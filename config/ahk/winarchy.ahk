@@ -54,8 +54,10 @@ ToggleFlow() {
         return
     Run('"' flow '"')
     hwnd := WinWait('Flow.Launcher ahk_exe Flow.Launcher.exe', , 2)
+    ; Cuando el toggle OCULTA la ventana, puede desaparecer entre el WinWait
+    ; y el WinActivate: en ese caso no hay nada que activar.
     if hwnd
-        WinActivate('ahk_id ' hwnd)
+        try WinActivate('ahk_id ' hwnd)
 }
 
 DefaultBrowser() {
