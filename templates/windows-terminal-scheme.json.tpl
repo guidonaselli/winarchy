@@ -1,0 +1,23 @@
+{
+  "name": "Winarchy",
+  "background": "{{colors.background}}",
+  "foreground": "{{colors.foreground}}",
+  "cursorColor": "{{colors.cursor}}",
+  "selectionBackground": "{{colors.selection_background}}",
+  "black": "{{colors.color0}}",
+  "red": "{{colors.color1}}",
+  "green": "{{colors.color2}}",
+  "yellow": "{{colors.color3}}",
+  "blue": "{{colors.color4}}",
+  "purple": "{{colors.color5}}",
+  "cyan": "{{colors.color6}}",
+  "white": "{{colors.color7}}",
+  "brightBlack": "{{colors.color8}}",
+  "brightRed": "{{colors.color9}}",
+  "brightGreen": "{{colors.color10}}",
+  "brightYellow": "{{colors.color11}}",
+  "brightBlue": "{{colors.color12}}",
+  "brightPurple": "{{colors.color13}}",
+  "brightCyan": "{{colors.color14}}",
+  "brightWhite": "{{colors.color15}}"
+}

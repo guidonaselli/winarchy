@@ -1,0 +1,41 @@
+# Theme: Auto Accent — base neutra oscura; el accent lo pone Windows en vivo.
+# dynamic_accent = true hace que el engine reemplace colors.accent y los bordes
+# focused/monocle/stack por el accent del sistema (Explorer\Accent\AccentColorMenu)
+# al renderizar, y que AccentWatch (AHK) re-sincronice cuando Windows lo cambie
+# (ej. "Color de énfasis: Automático" + rotación de wallpapers de Wallpaper Engine).
+# Los valores accent/focused/monocle/stack de abajo son placeholders de fallback.
+# Este theme no trae wallpaper a propósito: el wallpaper es input, no output.
+name = "Auto Accent"
+mode = "dark"
+dynamic_accent = true
+
+[colors]
+background = "#1a1b26"
+foreground = "#c8c8c8"
+accent = "#0078d4"
+cursor = "#eaeaea"
+selection_background = "#3a3d4d"
+selection_foreground = "#c8c8c8"
+color0 = "#2a2c3a"
+color1 = "#d35f5f"
+color2 = "#9ece6a"
+color3 = "#e0af68"
+color4 = "#7aa2f7"
+color5 = "#bb9af7"
+color6 = "#7dcfff"
+color7 = "#c8c8c8"
+color8 = "#565f89"
+color9 = "#f7768e"
+color10 = "#b9f27c"
+color11 = "#ff9e64"
+color12 = "#7da6ff"
+color13 = "#bb9af7"
+color14 = "#0db9d7"
+color15 = "#ffffff"
+
+[borders]
+focused = "#0078d4"
+unfocused = "#333333"
+urgent = "#b91c1c"
+monocle = "#409fdd"
+stack = "#0060aa"

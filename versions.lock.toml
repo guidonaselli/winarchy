@@ -1,0 +1,18 @@
+# Versiones fijadas de los componentes core de Winarchy.
+# `winarchy update` NO actualiza estos componentes; solo `winarchy update --core`
+# los actualiza (y reescribe este archivo) tras revisar changelogs.
+# Fijado el 2026-06-09.
+
+[core]
+komorebi = "0.1.41"
+yasb = "2.0.2"
+
+[winget]
+# id de winget -> requerido (true = lo instala install.ps1)
+"LGUG2Z.komorebi" = true
+"AmN.yasb" = true
+"AutoHotkey.AutoHotkey" = true
+"Flow-Launcher.Flow-Launcher" = true
+"ShareX.ShareX" = true
+"Microsoft.WindowsTerminal" = true
+"DEVCOM.JetBrainsMonoNerdFont" = true

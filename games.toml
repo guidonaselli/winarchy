@@ -1,0 +1,21 @@
+# Juegos conocidos por Winarchy.
+# Cada entrada genera: (a) ignore-rule en komorebi (nunca se tilean),
+# (b) suspensión de hotkeys SUPER cuando el proceso está en primer plano.
+# Alta rápida: `winarchy game-mode add <exe>` / baja: `winarchy game-mode remove <exe>`.
+# `exe` es el nombre del proceso sin ruta (con o sin .exe).
+
+# Lanzadores que tampoco deben tilearse (overlays/splash):
+[[launchers]]
+exe = "steamwebhelper.exe"
+
+[[launchers]]
+exe = "EpicGamesLauncher.exe"
+
+[[launchers]]
+exe = "GalaxyClient.exe"
+
+[[launchers]]
+exe = "Riot Client.exe"
+
+[[games]]
+exe = "VALORANT-Win64-Shipping.exe"
