@@ -2,5 +2,5 @@
 [colors]
 background={{colors.background}}
 foreground={{colors.foreground}}
-accent={{colors.accent}}
+accent={{colors.accent_ui}}
 muted={{colors.color8}}

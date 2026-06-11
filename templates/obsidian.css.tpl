@@ -25,10 +25,10 @@
 
   /* Links and accents */
   --text-link: {{colors.color4}};
-  --text-accent: {{colors.accent}};
-  --text-accent-hover: {{colors.accent}};
-  --interactive-accent: {{colors.accent}};
-  --interactive-accent-hover: {{colors.accent}};
+  --text-accent: {{colors.accent_ui}};
+  --text-accent-hover: {{colors.accent_ui}};
+  --interactive-accent: {{colors.accent_ui}};
+  --interactive-accent-hover: {{colors.accent_ui}};
   --text-on-accent: {{colors.on_accent}};
 
   /* Muted text */
@@ -49,7 +49,7 @@
 
   /* Graph */
   --graph-line: {{colors.color8}};
-  --graph-node: {{colors.accent}};
+  --graph-node: {{colors.accent_ui}};
   --graph-node-focused: {{colors.color4}};
   --graph-node-tag: {{colors.color6}};
   --graph-node-attachment: {{colors.color2}};
@@ -83,7 +83,7 @@
 
 /* Blockquotes */
 .markdown-rendered blockquote {
-  border-left-color: {{colors.accent}};
+  border-left-color: {{colors.accent_ui}};
 }
 
 /* Active elements */

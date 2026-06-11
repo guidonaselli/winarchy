@@ -24,7 +24,7 @@
 }
 
 .widget .label.alt {
-    color: {{colors.accent}};
+    color: {{colors.accent_ui}};
 }
 
 /* Iconos nerd-font (<span> en los labels): YASB les pone clase "icon" (sin "label").
@@ -57,12 +57,12 @@
 .komorebi-workspaces .ws-btn.active_empty_workspace,
 .komorebi-workspaces .ws-btn.active {
     color: {{colors.on_accent}};
-    background-color: {{colors.accent}};
+    background-color: {{colors.accent_ui}};
     border-radius: 4px;
 }
 
 .komorebi-active-layout .label {
-    color: {{colors.accent}};
+    color: {{colors.accent_ui}};
 }
 
 .active-window-widget .label {
@@ -70,12 +70,12 @@
 }
 
 .clock-widget .label {
-    color: {{colors.accent}};
+    color: {{colors.accent_ui}};
     font-weight: 600;
 }
 
 .home-widget .label {
-    color: {{colors.accent}};
+    color: {{colors.accent_ui}};
     font-size: 15px;
     padding: 0 6px;
 }
@@ -93,7 +93,7 @@
 }
 
 .home-menu .menu-item:hover {
-    background-color: {{colors.accent}};
+    background-color: {{colors.accent_ui}};
     color: {{colors.on_accent}};
 }
 
@@ -126,7 +126,7 @@
 }
 
 .notification-widget .new-notification {
-    color: {{colors.accent}};
+    color: {{colors.accent_ui}};
 }
 
 .wifi-widget .label,
@@ -192,7 +192,7 @@
 }
 
 .wifi-menu .controls-container .connect {
-    background-color: {{colors.accent}};
+    background-color: {{colors.accent_ui}};
     color: {{colors.on_accent}};
     padding: 4px 10px;
 }

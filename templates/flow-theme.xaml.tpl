@@ -17,13 +17,13 @@
     </Style>
     <Style x:Key="WindowBorderStyle" BasedOn="{StaticResource BaseWindowBorderStyle}" TargetType="{x:Type Border}">
         <Setter Property="Background" Value="{{colors.background}}" />
-        <Setter Property="BorderBrush" Value="{{colors.accent}}" />
+        <Setter Property="BorderBrush" Value="{{colors.accent_ui}}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
     </Style>
     <Style x:Key="WindowStyle" BasedOn="{StaticResource BaseWindowStyle}" TargetType="{x:Type Window}" />
     <Style x:Key="PendingLineStyle" BasedOn="{StaticResource BasePendingLineStyle}" TargetType="{x:Type Line}">
-        <Setter Property="Stroke" Value="{{colors.accent}}" />
+        <Setter Property="Stroke" Value="{{colors.accent_ui}}" />
     </Style>
     <Style x:Key="ItemTitleStyle" BasedOn="{StaticResource BaseItemTitleStyle}" TargetType="{x:Type TextBlock}">
         <Setter Property="Foreground" Value="{{colors.foreground}}" />
@@ -32,7 +32,7 @@
         <Setter Property="Foreground" Value="{{colors.color8}}" />
     </Style>
     <Style x:Key="ItemTitleSelectedStyle" BasedOn="{StaticResource BaseItemTitleSelectedStyle}" TargetType="{x:Type TextBlock}">
-        <Setter Property="Foreground" Value="{{colors.accent}}" />
+        <Setter Property="Foreground" Value="{{colors.accent_ui}}" />
     </Style>
     <Style x:Key="ItemSubTitleSelectedStyle" BasedOn="{StaticResource BaseItemSubTitleSelectedStyle}" TargetType="{x:Type TextBlock}">
         <Setter Property="Foreground" Value="{{colors.foreground}}" />
@@ -41,10 +41,10 @@
         <Setter Property="Foreground" Value="{{colors.color8}}" />
     </Style>
     <Style x:Key="ItemHotkeySelectedStyle" BasedOn="{StaticResource BaseItemHotkeySelectedStyle}" TargetType="{x:Type TextBlock}">
-        <Setter Property="Foreground" Value="{{colors.accent}}" />
+        <Setter Property="Foreground" Value="{{colors.accent_ui}}" />
     </Style>
     <Style x:Key="HighlightStyle">
-        <Setter Property="TextElement.Foreground" Value="{{colors.accent}}" />
+        <Setter Property="TextElement.Foreground" Value="{{colors.accent_ui}}" />
     </Style>
     <SolidColorBrush x:Key="ItemSelectedBackgroundColor">{{colors.color0}}</SolidColorBrush>
     <Style x:Key="ItemGlyph" BasedOn="{StaticResource BaseGlyphStyle}" TargetType="{x:Type TextBlock}">

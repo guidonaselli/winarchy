@@ -6,7 +6,8 @@ local M = {}
 M.palette = {
   background = "{{colors.background}}",
   foreground = "{{colors.foreground}}",
-  accent     = "{{colors.accent}}",
+  accent     = "{{colors.accent_ui}}",
+  on_accent  = "{{colors.on_accent}}",
   cursor     = "{{colors.cursor}}",
   color0  = "{{colors.color0}}",  color1  = "{{colors.color1}}",
   color2  = "{{colors.color2}}",  color3  = "{{colors.color3}}",
@@ -48,11 +49,11 @@ function M.apply()
   set(0, "DiagnosticInfo",  { fg = p.color4 })
   set(0, "DiagnosticHint",  { fg = p.color6 })
   set(0, "Pmenu",        { fg = p.foreground, bg = p.color0 })
-  set(0, "PmenuSel",     { fg = p.background, bg = p.accent })
+  set(0, "PmenuSel",     { fg = p.on_accent, bg = p.accent })
   set(0, "StatusLine",   { fg = p.foreground, bg = p.color0 })
   set(0, "VertSplit",    { fg = p.color8 })
   set(0, "Search",       { fg = p.background, bg = p.color3 })
-  set(0, "IncSearch",    { fg = p.background, bg = p.accent })
+  set(0, "IncSearch",    { fg = p.on_accent, bg = p.accent })
   set(0, "MatchParen",   { fg = p.accent, bold = true, underline = true })
 end
 
