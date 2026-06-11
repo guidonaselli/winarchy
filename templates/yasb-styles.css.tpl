@@ -49,10 +49,14 @@
     color: {{colors.foreground}};
 }
 
+.komorebi-workspaces .ws-btn:hover {
+    color: {{colors.foreground}};
+}
+
 .komorebi-workspaces .ws-btn.active_populated_workspace,
 .komorebi-workspaces .ws-btn.active_empty_workspace,
 .komorebi-workspaces .ws-btn.active {
-    color: {{colors.background}};
+    color: {{colors.on_accent}};
     background-color: {{colors.accent}};
     border-radius: 4px;
 }
@@ -90,7 +94,7 @@
 
 .home-menu .menu-item:hover {
     background-color: {{colors.accent}};
-    color: {{colors.background}};
+    color: {{colors.on_accent}};
 }
 
 .home-menu .separator {
@@ -189,7 +193,7 @@
 
 .wifi-menu .controls-container .connect {
     background-color: {{colors.accent}};
-    color: {{colors.background}};
+    color: {{colors.on_accent}};
     padding: 4px 10px;
 }
 

@@ -29,6 +29,7 @@
   --text-accent-hover: #0c2031;
   --interactive-accent: #0c2031;
   --interactive-accent-hover: #0c2031;
+  --text-on-accent: #ffffff;
 
   /* Muted text */
   --text-muted: color-mix(in srgb, #c8c8c8 70%, transparent);

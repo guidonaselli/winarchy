@@ -29,6 +29,7 @@
   --text-accent-hover: {{colors.accent}};
   --interactive-accent: {{colors.accent}};
   --interactive-accent-hover: {{colors.accent}};
+  --text-on-accent: {{colors.on_accent}};
 
   /* Muted text */
   --text-muted: color-mix(in srgb, {{colors.foreground}} 70%, transparent);

@@ -77,6 +77,9 @@ function Build-WinarchyThemeContext {
     $ctx = ConvertTo-WinarchyFlatContext -Data $Theme
     $ctx['computed.theme_dir'] = Split-Path $ThemeDir -Leaf
     $ctx['computed.game_ignore_rules'] = Get-WinarchyGameIgnoreRulesJson
+    # Texto sobre superficies con fondo accent: el background del theme no sirve
+    # cuando el accent es oscuro (auto-accent puede traer cualquier color de Windows)
+    $ctx['colors.on_accent'] = Get-WinarchyOnAccentHex -Hex $Theme['colors']['accent']
     $ctx
 }
 
@@ -391,6 +394,16 @@ function Get-WinarchyShadedHex {
         [int][Math]::Round($c + ($target - $c) * $f)
     }
     '#{0:x2}{1:x2}{2:x2}' -f $rgb[0], $rgb[1], $rgb[2]
+}
+
+function Get-WinarchyOnAccentHex {
+    <# Blanco o casi-negro según la luminancia YIQ del color dado, para que el
+       texto sobre fondo accent sea legible con cualquier accent. #>
+    param([Parameter(Mandatory)][string]$Hex)
+    $r = [Convert]::ToInt32($Hex.Substring(1, 2), 16)
+    $g = [Convert]::ToInt32($Hex.Substring(3, 2), 16)
+    $b = [Convert]::ToInt32($Hex.Substring(5, 2), 16)
+    if ((($r * 299) + ($g * 587) + ($b * 114)) / 1000 -ge 128) { '#1a1a1a' } else { '#ffffff' }
 }
 
 function Set-WinarchyWindowsAppearance {
