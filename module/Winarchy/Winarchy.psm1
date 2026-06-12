@@ -10,26 +10,26 @@ foreach ($file in Get-ChildItem -Path (Join-Path $PSScriptRoot 'Private') -Filte
 function Show-WinarchyHelp {
     Write-Host @'
 
-  winarchy — capa de integración estilo Omarchy para Windows 11
+  winarchy — Omarchy-style integration layer for Windows 11
 
-  USO: winarchy <subcomando> [args]
+  USAGE: winarchy <subcommand> [args]
 
-    theme set <nombre>        Aplica un theme a todas las superficies
-    theme next                Cicla al siguiente theme (alfabético)
-    theme list                Lista themes instalados (* = activo)
-    update [--core]           Actualiza winget+scoop; --core también komorebi/YASB
-    menu                      Menú navegable (themes, capturas, game-mode, ...)
-    webapp install <n> <url>  Crea webapp como ventana dedicada
-    webapp remove <n>         Elimina una webapp
-    webapp list               Lista webapps instaladas
-    screenshot [region|window|full]   Captura vía ShareX (default: region)
-    game-mode on|off|status   Modo juego manual (AHK también lo activa solo)
-    game-mode add <exe>       Da de alta un juego (excluido de tiling + hotkeys)
-    game-mode remove <exe>    Baja de un juego
-    accent sync [--force]     Re-sincroniza el theme dinámico con el accent de Windows
-    accent status             Muestra accent del sistema vs aplicado
-    reload                    Recarga komorebi, YASB, AHK y Flow
-    doctor                    Diagnóstico del stack (verde/rojo + fix sugerido)
+    theme set <name>          Apply a theme to every surface
+    theme next                Cycle to the next theme (alphabetical)
+    theme list                List installed themes (* = active)
+    update [--core]           Update winget+scoop; --core also komorebi/YASB
+    menu                      Navigable menu (themes, screenshots, game-mode, ...)
+    webapp install <n> <url>  Create a webapp as a dedicated window
+    webapp remove <n>         Remove a webapp
+    webapp list               List installed webapps
+    screenshot [region|window|full]   Capture via ShareX (default: region)
+    game-mode on|off|status   Manual game mode (AHK also enables it on its own)
+    game-mode add <exe>       Register a game (no tiling/hotkeys, excluded from Quick Accent)
+    game-mode remove <exe>    Unregister a game
+    accent sync [--force]     Re-sync the dynamic theme with the Windows accent
+    accent status             Show system accent vs applied accent
+    reload                    Reload komorebi, YASB, AHK and Flow
+    doctor                    Stack diagnostics (green/red + suggested fix)
 
 '@
 }
@@ -52,7 +52,7 @@ function Invoke-Winarchy {
             $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'list' }
             switch ($sub) {
                 'set' {
-                    if ($rest.Count -lt 2) { throw 'Uso: winarchy theme set <nombre> [-StageOnly]' }
+                    if ($rest.Count -lt 2) { throw 'Usage: winarchy theme set <name> [-StageOnly]' }
                     Set-WinarchyTheme -Name $rest[1] -StageOnly:($rest -contains '-StageOnly' -or $rest -contains '--stage-only')
                 }
                 'next' { Set-WinarchyNextTheme }
@@ -63,7 +63,7 @@ function Invoke-Winarchy {
                         Write-Host "  $mark $t"
                     }
                 }
-                default { throw "Subcomando desconocido: theme $sub (set|next|list)" }
+                default { throw "Unknown subcommand: theme $sub (set|next|list)" }
             }
         }
         'update' { Invoke-WinarchyUpdate -Core:($rest -contains '--core' -or $rest -contains '-core') }
@@ -72,15 +72,15 @@ function Invoke-Winarchy {
             $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'list' }
             switch ($sub) {
                 'install' {
-                    if ($rest.Count -lt 3) { throw 'Uso: winarchy webapp install <nombre> <url>' }
+                    if ($rest.Count -lt 3) { throw 'Usage: winarchy webapp install <name> <url>' }
                     Install-WinarchyWebapp -Name $rest[1] -Url $rest[2]
                 }
                 'remove' {
-                    if ($rest.Count -lt 2) { throw 'Uso: winarchy webapp remove <nombre>' }
+                    if ($rest.Count -lt 2) { throw 'Usage: winarchy webapp remove <name>' }
                     Remove-WinarchyWebapp -Name $rest[1]
                 }
                 'list' { Get-WinarchyWebapps }
-                default { throw "Subcomando desconocido: webapp $sub (install|remove|list)" }
+                default { throw "Unknown subcommand: webapp $sub (install|remove|list)" }
             }
         }
         'screenshot' {
@@ -94,14 +94,14 @@ function Invoke-Winarchy {
                 'off' { Disable-WinarchyGameMode }
                 'status' { Get-WinarchyGameModeStatus }
                 'add' {
-                    if ($rest.Count -lt 2) { throw 'Uso: winarchy game-mode add <exe>' }
+                    if ($rest.Count -lt 2) { throw 'Usage: winarchy game-mode add <exe>' }
                     Add-WinarchyGame -Exe $rest[1]
                 }
                 'remove' {
-                    if ($rest.Count -lt 2) { throw 'Uso: winarchy game-mode remove <exe>' }
+                    if ($rest.Count -lt 2) { throw 'Usage: winarchy game-mode remove <exe>' }
                     Remove-WinarchyGame -Exe $rest[1]
                 }
-                default { throw "Subcomando desconocido: game-mode $sub (on|off|status|add|remove)" }
+                default { throw "Unknown subcommand: game-mode $sub (on|off|status|add|remove)" }
             }
         }
         'accent' {
@@ -109,13 +109,13 @@ function Invoke-Winarchy {
             switch ($sub) {
                 'sync' { Update-WinarchyAccent -Force:($rest -contains '--force' -or $rest -contains '-force') }
                 'status' { Get-WinarchyAccentStatus }
-                default { throw "Subcomando desconocido: accent $sub (sync|status)" }
+                default { throw "Unknown subcommand: accent $sub (sync|status)" }
             }
         }
-        'reload' { Invoke-WinarchyReload; Write-WinarchyOk 'Stack recargado.' }
+        'reload' { Invoke-WinarchyReload; Write-WinarchyOk 'Stack reloaded.' }
         'doctor' { exit (Invoke-WinarchyDoctor) }
         default {
-            Write-WinarchyErr "Subcomando desconocido: $cmd"
+            Write-WinarchyErr "Unknown subcommand: $cmd"
             Show-WinarchyHelp
             exit 1
         }

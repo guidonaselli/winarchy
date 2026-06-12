@@ -52,13 +52,13 @@ function ConvertFrom-WinarchyToml {
             continue
         }
 
-        throw "Línea TOML no soportada: '$line'"
+        throw "Unsupported TOML line: '$line'"
     }
     $root
 }
 
 function Import-WinarchyToml {
     param([Parameter(Mandatory)][string]$Path)
-    if (-not (Test-Path $Path)) { throw "Archivo TOML no encontrado: $Path" }
+    if (-not (Test-Path $Path)) { throw "TOML file not found: $Path" }
     ConvertFrom-WinarchyToml -Content (Get-Content -Path $Path -Raw -Encoding UTF8)
 }

@@ -31,7 +31,7 @@ function Test-WinarchyThemeData {
         if (-not $Theme.ContainsKey($k)) { $missing.Add($k) }
     }
     if ($Theme.ContainsKey('mode') -and $Theme['mode'] -notin @('dark', 'light')) {
-        $missing.Add("mode (debe ser 'dark' o 'light')")
+        $missing.Add("mode (must be 'dark' or 'light')")
     }
     if (-not $Theme.ContainsKey('colors')) { $missing.Add('[colors]') }
     else {
@@ -113,7 +113,7 @@ function Merge-WinarchyTerminalScheme {
     param([Parameter(Mandatory)][string]$SchemeJsonPath)
     $settingsPath = Get-WinarchyTerminalSettingsPath
     if (-not $settingsPath) {
-        Write-WinarchyWarn 'Windows Terminal settings.json no encontrado; scheme no aplicado.'
+        Write-WinarchyWarn 'Windows Terminal settings.json not found; scheme not applied.'
         return $null
     }
     $settings = Get-Content $settingsPath -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable
@@ -138,7 +138,7 @@ function Set-WinarchyFlowTheme {
     param([Parameter(Mandatory)][string]$XamlPath)
     $flowDir = "$env:APPDATA\FlowLauncher"
     if (-not (Test-Path $flowDir)) {
-        Write-WinarchyWarn 'Flow Launcher no encontrado; theme de Flow no aplicado.'
+        Write-WinarchyWarn 'Flow Launcher not found; Flow theme not applied.'
         return
     }
     $themesDir = Join-Path $flowDir 'Themes'
@@ -206,7 +206,7 @@ function Set-WinarchyVSCodeColorTheme {
     }
     else {
         $brace = $raw.IndexOf('{')
-        if ($brace -lt 0) { throw "sin objeto JSON raíz: $Path" }
+        if ($brace -lt 0) { throw "no root JSON object: $Path" }
         $rest = $raw.Substring($brace + 1)
         $comma = if ($rest -match '^\s*\}') { '' } else { ',' }
         $updated = $raw.Substring(0, $brace + 1) + "`n  `"workbench.colorTheme`": `"$Name`"$comma" + $rest
@@ -238,7 +238,7 @@ function Sync-WinarchyJetBrains {
     $schemeName = $null
     if (Test-Path $icls) {
         try { $schemeName = ([xml](Get-Content $icls -Raw -Encoding UTF8)).scheme.name }
-        catch { Write-WinarchyWarn "jetbrains.icls del theme no parsea como XML; JetBrains omitido." ; return }
+        catch { Write-WinarchyWarn "Theme's jetbrains.icls does not parse as XML; JetBrains skipped." ; return }
     }
 
     foreach ($product in Get-ChildItem $jbRoot -Directory -ErrorAction SilentlyContinue) {
@@ -258,7 +258,7 @@ function Sync-WinarchyJetBrains {
         if (Test-Path $schemeXmlPath) {
             try { $doc = [xml](Get-Content $schemeXmlPath -Raw -Encoding UTF8) }
             catch {
-                Write-WinarchyWarn "colors.scheme.xml de $($product.Name) no parsea; scheme global no apuntado."
+                Write-WinarchyWarn "colors.scheme.xml of $($product.Name) does not parse; global scheme not pointed."
                 continue
             }
         }
@@ -288,7 +288,7 @@ function Sync-WinarchyVSCode {
     $dropin = Join-Path $ThemeDir 'vscode.json'
     if (-not (Test-Path $dropin)) { return }
     try { $spec = Get-Content $dropin -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable }
-    catch { Write-WinarchyWarn 'vscode.json del theme no parsea; VS Code omitido.'; return }
+    catch { Write-WinarchyWarn "Theme's vscode.json does not parse; VS Code skipped."; return }
     if (-not $spec -or -not $spec['name']) { return }
 
     foreach ($editor in Get-WinarchyVSCodeEditors) {
@@ -305,7 +305,7 @@ function Sync-WinarchyVSCode {
                         & $cli.Source --install-extension $spec['extension'] @scopeArgs 2>$null | Out-Null
                     }
                 }
-                catch { Write-WinarchyWarn "Extensión $($spec['extension']) no instalada en $($editor.Id); el theme se resolverá cuando aparezca." }
+                catch { Write-WinarchyWarn "Extension $($spec['extension']) not installed in $($editor.Id); the theme will resolve once it shows up." }
             }
         }
 
@@ -313,7 +313,7 @@ function Sync-WinarchyVSCode {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
         foreach ($settingsPath in Get-WinarchyVSCodeSettingsFiles $editor) {
             try { Set-WinarchyVSCodeColorTheme -Path $settingsPath -Name $spec['name'] }
-            catch { Write-WinarchyWarn "settings de $($editor.Id) no actualizable ($settingsPath); colorTheme no aplicado ahí." }
+            catch { Write-WinarchyWarn "$($editor.Id) settings not updatable ($settingsPath); colorTheme not applied there." }
         }
     }
 }
@@ -335,13 +335,13 @@ function Sync-WinarchyObsidian {
   "name": "Winarchy",
   "version": "1.0.0",
   "minAppVersion": "0.16.0",
-  "description": "Sincronizado con el theme activo de Winarchy",
+  "description": "Synced with the active Winarchy theme",
   "author": "Winarchy"
 }
 '@ | Set-Content -Path $manifest -Encoding UTF8
             }
         }
-        catch { Write-WinarchyWarn "Vault Obsidian no escribible, omitido: $vault" }
+        catch { Write-WinarchyWarn "Obsidian vault not writable, skipped: $vault" }
     }
 }
 
@@ -451,7 +451,7 @@ function Set-WinarchyWindowsAppearance {
         Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\DWM' -Name 'AccentColor' -Value $abgr -Type DWord
         Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\DWM' -Name 'ColorizationColor' -Value $abgr -Type DWord
     }
-    catch { Write-WinarchyWarn "Accent no aplicado: $($_.Exception.Message)" }
+    catch { Write-WinarchyWarn "Accent not applied: $($_.Exception.Message)" }
 }
 
 function Set-WinarchyWallpaper {
@@ -522,20 +522,20 @@ function Set-WinarchyTheme {
     $themeToml = Join-Path $themeDir 'theme.toml'
     if (-not (Test-Path $themeToml)) {
         $available = (Get-WinarchyThemes) -join ', '
-        throw "Theme '$Name' no existe. Disponibles: $available"
+        throw "Theme '$Name' does not exist. Available: $available"
     }
 
     # 1. Validación — falla ANTES de modificar nada
     $theme = Import-WinarchyToml -Path $themeToml
     $missing = Test-WinarchyThemeData -Theme $theme
     if ($missing.Count -gt 0) {
-        throw "theme.toml de '$Name' inválido. Claves faltantes: $($missing -join ', ')"
+        throw "Invalid theme.toml for '$Name'. Missing keys: $($missing -join ', ')"
     }
 
     # 1b. Theme dinámico: el accent vivo de Windows pisa el placeholder de la paleta
     $dynamicAccent = $theme.ContainsKey('dynamic_accent') -and $theme['dynamic_accent']
     if ($LightRefresh -and -not $dynamicAccent) {
-        throw "-LightRefresh solo aplica a themes dinámicos y '$Name' no lo es."
+        throw "-LightRefresh only applies to dynamic themes and '$Name' is not one."
     }
     $liveAccent = $null
     if ($dynamicAccent) {
@@ -546,7 +546,7 @@ function Set-WinarchyTheme {
             $theme['borders']['monocle'] = Get-WinarchyShadedHex -Hex $liveAccent -Factor 0.25
             $theme['borders']['stack'] = Get-WinarchyShadedHex -Hex $liveAccent -Factor -0.2
         }
-        else { Write-WinarchyWarn 'Accent de Windows ilegible; se usa la paleta base del theme.' }
+        else { Write-WinarchyWarn 'Windows accent unreadable; using the theme base palette.' }
     }
 
     # 2. Render a staging
@@ -568,7 +568,7 @@ function Set-WinarchyTheme {
         $t['Staged'] = $stagedFile
     }
     if ($StageOnly) {
-        Write-WinarchyOk "Theme '$Name' validado y renderizado en staging: $staging"
+        Write-WinarchyOk "Theme '$Name' validated and rendered to staging: $staging"
         return
     }
 
@@ -637,11 +637,11 @@ function Set-WinarchyTheme {
         elseif (-not $dynamicAccent -and (Test-Path $marker)) { Remove-Item $marker -Force }
         Invoke-WinarchyReload -Light:$LightRefresh
 
-        if ($LightRefresh) { Write-WinarchyOk "Accent sincronizado: $($theme['colors']['accent'])." }
-        else { Write-WinarchyOk "Theme '$($theme['name'])' aplicado en todas las superficies." }
+        if ($LightRefresh) { Write-WinarchyOk "Accent synced: $($theme['colors']['accent'])." }
+        else { Write-WinarchyOk "Theme '$($theme['name'])' applied across all surfaces." }
     }
     catch {
-        Write-WinarchyErr "Fallo aplicando theme: $($_.Exception.Message) — iniciando rollback."
+        Write-WinarchyErr "Failed to apply theme: $($_.Exception.Message) — starting rollback."
         foreach ($t in $targets) {
             $bak = Join-Path $snapshot (Split-Path $t.Output -Leaf)
             if (Test-Path $bak) { Copy-Item $bak $t.Output -Force }
@@ -655,14 +655,14 @@ function Set-WinarchyTheme {
             Set-ItemProperty -Path $personalize -Name 'SystemUsesLightTheme' -Value $prevLight -Type DWord
         }
         Invoke-WinarchyReload -Light:$LightRefresh
-        throw "Theme '$Name' NO aplicado; se restauró el estado anterior (snapshot: $snapshot)."
+        throw "Theme '$Name' NOT applied; previous state restored (snapshot: $snapshot)."
     }
 }
 
 function Set-WinarchyNextTheme {
     <# Cicla alfabéticamente al siguiente theme instalado. #>
     $themes = @(Get-WinarchyThemes)
-    if ($themes.Count -eq 0) { throw 'No hay themes instalados.' }
+    if ($themes.Count -eq 0) { throw 'No themes installed.' }
     $current = Get-WinarchyCurrentTheme
     $idx = [array]::IndexOf($themes, $current)
     $next = $themes[(($idx + 1) % $themes.Count)]
@@ -689,17 +689,17 @@ function Update-WinarchyAccent {
     if (-not (Test-WinarchyDynamicTheme -Name $current)) {
         # marker huérfano (theme estático aplicado por fuera): limpiarlo apaga el watcher
         if (Test-Path $marker) { Remove-Item $marker -Force }
-        Write-WinarchyInfo 'El theme activo no es dinámico; nada que sincronizar.'
+        Write-WinarchyInfo 'Active theme is not dynamic; nothing to sync.'
         return
     }
     $live = Get-WinarchyWindowsAccent
     if (-not $live) {
-        Write-WinarchyWarn 'Accent de Windows ilegible; sync omitido.'
+        Write-WinarchyWarn 'Windows accent unreadable; sync skipped.'
         return
     }
     $applied = if (Test-Path $marker) { (Get-Content $marker -Raw).Trim() } else { $null }
     if (-not $Force -and $live -eq $applied) {
-        Write-WinarchyOk "Accent sin cambios ($live)."
+        Write-WinarchyOk "Accent unchanged ($live)."
         return
     }
     Set-WinarchyTheme -Name $current -LightRefresh
@@ -712,10 +712,10 @@ function Get-WinarchyAccentStatus {
     $marker = Join-Path (Get-WinarchyStateDir) 'dynamic-accent'
     $applied = if (Test-Path $marker) { (Get-Content $marker -Raw).Trim() } else { $null }
     $dynamic = Test-WinarchyDynamicTheme -Name $current
-    Write-Host "  Theme activo:    $(if ($current) { $current } else { '(ninguno)' })$(if ($dynamic) { ' [dinámico]' })"
-    Write-Host "  Accent sistema:  $(if ($live) { $live } else { '(ilegible)' })"
-    Write-Host "  Accent aplicado: $(if ($applied) { $applied } else { '(n/a — watcher inactivo)' })"
+    Write-Host "  Active theme:    $(if ($current) { $current } else { '(none)' })$(if ($dynamic) { ' [dynamic]' })"
+    Write-Host "  System accent:   $(if ($live) { $live } else { '(unreadable)' })"
+    Write-Host "  Applied accent:  $(if ($applied) { $applied } else { '(n/a — watcher inactive)' })"
     if ($dynamic -and $live -and $applied -and $live -ne $applied) {
-        Write-WinarchyInfo "Desincronizado: corré 'winarchy accent sync'."
+        Write-WinarchyInfo "Out of sync: run 'winarchy accent sync'."
     }
 }

@@ -8,22 +8,22 @@ function Invoke-WinarchyUpdate {
     $lock = Import-WinarchyToml -Path $lockPath
 
     if ($Core) {
-        Write-WinarchyInfo 'Actualizando componentes CORE (komorebi, YASB)...'
+        Write-WinarchyInfo 'Updating CORE components (komorebi, YASB)...'
         foreach ($id in $script:CoreWingetIds) {
             winget pin remove --id $id 2>$null | Out-Null
             winget upgrade --id $id --silent --accept-package-agreements --accept-source-agreements
             winget pin add --id $id 2>$null | Out-Null
         }
         Update-WinarchyLockfile -LockPath $lockPath
-        Write-WinarchyOk 'Core actualizado y versions.lock.toml reescrito. Verificá con `winarchy doctor` y revisá changelogs.'
+        Write-WinarchyOk 'Core updated and versions.lock.toml rewritten. Verify with `winarchy doctor` and check the changelogs.'
         return
     }
 
-    Write-WinarchyInfo 'Actualizando paquetes winget (core excluido por pin)...'
+    Write-WinarchyInfo 'Updating winget packages (core excluded via pin)...'
     winget upgrade --all --silent --accept-package-agreements --accept-source-agreements
 
     if (Get-Command scoop -ErrorAction SilentlyContinue) {
-        Write-WinarchyInfo 'Actualizando paquetes scoop...'
+        Write-WinarchyInfo 'Updating scoop packages...'
         scoop update *
     }
 
@@ -31,10 +31,10 @@ function Invoke-WinarchyUpdate {
     $pending = winget upgrade 2>$null | Out-String
     foreach ($id in $script:CoreWingetIds) {
         if ($pending -match [regex]::Escape($id)) {
-            Write-WinarchyWarn "Update core disponible para $id (lockfile: komorebi=$($lock['core']['komorebi']), yasb=$($lock['core']['yasb'])). Aplicalo con: winarchy update --core"
+            Write-WinarchyWarn "Core update available for $id (lockfile: komorebi=$($lock['core']['komorebi']), yasb=$($lock['core']['yasb'])). Apply it with: winarchy update --core"
         }
     }
-    Write-WinarchyOk 'Update general completado.'
+    Write-WinarchyOk 'General update complete.'
 }
 
 function Update-WinarchyLockfile {
@@ -44,7 +44,7 @@ function Update-WinarchyLockfile {
         $out = winget list --id $pair[0] 2>$null | Out-String
         if ($out -match '(\d+\.\d+\.\d+)') { $versions[$pair[1]] = $Matches[1] }
     }
-    if ($versions.Count -eq 0) { Write-WinarchyWarn 'No pude leer versiones instaladas; lockfile sin cambios.'; return }
+    if ($versions.Count -eq 0) { Write-WinarchyWarn 'Could not read installed versions; lockfile unchanged.'; return }
     $content = Get-Content $LockPath -Raw -Encoding UTF8
     foreach ($name in $versions.Keys) {
         $content = [regex]::Replace($content, "(?m)^$name\s*=\s*`"[^`"]*`"", "$name = `"$($versions[$name])`"")

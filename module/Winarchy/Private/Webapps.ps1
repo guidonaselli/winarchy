@@ -29,7 +29,7 @@ function Install-WinarchyWebapp {
         [Parameter(Mandatory)][string]$Url
     )
     $browser = Get-WinarchyBrowserExe
-    if (-not $browser) { throw 'No encontré un browser chromium (Chrome/Edge) para crear la webapp.' }
+    if (-not $browser) { throw 'No Chromium browser (Chrome/Edge) found to create the webapp.' }
 
     $lnkPath = Join-Path (Get-WinarchyWebappsDir) "$Name.lnk"
     $shell = New-Object -ComObject WScript.Shell
@@ -45,23 +45,23 @@ function Install-WinarchyWebapp {
     $apps[$Name] = @{ url = $Url; shortcut = $lnkPath; browser = $browser; created = (Get-Date -Format 'o') }
     $apps | ConvertTo-Json -Depth 5 | Set-Content -Path $registry -Encoding UTF8
 
-    Write-WinarchyOk "Webapp '$Name' creada → $Url (lanzador en Start Menu, visible para Flow Launcher)."
+    Write-WinarchyOk "Webapp '$Name' created → $Url (launcher in the Start Menu, visible to Flow Launcher)."
 }
 
 function Remove-WinarchyWebapp {
     param([Parameter(Mandatory)][string]$Name)
     $registry = Get-WinarchyWebappsRegistry
     $apps = if (Test-Path $registry) { Get-Content $registry -Raw | ConvertFrom-Json -AsHashtable } else { @{} }
-    if (-not $apps.ContainsKey($Name)) { Write-WinarchyWarn "Webapp '$Name' no existe."; return }
+    if (-not $apps.ContainsKey($Name)) { Write-WinarchyWarn "Webapp '$Name' does not exist."; return }
     if (Test-Path $apps[$Name]['shortcut']) { Remove-Item $apps[$Name]['shortcut'] -Force }
     $apps.Remove($Name)
     $apps | ConvertTo-Json -Depth 5 | Set-Content -Path $registry -Encoding UTF8
-    Write-WinarchyOk "Webapp '$Name' eliminada."
+    Write-WinarchyOk "Webapp '$Name' removed."
 }
 
 function Get-WinarchyWebapps {
     $registry = Get-WinarchyWebappsRegistry
-    if (-not (Test-Path $registry)) { Write-WinarchyInfo 'No hay webapps instaladas.'; return }
+    if (-not (Test-Path $registry)) { Write-WinarchyInfo 'No webapps installed.'; return }
     $apps = Get-Content $registry -Raw | ConvertFrom-Json -AsHashtable
     foreach ($name in ($apps.Keys | Sort-Object)) {
         Write-Host ("  {0,-20} {1}" -f $name, $apps[$name]['url'])
@@ -74,7 +74,7 @@ function Invoke-WinarchyScreenshot {
         "$env:ProgramFiles\ShareX\ShareX.exe",
         "${env:ProgramFiles(x86)}\ShareX\ShareX.exe"
     ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-    if (-not $sharex) { throw 'ShareX no está instalado (winget install ShareX.ShareX).' }
+    if (-not $sharex) { throw 'ShareX is not installed (winget install ShareX.ShareX).' }
     $arg = switch ($Kind) {
         'region' { '-RectangleRegion' }
         'window' { '-ActiveWindow' }

@@ -74,13 +74,13 @@ function Invoke-WinarchyTemplate {
         [Parameter(Mandatory)][string]$TemplatePath,
         [Parameter(Mandatory)][hashtable]$Context
     )
-    if (-not (Test-Path $TemplatePath)) { throw "Template no encontrado: $TemplatePath" }
+    if (-not (Test-Path $TemplatePath)) { throw "Template not found: $TemplatePath" }
     $content = Get-Content -Path $TemplatePath -Raw -Encoding UTF8
     $rendered = [regex]::Replace($content, '\{\{\s*([\w\.\-]+)\s*\}\}', {
         param($m)
         $token = $m.Groups[1].Value
         if ($Context.ContainsKey($token)) { [string]$Context[$token] }
-        else { throw "Token sin resolver en $(Split-Path $TemplatePath -Leaf): {{$token}}" }
+        else { throw "Unresolved token in $(Split-Path $TemplatePath -Leaf): {{$token}}" }
     })
     $rendered
 }

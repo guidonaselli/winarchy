@@ -9,10 +9,10 @@ function Invoke-WinarchyDoctor {
     }
 
     # --- Procesos core vivos -------------------------------------------------
-    Add-Check 'komorebi corriendo' (Test-WinarchyProcess 'komorebi') `
+    Add-Check 'komorebi running' (Test-WinarchyProcess 'komorebi') `
         'tiling window manager' 'komorebic start'
-    Add-Check 'YASB corriendo' (Test-WinarchyProcess 'yasb') `
-        'barra de estado' 'yasbc start  (o lanzar YASB desde el menú inicio)'
+    Add-Check 'YASB running' (Test-WinarchyProcess 'yasb') `
+        'status bar' 'yasbc start  (or launch YASB from the Start Menu)'
     # Primero por PID file (winarchy.ahk lo escribe al arrancar; CommandLine depende
     # de WMI/CIM, que no está disponible en todos los entornos)
     $ahkAlive = $false
@@ -26,9 +26,9 @@ function Invoke-WinarchyDoctor {
         $ahkAlive = $null -ne (Get-Process -Name 'AutoHotkey*' -ErrorAction SilentlyContinue |
             Where-Object { $_.CommandLine -like '*winarchy.ahk*' })
     }
-    Add-Check 'AHK winarchy.ahk corriendo' $ahkAlive `
-        'dueño único de hotkeys' "AutoHotkey64.exe `"$root\config\ahk\winarchy.ahk`""
-    Add-Check 'Flow Launcher corriendo' (Test-WinarchyProcess 'Flow.Launcher') `
+    Add-Check 'AHK winarchy.ahk running' $ahkAlive `
+        'sole hotkey owner' "AutoHotkey64.exe `"$root\config\ahk\winarchy.ahk`""
+    Add-Check 'Flow Launcher running' (Test-WinarchyProcess 'Flow.Launcher') `
         'launcher' "& `"$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe`""
 
     # --- Configs parseables ---------------------------------------------------
@@ -37,51 +37,51 @@ function Invoke-WinarchyDoctor {
     if (Test-Path $komorebiJson) {
         try { Get-Content $komorebiJson -Raw | ConvertFrom-Json | Out-Null; $komorebiOk = $true } catch { }
     }
-    Add-Check 'komorebi.json válido' $komorebiOk `
-        $komorebiJson 'winarchy theme set <theme>  (lo regenera)'
+    Add-Check 'komorebi.json valid' $komorebiOk `
+        $komorebiJson 'winarchy theme set <theme>  (regenerates it)'
 
     $themesOk = $true; $themesDetail = @()
     foreach ($t in Get-WinarchyThemes) {
         try {
             $data = Import-WinarchyToml -Path (Join-Path (Get-WinarchyThemesDir) "$t\theme.toml")
             $missing = Test-WinarchyThemeData -Theme $data
-            if ($missing.Count -gt 0) { $themesOk = $false; $themesDetail += "$t (faltan: $($missing -join ','))" }
+            if ($missing.Count -gt 0) { $themesOk = $false; $themesDetail += "$t (missing: $($missing -join ','))" }
         }
-        catch { $themesOk = $false; $themesDetail += "$t (no parsea)" }
+        catch { $themesOk = $false; $themesDetail += "$t (does not parse)" }
     }
-    Add-Check 'themes válidos' $themesOk `
+    Add-Check 'themes valid' $themesOk `
         ($(if ($themesDetail) { $themesDetail -join '; ' } else { "$((@(Get-WinarchyThemes)).Count) themes OK" })) `
-        'corregir theme.toml indicado'
+        'fix the theme.toml listed above'
 
     # --- Enlaces / env vars ----------------------------------------------------
     $envOk = ($env:KOMOREBI_CONFIG_HOME -eq (Join-Path $root 'config\komorebi')) -and
              ($env:YASB_CONFIG_HOME -eq (Join-Path $root 'config\yasb'))
-    Add-Check 'env vars de config apuntando al repo' $envOk `
+    Add-Check 'config env vars pointing at the repo' $envOk `
         "KOMOREBI_CONFIG_HOME=$env:KOMOREBI_CONFIG_HOME; YASB_CONFIG_HOME=$env:YASB_CONFIG_HOME" `
-        '.\install.ps1  (las re-registra; reabrir terminal)'
+        '.\install.ps1  (re-registers them; reopen the terminal)'
 
     # --- Versiones vs lockfile ---------------------------------------------------
     $lock = Import-WinarchyToml -Path (Join-Path $root 'versions.lock.toml')
     $komorebicCmd = Get-Command komorebic -ErrorAction SilentlyContinue
-    $verOk = $false; $verDetail = 'komorebic no está en PATH'
+    $verOk = $false; $verDetail = 'komorebic is not on PATH'
     if ($komorebicCmd) {
         $installed = (& komorebic --version 2>$null | Select-Object -First 1) -replace '[^\d\.]', ''
         $verOk = $installed -eq $lock['core']['komorebi']
-        $verDetail = "instalado=$installed lockfile=$($lock['core']['komorebi'])"
+        $verDetail = "installed=$installed lockfile=$($lock['core']['komorebi'])"
     }
-    Add-Check 'komorebi en versión del lockfile' $verOk $verDetail `
-        'winarchy update --core  (o reinstalar la versión fijada)'
+    Add-Check 'komorebi at lockfile version' $verOk $verDetail `
+        'winarchy update --core  (or reinstall the pinned version)'
 
     # --- Dueños de hotkeys duplicados ----------------------------------------------
     $whkd = Test-WinarchyProcess 'whkd'
-    Add-Check 'sin dueños de hotkeys duplicados (whkd)' (-not $whkd) `
-        $(if ($whkd) { 'whkd está corriendo — conflicto con AHK' } else { 'AHK es el único dueño' }) `
-        'Stop-Process -Name whkd; quitar su autostart'
+    Add-Check 'no duplicate hotkey owners (whkd)' (-not $whkd) `
+        $(if ($whkd) { 'whkd is running — conflicts with AHK' } else { 'AHK is the sole owner' }) `
+        'Stop-Process -Name whkd; remove its autostart'
 
     # --- Estado de migración Seelen ---------------------------------------------------
     $seelen = Test-WinarchyProcess 'seelen-ui'
-    Add-Check 'Seelen UI inactivo' (-not $seelen) `
-        $(if ($seelen) { 'Seelen sigue corriendo (modo convivencia)' } else { 'migración completa o no instalado' }) `
+    Add-Check 'Seelen UI inactive' (-not $seelen) `
+        $(if ($seelen) { 'Seelen is still running (coexistence mode)' } else { 'migration complete or not installed' }) `
         '.\scripts\migrate-from-seelen.ps1'
 
     # --- Recordatorio permanente -----------------------------------------------------
@@ -98,7 +98,7 @@ function Invoke-WinarchyDoctor {
         }
     }
     Write-Host ''
-    Write-WinarchyInfo 'Recordatorio: komorebi NO gestiona ventanas elevadas (by design; no correr elevado).'
-    if ($failed -eq 0) { Write-WinarchyOk 'Todo verde.' } else { Write-WinarchyErr "$failed chequeo(s) en rojo." }
+    Write-WinarchyInfo 'Reminder: komorebi does NOT manage elevated windows (by design; never run it elevated).'
+    if ($failed -eq 0) { Write-WinarchyOk 'All green.' } else { Write-WinarchyErr "$failed check(s) failing." }
     $failed
 }
