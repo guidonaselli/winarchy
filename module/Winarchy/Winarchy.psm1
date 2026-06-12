@@ -17,6 +17,8 @@ function Show-WinarchyHelp {
     theme set <name>          Apply a theme to every surface
     theme next                Cycle to the next theme (alphabetical)
     theme list                List installed themes (* = active)
+    theme preview [name]      Render synthetic preview cards (all themes by default)
+    theme gallery             Visual theme picker (WPF grid)
     update [--core]           Update winget+scoop; --core also komorebi/YASB
     menu                      Navigable menu (themes, screenshots, game-mode, ...)
     webapp install <n> <url>  Create a webapp as a dedicated window
@@ -63,7 +65,12 @@ function Invoke-Winarchy {
                         Write-Host "  $mark $t"
                     }
                 }
-                default { throw "Unknown subcommand: theme $sub (set|next|list)" }
+                'preview' {
+                    if ($rest.Count -ge 2) { Update-WinarchyThemePreviews -Name $rest[1] }
+                    else { Update-WinarchyThemePreviews }
+                }
+                'gallery' { Show-WinarchyThemeGallery }
+                default { throw "Unknown subcommand: theme $sub (set|next|list|preview|gallery)" }
             }
         }
         'update' { Invoke-WinarchyUpdate -Core:($rest -contains '--core' -or $rest -contains '-core') }

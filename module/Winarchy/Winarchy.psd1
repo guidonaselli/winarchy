@@ -9,6 +9,7 @@
         'Invoke-Winarchy',
         'Set-WinarchyTheme', 'Set-WinarchyNextTheme', 'Get-WinarchyThemes', 'Get-WinarchyCurrentTheme',
         'Update-WinarchyAccent', 'Get-WinarchyAccentStatus',
+        'New-WinarchyThemePreview', 'Update-WinarchyThemePreviews', 'Show-WinarchyThemeGallery',
         'Invoke-WinarchyUpdate', 'Invoke-WinarchyDoctor', 'Invoke-WinarchyReload',
         'Enable-WinarchyGameMode', 'Disable-WinarchyGameMode', 'Get-WinarchyGameModeStatus',
         'Add-WinarchyGame', 'Remove-WinarchyGame',

@@ -46,6 +46,7 @@
     { "kind": "Exe", "id": "Flow.Launcher.exe", "matching_strategy": "Equals" },
     { "kind": "Exe", "id": "Twinkle Tray.exe", "matching_strategy": "Equals" },
     { "kind": "Class", "id": "TaskManagerWindow", "matching_strategy": "Equals" },
-    { "kind": "Title", "id": "Picture-in-Picture", "matching_strategy": "Equals" }{{computed.game_ignore_rules}}
+    { "kind": "Title", "id": "Picture-in-Picture", "matching_strategy": "Equals" },
+    { "kind": "Title", "id": "Winarchy — Themes", "matching_strategy": "Equals" }{{computed.game_ignore_rules}}
   ]
 }
