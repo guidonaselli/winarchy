@@ -97,6 +97,7 @@ function Get-WinarchyRenderTargets {
         @{ Template = 'nvim-theme.lua.tpl';               Output = Join-Path $root 'config\nvim\winarchy-theme.lua';     Validate = $null }
         @{ Template = 'ahk-theme.ini.tpl';                Output = Join-Path $root 'config\ahk\theme.ini';               Validate = $null }
         @{ Template = 'obsidian.css.tpl';                 Output = Join-Path $root 'config\obsidian\winarchy-theme.css'; Validate = $null }
+        @{ Template = 'starship.toml.tpl';                Output = Join-Path $root 'config\pwsh\starship.toml';          Validate = $null }
     )
 }
 

@@ -15,6 +15,7 @@
         'Add-WinarchyGame', 'Remove-WinarchyGame',
         'Install-WinarchyWebapp', 'Remove-WinarchyWebapp', 'Get-WinarchyWebapps',
         'Invoke-WinarchyScreenshot', 'Show-WinarchyMenu',
+        'Install-WinarchyShellProfile', 'Remove-WinarchyShellProfile',
         # helpers usados por install.ps1 y scripts\*.ps1
         'New-WinarchySnapshot', 'Import-WinarchyToml', 'Get-WinarchyAhkExe', 'Get-WinarchyStateDir',
         'Disable-WinarchyXMouse',

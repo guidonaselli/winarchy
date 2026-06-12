@@ -236,6 +236,22 @@ winarchy accent status
 
 ---
 
+## Terminal profile
+
+Winarchy ships an omarchy-style shell experience on PowerShell 7 + Windows Terminal:
+
+- **starship** prompt, themed by the theme engine (`config/pwsh/starship.toml` is regenerated on every `winarchy theme set`; the prompt recolors live, no restart needed)
+- **PSFzf + fzf** — fuzzy history (`Ctrl+R`) and file picker (`Ctrl+T`)
+- **zoxide** — smart `cd` (`z proj`, `zi`)
+- **eza / bat** — modern `ls`/`ll`/`la`/`lt` and `cat`
+- **PSReadLine** — fish-style history predictions in list view
+
+`install.ps1` installs the tools (winget + PSGallery) and adds a single marked block to your pwsh `$PROFILE` that dot-sources the managed profile (`config/pwsh/profile.ps1`). Every integration is guarded: if a binary is missing, that piece is silently skipped — the profile never breaks your shell.
+
+Your own customization goes in `config/pwsh/user.ps1` (gitignored), loaded last so it can override anything. To uninstall the hook: `Remove-WinarchyShellProfile` (a snapshot of your `$PROFILE` is taken before any change).
+
+---
+
 ## Game mode
 
 Winarchy treats gaming as a real requirement, not an afterthought.

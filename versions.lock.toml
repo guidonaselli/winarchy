@@ -16,3 +16,9 @@ yasb = "2.0.2"
 "ShareX.ShareX" = true
 "Microsoft.WindowsTerminal" = true
 "DEVCOM.JetBrainsMonoNerdFont" = true
+# Herramientas del terminal profile (no core, sin pin: siguen su último release)
+"Starship.Starship" = true
+"junegunn.fzf" = true
+"ajeetdsouza.zoxide" = true
+"eza-community.eza" = true
+"sharkdp.bat" = true

@@ -78,6 +78,17 @@ function Invoke-WinarchyDoctor {
         $(if ($whkd) { 'whkd is running — conflicts with AHK' } else { 'AHK is the sole owner' }) `
         'Stop-Process -Name whkd; remove its autostart'
 
+    # --- Terminal profile (informativo) -----------------------------------------------
+    $shellTools = @('starship', 'fzf', 'zoxide', 'eza', 'bat')
+    $missingTools = @($shellTools | Where-Object {
+        -not (Get-Command $_ -CommandType Application -ErrorAction SilentlyContinue)
+    })
+    Add-Check 'shell tools installed' ($missingTools.Count -eq 0) `
+        $(if ($missingTools) { "missing: $($missingTools -join ', ')" } else { ($shellTools -join ', ') + ' + PSFzf' }) `
+        '.\install.ps1  (installs them via winget)'
+    Add-Check 'pwsh profile hook installed' (Test-WinarchyShellProfileHook) `
+        (Get-WinarchyShellProfilePath) '.\install.ps1  (adds the managed block to $PROFILE)'
+
     # --- Estado de migración Seelen ---------------------------------------------------
     $seelen = Test-WinarchyProcess 'seelen-ui'
     Add-Check 'Seelen UI inactive' (-not $seelen) `

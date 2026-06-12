@@ -70,6 +70,17 @@ if ($userPath -notlike "*$binDir*") {
 }
 else { Write-WinarchyOk 'bin\ ya estaba en PATH' }
 
+# --- 3b. Terminal profile: PSFzf + hook en $PROFILE de pwsh --------------------------
+if (-not $SkipPackages) {
+    if (-not (Get-Module -ListAvailable PSFzf)) {
+        Write-WinarchyInfo 'Instalando PSFzf (PSGallery)...'
+        try { Install-Module PSFzf -Scope CurrentUser -Force -ErrorAction Stop }
+        catch { Write-WinarchyWarn "No pude instalar PSFzf: $($_.Exception.Message)" }
+    }
+    else { Write-WinarchyOk 'PSFzf ya instalado' }
+}
+Install-WinarchyShellProfile
+
 # --- 4. Theme inicial (genera todos los configs) ------------------------------------
 if (-not (Get-WinarchyCurrentTheme)) {
     Write-WinarchyInfo 'Generando configs con el theme inicial (tokyo-night)...'

@@ -11,9 +11,11 @@ config/nvim/winarchy-theme.lua
 config/flow/Winarchy.xaml
 config/terminal/winarchy-scheme.json
 config/ahk/theme.ini
+config/pwsh/starship.toml
 
-# Override de hotkeys del usuario (local a cada máquina)
+# Overrides del usuario (locales a cada máquina)
 config/ahk/user.ahk
+config/pwsh/user.ps1
 
 # Planning interno (specs/changes de OpenSpec y tooling de agentes) — no es parte del producto
 openspec/
