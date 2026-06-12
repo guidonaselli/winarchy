@@ -1,6 +1,7 @@
 # Juegos conocidos por Winarchy.
 # Cada entrada genera: (a) ignore-rule en komorebi (nunca se tilean),
-# (b) suspensión de hotkeys SUPER cuando el proceso está en primer plano.
+# (b) suspensión de hotkeys SUPER cuando el proceso está en primer plano,
+# (c) exclusión en PowerToys Quick Accent (solo si está instalado).
 # Alta rápida: `winarchy game-mode add <exe>` / baja: `winarchy game-mode remove <exe>`.
 # `exe` es el nombre del proceso sin ruta (con o sin .exe).
 
@@ -19,3 +20,9 @@ exe = "Riot Client.exe"
 
 [[games]]
 exe = "VALORANT-Win64-Shipping.exe"
+
+[[games]]
+exe = "re9.exe"
+
+[[games]]
+exe = "domekeeper.exe"
