@@ -81,6 +81,12 @@ $env:STARSHIP_CONFIG = Join-Path $PSScriptRoot 'starship.toml'
 $winarchyInit = Get-WinarchyToolInit -Tool starship -InitArgs @('init', 'powershell', '--print-full-init')
 if ($winarchyInit) { try { . $winarchyInit } catch { } }
 
+# --- fastfetch: splash de arranque estilo omarchy (solo terminal interactiva) --------
+if (-not [Console]::IsOutputRedirected -and
+    (Get-Command fastfetch -CommandType Application -ErrorAction SilentlyContinue)) {
+    try { fastfetch --config (Join-Path $PSScriptRoot '..\fastfetch\config.jsonc') } catch { }
+}
+
 # --- Override del usuario (puede redefinir todo lo anterior) -------------------------
 $winarchyUserProfile = Join-Path $PSScriptRoot 'user.ps1'
 if (Test-Path $winarchyUserProfile) {

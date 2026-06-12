@@ -245,6 +245,7 @@ Winarchy ships an omarchy-style shell experience on PowerShell 7 + Windows Termi
 - **zoxide** — smart `cd` (`z proj`, `zi`)
 - **eza / bat** — modern `ls`/`ll`/`la`/`lt` and `cat`
 - **PSReadLine** — fish-style history predictions in list view
+- **fastfetch** — omarchy-style splash on every new interactive terminal (`config/fastfetch/config.jsonc`)
 
 `install.ps1` installs the tools (winget + PSGallery) and adds a single marked block to your pwsh `$PROFILE` that dot-sources the managed profile (`config/pwsh/profile.ps1`). Every integration is guarded: if a binary is missing, that piece is silently skipped — the profile never breaks your shell.
 
