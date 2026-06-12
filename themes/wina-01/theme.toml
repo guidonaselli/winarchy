@@ -1,0 +1,36 @@
+# Theme: WINA-01 — Evangelion Unit-01 (purple armor, neon-green accent, horn yellow).
+# Backgrounds stay deep eggplant-black so the green only shows up as accent/focus
+# and never burns the eyes; reds are kept for warnings, just like the Eva alerts.
+name = "WINA-01"
+mode = "dark"
+
+[colors]
+background = "#16121E"
+foreground = "#C8C0D8"
+accent = "#9BE53E"
+cursor = "#9BE53E"
+selection_background = "#5B2C8F"
+selection_foreground = "#ECE8F2"
+color0 = "#2A2438"
+color1 = "#E5484D"
+color2 = "#9BE53E"
+color3 = "#F2C94C"
+color4 = "#7C5CBF"
+color5 = "#A974E0"
+color6 = "#4FB8C9"
+color7 = "#C8C0D8"
+color8 = "#4A4060"
+color9 = "#FF5C61"
+color10 = "#B4FF4D"
+color11 = "#FFD95E"
+color12 = "#9A7AE0"
+color13 = "#C194F0"
+color14 = "#6FD3E0"
+color15 = "#F2EEF8"
+
+[borders]
+focused = "#9BE53E"
+unfocused = "#3A2F52"
+urgent = "#E5484D"
+monocle = "#A974E0"
+stack = "#F2C94C"
