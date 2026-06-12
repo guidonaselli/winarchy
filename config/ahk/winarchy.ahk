@@ -414,6 +414,7 @@ AccentWatch() {
 
 ; --- Themes / ayuda --------------------------------------------------------------------
 #+t::Winarchy('theme next')                       ; siguiente theme
+#^t::Winarchy('theme gallery')                    ; galería visual de themes
 #k::ToggleKeyOverlay()                            ; este overlay de keybindings
 
 ; --- Override de usuario (config\ahk\user.ahk, no versionado; sus hotkeys

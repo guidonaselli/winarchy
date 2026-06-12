@@ -65,6 +65,7 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 | Keybinding | Action |
 |---|---|
 | `SUPER+Shift+T` | Next theme (`winarchy theme next`) |
+| `SUPER+Ctrl+T` | Theme gallery (`winarchy theme gallery`) |
 
 ## User overrides
 Create `config\ahk\user.ahk` (gitignored) to add your own hotkeys without touching
