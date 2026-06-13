@@ -2,8 +2,6 @@
   <img src="assets/logo/winarchy-logo.svg" alt="Winarchy" width="220">
 </p>
 
-# Winarchy
-
 ```text
 __        ___ _   _    _    ____   ____ _   ___   __
 \ \      / / | \ | |  / \  |  _ \ / ___| | | \ \ / /
