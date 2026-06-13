@@ -76,12 +76,18 @@ function Build-WinarchyThemeContext {
     param([Parameter(Mandatory)][hashtable]$Theme, [Parameter(Mandatory)][string]$ThemeDir)
     $ctx = ConvertTo-WinarchyFlatContext -Data $Theme
     $ctx['computed.theme_dir'] = Split-Path $ThemeDir -Leaf
+    # Raíz del repo con forward slashes: apto para rutas dentro de JSON generado
+    $ctx['computed.root'] = (Get-WinarchyRoot) -replace '\\', '/'
     $ctx['computed.game_ignore_rules'] = Get-WinarchyGameIgnoreRulesJson
     # auto-accent puede traer un accent tan oscuro (o claro) como el background:
     # accent_ui es el accent corregido para usarse como texto/superficie dentro de
     # apps con fondo del theme, y on_accent el texto legible sobre ese accent_ui.
     $ctx['colors.accent_ui'] = Get-WinarchyReadableAccentHex -Accent $Theme['colors']['accent'] -Background $Theme['colors']['background']
     $ctx['colors.on_accent'] = Get-WinarchyOnAccentHex -Hex $ctx['colors.accent_ui']
+    # Accent como "R;G;B" decimal, para escapes ANSI truecolor (fastfetch usa "38;2;R;G;B")
+    $accentHex = $ctx['colors.accent_ui'].TrimStart('#')
+    $ctx['colors.accent_ansi_rgb'] = (0, 2, 4 | ForEach-Object {
+            [Convert]::ToInt32($accentHex.Substring($_, 2), 16) }) -join ';'
     $ctx
 }
 
@@ -98,6 +104,7 @@ function Get-WinarchyRenderTargets {
         @{ Template = 'ahk-theme.ini.tpl';                Output = Join-Path $root 'config\ahk\theme.ini';               Validate = $null }
         @{ Template = 'obsidian.css.tpl';                 Output = Join-Path $root 'config\obsidian\winarchy-theme.css'; Validate = $null }
         @{ Template = 'starship.toml.tpl';                Output = Join-Path $root 'config\pwsh\starship.toml';          Validate = $null }
+        @{ Template = 'fastfetch.jsonc.tpl';              Output = Join-Path $root 'config\fastfetch\config.jsonc';      Validate = 'json' }
     )
 }
 

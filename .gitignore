@@ -12,6 +12,7 @@ config/flow/Winarchy.xaml
 config/terminal/winarchy-scheme.json
 config/ahk/theme.ini
 config/pwsh/starship.toml
+config/fastfetch/config.jsonc
 
 # Overrides del usuario (locales a cada máquina)
 config/ahk/user.ahk
