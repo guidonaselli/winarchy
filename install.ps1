@@ -32,6 +32,18 @@ $snapshot = New-WinarchySnapshot -Label 'pre-install' -Path @(
 )
 Write-WinarchyOk "Snapshot previo: $snapshot"
 
+# Export de las Scheduled Tasks de Winarchy (si existieran) al snapshot, para rollback.
+# Vía schtasks.exe (no usa CIM/MI, que está roto en algunas máquinas).
+try {
+    foreach ($name in @('komorebi', 'yasb', 'ahk')) {
+        $xml = & schtasks.exe /Query /TN "\Winarchy\$name" /XML 2>$null
+        if ($LASTEXITCODE -eq 0 -and $xml) {
+            $xml | Set-Content -Path (Join-Path $snapshot "task-$name.xml") -Encoding Unicode
+        }
+    }
+}
+catch { Write-WinarchyWarn "No pude exportar tareas previas al snapshot: $($_.Exception.Message)" }
+
 # --- 1. Paquetes (winget, versiones core fijadas) -------------------------------
 if (-not $SkipPackages) {
     $lock = Import-WinarchyToml -Path (Join-Path $Root 'versions.lock.toml')
@@ -89,26 +101,13 @@ if (-not (Get-WinarchyCurrentTheme)) {
 
 # --- 5. Autostart + taskbar (solo con -Activate) --------------------------------------
 if ($Activate) {
-    $shell = New-Object -ComObject WScript.Shell
-
     $komorebic = (Get-Command komorebic -ErrorAction SilentlyContinue).Source
-    if ($komorebic) {
-        $lnk = $shell.CreateShortcut((Join-Path $startup 'Winarchy komorebi.lnk'))
-        $lnk.TargetPath = $komorebic; $lnk.Arguments = 'start'; $lnk.Save()
-    }
-
     $yasb = (Get-Command yasbc -ErrorAction SilentlyContinue).Source
-    if ($yasb) {
-        $lnk = $shell.CreateShortcut((Join-Path $startup 'Winarchy YASB.lnk'))
-        $lnk.TargetPath = $yasb; $lnk.Arguments = 'start'; $lnk.Save()
-    }
-
     $ahkExe = Get-WinarchyAhkExe
-    if ($ahkExe) {
-        $lnk = $shell.CreateShortcut((Join-Path $startup 'Winarchy hotkeys.lnk'))
-        $lnk.TargetPath = $ahkExe; $lnk.Arguments = "`"$Root\config\ahk\winarchy.ahk`""; $lnk.Save()
-    }
-    Write-WinarchyOk 'Autostart registrado (Startup): komorebi, YASB, AHK'
+
+    # Scheduled Tasks At-LogOn (disparo más temprano que la carpeta Startup). Migra
+    # borrando los .lnk legacy; idempotente; fallback a Startup si el registro falla.
+    Register-WinarchyAutostart
 
     # Taskbar nativa en auto-hide (no oculta del todo: ver design D6/riesgos)
     try {

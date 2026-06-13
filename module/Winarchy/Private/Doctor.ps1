@@ -31,6 +31,13 @@ function Invoke-WinarchyDoctor {
     Add-Check 'Flow Launcher running' (Test-WinarchyProcess 'Flow.Launcher') `
         'launcher' "& `"$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe`""
 
+    # --- Autostart (Scheduled Tasks At-LogOn) ----------------------------------
+    $autostart = Get-WinarchyAutostartStatus
+    $autoMissing = @($autostart.Keys | Where-Object { -not $autostart[$_] })
+    Add-Check 'autostart registered (komorebi/YASB/AHK)' ($autoMissing.Count -eq 0) `
+        $(if ($autoMissing) { "missing: $($autoMissing -join ', ')" } else { 'At-LogOn tasks present' }) `
+        '.\install.ps1 -Activate  (registers the At-LogOn tasks)'
+
     # --- Configs parseables ---------------------------------------------------
     $komorebiJson = Join-Path $root 'config\komorebi\komorebi.json'
     $komorebiOk = $false

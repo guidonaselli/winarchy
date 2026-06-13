@@ -27,9 +27,8 @@ Write-WinarchyOk 'Servicios detenidos'
 Disable-WinarchyXMouse
 Write-WinarchyOk 'Focus-follows-mouse del SO desactivado'
 
-# 2. Autostart fuera
-$startup = [Environment]::GetFolderPath('Startup')
-Remove-Item (Join-Path $startup 'Winarchy *.lnk') -Force -ErrorAction SilentlyContinue
+# 2. Autostart fuera (Scheduled Tasks + .lnk legacy)
+Unregister-WinarchyAutostart
 Write-WinarchyOk 'Autostart eliminado'
 
 # 3. Taskbar restaurada (quitar auto-hide)

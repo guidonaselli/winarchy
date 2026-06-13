@@ -19,6 +19,7 @@
         # helpers usados por install.ps1 y scripts\*.ps1
         'New-WinarchySnapshot', 'Import-WinarchyToml', 'Get-WinarchyAhkExe', 'Get-WinarchyStateDir',
         'Disable-WinarchyXMouse',
+        'Register-WinarchyAutostart', 'Unregister-WinarchyAutostart', 'Get-WinarchyAutostartStatus',
         'Write-WinarchyInfo', 'Write-WinarchyOk', 'Write-WinarchyWarn', 'Write-WinarchyErr'
     )
     CmdletsToExport   = @()

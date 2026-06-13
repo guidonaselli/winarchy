@@ -64,6 +64,30 @@ function Update-WinarchyKomorebiRules {
     if (Test-WinarchyProcess 'komorebi') { komorebic reload-configuration 2>$null | Out-Null }
 }
 
+function Restart-WinarchyPowerToys {
+    <# Reinicia PowerToys (si está corriendo) para que recargue settings.json del disco.
+       PowerToys NO relee excluded_apps en caliente: mantiene la lista en memoria y
+       pisa el archivo en su próximo guardado. Reiniciarlo es la única forma de que
+       tome los cambios que escribimos por disco sin perderlos. No-op si no corre. #>
+    $procs = @(Get-Process PowerToys -ErrorAction SilentlyContinue)
+    if ($procs.Count -eq 0) { return }
+    $exe = ($procs | Where-Object { $_.Path } | Select-Object -First 1).Path
+    if (-not $exe) {
+        $exe = @(
+            "$env:LOCALAPPDATA\PowerToys\PowerToys.exe",
+            "$env:ProgramFiles\PowerToys\PowerToys.exe"
+        ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    }
+    Get-Process PowerToys* -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    if ($exe -and (Test-Path $exe)) {
+        Start-Sleep -Milliseconds 500
+        Start-Process $exe
+    }
+    else {
+        Write-WinarchyWarn 'No encontré PowerToys.exe para reiniciarlo; reinicialo a mano para aplicar las exclusiones.'
+    }
+}
+
 function Update-WinarchyQuickAccentExclusion {
     <# Merge quirúrgico de excluded_apps en el settings.json de PowerToys Quick Accent.
        Si PowerToys/Quick Accent no está instalado (no existe el archivo), no hace nada. #>
@@ -89,8 +113,11 @@ function Update-WinarchyQuickAccentExclusion {
         }
         $json.properties.excluded_apps.value = if ($apps.Count) { ($apps -join "`r") + "`r" } else { '' }
         Set-Content -Path $path -Value ($json | ConvertTo-Json -Depth 10 -Compress) -Encoding UTF8 -NoNewline
+        # PowerToys mantiene excluded_apps en memoria y pisaría el archivo en su próximo
+        # guardado: hay que reiniciarlo para que recargue del disco lo que acabamos de escribir.
+        Restart-WinarchyPowerToys
         $verb = if ($Remove) { 'removed from' } else { 'added to' }
-        Write-WinarchyInfo "Quick Accent: '$Exe' $verb exclusions (PowerToys reloads on its own)."
+        Write-WinarchyInfo "Quick Accent: '$Exe' $verb exclusions (PowerToys reiniciado para recargar)."
     }
     catch {
         Write-WinarchyWarn "Could not update Quick Accent exclusions: $_"
