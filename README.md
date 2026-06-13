@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo/winarchy-logo.svg" alt="Winarchy" width="220">
+</p>
+
 # Winarchy
 
 ```text
