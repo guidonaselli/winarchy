@@ -1,58 +1,58 @@
 /* managed by winarchy — generado desde templates/obsidian.css.tpl. NO editar a mano. */
-/* Theme: Auto Accent */
+/* Theme: WINA-01 */
 
 .theme-dark, .theme-light {
   /* Core colors */
-  --background-primary: #1a1b26;
-  --background-primary-alt: #1a1b26;
-  --background-secondary: #1a1b26;
-  --background-secondary-alt: #1a1b26;
-  --text-normal: #c8c8c8;
+  --background-primary: #16121E;
+  --background-primary-alt: #16121E;
+  --background-secondary: #16121E;
+  --background-secondary-alt: #16121E;
+  --text-normal: #C8C0D8;
 
   /* Selection colors */
-  --text-selection: #3a3d4d;
+  --text-selection: #5B2C8F;
 
   /* Border color */
-  --background-modifier-border: #565f89;
+  --background-modifier-border: #4A4060;
 
   /* Semantic heading colors */
-  --text-title-h1: #d35f5f;
-  --text-title-h2: #9ece6a;
-  --text-title-h3: #e0af68;
-  --text-title-h4: #7aa2f7;
-  --text-title-h5: #bb9af7;
-  --text-title-h6: #bb9af7;
+  --text-title-h1: #E5484D;
+  --text-title-h2: #9BE53E;
+  --text-title-h3: #F2C94C;
+  --text-title-h4: #7C5CBF;
+  --text-title-h5: #A974E0;
+  --text-title-h6: #A974E0;
 
   /* Links and accents */
-  --text-link: #7aa2f7;
-  --text-accent: #6d7983;
-  --text-accent-hover: #6d7983;
-  --interactive-accent: #6d7983;
-  --interactive-accent-hover: #6d7983;
-  --text-on-accent: #ffffff;
+  --text-link: #7C5CBF;
+  --text-accent: #9be53e;
+  --text-accent-hover: #9be53e;
+  --interactive-accent: #9be53e;
+  --interactive-accent-hover: #9be53e;
+  --text-on-accent: #1a1a1a;
 
   /* Muted text */
-  --text-muted: color-mix(in srgb, #c8c8c8 70%, transparent);
-  --text-faint: color-mix(in srgb, #c8c8c8 55%, transparent);
+  --text-muted: color-mix(in srgb, #C8C0D8 70%, transparent);
+  --text-faint: color-mix(in srgb, #C8C0D8 55%, transparent);
 
   /* Code */
-  --code-normal: #7dcfff;
+  --code-normal: #4FB8C9;
 
   /* Errors and success */
-  --text-error: #d35f5f;
-  --text-error-hover: #d35f5f;
-  --text-success: #9ece6a;
+  --text-error: #E5484D;
+  --text-error-hover: #E5484D;
+  --text-success: #9BE53E;
 
   /* Tags */
-  --tag-color: #7dcfff;
-  --tag-background: #565f89;
+  --tag-color: #4FB8C9;
+  --tag-background: #4A4060;
 
   /* Graph */
-  --graph-line: #565f89;
-  --graph-node: #6d7983;
-  --graph-node-focused: #7aa2f7;
-  --graph-node-tag: #7dcfff;
-  --graph-node-attachment: #9ece6a;
+  --graph-line: #4A4060;
+  --graph-node: #9be53e;
+  --graph-node-focused: #7C5CBF;
+  --graph-node-tag: #4FB8C9;
+  --graph-node-attachment: #9BE53E;
 }
 
 /* Headers */
@@ -65,16 +65,16 @@
 
 /* Code blocks */
 .markdown-rendered code {
-  color: #7dcfff;
+  color: #4FB8C9;
 }
 
 /* Syntax highlighting */
-.cm-s-obsidian span.cm-keyword { color: #d35f5f; }
-.cm-s-obsidian span.cm-string { color: #9ece6a; }
-.cm-s-obsidian span.cm-number { color: #e0af68; }
-.cm-s-obsidian span.cm-comment { color: #565f89; }
-.cm-s-obsidian span.cm-operator { color: #7aa2f7; }
-.cm-s-obsidian span.cm-def { color: #7aa2f7; }
+.cm-s-obsidian span.cm-keyword { color: #E5484D; }
+.cm-s-obsidian span.cm-string { color: #9BE53E; }
+.cm-s-obsidian span.cm-number { color: #F2C94C; }
+.cm-s-obsidian span.cm-comment { color: #4A4060; }
+.cm-s-obsidian span.cm-operator { color: #7C5CBF; }
+.cm-s-obsidian span.cm-def { color: #7C5CBF; }
 
 /* Links */
 .markdown-rendered a {
@@ -83,7 +83,7 @@
 
 /* Blockquotes */
 .markdown-rendered blockquote {
-  border-left-color: #6d7983;
+  border-left-color: #9be53e;
 }
 
 /* Active elements */

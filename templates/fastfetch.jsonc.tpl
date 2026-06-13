@@ -13,7 +13,8 @@
     },
     "display": {
         "separator": "  ",
-        "color": { "keys": "blue" }
+        "color": { "keys": "blue" },
+        "key": { "width": 10 }
     },
     "modules": [
         "break",
