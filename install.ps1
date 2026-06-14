@@ -93,6 +93,9 @@ if (-not $SkipPackages) {
 }
 Install-WinarchyShellProfile
 
+# --- 3c. Skill "winarchy" en los agentes de IA detectados (estilo Omarchy) ----------
+Install-WinarchySkill
+
 # --- 4. Theme inicial (genera todos los configs) ------------------------------------
 if (-not (Get-WinarchyCurrentTheme)) {
     Write-WinarchyInfo 'Generando configs con el theme inicial (tokyo-night)...'

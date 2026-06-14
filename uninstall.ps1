@@ -47,6 +47,9 @@ Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explo
     -Name 'StartupDelayInMSec' -ErrorAction SilentlyContinue
 Write-WinarchyOk 'Delay de Startup restaurado al default'
 
+# 3b. Skill "winarchy" fuera de los agentes de IA
+Uninstall-WinarchySkill
+
 # 4. Env vars y PATH
 [Environment]::SetEnvironmentVariable('KOMOREBI_CONFIG_HOME', $null, 'User')
 [Environment]::SetEnvironmentVariable('YASB_CONFIG_HOME', $null, 'User')
