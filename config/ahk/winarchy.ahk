@@ -145,7 +145,7 @@ ToggleKeyOverlay() {
     }
     sections := ParseKeymap(A_ScriptFullPath)
     if FileExist(A_ScriptDir '\user.ahk')
-        for s in ParseKeymap(A_ScriptDir '\user.ahk', 'Usuario')
+        for s in ParseKeymap(A_ScriptDir '\user.ahk', 'User')
             sections.Push(s)
     visible := []
     total := 0
@@ -334,11 +334,11 @@ AccentWatch() {
 ; --- Apps ---------------------------------------------------------------------
 #Enter::Run('wt.exe')                            ; terminal
 #Space::ToggleFlow()                             ; Flow Launcher
-#+Space::WinarchyTerminal('menu')                ; menú winarchy
+#+Space::WinarchyTerminal('menu')                ; winarchy menu
 #b::Run(DefaultBrowser())                        ; browser
-#e::Run('explorer.exe')                          ; explorador de archivos
+#e::Run('explorer.exe')                          ; file explorer
 ; Win+N queda libre para Windows (centro de notificaciones; la campanita de YASB lo simula)
-#m::LaunchMusic()                                ; música (Spotify / YT Music)
+#m::LaunchMusic()                                ; music (Spotify / YT Music)
 #o::LaunchObsidian()                             ; Obsidian
 
 ; --- Webapps --------------------------------------------------------------------
@@ -347,40 +347,41 @@ AccentWatch() {
 #y::WebApp('https://youtube.com')                ; YouTube
 #x::WebApp('https://x.com')                      ; X
 #c::WebApp('https://calendar.google.com')        ; Google Calendar
-#g::WebApp('https://web.whatsapp.com')           ; WhatsApp (en juego, Win+G = Game Bar)
+#g::WebApp('https://web.whatsapp.com')           ; WhatsApp (in-game Win+G = Game Bar)
 
-; --- Ventanas -------------------------------------------------------------------
-#w::Komorebic('close')                           ; cerrar ventana
-#f::Komorebic('toggle-monocle')                  ; monocle (fullscreen lógico)
-#+f::Komorebic('toggle-maximize')                ; maximize real
-#t::Komorebic('toggle-float')                    ; flotar/anclar
-#p::Komorebic('toggle-pause')                    ; pausar tiling
-#r::Komorebic('retile')                          ; re-tilear forzado
-#+r::Winarchy('reload')                          ; recargar todo el stack
+; --- Windows -------------------------------------------------------------------
+#w::Komorebic('close')                           ; close window
+#f::Komorebic('toggle-monocle')                  ; monocle (logical fullscreen)
+#+f::Komorebic('toggle-maximize')                ; real maximize
+#t::Komorebic('toggle-float')                    ; float/tile
+#p::Komorebic('toggle-pause')                    ; pause tiling
+#r::Komorebic('retile')                          ; force retile
+#+r::Winarchy('reload')                          ; reload whole stack
 
-; --- Foco direccional -----------------------------------------------------------
-#Left::Komorebic('focus left')                   ; mover el foco
+; --- Focus -----------------------------------------------------------
+#Left::Komorebic('focus left')                   ; move focus
 #Right::Komorebic('focus right')
 #Up::Komorebic('focus up')
 #Down::Komorebic('focus down')
 
-; --- Mover ventana en el layout ---------------------------------------------------
-#+Left::Komorebic('move left')                   ; mover la ventana
+; --- Move window ---------------------------------------------------
+#+Left::Komorebic('move left')                   ; move window
 #+Right::Komorebic('move right')
 #+Up::Komorebic('move up')
 #+Down::Komorebic('move down')
 
 ; --- Resize -----------------------------------------------------------------------
-#=::Komorebic('resize-axis horizontal increase') ; ancho +
-#-::Komorebic('resize-axis horizontal decrease') ; ancho -
-#+=::Komorebic('resize-axis vertical increase')  ; alto +
-#+-::Komorebic('resize-axis vertical decrease')  ; alto -
+#=::Komorebic('resize-axis horizontal increase') ; width +
+#-::Komorebic('resize-axis horizontal decrease') ; width -
+#+=::Komorebic('resize-axis vertical increase')  ; height +
+#+-::Komorebic('resize-axis vertical decrease')  ; height -
 
-; --- Workspaces 1-9 (komorebi, no virtual desktops nativos) -------------------------
+; --- Workspaces ---------------------------------------------------------------
+; 1-9 (komorebi, no virtual desktops nativos)
 ; Exentos del game-mode: si se suspenden, Win+N cae al atajo nativo de Windows
 ; (lanza la app N de la taskbar), que es peor que poder salir del juego por workspace.
 #SuspendExempt
-#1::Komorebic('focus-workspace 0')               ; ir al workspace N
+#1::Komorebic('focus-workspace 0')               ; go to workspace N
 #2::Komorebic('focus-workspace 1')
 #3::Komorebic('focus-workspace 2')
 #4::Komorebic('focus-workspace 3')
@@ -391,7 +392,7 @@ AccentWatch() {
 #9::Komorebic('focus-workspace 8')
 #SuspendExempt False
 
-#+1::Komorebic('move-to-workspace 0')            ; mover ventana al workspace N
+#+1::Komorebic('move-to-workspace 0')            ; move window to workspace N
 #+2::Komorebic('move-to-workspace 1')
 #+3::Komorebic('move-to-workspace 2')
 #+4::Komorebic('move-to-workspace 3')
@@ -401,21 +402,21 @@ AccentWatch() {
 #+8::Komorebic('move-to-workspace 7')
 #+9::Komorebic('move-to-workspace 8')
 
-; --- Monitores ------------------------------------------------------------------------
-#,::Komorebic('cycle-focus-monitor previous')    ; foco al monitor anterior
-#.::Komorebic('cycle-focus-monitor next')        ; foco al monitor siguiente
-#+,::Komorebic('cycle-move-monitor previous')    ; mover al monitor anterior
-#+.::Komorebic('cycle-move-monitor next')        ; mover al monitor siguiente
+; --- Monitors ------------------------------------------------------------------------
+#,::Komorebic('cycle-focus-monitor previous')    ; focus previous monitor
+#.::Komorebic('cycle-focus-monitor next')        ; focus next monitor
+#+,::Komorebic('cycle-move-monitor previous')    ; move to previous monitor
+#+.::Komorebic('cycle-move-monitor next')        ; move to next monitor
 
-; --- Capturas (ShareX) -------------------------------------------------------------------
-#+s::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -RectangleRegion')  ; captura de región
-#+w::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -ActiveWindow')     ; captura de ventana activa
-#+p::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -PrintScreen')      ; captura de pantalla completa
+; --- Screenshots (ShareX) -------------------------------------------------------------------
+#+s::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -RectangleRegion')  ; region capture
+#+w::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -ActiveWindow')     ; active window capture
+#+p::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -PrintScreen')      ; fullscreen capture
 
-; --- Themes / ayuda --------------------------------------------------------------------
-#+t::Winarchy('theme next')                       ; siguiente theme
-#^t::Winarchy('theme gallery')                    ; galería visual de themes
-#k::ToggleKeyOverlay()                            ; este overlay de keybindings
+; --- Themes / help --------------------------------------------------------------------
+#+t::Winarchy('theme next')                       ; next theme
+#^t::Winarchy('theme gallery')                    ; theme gallery
+#k::ToggleKeyOverlay()                            ; this keybindings overlay
 
 ; --- Override de usuario (config\ahk\user.ahk, no versionado; sus hotkeys
 ;     aparecen en el overlay bajo "Usuario" o sus propios headers "; --- X ---")
