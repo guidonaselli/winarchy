@@ -204,3 +204,6 @@ widgets:
       label_expanded: ""
       pin_click_modifier: "alt"
       show_unpinned: false
+      # Flow es componente del stack y su identidad va unificada (sin tray propio):
+      # se oculta del systray de la barra. Solo apps que Winarchy instala van acá.
+      hide_icons: ["Flow.Launcher"]

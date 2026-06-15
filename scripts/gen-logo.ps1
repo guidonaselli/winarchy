@@ -115,8 +115,8 @@ function New-LogoBitmap {
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::None
     $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
-    $bgBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb($BG[0], $BG[1], $BG[2]))
-    $g.FillRectangle($bgBrush, 0, 0, $Size, $Size)
+    # Tray icon: fondo transparente (el Bitmap nace ARGB 0,0,0,0). No se rellena el
+    # fondo para que en la bandeja el logo se vea sin cuadro negro alrededor.
     $cell = [Math]::Max(1, [Math]::Floor([Math]::Min(($Size * $Fill) / $gw, ($Size * $Fill) / ($gh * $YSCALE))))
     $cellH = $cell * $YSCALE
     $logoW = $cell * $gw; $logoH = $cellH * $gh
