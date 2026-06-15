@@ -19,7 +19,15 @@ function Disable-WinarchyGameMode {
     if (-not (Test-Path $flag)) { Write-WinarchyInfo 'Game-mode was already inactive.'; return }
     Remove-Item $flag -Force
     if (Test-Path (Get-WinarchyPauseMarker)) {
-        if (Test-WinarchyProcess 'komorebi') { komorebic toggle-pause 2>$null | Out-Null }
+        if (Test-WinarchyProcess 'komorebi') {
+            komorebic toggle-pause 2>$null | Out-Null
+        }
+        else {
+            # komorebi se cerró/crasheó durante el game-mode: no hay nada que des-pausar,
+            # relanzarlo para que el tiling vuelva al salir (era la pausa lo que lo dejaba "offline").
+            Write-WinarchyWarn 'komorebi was not running on game-mode exit; relaunching it.'
+            komorebic start 2>$null | Out-Null
+        }
         Remove-Item (Get-WinarchyPauseMarker) -Force
     }
     Write-WinarchyOk 'Game-mode OFF: tiling and hotkeys restored.'
