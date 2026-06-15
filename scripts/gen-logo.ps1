@@ -111,16 +111,15 @@ New-LogoPng -CanvasW 512  -CanvasH 512 -Fill 0.85 -Path (Join-Path $outDir 'wina
 # devuelto en memoria para empaquetar varios tamanos en un .ico con frames PNG.
 function New-LogoBitmap {
     param([int]$Size, [double]$Fill)
-    $bmp = New-Object System.Drawing.Bitmap($Size, $Size)
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::None
-    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
-    # Tray icon: fondo transparente (el Bitmap nace ARGB 0,0,0,0). No se rellena el
-    # fondo para que en la bandeja el logo se vea sin cuadro negro alrededor.
-    $cell = [Math]::Max(1, [Math]::Floor([Math]::Min(($Size * $Fill) / $gw, ($Size * $Fill) / ($gh * $YSCALE))))
-    $cellH = $cell * $YSCALE
-    $logoW = $cell * $gw; $logoH = $cellH * $gh
-    $offX = [int](($Size - $logoW) / 2); $offY = [int](($Size - $logoH) / 2)
+    # El logo mide $gw celdas de ancho (36): a 16/32 px una celda cae a <1 px y el
+    # dibujo directo desbordaba el frame (se veia solo el centro recortado, leia "A").
+    # Solucion: rasterizar a tamano NATIVO (1 celda = 1 px, alto x YSCALE) sobre fondo
+    # transparente y luego escalar el conjunto para que entre completo en cada frame.
+    $natW = [int]$gw; $natH = [int]($gh * $YSCALE)
+    $native = New-Object System.Drawing.Bitmap($natW, $natH)
+    $gn = [System.Drawing.Graphics]::FromImage($native)
+    $gn.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::None
+    $gn.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
     $purpleBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb($PURPLE[0], $PURPLE[1], $PURPLE[2]))
     $greenBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb($GREEN[0], $GREEN[1], $GREEN[2]))
     for ($y = 0; $y -lt $gh; $y++) {
@@ -128,10 +127,22 @@ function New-LogoBitmap {
             $c = $cells[$y][$x]
             if ($c -eq '.') { continue }
             $brush = if ($c -eq 'p') { $purpleBrush } else { $greenBrush }
-            $g.FillRectangle($brush, $offX + $x * $cell, $offY + $y * $cellH, $cell, $cellH)
+            $gn.FillRectangle($brush, $x, $y * $YSCALE, 1, $YSCALE)
         }
     }
+    $gn.Dispose()
+
+    # Escalar el logo nativo dentro del frame cuadrado, centrado y con margen ($Fill).
+    $bmp = New-Object System.Drawing.Bitmap($Size, $Size)   # nace transparente (ARGB 0,0,0,0)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $scale = [Math]::Min(($Size * $Fill) / $natW, ($Size * $Fill) / $natH)
+    $drawW = $natW * $scale; $drawH = $natH * $scale
+    $offX = ($Size - $drawW) / 2; $offY = ($Size - $drawH) / 2
+    $g.DrawImage($native, $offX, $offY, $drawW, $drawH)
     $g.Dispose()
+    $native.Dispose()
     $bmp
 }
 
