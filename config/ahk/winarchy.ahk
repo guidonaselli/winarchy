@@ -92,6 +92,50 @@ LaunchObsidian() {
         TrayTip('Obsidian no está instalado', 'Winarchy')
 }
 
+; --- Tray único de Winarchy ---------------------------------------------------
+; AHK es el host del tray del stack: su icono ES la identidad de Winarchy. Los
+; demás componentes ocultan su tray propio (YASB, Flow); komorebi no tiene tray.
+SetupTray()
+
+SetupTray() {
+    global RepoRoot
+    ico := RepoRoot "\assets\logo\winarchy.ico"
+    if FileExist(ico)
+        try TraySetIcon(ico)            ; si falla, queda el icono por defecto de AHK
+    A_IconTip := "Winarchy"
+
+    tray := A_TrayMenu
+    tray.Delete()                        ; quita el menú por defecto de AHK (Pause/Suspend/Reload/Edit)
+
+    themes := Menu()
+    themes.Add("Next theme`tSUPER+Shift+T", (*) => Winarchy('theme next'))
+    themes.Add("Gallery`tSUPER+Ctrl+T", (*) => Winarchy('theme gallery'))
+
+    tray.Add("Winarchy menu`tSUPER+Shift+Space", (*) => WinarchyTerminal('menu'))
+    tray.Default := "Winarchy menu`tSUPER+Shift+Space"
+    tray.Add()
+    tray.Add("Themes", themes)
+    tray.Add("Reload stack`tSUPER+Shift+R", (*) => Winarchy('reload'))
+    tray.Add("Game mode (toggle)", (*) => ToggleGameMode())
+    tray.Add("Doctor", (*) => WinarchyTerminal('doctor'))
+    tray.Add("Check for updates", (*) => WinarchyTerminal('update'))
+    tray.Add()
+    tray.Add("Quit Winarchy", (*) => QuitStack())
+}
+
+ToggleGameMode() {
+    global GameFlag
+    Winarchy(FileExist(GameFlag) ? 'game-mode off' : 'game-mode on')
+}
+
+QuitStack() {
+    ; parada ordenada y NO elevada: komorebi primero, luego barra/launcher, AHK al final
+    try Komorebic('stop')
+    try RunWait('taskkill /IM yasb.exe /F', , 'Hide')
+    try RunWait('taskkill /IM Flow.Launcher.exe /F', , 'Hide')
+    ExitApp()
+}
+
 ; --- Overlay de keybindings (SUPER+K, estilo Omarchy) ----------------------------
 ; El contenido se parsea del propio script (+ user.ahk): hotkey + comentario inline.
 ; Colores del theme actual vía config\ahk\theme.ini (generado por el theme engine).

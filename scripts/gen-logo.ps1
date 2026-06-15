@@ -7,6 +7,7 @@
     - assets/logo/winarchy-logo.svg          (vectorial, para el README)
     - assets/logo/winarchy-social.png        (1280x640, social preview de GitHub)
     - assets/logo/winarchy-logo.png          (512x512, asset cuadrado / favicon)
+    - assets/logo/winarchy.ico               (16/32/48/256, tray icon del stack)
   Dos tonos fijos: morado + verde, gaps en negro tokyo-night.
 #>
 [CmdletBinding()]
@@ -104,3 +105,66 @@ function New-LogoPng {
 }
 New-LogoPng -CanvasW 1280 -CanvasH 640 -Fill 0.9 -Path (Join-Path $outDir 'winarchy-social.png')
 New-LogoPng -CanvasW 512  -CanvasH 512 -Fill 0.85 -Path (Join-Path $outDir 'winarchy-logo.png')
+
+# --- ICO (tray icon de Winarchy) ---
+# Render del logo a un Bitmap cuadrado (misma logica de celdas que New-LogoPng),
+# devuelto en memoria para empaquetar varios tamanos en un .ico con frames PNG.
+function New-LogoBitmap {
+    param([int]$Size, [double]$Fill)
+    $bmp = New-Object System.Drawing.Bitmap($Size, $Size)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::None
+    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
+    $bgBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb($BG[0], $BG[1], $BG[2]))
+    $g.FillRectangle($bgBrush, 0, 0, $Size, $Size)
+    $cell = [Math]::Max(1, [Math]::Floor([Math]::Min(($Size * $Fill) / $gw, ($Size * $Fill) / ($gh * $YSCALE))))
+    $cellH = $cell * $YSCALE
+    $logoW = $cell * $gw; $logoH = $cellH * $gh
+    $offX = [int](($Size - $logoW) / 2); $offY = [int](($Size - $logoH) / 2)
+    $purpleBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb($PURPLE[0], $PURPLE[1], $PURPLE[2]))
+    $greenBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb($GREEN[0], $GREEN[1], $GREEN[2]))
+    for ($y = 0; $y -lt $gh; $y++) {
+        for ($x = 0; $x -lt $gw; $x++) {
+            $c = $cells[$y][$x]
+            if ($c -eq '.') { continue }
+            $brush = if ($c -eq 'p') { $purpleBrush } else { $greenBrush }
+            $g.FillRectangle($brush, $offX + $x * $cell, $offY + $y * $cellH, $cell, $cellH)
+        }
+    }
+    $g.Dispose()
+    $bmp
+}
+
+function New-LogoIco {
+    param([int[]]$Sizes, [string]$Path)
+    # Cada frame se guarda como PNG (los .ico modernos soportan frames PNG-comprimidos).
+    $frames = foreach ($s in $Sizes) {
+        $bmp = New-LogoBitmap -Size $s -Fill 0.85
+        $ms = New-Object System.IO.MemoryStream
+        $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+        $bmp.Dispose()
+        [pscustomobject]@{ Size = $s; Bytes = $ms.ToArray() }
+    }
+    $fs = [System.IO.File]::Open($Path, [System.IO.FileMode]::Create)
+    $bw = New-Object System.IO.BinaryWriter($fs)
+    # ICONDIR: reserved(0), type(1=icon), count
+    $bw.Write([uint16]0); $bw.Write([uint16]1); $bw.Write([uint16]$frames.Count)
+    # offset al primer frame: 6 (header) + 16 * count (directorio)
+    $offset = 6 + 16 * $frames.Count
+    foreach ($f in $frames) {
+        $dim = if ($f.Size -ge 256) { 0 } else { $f.Size }   # 0 == 256 en el formato ICO
+        $bw.Write([byte]$dim)            # width
+        $bw.Write([byte]$dim)            # height
+        $bw.Write([byte]0)               # color count (0 = >=256)
+        $bw.Write([byte]0)               # reserved
+        $bw.Write([uint16]1)             # color planes
+        $bw.Write([uint16]32)            # bits per pixel
+        $bw.Write([uint32]$f.Bytes.Length)
+        $bw.Write([uint32]$offset)
+        $offset += $f.Bytes.Length
+    }
+    foreach ($f in $frames) { $bw.Write($f.Bytes) }
+    $bw.Flush(); $bw.Dispose(); $fs.Dispose()
+    Write-Host "OK: $Path"
+}
+New-LogoIco -Sizes @(16, 32, 48, 256) -Path (Join-Path $outDir 'winarchy.ico')

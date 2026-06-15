@@ -9,7 +9,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: official
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Winarchy Skill
@@ -34,6 +34,10 @@ metadata:
 - Core components (komorebi, YASB) are pinned in `versions.lock.toml`; only
   `winarchy update --core` may bump them.
 - Before system changes (registry, autostart): snapshot in `backups\<timestamp>\`.
+- **Winarchy is the single update channel.** Third-party auto-updaters are off
+  (YASB `update_check`, Flow `AutoUpdates`); do not re-enable them. Likewise the
+  stack shows **one tray icon** (hosted by `winarchy.ahk`) — YASB's own tray and
+  Flow's notify icon are hidden on purpose. Do not turn them back on.
 
 ## Discovery-first workflow
 Prefer discovering the current command surface dynamically:
@@ -54,7 +58,9 @@ winarchy theme set <name>          # apply a theme to every surface
 winarchy theme next                # cycle to the next theme
 winarchy theme list                # list themes (* = active)
 winarchy theme gallery             # visual WPF theme picker
-winarchy update [--core]           # update winget+scoop; --core also komorebi/YASB
+winarchy update                    # update third-party apps (winget+scoop); warns if a new Winarchy release exists
+winarchy update --core             # also bump pinned komorebi/YASB and rewrite versions.lock.toml
+winarchy update --self             # update Winarchy itself (git pull release + idempotent migration)
 winarchy menu                      # navigable menu
 winarchy webapp install <n> <url>  # create a webapp as a dedicated window
 winarchy webapp remove <n>         # remove a webapp
@@ -68,6 +74,30 @@ winarchy accent status             # system accent vs applied accent
 winarchy reload                    # reload komorebi, YASB, AHK and Flow
 winarchy doctor                    # stack diagnostics
 ```
+
+## Updates — three axes
+Keep the axes separate; never auto-apply a self-update.
+
+| Command | Updates | Mechanism |
+| --- | --- | --- |
+| `winarchy update` | third-party apps (winget + scoop) | core pinned out; also a best-effort warning if a newer Winarchy release exists |
+| `winarchy update --core` | komorebi / YASB | unpin → upgrade → repin → rewrite `versions.lock.toml` |
+| `winarchy update --self` | Winarchy itself | `git pull --ff-only origin release` → `install.ps1` migration (mode preserved) |
+
+- The Winarchy version is `ModuleVersion` in `Winarchy.psd1`, kept in sync with the
+  git tag and GitHub Release. See `docs\RELEASING.md` for cutting a release.
+- The version check hits the GitHub Releases API, is **best-effort** (degrades
+  silently with no network) and **cached 6h** in `state\last-release-check`.
+- `winarchy update --self` only runs on a git checkout and **aborts if the working
+  tree has uncommitted changes to tracked files** — user customization must live in
+  untracked overrides so it is never touched. Rollback: `git checkout <previous-tag>`
+  + `install.ps1`.
+
+## Unified tray
+The whole stack presents **one** Winarchy tray icon, hosted by `winarchy.ahk`
+(icon = `assets\logo\winarchy.ico`). Its menu dispatches to the CLI (themes,
+reload, game mode, doctor, update, quit). When adding stack-level UX, extend this
+tray menu rather than introducing a second tray icon.
 
 ## Safe edit targets
 - Hotkeys: `config\ahk\winarchy.ahk` (then `winarchy reload`).

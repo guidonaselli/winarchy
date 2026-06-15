@@ -11,6 +11,13 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
 - Personalización del usuario va en archivos override, no en los generados.
 - `settings.json` de Windows Terminal se modifica solo por merge quirúrgico del scheme "Winarchy".
 - Componentes core (komorebi, YASB) fijados en `versions.lock.toml`; solo `winarchy update --core` los toca.
+- Winarchy es el ÚNICO canal de updates: los auto-updaters de terceros (YASB `update_check`,
+  Flow `AutoUpdates`) quedan apagados y no se reactivan. Tres ejes: `update` (terceros),
+  `update --core` (komorebi/YASB pinneados), `update --self` (Winarchy mismo vía git rama
+  `release` + migración `install.ps1`). Versión = `ModuleVersion` del `.psd1`, en sync con el
+  tag/Release (ver `docs/RELEASING.md`).
+- Identidad unificada: un solo tray icon (host `winarchy.ahk`, `assets/logo/winarchy.ico`);
+  los tray propios de YASB/Flow quedan ocultos. No reintroducir un segundo tray.
 - Fuera de alcance: novideo_srgb, Twinkle Tray, Windhawk (stack personal de la máquina, no del producto).
 - Antes de cambios de sistema (registry, autostart): snapshot en `backups/<timestamp>/`.
 

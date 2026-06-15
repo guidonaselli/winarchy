@@ -20,6 +20,8 @@ function Show-WinarchyHelp {
     theme preview [name]      Render synthetic preview cards (all themes by default)
     theme gallery             Visual theme picker (WPF grid)
     update [--core]           Update winget+scoop; --core also komorebi/YASB
+                              (único canal de updates: YASB/Flow tienen su auto-update off)
+    update --self             Update Winarchy itself (git pull release + migration)
     menu                      Navigable menu (themes, screenshots, game-mode, ...)
     webapp install <n> <url>  Create a webapp as a dedicated window
     webapp remove <n>         Remove a webapp
@@ -73,7 +75,11 @@ function Invoke-Winarchy {
                 default { throw "Unknown subcommand: theme $sub (set|next|list|preview|gallery)" }
             }
         }
-        'update' { Invoke-WinarchyUpdate -Core:($rest -contains '--core' -or $rest -contains '-core') }
+        'update' {
+            Invoke-WinarchyUpdate `
+                -Core:($rest -contains '--core' -or $rest -contains '-core') `
+                -Self:($rest -contains '--self' -or $rest -contains '-self')
+        }
         'menu' { Show-WinarchyMenu }
         'webapp' {
             $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'list' }

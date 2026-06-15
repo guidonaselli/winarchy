@@ -102,6 +102,16 @@ function Invoke-WinarchyDoctor {
         $(if ($seelen) { 'Seelen is still running (coexistence mode)' } else { 'migration complete or not installed' }) `
         '.\scripts\migrate-from-seelen.ps1'
 
+    # --- Versión de Winarchy mismo (informativo, best-effort) -------------------------
+    $ver = Get-WinarchyVersion
+    $verCheck = Test-WinarchyUpdateAvailable
+    $verDetail = "installed=$($ver.Version)$(if ($ver.Describe) { " ($($ver.Describe))" })"
+    if ($verCheck.Latest) {
+        $verDetail += "; latest release=$($verCheck.Latest)"
+        if ($verCheck.Available) { $verDetail += ' — run: winarchy update --self' }
+    }
+    Add-Check 'Winarchy up to date' (-not $verCheck.Available) $verDetail 'winarchy update --self'
+
     # --- Recordatorio permanente -----------------------------------------------------
     Write-Host ''
     Write-Host '  winarchy doctor' -ForegroundColor Cyan

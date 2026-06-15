@@ -21,15 +21,18 @@ function Get-WinarchyAutostartComponents {
     if ($komorebic) {
         $items.Add([pscustomobject]@{
             Key = 'komorebi'; TaskName = 'komorebi'; LnkName = 'Winarchy komorebi.lnk'
-            Exe = $komorebic; Arguments = 'start'
+            Exe = $komorebic; Arguments = 'start'; Delay = 'PT0S'
         })
     }
 
+    # YASB arranca con delay para que komorebi alcance a bindear su named pipe primero;
+    # de lo contrario el widget de workspaces queda en blanco hasta que reconecta. El
+    # delay es cosmético (YASB reconecta solo), solo achica la ventana de blank.
     $yasb = (Get-Command yasbc -ErrorAction SilentlyContinue).Source
     if ($yasb) {
         $items.Add([pscustomobject]@{
             Key = 'yasb'; TaskName = 'yasb'; LnkName = 'Winarchy YASB.lnk'
-            Exe = $yasb; Arguments = 'start'
+            Exe = $yasb; Arguments = 'start'; Delay = 'PT5S'
         })
     }
 
@@ -37,7 +40,7 @@ function Get-WinarchyAutostartComponents {
     if ($ahkExe) {
         $items.Add([pscustomobject]@{
             Key = 'ahk'; TaskName = 'ahk'; LnkName = 'Winarchy hotkeys.lnk'
-            Exe = $ahkExe; Arguments = "`"$root\config\ahk\winarchy.ahk`""
+            Exe = $ahkExe; Arguments = "`"$root\config\ahk\winarchy.ahk`""; Delay = 'PT0S'
         })
     }
 
@@ -77,14 +80,15 @@ function New-WinarchyStartupShortcut {
 
 function New-WinarchyTaskXml {
     <#
-      XML de definición de tarea: trigger At-LogOn del usuario (delay 0), principal
-      InteractiveToken + LeastPrivilege (sin elevar, solo sesión interactiva),
-      MultipleInstancesPolicy IgnoreNew, sin límite de ejecución.
+      XML de definición de tarea: trigger At-LogOn del usuario (delay por componente,
+      ver Component.Delay), principal InteractiveToken + LeastPrivilege (sin elevar,
+      solo sesión interactiva), MultipleInstancesPolicy IgnoreNew, sin límite de ejecución.
     #>
     param([Parameter(Mandatory)][object]$Component, [Parameter(Mandatory)][string]$User)
     $u = [System.Security.SecurityElement]::Escape($User)
     $cmd = [System.Security.SecurityElement]::Escape($Component.Exe)
     $arg = [System.Security.SecurityElement]::Escape($Component.Arguments)
+    $delay = if ($Component.Delay) { $Component.Delay } else { 'PT0S' }
     @"
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -95,7 +99,7 @@ function New-WinarchyTaskXml {
     <LogonTrigger>
       <Enabled>true</Enabled>
       <UserId>$u</UserId>
-      <Delay>PT0S</Delay>
+      <Delay>$delay</Delay>
     </LogonTrigger>
   </Triggers>
   <Principals>

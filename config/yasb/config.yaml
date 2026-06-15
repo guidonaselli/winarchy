@@ -2,6 +2,11 @@
 # NOTA: verificar nombres de widgets contra la wiki de YASB v2.x en el smoke test (tarea 9.1).
 watch_stylesheet: true
 watch_config: true
+# Identidad unificada: YASB no muestra tray propio (el tray del stack lo hostea AHK)
+# ni corre su update checker (los updates los maneja `winarchy update`). El widget
+# `systray` de la barra (más abajo) NO se ve afectado: sigue mostrando iconos de terceros.
+show_systray: false
+update_check: false
 
 komorebi:
   start_command: "komorebic start"

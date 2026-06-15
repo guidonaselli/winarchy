@@ -102,6 +102,12 @@ if (-not (Get-WinarchyCurrentTheme)) {
     Set-WinarchyTheme -Name 'tokyo-night'
 }
 
+# --- 4b. Identidad unificada: tray único + auto-updates de terceros off ---------------
+# Idempotente: se reaplica en cada install/repair, así un update de Flow no reintroduce
+# su tray/auto-update. YASB ya queda configurado por su config.yaml (show_systray/
+# update_check off); AHK hostea el tray del stack; komorebi no tiene tray.
+Set-WinarchyFlowIdentity
+
 # --- 5. Autostart + taskbar (solo con -Activate) --------------------------------------
 if ($Activate) {
     $komorebic = (Get-Command komorebic -ErrorAction SilentlyContinue).Source

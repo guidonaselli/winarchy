@@ -3,7 +3,8 @@
 $script:CoreWingetIds = @('LGUG2Z.komorebi', 'AmN.yasb')
 
 function Invoke-WinarchyUpdate {
-    param([switch]$Core)
+    param([switch]$Core, [switch]$Self)
+    if ($Self) { Invoke-WinarchySelfUpdate; return }
     $lockPath = Join-Path (Get-WinarchyRoot) 'versions.lock.toml'
     $lock = Import-WinarchyToml -Path $lockPath
 
@@ -34,6 +35,8 @@ function Invoke-WinarchyUpdate {
             Write-WinarchyWarn "Core update available for $id (lockfile: komorebi=$($lock['core']['komorebi']), yasb=$($lock['core']['yasb'])). Apply it with: winarchy update --core"
         }
     }
+    # Aviso no intrusivo si hay una versión nueva de Winarchy mismo (best-effort).
+    Write-WinarchyUpdateNotice | Out-Null
     Write-WinarchyOk 'General update complete.'
 }
 

@@ -142,7 +142,7 @@ Rollback:
 
 ```text
 winarchy theme set <name> | next | list
-winarchy update [--core]
+winarchy update [--core | --self]
 winarchy menu
 winarchy webapp install <name> <url> | remove <name> | list
 winarchy screenshot [region|window|full]
@@ -151,6 +151,22 @@ winarchy accent sync [--force] | status
 winarchy reload
 winarchy doctor
 ```
+
+### Updates — three axes
+
+Winarchy is the single update channel; third-party auto-updaters (YASB, Flow) are off.
+
+| Command | Updates | How |
+| --- | --- | --- |
+| `winarchy update` | third-party apps (winget + scoop) | core pinned out via `winget pin`; also warns if a new Winarchy release exists |
+| `winarchy update --core` | komorebi / YASB (pinned core) | unpins, upgrades, repins, rewrites `versions.lock.toml` |
+| `winarchy update --self` | Winarchy itself (CLI, templates, configs, AHK, themes) | `git pull --ff-only origin release` + idempotent migration (`install.ps1`, mode preserved) |
+
+The version check is best-effort (GitHub Releases API), cached 6 h, and never blocks the
+flow. `winarchy doctor` shows installed vs latest release. Self-update only runs on a git
+checkout and aborts if the working tree has uncommitted changes to tracked files (your
+customization lives in untracked overrides, so it is never touched). Roll back with
+`git checkout <previous-tag>` + `install.ps1`.
 
 ---
 
