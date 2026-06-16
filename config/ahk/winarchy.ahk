@@ -209,7 +209,7 @@ MenuWatch() {
     global MenuFlag
     if FileExist(MenuFlag) {
         try FileDelete(MenuFlag)
-        A_TrayMenu.Show()
+        ShowMainMenu()
     }
 }
 
@@ -225,6 +225,198 @@ QuitStack() {
     try RunWait('taskkill /IM Flow.Launcher.exe /F', , 'Hide')
     ExitApp()
 }
+
+; --- Menú principal estilo Omarchy/Walker (GUI propia, centrada y tematizada) ----
+; Reemplaza el menú nativo de Windows (A_TrayMenu) en el hotkey SUPER+Alt+Space y en
+; el botón de la barra YASB: lista vertical centrada en el monitor activo, con los
+; colores del theme actual (config\ahk\theme.ini), navegable con ↑/↓/Enter/Esc y
+; click, y drill-in a submenús (Themes, System). Mismo patrón que el overlay de
+; keybindings (SUPER+K). El right-click del tray sigue usando A_TrayMenu nativo: ese
+; menú lo dibuja Windows y no se puede tematizar (fallback igualmente funcional).
+MainMenu := ''        ; Gui activa, '' = cerrado
+MenuRows := []        ; [{label, hint}] controles Text por fila
+MenuItems := []       ; items del nivel actual
+MenuSel := 1          ; índice seleccionado (1-based)
+MenuTitle := ''       ; título del nivel actual
+MenuStack := []       ; pila para volver de submenús
+MenuColors := {bg:'16121E', fg:'C8C0D8', ac:'9BE53E', mut:'4A4060'}
+
+WinarchyMenuItems() {
+    return [
+        {text:'Apps',          hint:'SUPER+Space',   action:(*)=>ToggleFlowApps()},
+        {text:'Themes',        sub:[
+            {text:'Next theme', hint:'SUPER+Shift+T', action:(*)=>Winarchy('theme next')},
+            {text:'Gallery',    hint:'SUPER+Ctrl+T',  action:(*)=>Winarchy('theme gallery')} ]},
+        {text:'Reload stack',  hint:'SUPER+Shift+R', action:(*)=>Winarchy('reload')},
+        {text:'Game mode',     hint:'toggle',        action:(*)=>ToggleGameMode()},
+        {text:'Doctor',                              action:(*)=>WinarchyTerminal('doctor')},
+        {text:'Check updates',                       action:(*)=>WinarchyTerminal('update')},
+        {text:'System',        hint:'SUPER+Esc',     sub: WinarchySysItems()},
+        {text:'Quit Winarchy',                       action:(*)=>QuitStack()} ]
+}
+
+WinarchySysItems() {
+    return [
+        {text:'Settings…',                       action:(*)=>Run('explorer.exe ms-settings:')},
+        {text:'Screensaver',                     action:(*)=>LaunchScreensaver()},
+        {text:'Lock',                            action:(*)=>LockWorkstation()},
+        {text:'Sleep',                           action:(*)=>SleepSystem()},
+        {text:'Hibernate',                       action:(*)=>HibernateSystem()},
+        {text:'Sign out',                        action:(*)=>SignOutSystem()},
+        {text:'Restart',                         action:(*)=>RestartSystem()},
+        {text:'Shut down',                       action:(*)=>ShutdownSystem()} ]
+}
+
+ShowSystemMenu(*) {
+    global MainMenu, MenuStack
+    if (MainMenu != '') {          ; ya abierto → togglear cierra
+        CloseMainMenu()
+        return
+    }
+    MenuStack := []
+    RenderMenu(WinarchySysItems(), 'System')
+}
+
+ShowMainMenu(*) {
+    global MainMenu, MenuStack
+    if (MainMenu != '') {          ; ya abierto → togglear cierra
+        CloseMainMenu()
+        return
+    }
+    MenuStack := []
+    RenderMenu(WinarchyMenuItems(), 'Winarchy')
+}
+
+RenderMenu(items, title) {
+    global MainMenu, MenuRows, MenuItems, MenuSel, MenuTitle, MenuColors
+    if (MainMenu != '')
+        try MainMenu.Destroy()
+    MenuItems := items, MenuSel := 1, MenuRows := [], MenuTitle := title
+
+    ; colores del theme (fallback al theme por defecto si todavía no se generó theme.ini)
+    bg := '16121E', fg := 'C8C0D8', ac := '9BE53E', mut := '4A4060'
+    ini := A_ScriptDir '\theme.ini'
+    if FileExist(ini) {
+        bg  := LTrim(IniRead(ini, 'colors', 'background', bg), '#')
+        fg  := LTrim(IniRead(ini, 'colors', 'foreground', fg), '#')
+        ac  := LTrim(IniRead(ini, 'colors', 'accent', ac), '#')
+        mut := LTrim(IniRead(ini, 'colors', 'muted', mut), '#')
+    }
+    MenuColors := {bg:bg, fg:fg, ac:ac, mut:mut}
+
+    g := Gui('-Caption +AlwaysOnTop +ToolWindow', 'WinarchyMenu')
+    g.BackColor := bg
+    g.MarginX := 0, g.MarginY := 0
+
+    pad := 16, rowH := 30, titleH := 32, labelW := 250, hintW := 170, gap := 16
+    w := pad * 2 + labelW + gap + hintW
+
+    g.SetFont('s12 bold', 'JetBrainsMono Nerd Font')
+    g.Add('Text', Format('x{} y{} w{} c{}', pad, pad, labelW + gap + hintW, ac), title)
+
+    g.SetFont('s11 norm', 'JetBrainsMono Nerd Font')
+    y0 := pad + titleH
+    for i, it in items {
+        y := y0 + (i - 1) * rowH
+        marker := (i = 1) ? Chr(0x25B8) ' ' : '   '
+        lbl := g.Add('Text', Format('x{} y{} w{} h{} c{} BackgroundTrans', pad, y + 4, labelW, rowH, (i = 1) ? ac : fg), marker it.text)
+        lbl.OnEvent('Click', MenuClick.Bind(i))
+        hintTxt := it.HasOwnProp('hint') ? it.hint : (it.HasOwnProp('sub') ? Chr(0x25B8) : '')
+        hnt := g.Add('Text', Format('x{} y{} w{} h{} c{} Right BackgroundTrans', pad + labelW + gap, y + 4, hintW, rowH, mut), hintTxt)
+        hnt.OnEvent('Click', MenuClick.Bind(i))
+        MenuRows.Push({label: lbl, hint: hnt})
+    }
+    h := y0 + items.Length * rowH + pad
+
+    ; centrado en el monitor donde está el mouse (igual que el overlay de keybindings)
+    CoordMode('Mouse', 'Screen')
+    MouseGetPos(&mx, &my)
+    wl := 0, wt := 0, wr := A_ScreenWidth, wb := A_ScreenHeight
+    loop MonitorGetCount() {
+        MonitorGet(A_Index, &l, &t, &r, &b)
+        if (mx >= l && mx < r && my >= t && my < b) {
+            MonitorGetWorkArea(A_Index, &wl, &wt, &wr, &wb)
+            break
+        }
+    }
+    g.OnEvent('Escape', (*) => MenuBack())
+    g.OnEvent('Close', (*) => CloseMainMenu())
+    MainMenu := g
+    g.Show(Format('x{} y{} w{} h{}', wl + (wr - wl - w) // 2, wt + (wb - wt - h) // 2, w, h))
+    DllCall('dwmapi\DwmSetWindowAttribute', 'ptr', g.Hwnd, 'int', 33, 'int*', 2, 'int', 4)  ; esquinas redondeadas
+    SetTimer(MainMenuWatch, 250)               ; cierra al perder el foco
+}
+
+SetMenuSel(n) {
+    global MenuRows, MenuItems, MenuSel, MenuColors
+    n := Mod(n - 1 + MenuItems.Length, MenuItems.Length) + 1   ; wrap circular, 1-based
+    old := MenuRows[MenuSel]
+    old.label.Text := '   ' MenuItems[MenuSel].text
+    old.label.SetFont('c' MenuColors.fg)
+    cur := MenuRows[n]
+    cur.label.Text := Chr(0x25B8) ' ' MenuItems[n].text
+    cur.label.SetFont('c' MenuColors.ac)
+    MenuSel := n
+}
+
+MenuNav(dir) {
+    global MenuSel
+    SetMenuSel(MenuSel + dir)
+}
+
+MenuActivate() {
+    global MenuItems, MenuSel
+    InvokeMenuItem(MenuItems[MenuSel])
+}
+
+MenuClick(i, *) {
+    global MenuItems
+    SetMenuSel(i)
+    InvokeMenuItem(MenuItems[i])
+}
+
+InvokeMenuItem(it) {
+    global MenuStack, MenuItems, MenuTitle, MenuSel
+    if it.HasOwnProp('sub') {
+        MenuStack.Push({items: MenuItems, title: MenuTitle, sel: MenuSel})
+        RenderMenu(it.sub, it.text)
+        return
+    }
+    CloseMainMenu()
+    it.action.Call()
+}
+
+MenuBack() {
+    global MenuStack
+    if MenuStack.Length {
+        prev := MenuStack.Pop()
+        RenderMenu(prev.items, prev.title)
+        SetMenuSel(prev.sel)
+        return
+    }
+    CloseMainMenu()
+}
+
+CloseMainMenu() {
+    global MainMenu, MenuStack
+    SetTimer(MainMenuWatch, 0)
+    try MainMenu.Destroy()
+    MainMenu := '', MenuStack := []
+}
+
+MainMenuWatch() {
+    global MainMenu
+    if (MainMenu != '') && !WinActive('ahk_id ' MainMenu.Hwnd)
+        CloseMainMenu()
+}
+
+; Navegación por teclado, solo mientras el menú está activo.
+#HotIf WinActive('WinarchyMenu ahk_class AutoHotkeyGUI')
+Up::MenuNav(-1)
+Down::MenuNav(1)
+Enter::MenuActivate()
+Backspace::MenuBack()
+#HotIf
 
 ; --- Overlay de keybindings (SUPER+K, estilo Omarchy) ----------------------------
 ; El contenido se parsea del propio script (+ user.ahk): hotkey + comentario inline.
@@ -475,8 +667,8 @@ AccentWatch() {
 #o::LaunchObsidian()                             ; Obsidian
 
 ; --- Menu (popup estilo Omarchy) ------------------------------------------------
-#!Space::A_TrayMenu.Show()                       ; winarchy menu (Apps/Themes/System/...)
-#Esc::SysMenu.Show()                             ; system / power menu
+#!Space::ShowMainMenu()                          ; winarchy menu (Apps/Themes/System/...)
+#Esc::ShowSystemMenu()                           ; system / power menu (themed)
 
 ; --- Webapps --------------------------------------------------------------------
 #a::WebApp('https://chatgpt.com')                ; ChatGPT

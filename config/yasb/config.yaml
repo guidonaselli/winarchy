@@ -41,20 +41,17 @@ bars:
       right: ["game_mode", "media", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "notifications", "systray", "winarchy_menu"]
 
 widgets:
-  # Menú de inicio: accesos a Configuración de Windows + system/power menu
+  # Logo arriba-izquierda: abre el mismo menú principal de winarchy.ahk
+  # (Apps/Themes/System/...) que SUPER+Alt+Space y el botón ☰ de la derecha.
+  # Toca el flag show-menu.flag que AHK levanta con su watcher (YASB no puede
+  # llamar funciones de AHK directo).
   home:
-    type: "yasb.home.HomeWidget"
+    type: "yasb.custom.CustomWidget"
     options:
       label: ""   # logo Windows (nerd font)
-      menu_list:
-        - { title: "Configuración", uri: "ms-settings:" }
-        - { title: "Red e Internet", uri: "ms-settings:network" }
-        - { title: "Bluetooth", uri: "ms-settings:bluetooth" }
-        - { title: "Pantalla", uri: "ms-settings:display" }
-        - { title: "Sonido", uri: "ms-settings:sound" }
-      system_menu: true
-      power_menu: true
-      blur: false
+      class_name: "home-widget"
+      callbacks:
+        on_left: "exec cmd.exe /c copy /y nul \"%KOMOREBI_CONFIG_HOME%\\..\\..\\state\\show-menu.flag\""
 
   # Indicador de game-mode manual: muestra GAME si existe state\game-mode.flag.
   # (la suspensión automática por juego la maneja AHK; esto refleja el toggle manual)
@@ -221,4 +218,4 @@ widgets:
       label: "☰"
       class_name: "winarchy-menu-widget"
       callbacks:
-        on_left: "exec powershell -NoProfile -Command New-Item -ItemType File -Force -Path $env:KOMOREBI_CONFIG_HOME\\..\\..\\state\\show-menu.flag"
+        on_left: "exec cmd.exe /c copy /y nul \"%KOMOREBI_CONFIG_HOME%\\..\\..\\state\\show-menu.flag\""
