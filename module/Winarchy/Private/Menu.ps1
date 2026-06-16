@@ -1,5 +1,6 @@
 # Menu.ps1 — `winarchy menu`: menú navegable estilo omarchy-menu (consola).
-# Se invoca desde AHK con SUPER+Shift+Space (abre en Windows Terminal).
+# Invocable solo desde la CLI (`winarchy menu`, abre en Windows Terminal); el atajo
+# global SUPER+Alt+Space abre en cambio el menú nativo de AHK (A_TrayMenu, popup-style).
 # Nota: la integración como plugin de Flow quedó como evolución futura (open question del design).
 
 function Show-WinarchyMenu {
