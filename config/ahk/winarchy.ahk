@@ -11,6 +11,7 @@ ProcessSetPriority "High"   ; el dispatcher debe responder siempre, costo ~0
 RepoRoot := RegExReplace(A_ScriptDir, "\\config\\ahk$")
 StateDir := RepoRoot "\state"
 GameFlag := StateDir "\game-mode.flag"
+MenuFlag := StateDir "\show-menu.flag"
 GamesToml := RepoRoot "\games.toml"
 WinarchyPs1 := RepoRoot "\bin\winarchy.ps1"
 DirCreate(StateDir)
@@ -60,6 +61,28 @@ ToggleFlow() {
         try WinActivate('ahk_id ' hwnd)
 }
 
+ToggleFlowApps() {
+    ; Como ToggleFlow(), pero precarga "app " en el query box: Set-WinarchyFlowAppsKeyword
+    ; (Identity.ps1) agrega "app" como ActionKeyword extra del plugin Program de Flow, así
+    ; que esto queda scoped a solo programas instalados — paridad con el Apps de Walker en
+    ; Omarchy, sin curar una lista a mano.
+    flow := EnvGet('LOCALAPPDATA') '\FlowLauncher\Flow.Launcher.exe'
+    if !FileExist(flow)
+        return
+    Run('"' flow '"')
+    hwnd := WinWait('Flow.Launcher ahk_exe Flow.Launcher.exe', , 2)
+    if hwnd {
+        try WinActivate('ahk_id ' hwnd)
+        ; solo tipear si la activación realmente puso el foco en Flow (si falló,
+        ; el foco sigue en lo que estaba antes y no hay que mandarle texto)
+        if WinActive('ahk_id ' hwnd) {
+            Sleep(50)
+            Send('^a')
+            SendText('app ')
+        }
+    }
+}
+
 DefaultBrowser() {
     try {
         progId := RegRead('HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice', 'ProgId')
@@ -92,13 +115,63 @@ LaunchObsidian() {
         TrayTip('Obsidian no está instalado', 'Winarchy')
 }
 
+; --- System / power menu (SUPER+Esc, estilo Omarchy) ---------------------------
+; Acciones directas vía shutdown.exe/rundll32, sin depender del menú de power
+; de YASB (ese sigue andando por click en el widget "home"; esto es el atajo
+; global). SysMenu se referencia tanto desde el hotkey como submenú del menú
+; principal (más abajo).
+LockWorkstation() {
+    Run('rundll32.exe user32.dll,LockWorkStation', , 'Hide')
+}
+
+SleepSystem() {
+    Run('rundll32.exe powrprof.dll,SetSuspendState 0,1,0', , 'Hide')
+}
+
+HibernateSystem() {
+    Run('shutdown.exe /h', , 'Hide')
+}
+
+SignOutSystem() {
+    Run('shutdown.exe /l', , 'Hide')
+}
+
+RestartSystem() {
+    Run('shutdown.exe /r /t 0', , 'Hide')
+}
+
+ShutdownSystem() {
+    Run('shutdown.exe /s /t 0', , 'Hide')
+}
+
+LaunchScreensaver() {
+    try {
+        scr := RegRead('HKCU\Control Panel\Desktop', 'SCRNSAVE.EXE')
+        if FileExist(scr)
+            Run('"' scr '" /s')
+    }
+}
+
+SysMenu := Menu()
+SysMenu.Add("Settings...", (*) => Run('explorer.exe ms-settings:'))
+SysMenu.Add()
+SysMenu.Add("Screensaver", (*) => LaunchScreensaver())
+SysMenu.Add("Lock", (*) => LockWorkstation())
+SysMenu.Add("Sleep", (*) => SleepSystem())
+SysMenu.Add("Hibernate", (*) => HibernateSystem())
+SysMenu.Add("Sign out", (*) => SignOutSystem())
+SysMenu.Add("Restart", (*) => RestartSystem())
+SysMenu.Add("Shut down", (*) => ShutdownSystem())
+
 ; --- Tray único de Winarchy ---------------------------------------------------
 ; AHK es el host del tray del stack: su icono ES la identidad de Winarchy. Los
 ; demás componentes ocultan su tray propio (YASB, Flow); komorebi no tiene tray.
+; El tray ES el menú principal estilo Omarchy: mismo contenido vía right-click,
+; SUPER+Alt+Space (hotkey) o el botón a la derecha de la barra YASB (MenuWatch).
 SetupTray()
 
 SetupTray() {
-    global RepoRoot
+    global RepoRoot, SysMenu
     ico := RepoRoot "\assets\logo\winarchy.ico"
     if FileExist(ico)
         try TraySetIcon(ico)            ; si falla, queda el icono por defecto de AHK
@@ -111,8 +184,8 @@ SetupTray() {
     themes.Add("Next theme`tSUPER+Shift+T", (*) => Winarchy('theme next'))
     themes.Add("Gallery`tSUPER+Ctrl+T", (*) => Winarchy('theme gallery'))
 
-    tray.Add("Winarchy menu`tSUPER+Shift+Space", (*) => WinarchyTerminal('menu'))
-    tray.Default := "Winarchy menu`tSUPER+Shift+Space"
+    tray.Add("Apps", (*) => ToggleFlowApps())
+    tray.Default := "Apps"
     tray.Add()
     tray.Add("Themes", themes)
     tray.Add("Reload stack`tSUPER+Shift+R", (*) => Winarchy('reload'))
@@ -120,7 +193,24 @@ SetupTray() {
     tray.Add("Doctor", (*) => WinarchyTerminal('doctor'))
     tray.Add("Check for updates", (*) => WinarchyTerminal('update'))
     tray.Add()
+    tray.Add("System`tSUPER+Esc", SysMenu)
+    tray.Add()
     tray.Add("Quit Winarchy", (*) => QuitStack())
+}
+
+; --- Menu watcher (puente para el botón de la barra YASB) ----------------------
+; YASB (proceso separado) no puede llamar funciones de AHK directamente: el click
+; en el widget de la barra toca este flag (mismo patrón que GameFlag) y este
+; watcher lo levanta y muestra el menú. Poll rápido porque es una acción de click,
+; no algo ocioso de fondo.
+SetTimer(MenuWatch, 150)
+
+MenuWatch() {
+    global MenuFlag
+    if FileExist(MenuFlag) {
+        try FileDelete(MenuFlag)
+        A_TrayMenu.Show()
+    }
 }
 
 ToggleGameMode() {
@@ -378,12 +468,15 @@ AccentWatch() {
 ; --- Apps ---------------------------------------------------------------------
 #Enter::Run('wt.exe')                            ; terminal
 #Space::ToggleFlow()                             ; Flow Launcher
-#+Space::WinarchyTerminal('menu')                ; winarchy menu
 #b::Run(DefaultBrowser())                        ; browser
 #e::Run('explorer.exe')                          ; file explorer
 ; Win+N queda libre para Windows (centro de notificaciones; la campanita de YASB lo simula)
 #m::LaunchMusic()                                ; music (Spotify / YT Music)
 #o::LaunchObsidian()                             ; Obsidian
+
+; --- Menu (popup estilo Omarchy) ------------------------------------------------
+#!Space::A_TrayMenu.Show()                       ; winarchy menu (Apps/Themes/System/...)
+#Esc::SysMenu.Show()                             ; system / power menu
 
 ; --- Webapps --------------------------------------------------------------------
 #a::WebApp('https://chatgpt.com')                ; ChatGPT

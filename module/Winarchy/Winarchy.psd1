@@ -18,7 +18,7 @@
         'Install-WinarchyWebapp', 'Remove-WinarchyWebapp', 'Get-WinarchyWebapps',
         'Invoke-WinarchyScreenshot', 'Show-WinarchyMenu',
         'Install-WinarchyShellProfile', 'Remove-WinarchyShellProfile',
-        'Set-WinarchyFlowIdentity',
+        'Set-WinarchyFlowIdentity', 'Set-WinarchyFlowAppsKeyword',
         # helpers usados por install.ps1 y scripts\*.ps1
         'New-WinarchySnapshot', 'Import-WinarchyToml', 'Get-WinarchyAhkExe', 'Get-WinarchyStateDir',
         'Disable-WinarchyXMouse',

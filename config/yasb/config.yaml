@@ -38,7 +38,7 @@ bars:
     widgets:
       left: ["home", "komorebi_workspaces", "komorebi_active_layout", "active_window"]
       center: ["clock"]
-      right: ["game_mode", "media", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "notifications", "systray"]
+      right: ["game_mode", "media", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "notifications", "systray", "winarchy_menu"]
 
 widgets:
   # Menú de inicio: accesos a Configuración de Windows + system/power menu
@@ -209,3 +209,16 @@ widgets:
       # Solo apps que Winarchy instala van acá (Windhawk/Twinkle Tray/etc. NO: son
       # personales de la máquina, fuera de alcance).
       hide_icons: ["Flow.Launcher", "ShareX"]
+
+  # Esquina derecha, estilo Omarchy: abre el menu principal de winarchy.ahk
+  # (Apps/Themes/System/...), el mismo que SUPER+Alt+Space y el right-click del
+  # tray. YASB es un proceso separado y no puede llamar funciones de AHK
+  # directo: el click toca un flag (mismo patron que game_mode) que AHK levanta
+  # con su propio watcher.
+  winarchy_menu:
+    type: "yasb.custom.CustomWidget"
+    options:
+      label: "☰"
+      class_name: "winarchy-menu-widget"
+      callbacks:
+        on_left: "exec powershell -NoProfile -Command New-Item -ItemType File -Force -Path $env:KOMOREBI_CONFIG_HOME\\..\\..\\state\\show-menu.flag"

@@ -107,6 +107,7 @@ if (-not (Get-WinarchyCurrentTheme)) {
 # su tray/auto-update. YASB ya queda configurado por su config.yaml (show_systray/
 # update_check off); AHK hostea el tray del stack; komorebi no tiene tray.
 Set-WinarchyFlowIdentity
+Set-WinarchyFlowAppsKeyword
 
 # --- 5. Autostart + taskbar (solo con -Activate) --------------------------------------
 if ($Activate) {

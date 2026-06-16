@@ -9,13 +9,24 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 |---|---|
 | `SUPER+Return` | Windows Terminal |
 | `SUPER+Space` | Flow Launcher (launcher) |
-| `SUPER+Shift+Space` | winarchy menu |
 | `SUPER+B` | Default browser |
 | `SUPER+E` | File explorer |
 | `SUPER+N` | Notification center (Windows native — not intercepted, so YASB's bell works) |
 | `SUPER+M` | Music (Spotify, fallback YT Music webapp) |
 | `SUPER+O` | Obsidian |
 | `SUPER+K` | Keybindings overlay (auto-generated, themed, shown on the active monitor) |
+
+## Menu (popup, Omarchy-style)
+| Keybinding | Action |
+|---|---|
+| `SUPER+Alt+Space` | Winarchy menu (Apps/Themes/Reload/Game mode/Doctor/Update/System/Quit) — same content as right-clicking the tray icon, or the rightmost button on the YASB bar |
+| `SUPER+Esc` | System / power submenu directly (Screensaver/Lock/Sleep/Hibernate/Sign out/Restart/Shut down) |
+
+The menu's **Apps** entry opens Flow Launcher pre-scoped to the `Program` plugin
+(action keyword `app`, added additively by `Set-WinarchyFlowAppsKeyword` — it
+does not replace the default `*`, so plain `SUPER+Space` keeps searching
+everything). This mirrors Omarchy's Walker-based Apps list without curating a
+manual app list: Flow already indexes installed programs.
 
 ## Webapps (browser `--app=` windows, tileable)
 | Keybinding | Action |
@@ -80,6 +91,10 @@ the `SUPER+K` overlay under "Usuario", or under your own `; --- Section ---` hea
   so Game Bar gets `Win+G` back exactly when it is useful.
 
 ## Differences vs Omarchy
-- `SUPER+Space` opens Flow (in Omarchy it opens Walker); Windows' native keyboard
+- `SUPER+Space` opens Flow unscoped (in Omarchy it opens Walker, apps-only); the
+  apps-only equivalent lives in the menu's **Apps** entry instead, to avoid
+  changing the existing `SUPER+Space` search behavior. Windows' native keyboard
   layout switcher on `Win+Space` is **overridden** — use the language bar if needed.
+- The main menu and system/power submenu are native AHK popup menus (Windows
+  context-menu styling), not a custom-themed translucent box like Omarchy's.
 - Notifications: native Windows system (no mako equivalent).

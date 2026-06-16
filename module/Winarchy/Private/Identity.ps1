@@ -47,3 +47,38 @@ function Set-WinarchyFlowIdentity {
     $settings | ConvertTo-Json -Depth 50 | Set-Content -Path $settingsPath -Encoding UTF8
     Write-WinarchyOk "Flow identity applied (tray + auto-update off): $settingsPath"
 }
+
+function Set-WinarchyFlowAppsKeyword {
+    <# Agrega "app" como ActionKeyword extra del plugin Program (additivo: no
+       reemplaza "*", la búsqueda global de Flow sigue igual). Permite que el
+       popup "Apps" (paridad con Walker de Omarchy) precargue "app " en el query
+       box y quede scoped a solo programas instalados — sin curar una lista a
+       mano, Flow ya los indexa. Idempotente y con snapshot previo. #>
+    $settingsPath = Get-WinarchyFlowSettingsPath
+    if (-not (Test-Path $settingsPath)) {
+        Write-WinarchyWarn 'Flow Launcher Settings.json not found; Apps keyword not applied.'
+        return
+    }
+
+    # ID fijo del plugin built-in "Program" (Flow.Launcher.Plugin.Program/plugin.json).
+    $programPluginId = '791FC278BA414111B8D1886DFE447410'
+
+    $settings = Get-Content $settingsPath -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable
+    $plugins = $settings['PluginSettings']['Plugins']
+    if (-not $plugins -or -not $plugins.ContainsKey($programPluginId)) {
+        Write-WinarchyWarn 'Flow Program plugin settings not found (¿corriste Flow al menos una vez?); Apps keyword not applied.'
+        return
+    }
+
+    $program = $plugins[$programPluginId]
+    $keywords = if ($null -eq $program['ActionKeywords']) { @() } else { @($program['ActionKeywords']) }
+    if ($keywords -contains 'app') {
+        Write-WinarchyOk "Flow Apps keyword already applied: $settingsPath"
+        return
+    }
+
+    New-WinarchySnapshot -Label 'flow-settings' -Path @($settingsPath) | Out-Null
+    $program['ActionKeywords'] = $keywords + 'app'
+    $settings | ConvertTo-Json -Depth 50 | Set-Content -Path $settingsPath -Encoding UTF8
+    Write-WinarchyOk "Flow Apps keyword applied (additive, 'app '): $settingsPath"
+}
