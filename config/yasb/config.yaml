@@ -52,6 +52,10 @@ widgets:
       class_name: "home-widget"
       callbacks:
         on_left: "exec cmd.exe /c copy /y nul \"%KOMOREBI_CONFIG_HOME%\\..\\..\\state\\show-menu.flag\""
+        # sin esto, el right/middle-click por defecto hace toggle_label → label_alt
+        # (no definido) y el logo desaparece hasta volver a togglear.
+        on_middle: "do_nothing"
+        on_right: "do_nothing"
 
   # Indicador de game-mode manual: muestra GAME si existe state\game-mode.flag.
   # (la suspensión automática por juego la maneja AHK; esto refleja el toggle manual)
@@ -219,3 +223,5 @@ widgets:
       class_name: "winarchy-menu-widget"
       callbacks:
         on_left: "exec cmd.exe /c copy /y nul \"%KOMOREBI_CONFIG_HOME%\\..\\..\\state\\show-menu.flag\""
+        on_middle: "do_nothing"
+        on_right: "do_nothing"

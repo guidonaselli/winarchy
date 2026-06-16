@@ -242,13 +242,14 @@ MenuStack := []       ; pila para volver de submenús
 MenuColors := {bg:'16121E', fg:'C8C0D8', ac:'9BE53E', mut:'4A4060'}
 
 WinarchyMenuItems() {
+    global GameFlag
     return [
         {text:'Apps',          hint:'SUPER+Space',   action:(*)=>ToggleFlowApps()},
         {text:'Themes',        sub:[
             {text:'Next theme', hint:'SUPER+Shift+T', action:(*)=>Winarchy('theme next')},
             {text:'Gallery',    hint:'SUPER+Ctrl+T',  action:(*)=>Winarchy('theme gallery')} ]},
         {text:'Reload stack',  hint:'SUPER+Shift+R', action:(*)=>Winarchy('reload')},
-        {text:'Game mode',     hint:'toggle',        action:(*)=>ToggleGameMode()},
+        {text:'Game mode',     hint:(FileExist(GameFlag) ? 'ON' : 'OFF'), action:(*)=>ToggleGameMode()},
         {text:'Doctor',                              action:(*)=>WinarchyTerminal('doctor')},
         {text:'Check updates',                       action:(*)=>WinarchyTerminal('update')},
         {text:'System',        hint:'SUPER+Esc',     sub: WinarchySysItems()},
