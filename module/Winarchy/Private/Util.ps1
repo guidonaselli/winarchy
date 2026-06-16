@@ -27,6 +27,29 @@ function Get-WinarchyAhkExe {
     $found
 }
 
+function Get-WinarchyKomorebiExe {
+    <# komorebi.exe vía PATH o instalación estándar; $null si no está. #>
+    $found = (Get-Command komorebi.exe -ErrorAction SilentlyContinue).Source
+    if (-not $found) {
+        $found = @("$env:ProgramFiles\komorebi\bin\komorebi.exe") |
+            Where-Object { Test-Path $_ } | Select-Object -First 1
+    }
+    $found
+}
+
+function Start-WinarchyKomorebi {
+    <#
+      Arranca komorebi de forma robusta e instantánea. `komorebic start` es flaky en
+      algunas máquinas (os error 1920: reintenta y puede colgarse varios segundos), así
+      que lanzamos komorebi.exe directo, que arranca al toque y hereda KOMOREBI_CONFIG_HOME
+      del entorno (User var que registra install.ps1). No-op si ya está corriendo.
+    #>
+    if (Test-WinarchyProcess 'komorebi') { return }
+    $exe = Get-WinarchyKomorebiExe
+    if (-not $exe) { Write-WinarchyWarn 'komorebi.exe no encontrado; no puedo arrancar el tiling.'; return }
+    Start-Process $exe -WindowStyle Hidden
+}
+
 function Write-WinarchyInfo { param([string]$Message) Write-Host "  $Message" }
 function Write-WinarchyOk   { param([string]$Message) Write-Host "  [OK] $Message" -ForegroundColor Green }
 function Write-WinarchyWarn { param([string]$Message) Write-Host "  [!!] $Message" -ForegroundColor Yellow }

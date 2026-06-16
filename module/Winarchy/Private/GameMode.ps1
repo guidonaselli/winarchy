@@ -26,7 +26,7 @@ function Disable-WinarchyGameMode {
             # komorebi se cerró/crasheó durante el game-mode: no hay nada que des-pausar,
             # relanzarlo para que el tiling vuelva al salir (era la pausa lo que lo dejaba "offline").
             Write-WinarchyWarn 'komorebi was not running on game-mode exit; relaunching it.'
-            komorebic start 2>$null | Out-Null
+            Start-WinarchyKomorebi
         }
         Remove-Item (Get-WinarchyPauseMarker) -Force
     }
