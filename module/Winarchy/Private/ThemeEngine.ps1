@@ -449,6 +449,10 @@ function Set-WinarchyWindowsAppearance {
     $light = if ($Mode -eq 'light') { 1 } else { 0 }
     Set-ItemProperty -Path $personalize -Name 'AppsUseLightTheme' -Value $light -Type DWord
     Set-ItemProperty -Path $personalize -Name 'SystemUsesLightTheme' -Value $light -Type DWord
+    # ColorPrevalence = accent sobre taskbar/Start/bordes de ventana. Se activa siempre
+    # (incluso en themes dinámicos: el hue lo pone Windows, pero la barra igual reacciona).
+    Set-ItemProperty -Path $personalize -Name 'ColorPrevalence' -Value 1 -Type DWord
+    Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\DWM' -Name 'ColorPrevalence' -Value 1 -Type DWord
     if ($SkipAccent) { return }
     try {
         $r = [Convert]::ToInt32($AccentHex.Substring(1, 2), 16)
@@ -609,7 +613,9 @@ function Set-WinarchyTheme {
         }
     }
     $personalize = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize'
-    $prevLight = (Get-ItemProperty -Path $personalize -ErrorAction SilentlyContinue).AppsUseLightTheme
+    $personalizeBackup = Get-ItemProperty -Path $personalize -ErrorAction SilentlyContinue
+    $prevLight = $personalizeBackup.AppsUseLightTheme
+    $prevPrevalence = $personalizeBackup.ColorPrevalence
 
     try {
         # 4. Apply atómico de los generados (move desde staging)
@@ -661,6 +667,10 @@ function Set-WinarchyTheme {
         if (-not $LightRefresh -and $null -ne $prevLight) {
             Set-ItemProperty -Path $personalize -Name 'AppsUseLightTheme' -Value $prevLight -Type DWord
             Set-ItemProperty -Path $personalize -Name 'SystemUsesLightTheme' -Value $prevLight -Type DWord
+        }
+        if (-not $LightRefresh -and $null -ne $prevPrevalence) {
+            Set-ItemProperty -Path $personalize -Name 'ColorPrevalence' -Value $prevPrevalence -Type DWord
+            Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\DWM' -Name 'ColorPrevalence' -Value $prevPrevalence -Type DWord
         }
         Invoke-WinarchyReload -Light:$LightRefresh
         throw "Theme '$Name' NOT applied; previous state restored (snapshot: $snapshot)."
