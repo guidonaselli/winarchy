@@ -500,6 +500,7 @@ function Invoke-WinarchyReload {
        -Light: solo komorebi y YASB (sync de accent: no matar AHK/Flow por un color). #>
     param([switch]$Light)
     if (Test-WinarchyProcess 'komorebi') { komorebic reload-configuration 2>$null | Out-Null }
+    elseif (Get-Command komorebic -ErrorAction SilentlyContinue) { komorebic start 2>$null | Out-Null }
     if (Get-Command yasbc -ErrorAction SilentlyContinue) { yasbc reload 2>$null | Out-Null }
     elseif (Test-WinarchyProcess 'yasb') {
         Stop-Process -Name 'yasb' -Force -ErrorAction SilentlyContinue
