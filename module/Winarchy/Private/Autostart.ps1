@@ -17,11 +17,14 @@ function Get-WinarchyAutostartComponents {
     $root = Get-WinarchyRoot
     $items = [System.Collections.Generic.List[object]]::new()
 
-    $komorebic = (Get-Command komorebic -ErrorAction SilentlyContinue).Source
-    if ($komorebic) {
+    # komorebi.exe directo (no `komorebic start`): start es flaky en algunas máquinas
+    # (os error 1920: reintenta en loop y se cuelga al arrancar). Lanzar el exe directo
+    # arranca al toque y hereda KOMOREBI_CONFIG_HOME del entorno. Ver Start-WinarchyKomorebi.
+    $komorebiExe = Get-WinarchyKomorebiExe
+    if ($komorebiExe) {
         $items.Add([pscustomobject]@{
             Key = 'komorebi'; TaskName = 'komorebi'; LnkName = 'Winarchy komorebi.lnk'
-            Exe = $komorebic; Arguments = 'start'; Delay = 'PT0S'
+            Exe = $komorebiExe; Arguments = ''; Delay = 'PT0S'
         })
     }
 
