@@ -6,7 +6,6 @@
   "default_workspace_padding": 6,
   "default_container_padding": 4,
   "mouse_follows_focus": false,
-  "focus_follows_mouse": "Windows",
   "border": true,
   "border_width": 3,
   "border_offset": -1,
