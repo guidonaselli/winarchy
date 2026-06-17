@@ -609,13 +609,16 @@ GameWatch() {
         }
     }
 
+    ; NO se suspenden los hotkeys en game-mode: igual que la tecla Windows, siguen
+    ; vivos durante el juego. Los combos de geometría de komorebi (SUPER+flechas,
+    ; resize, layout) quedan inertes mientras el tiling está pausado, pero komorebi
+    ; los ignora sin efecto; todo lo demás (menú, System, launcher, screenshots) es
+    ; útil mientras se juega. game-mode solo trackea estado y refresca games.toml.
     if (active && !GameModeActive) {
         GameModeActive := true
-        Suspend(true)                            ; hotkeys SUPER fuera, el juego manda
         LoadGames()                              ; refresco para altas en caliente
     } else if (!active && GameModeActive) {
         GameModeActive := false
-        Suspend(false)
     }
 }
 
@@ -655,7 +658,7 @@ AccentWatch() {
 }
 
 ; ============================================================================
-; HOTKEYS — esquema SUPER (todo lo de abajo se suspende en game-mode)
+; HOTKEYS — esquema SUPER (siguen vivos en game-mode, como la tecla Windows)
 ; ============================================================================
 
 ; --- Apps ---------------------------------------------------------------------
@@ -708,9 +711,6 @@ AccentWatch() {
 
 ; --- Workspaces ---------------------------------------------------------------
 ; 1-9 (komorebi, no virtual desktops nativos)
-; Exentos del game-mode: si se suspenden, Win+N cae al atajo nativo de Windows
-; (lanza la app N de la taskbar), que es peor que poder salir del juego por workspace.
-#SuspendExempt
 #1::Komorebic('focus-workspace 0')               ; go to workspace N
 #2::Komorebic('focus-workspace 1')
 #3::Komorebic('focus-workspace 2')
@@ -720,7 +720,6 @@ AccentWatch() {
 #7::Komorebic('focus-workspace 6')
 #8::Komorebic('focus-workspace 7')
 #9::Komorebic('focus-workspace 8')
-#SuspendExempt False
 
 #+1::Komorebic('move-to-workspace 0')            ; move window to workspace N
 #+2::Komorebic('move-to-workspace 1')
