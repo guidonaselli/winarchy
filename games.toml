@@ -26,3 +26,6 @@ exe = "re9.exe"
 
 [[games]]
 exe = "domekeeper.exe"
+
+[[games]]
+exe = "cs2.exe"
