@@ -22,9 +22,14 @@ function Get-WinarchyAutostartComponents {
     # arranca al toque y hereda KOMOREBI_CONFIG_HOME del entorno. Ver Start-WinarchyKomorebi.
     $komorebiExe = Get-WinarchyKomorebiExe
     if ($komorebiExe) {
+        # komorebi.exe es app de consola: lanzado directo por el Task Scheduler, Windows 11
+        # le asigna Windows Terminal como host y deja una ventana de logs visible al arrancar.
+        # conhost --headless lo hospeda sin ventana (ignora el default terminal), igual que el
+        # -WindowStyle Hidden de Start-WinarchyKomorebi.
+        $conhost = Join-Path $env:WINDIR 'System32\conhost.exe'
         $items.Add([pscustomobject]@{
             Key = 'komorebi'; TaskName = 'komorebi'; LnkName = 'Winarchy komorebi.lnk'
-            Exe = $komorebiExe; Arguments = ''; Delay = 'PT0S'
+            Exe = $conhost; Arguments = "--headless `"$komorebiExe`""; Delay = 'PT0S'
         })
     }
 
