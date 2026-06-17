@@ -234,11 +234,12 @@ QuitStack() {
 ; keybindings (SUPER+K). El right-click del tray sigue usando A_TrayMenu nativo: ese
 ; menú lo dibuja Windows y no se puede tematizar (fallback igualmente funcional).
 MainMenu := ''        ; Gui activa, '' = cerrado
-MenuRows := []        ; [{label, hint}] controles Text por fila
+MenuRows := []        ; [{label, hint, y}] controles Text por fila + su Y
 MenuItems := []       ; items del nivel actual
 MenuSel := 1          ; índice seleccionado (1-based)
 MenuTitle := ''       ; título del nivel actual
 MenuStack := []       ; pila para volver de submenús
+MenuSelBar := ''         ; barra de selección (un control que se mueve a la fila activa)
 MenuColors := {bg:'16121E', fg:'C8C0D8', ac:'9BE53E', mut:'4A4060'}
 
 WinarchyMenuItems() {
@@ -289,7 +290,7 @@ ShowMainMenu(*) {
 }
 
 RenderMenu(items, title) {
-    global MainMenu, MenuRows, MenuItems, MenuSel, MenuTitle, MenuColors
+    global MainMenu, MenuRows, MenuItems, MenuSel, MenuTitle, MenuColors, MenuSelBar
     if (MainMenu != '')
         try MainMenu.Destroy()
     MenuItems := items, MenuSel := 1, MenuRows := [], MenuTitle := title
@@ -317,15 +318,19 @@ RenderMenu(items, title) {
 
     g.SetFont('s11 norm', 'JetBrainsMono Nerd Font')
     y0 := pad + titleH
+    ; barra de selección accent: se agrega PRIMERO (queda detrás de los textos, que son
+    ; BackgroundTrans) y se reposiciona sobre la fila activa con .Move() en SetMenuSel.
+    MenuSelBar := g.Add('Text', Format('x{} y{} w{} h{} Background{}', pad - 6, y0, labelW + gap + hintW + 12, rowH, ac), '')
     for i, it in items {
         y := y0 + (i - 1) * rowH
         marker := (i = 1) ? Chr(0x25B8) ' ' : '   '
-        lbl := g.Add('Text', Format('x{} y{} w{} h{} c{} BackgroundTrans', pad, y + 4, labelW, rowH, (i = 1) ? ac : fg), marker it.text)
+        ; fila 1 preseleccionada: texto en color fondo para leerse sobre la barra accent
+        lbl := g.Add('Text', Format('x{} y{} w{} h{} c{} BackgroundTrans', pad, y + 4, labelW, rowH, (i = 1) ? bg : fg), marker it.text)
         lbl.OnEvent('Click', MenuClick.Bind(i))
         hintTxt := it.HasOwnProp('hint') ? it.hint : (it.HasOwnProp('sub') ? Chr(0x25B8) : '')
-        hnt := g.Add('Text', Format('x{} y{} w{} h{} c{} Right BackgroundTrans', pad + labelW + gap, y + 4, hintW, rowH, mut), hintTxt)
+        hnt := g.Add('Text', Format('x{} y{} w{} h{} c{} Right BackgroundTrans', pad + labelW + gap, y + 4, hintW, rowH, (i = 1) ? bg : mut), hintTxt)
         hnt.OnEvent('Click', MenuClick.Bind(i))
-        MenuRows.Push({label: lbl, hint: hnt})
+        MenuRows.Push({label: lbl, hint: hnt, y: y})
     }
     h := y0 + items.Length * rowH + pad
 
@@ -349,14 +354,19 @@ RenderMenu(items, title) {
 }
 
 SetMenuSel(n) {
-    global MenuRows, MenuItems, MenuSel, MenuColors
+    global MenuRows, MenuItems, MenuSel, MenuColors, MenuSelBar
     n := Mod(n - 1 + MenuItems.Length, MenuItems.Length) + 1   ; wrap circular, 1-based
+    ; fila vieja → colores normales
     old := MenuRows[MenuSel]
     old.label.Text := '   ' MenuItems[MenuSel].text
     old.label.SetFont('c' MenuColors.fg)
+    old.hint.SetFont('c' MenuColors.mut)
+    ; fila nueva → texto en color fondo (sobre la barra accent) + mover la barra
     cur := MenuRows[n]
     cur.label.Text := Chr(0x25B8) ' ' MenuItems[n].text
-    cur.label.SetFont('c' MenuColors.ac)
+    cur.label.SetFont('c' MenuColors.bg)
+    cur.hint.SetFont('c' MenuColors.bg)
+    try MenuSelBar.Move(, cur.y)
     MenuSel := n
 }
 
