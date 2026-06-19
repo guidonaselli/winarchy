@@ -152,6 +152,14 @@ widgets:
       ethernet_label: "<span>{wifi_icon}</span>"
       ethernet_label_alt: "<span>{wifi_icon}</span> {ip_addr}"
       ethernet_icon: "󰈀"
+      # Iconos por fuerza de señal explícitos (glifos MD, juego con el de ethernet);
+      # sin esto YASB cae a sus defaults. Posición 0 = sin señal / wifi off.
+      wifi_icons:
+        - "󰤮"   # 0% / desconectado / wifi off (con línea)
+        - "󰤟"   # 1-24%
+        - "󰤢"   # 25-49%
+        - "󰤥"   # 50-74%
+        - "󰤨"   # 75-100%
       update_interval: 15000
       hide_if_ethernet: false
       callbacks:
