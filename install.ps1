@@ -146,8 +146,19 @@ if ($Activate) {
     if ($ahkExe) { Start-Process $ahkExe -ArgumentList "`"$Root\config\ahk\winarchy.ahk`"" }
 }
 else {
-    Write-WinarchyInfo 'Modo CONVIVENCIA: sin autostart. Para activar el stack: .\install.ps1 -Activate'
-    Write-WinarchyInfo 'Para migrar desde Seelen: .\scripts\migrate-from-seelen.ps1'
+    # Migración / self-update (sin -Activate): si el autostart YA estaba activo, re-registrarlo
+    # para que tome cambios en cómo se lanzan los componentes (p.ej. el launcher resiliente
+    # scripts\Start-Komorebi.ps1) sin cambiar el modo de operación vigente. Si nunca estuvo
+    # activo (convivencia pura), no se toca nada.
+    $autostart = Get-WinarchyAutostartStatus
+    if (@($autostart.Values | Where-Object { $_ }).Count -gt 0) {
+        Write-WinarchyInfo 'Autostart activo: re-registrando para aplicar cambios de arranque...'
+        Register-WinarchyAutostart
+    }
+    else {
+        Write-WinarchyInfo 'Modo CONVIVENCIA: sin autostart. Para activar el stack: .\install.ps1 -Activate'
+        Write-WinarchyInfo 'Para migrar desde Seelen: .\scripts\migrate-from-seelen.ps1'
+    }
 }
 
 Write-Host ''
