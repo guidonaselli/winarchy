@@ -24,16 +24,17 @@ function Get-WinarchyAutostartComponents {
     if ($komorebiExe) {
         # komorebi.exe es app de consola: lanzado directo por el Task Scheduler, Windows 11
         # le asigna Windows Terminal como host y deja una ventana de logs visible al arrancar.
-        # `conhost --headless` lo escondía pero NO lo mantenía vivo: el host detached muere
-        # enseguida y se lleva a komorebi (queda OFFLINE al arrancar). En su lugar lanzamos un
-        # powershell oculto que hace `Start-Process komorebi -WindowStyle Hidden`: komorebi
-        # queda como proceso top-level independiente que sobrevive a la salida del launcher,
-        # igual que Start-WinarchyKomorebi. Hereda KOMOREBI_CONFIG_HOME del entorno.
+        # `conhost --headless` lo escondía pero NO lo mantenía vivo (queda OFFLINE al arrancar).
+        # El `Start-Process komorebi -Hidden` directo tampoco alcanzaba: komorebi paniquea al
+        # arrancar muy temprano (Application Error 0xc0000409) y, lanzado una sola vez y sin log,
+        # quedaba muerto hasta reiniciarlo a mano. Ahora un powershell oculto corre el launcher
+        # scripts\Start-Komorebi.ps1, que espera al shell, reintenta y captura el log del panic.
         $ps = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $launcher = Join-Path $root 'scripts\Start-Komorebi.ps1'
         $items.Add([pscustomobject]@{
             Key = 'komorebi'; TaskName = 'komorebi'; LnkName = 'Winarchy komorebi.lnk'
             Exe = $ps
-            Arguments = "-NoProfile -WindowStyle Hidden -Command `"Start-Process '$komorebiExe' -WindowStyle Hidden`""
+            Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$launcher`""
             Delay = 'PT0S'
         })
     }
