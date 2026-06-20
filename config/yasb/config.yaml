@@ -153,8 +153,12 @@ widgets:
     type: "yasb.custom.CustomWidget"
     options:
       class_name: "wifi-widget"
-      label: "<span class=\"icon\">{data}</span>"
-      label_alt: "<span class=\"icon\">{data}</span>"
+      # OJO: el {data} va SIN <span> envolvente. YASB NO sustituye {data} si está
+      # dentro de <span> (lo deja literal en la barra); el estilo viene por
+      # `.wifi-widget .label` en styles.css. El icono ya es el dato, no hay glifo
+      # estático que meter en un span.
+      label: "{data}"
+      label_alt: "{data}"
       exec_options:
         # NO TOCAR el quoting sin testear: el entorno de exec de YASB no tiene
         # System32 en PATH (por eso el path COMPLETO a powershell.exe, no "powershell"),
