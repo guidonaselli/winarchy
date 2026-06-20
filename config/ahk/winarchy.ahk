@@ -620,10 +620,10 @@ GameWatch() {
     }
 
     ; NO se suspenden los hotkeys en game-mode: igual que la tecla Windows, siguen
-    ; vivos durante el juego. Los combos de geometría de komorebi (SUPER+flechas,
-    ; resize, layout) quedan inertes mientras el tiling está pausado, pero komorebi
-    ; los ignora sin efecto; todo lo demás (menú, System, launcher, screenshots) es
-    ; útil mientras se juega. game-mode solo trackea estado y refresca games.toml.
+    ; vivos durante el juego. game-mode NO pausa komorebi (solo flota la ventana del
+    ; juego vía ignore-rule), así que el tiling y SUPER+1/2 siguen funcionando; los
+    ; combos de geometría aplican al resto de ventanas tileadas. game-mode solo
+    ; trackea estado y refresca games.toml.
     if (active && !GameModeActive) {
         GameModeActive := true
         LoadGames()                              ; refresco para altas en caliente

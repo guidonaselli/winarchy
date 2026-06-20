@@ -1,36 +1,41 @@
-# GameMode.ps1 — modo juego: pausa tiling + suspende hotkeys (vía flag que vigila AHK)
+# GameMode.ps1 — modo juego: flota solo la ventana del juego (NO pausa el tiling).
+# El game-mode.flag lo vigila AHK para el estado/indicador; el accent-watcher queda inerte.
 
 function Get-WinarchyGameModeFlag { Join-Path (Get-WinarchyStateDir) 'game-mode.flag' }
-function Get-WinarchyPauseMarker  { Join-Path (Get-WinarchyStateDir) 'komorebi-paused-by-gamemode' }
+function Get-WinarchyFloatedMarker { Join-Path (Get-WinarchyStateDir) 'game-mode-floated' }
 
 function Enable-WinarchyGameMode {
     $flag = Get-WinarchyGameModeFlag
     if (Test-Path $flag) { Write-WinarchyInfo 'Game-mode was already active.'; return }
     Set-Content -Path $flag -Value (Get-Date -Format 'o') -Encoding UTF8 -NoNewline
-    if ((Test-WinarchyProcess 'komorebi') -and -not (Test-Path (Get-WinarchyPauseMarker))) {
-        komorebic toggle-pause 2>$null | Out-Null
-        New-Item -ItemType File -Path (Get-WinarchyPauseMarker) -Force | Out-Null
+
+    # NO se pausa komorebi: se flota SOLO la ventana en primer plano con la primitiva
+    # `session-float-rule` de komorebi (scope de sesión, sin tocar komorebi.json ni
+    # des-manejar globalmente el exe). El resto del tiling y los hotkeys SUPER
+    # (incl. SUPER+1/2) siguen activos.
+    if (Test-WinarchyProcess 'komorebi') {
+        komorebic session-float-rule 2>$null | Out-Null
+        Set-Content -Path (Get-WinarchyFloatedMarker) -Value (Get-Date -Format 'o') -Encoding UTF8 -NoNewline
     }
-    Write-WinarchyOk 'Game-mode ON: tiling paused, SUPER hotkeys suspended (AHK picks up the flag in <=1 s).'
+    Write-WinarchyOk 'Game-mode ON: la ventana en primer plano flota fuera del tiling; el resto del tiling y los hotkeys SUPER siguen activos.'
 }
 
 function Disable-WinarchyGameMode {
     $flag = Get-WinarchyGameModeFlag
     if (-not (Test-Path $flag)) { Write-WinarchyInfo 'Game-mode was already inactive.'; return }
     Remove-Item $flag -Force
-    if (Test-Path (Get-WinarchyPauseMarker)) {
+
+    # Limpiar la(s) regla(s) de floteo de sesión y re-tilear para que la ventana
+    # vuelva al layout. komorebi nunca estuvo pausado.
+    $marker = Get-WinarchyFloatedMarker
+    if (Test-Path $marker) {
         if (Test-WinarchyProcess 'komorebi') {
-            komorebic toggle-pause 2>$null | Out-Null
+            komorebic clear-session-float-rules 2>$null | Out-Null
+            komorebic retile 2>$null | Out-Null
         }
-        else {
-            # komorebi se cerró/crasheó durante el game-mode: no hay nada que des-pausar,
-            # relanzarlo para que el tiling vuelva al salir (era la pausa lo que lo dejaba "offline").
-            Write-WinarchyWarn 'komorebi was not running on game-mode exit; relaunching it.'
-            Start-WinarchyKomorebi
-        }
-        Remove-Item (Get-WinarchyPauseMarker) -Force
+        Remove-Item $marker -Force
     }
-    Write-WinarchyOk 'Game-mode OFF: tiling and hotkeys restored.'
+    Write-WinarchyOk 'Game-mode OFF: floteo de sesión limpiado y re-tilado; el tiling nunca se pausó.'
 }
 
 function Get-WinarchyGameModeStatus {
