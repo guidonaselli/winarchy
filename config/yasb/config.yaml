@@ -141,29 +141,32 @@ widgets:
       label_alt: "<span>󰍛</span> {virtual_mem_free}"
       update_interval: 5000
 
-  # Click: menú de redes wifi de YASB. Click derecho: Configuración de red.
+  # Indicador de red propio (CustomWidget). El yasb.wifi.WifiWidget nativo deja
+  # el placeholder {wifi_icon} literal mientras su WiFiWorker (winrt) no puede
+  # leer el adaptador —red abajo en el arranque, o radio WiFi off— y no expone
+  # un icono inicial. net-icon.ps1 decide el glifo de forma sincrónica con
+  # fallback a "desconectado", así la barra nunca muestra la plantilla cruda y
+  # se comporta como el resto de los iconos. Vive junto a este config
+  # (YASB_CONFIG_HOME). Tradeoff: sin selector de redes en la barra; el click
+  # abre la config de red de Windows.
   wifi:
-    type: "yasb.wifi.WifiWidget"
+    type: "yasb.custom.CustomWidget"
     options:
-      label: "<span>{wifi_icon}</span>"
-      label_alt: "<span>{wifi_icon}</span> {wifi_name}"
-      # En ethernet muestra este icono (glifo MD; el default codicons se recorta
-      # y el FA de ethernet no existe en JetBrainsMono NF)
-      ethernet_label: "<span>{wifi_icon}</span>"
-      ethernet_label_alt: "<span>{wifi_icon}</span> {ip_addr}"
-      ethernet_icon: "󰈀"
-      # Iconos por fuerza de señal explícitos (glifos MD, juego con el de ethernet);
-      # sin esto YASB cae a sus defaults. Posición 0 = sin señal / wifi off.
-      wifi_icons:
-        - "󰤮"   # 0% / desconectado / wifi off (con línea)
-        - "󰤟"   # 1-24%
-        - "󰤢"   # 25-49%
-        - "󰤥"   # 50-74%
-        - "󰤨"   # 75-100%
-      update_interval: 15000
-      hide_if_ethernet: false
+      class_name: "wifi-widget"
+      label: "<span class=\"icon\">{data}</span>"
+      label_alt: "<span class=\"icon\">{data}</span>"
+      exec_options:
+        # NO TOCAR el quoting sin testear: el entorno de exec de YASB no tiene
+        # System32 en PATH (por eso el path COMPLETO a powershell.exe, no "powershell"),
+        # y YASB re-cita los argumentos (list2cmdline), así que el path del script va
+        # SIN comillas —si se las ponés, quedan dobladas y powershell tira "Illegal
+        # characters in path". use_shell:true es lo que expande %SystemRoot%/%YASB_CONFIG_HOME%.
+        run_cmd: "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -ExecutionPolicy Bypass -File %YASB_CONFIG_HOME%\\net-icon.ps1"
+        run_interval: 7000
+        return_format: "string"
+        use_shell: true
       callbacks:
-        on_left: "toggle_menu"
+        on_left: "exec cmd.exe /c start ms-settings:network"
         on_right: "exec cmd.exe /c start ms-settings:network"
 
   # Click: Configuración de bluetooth de Windows.
