@@ -128,3 +128,26 @@ public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntP
     # 0x1001 = SPI_SETACTIVEWINDOWTRACKING; 0x03 = SPIF_UPDATEINIFILE | SPIF_SENDCHANGE
     [void][WinarchyNative.XMouse]::SystemParametersInfo(0x1001, 0, [IntPtr]::Zero, 0x03)
 }
+
+function Get-WinarchyForegroundExe {
+    <#
+      Devuelve el nombre del exe (con .exe) de la ventana en primer plano, o $null.
+      Se usa para no flotar la ventana equivocada al activar game-mode.
+    #>
+    if (-not ('WinarchyNative.Fg' -as [type])) {
+        Add-Type -Namespace WinarchyNative -Name Fg -MemberDefinition @'
+[DllImport("user32.dll")]
+public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll", SetLastError = true)]
+public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+'@
+    }
+    $hwnd = [WinarchyNative.Fg]::GetForegroundWindow()
+    if ($hwnd -eq [IntPtr]::Zero) { return $null }
+    $pid32 = 0
+    [void][WinarchyNative.Fg]::GetWindowThreadProcessId($hwnd, [ref]$pid32)
+    if ($pid32 -eq 0) { return $null }
+    $proc = Get-Process -Id $pid32 -ErrorAction SilentlyContinue
+    if (-not $proc) { return $null }
+    "$($proc.ProcessName).exe"
+}

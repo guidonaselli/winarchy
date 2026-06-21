@@ -37,6 +37,14 @@
       ]
     }
   ],
+  "manage_rules": [
+    [ { "kind": "Exe", "id": "firefox.exe", "matching_strategy": "Equals" }, { "kind": "Class", "id": "MozillaWindowClass", "matching_strategy": "Equals" } ],
+    [ { "kind": "Exe", "id": "zen.exe", "matching_strategy": "Equals" }, { "kind": "Class", "id": "MozillaWindowClass", "matching_strategy": "Equals" } ],
+    [ { "kind": "Exe", "id": "librewolf.exe", "matching_strategy": "Equals" }, { "kind": "Class", "id": "MozillaWindowClass", "matching_strategy": "Equals" } ],
+    [ { "kind": "Exe", "id": "floorp.exe", "matching_strategy": "Equals" }, { "kind": "Class", "id": "MozillaWindowClass", "matching_strategy": "Equals" } ],
+    [ { "kind": "Exe", "id": "waterfox.exe", "matching_strategy": "Equals" }, { "kind": "Class", "id": "MozillaWindowClass", "matching_strategy": "Equals" } ],
+    [ { "kind": "Exe", "id": "mullvadbrowser.exe", "matching_strategy": "Equals" }, { "kind": "Class", "id": "MozillaWindowClass", "matching_strategy": "Equals" } ]
+  ],
   "ignore_rules": [
     { "kind": "Class", "id": "#32770", "matching_strategy": "Equals" },
     { "kind": "Title", "id": "Control Panel", "matching_strategy": "Equals" },

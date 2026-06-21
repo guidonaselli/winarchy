@@ -7,17 +7,30 @@ function Get-WinarchyFloatedMarker { Join-Path (Get-WinarchyStateDir) 'game-mode
 function Enable-WinarchyGameMode {
     $flag = Get-WinarchyGameModeFlag
     if (Test-Path $flag) { Write-WinarchyInfo 'Game-mode was already active.'; return }
+
+    # `session-float-rule` flota CIEGAMENTE la ventana en primer plano por título: si se
+    # activa game-mode con un navegador/editor en foco (no el juego), esa ventana queda
+    # flotada y "no seleccionable" hasta apagar game-mode. Guard: solo flotamos si el
+    # exe en primer plano está registrado en games.toml.
+    $fgExe = Get-WinarchyForegroundExe
+    $games = @(Get-WinarchyGames)
+    $isGame = $fgExe -and ($games | Where-Object { $_ -ieq $fgExe })
+    if (-not $isGame) {
+        Write-WinarchyWarn "Game-mode NO activado: la ventana en primer plano ('$fgExe') no está en games.toml. Activá game-mode con el juego en foco, o registralo con ``winarchy game-mode add $fgExe``."
+        return
+    }
+
     Set-Content -Path $flag -Value (Get-Date -Format 'o') -Encoding UTF8 -NoNewline
 
-    # NO se pausa komorebi: se flota SOLO la ventana en primer plano con la primitiva
-    # `session-float-rule` de komorebi (scope de sesión, sin tocar komorebi.json ni
-    # des-manejar globalmente el exe). El resto del tiling y los hotkeys SUPER
-    # (incl. SUPER+1/2) siguen activos.
+    # NO se pausa komorebi: se flota SOLO la ventana del juego en primer plano con la
+    # primitiva `session-float-rule` de komorebi (scope de sesión, sin tocar
+    # komorebi.json ni des-manejar globalmente el exe). El resto del tiling y los
+    # hotkeys SUPER (incl. SUPER+1/2) siguen activos.
     if (Test-WinarchyProcess 'komorebi') {
         komorebic session-float-rule 2>$null | Out-Null
         Set-Content -Path (Get-WinarchyFloatedMarker) -Value (Get-Date -Format 'o') -Encoding UTF8 -NoNewline
     }
-    Write-WinarchyOk 'Game-mode ON: la ventana en primer plano flota fuera del tiling; el resto del tiling y los hotkeys SUPER siguen activos.'
+    Write-WinarchyOk "Game-mode ON: '$fgExe' flota fuera del tiling; el resto del tiling y los hotkeys SUPER siguen activos."
 }
 
 function Disable-WinarchyGameMode {
