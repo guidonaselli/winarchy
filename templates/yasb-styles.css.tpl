@@ -197,8 +197,44 @@
     padding: 4px 10px;
 }
 
-.systray-widget {
+/* Systray. La clase base del widget es `.systray` (no `.systray-widget`);
+   el botón de colapsar/expandir es `.unpinned-visibility-btn`. Sin estos
+   estilos YASB le deja a la flechita y a los iconos su hover blanco
+   translúcido por defecto, ajeno al theme. */
+.systray {
     background: transparent;
+}
+
+.systray .pinned-container,
+.systray .unpinned-container {
+    background: transparent;
+}
+
+/* La "flechita" que despliega los iconos no fijados */
+.systray .unpinned-visibility-btn {
+    color: {{colors.color4}};
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 0 4px;
+    margin: 0 2px;
+    font-size: 16px;
+}
+
+.systray .unpinned-visibility-btn:hover {
+    color: {{colors.foreground}};
+    background-color: {{colors.color0}};
+}
+
+/* Iconos individuales del tray: hover sutil acorde al theme */
+.systray .button {
+    border-radius: 4px;
+    padding: 2px;
+    margin: 0 1px;
+}
+
+.systray .button:hover {
+    background-color: {{colors.color0}};
 }
 
 .game-mode-widget .label {

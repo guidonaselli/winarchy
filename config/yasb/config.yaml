@@ -216,8 +216,11 @@ widgets:
   systray:
     type: "yasb.systray.SystrayWidget"
     options:
-      label_collapsed: ""
-      label_expanded: ""
+      # Triangulos unicode (no glifos nerd-font F053/F054): la fuente del bar
+      # los dejaba como tofu --el "cuadrado invisible"--; estos caen al fallback
+      # de Segoe UI y siempre renderizan. (colapsado = click para expandir).
+      label_collapsed: "▸"
+      label_expanded: "▾"
       pin_click_modifier: "alt"
       show_unpinned: false
       # Componentes del stack (los instala Winarchy vía versions.lock.toml): su
