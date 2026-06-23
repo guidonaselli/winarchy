@@ -45,6 +45,31 @@
     [ { "kind": "Exe", "id": "waterfox.exe", "matching_strategy": "Equals" }, { "kind": "Class", "id": "MozillaWindowClass", "matching_strategy": "Equals" } ],
     [ { "kind": "Exe", "id": "mullvadbrowser.exe", "matching_strategy": "Equals" }, { "kind": "Class", "id": "MozillaWindowClass", "matching_strategy": "Equals" } ]
   ],
+  "object_name_change_applications": [
+    { "kind": "Exe", "id": "firefox.exe", "matching_strategy": "Equals" },
+    { "kind": "Exe", "id": "zen.exe", "matching_strategy": "Equals" },
+    { "kind": "Exe", "id": "librewolf.exe", "matching_strategy": "Equals" },
+    { "kind": "Exe", "id": "floorp.exe", "matching_strategy": "Equals" },
+    { "kind": "Exe", "id": "waterfox.exe", "matching_strategy": "Equals" },
+    { "kind": "Exe", "id": "mullvadbrowser.exe", "matching_strategy": "Equals" }
+  ],
+  "tray_and_multi_window_applications": [
+    { "kind": "Exe", "id": "firefox.exe", "matching_strategy": "Equals" },
+    { "kind": "Exe", "id": "zen.exe", "matching_strategy": "Equals" },
+    { "kind": "Exe", "id": "librewolf.exe", "matching_strategy": "Equals" },
+    { "kind": "Exe", "id": "floorp.exe", "matching_strategy": "Equals" },
+    { "kind": "Exe", "id": "waterfox.exe", "matching_strategy": "Equals" },
+    { "kind": "Exe", "id": "mullvadbrowser.exe", "matching_strategy": "Equals" }
+  ],
+  "slow_application_identifiers": [
+    { "kind": "Exe", "id": "firefox.exe", "matching_strategy": "Equals" },
+    { "kind": "Exe", "id": "zen.exe", "matching_strategy": "Equals" },
+    { "kind": "Exe", "id": "librewolf.exe", "matching_strategy": "Equals" },
+    { "kind": "Exe", "id": "floorp.exe", "matching_strategy": "Equals" },
+    { "kind": "Exe", "id": "waterfox.exe", "matching_strategy": "Equals" },
+    { "kind": "Exe", "id": "mullvadbrowser.exe", "matching_strategy": "Equals" }
+  ],
+  "slow_application_compensation_time": 75,
   "ignore_rules": [
     { "kind": "Class", "id": "#32770", "matching_strategy": "Equals" },
     { "kind": "Title", "id": "Control Panel", "matching_strategy": "Equals" },
