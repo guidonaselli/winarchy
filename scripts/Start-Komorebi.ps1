@@ -1,14 +1,18 @@
 # Start-Komorebi.ps1 — arranque resiliente de komorebi para el autostart de Winarchy.
 #
-# Lo lanza la Scheduled Task At-LogOn (oculto). Resuelve la causa de que komorebi
-# quedara OFFLINE al prender la PC: arrancaba demasiado temprano y paniqueaba
-# (Application Error 0xc0000409 = panic/abort de Rust), y como el `Start-Process`
-# directo lo lanzaba una sola vez, sin log y sin reintento, nadie lo volvía a
-# levantar hasta reiniciarlo a mano. Este launcher:
-#   1. Redirige stdout/stderr de komorebi a un log (antes se perdían: no sabíamos
-#      por qué paniqueaba).
-#   2. Espera a que el shell (explorer) esté listo antes del primer intento.
-#   3. Reintenta si komorebi sale en los primeros segundos.
+# Lo lanza la Scheduled Task At-LogOn (oculto). Resuelve dos causas de que komorebi
+# quedara OFFLINE al prender/desbloquear la PC:
+#   a) panic temprano (Application Error 0xc0000409 = abort de Rust).
+#   b) "failed call to AllowSetForegroundWindow after 5 retries" (main.rs:219): komorebi
+#      arranca antes de que la sesión tenga una ventana de foreground real. Pasa típico
+#      al desbloquear rápido: el LogonTrigger dispara y el escritorio no asentó todavía.
+# Antes el launcher cortaba a los 5 intentos en <1 min y quedaba muerto hasta reiniciar
+# a mano. Este launcher:
+#   1. Redirige stdout/stderr de komorebi a un log.
+#   2. Espera a que exista foreground real (explorer + GetForegroundWindow != 0), no solo
+#      a que explorer exista, y baja el foreground lock timeout a 0.
+#   3. Reintenta con presupuesto de tiempo (~5 min) y re-espera el foreground en cada
+#      vuelta, en vez de rendirse a los pocos segundos.
 #
 # Hereda KOMOREBI_CONFIG_HOME del entorno (User var que registra install.ps1).
 # No-op si komorebi ya está corriendo.
@@ -20,6 +24,18 @@ $outLog = Join-Path $logDir 'komorebi.out.log'
 $errLog = Join-Path $logDir 'komorebi.err.log'
 
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+
+# P/Invoke para detectar foreground real y bajar el lock timeout. Sin esto,
+# AllowSetForegroundWindow de komorebi es rechazada cuando el escritorio no asentó.
+Add-Type -Namespace Win -Name Fg -MemberDefinition @'
+[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
+[DllImport("user32.dll", SetLastError=true)] public static extern bool SystemParametersInfo(uint a, uint b, System.IntPtr c, uint d);
+'@
+
+function Test-ForegroundReady {
+    [bool]((Get-Process explorer -ErrorAction SilentlyContinue) -and `
+           ([Win.Fg]::GetForegroundWindow() -ne [System.IntPtr]::Zero))
+}
 
 function Write-Log([string]$m) {
     "{0}  {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m |
@@ -47,43 +63,60 @@ foreach ($stale in @('komorebi.sock', 'komorebi.hwnd.json')) {
     }
 }
 
-# 1) Esperar a que el shell esté listo. explorer suele estar al toque, pero en el
-#    arranque puede no estarlo todavía; esperamos hasta 40s y damos un settle corto.
-$deadline = (Get-Date).AddSeconds(40)
-while ((Get-Date) -lt $deadline -and -not (Get-Process explorer -ErrorAction SilentlyContinue)) {
+# Presupuesto total para que el escritorio asiente y komorebi quede arriba. Cubre el
+# caso de desbloqueo rápido, donde el foreground tarda en existir.
+$overallDeadline = (Get-Date).AddMinutes(5)
+
+# 1) Esperar foreground real (explorer + ventana de foreground != 0), no solo explorer.
+while ((Get-Date) -lt $overallDeadline -and -not (Test-ForegroundReady)) {
     Start-Sleep -Milliseconds 500
 }
-Start-Sleep -Seconds 4
+Start-Sleep -Seconds 2
 
-# 2) Intentos: lanzar oculto con redirección de logs y verificar que sobrevive >8s.
-$maxAttempts = 5
-for ($i = 1; $i -le $maxAttempts; $i++) {
+# 2) Intentos con presupuesto de tiempo: re-esperar foreground en cada vuelta, bajar el
+#    lock timeout, lanzar oculto y verificar que sobrevive >8s. No nos rendimos a los
+#    pocos segundos: reintentamos hasta $overallDeadline.
+$attempt = 0
+while ((Get-Date) -lt $overallDeadline) {
     if (Test-KomorebiRunning) { Write-Log 'komorebi vivo; listo.'; exit 0 }
+    $attempt++
 
-    Write-Log "intento $i/${maxAttempts}: lanzando komorebi.exe"
+    # Asegurar la precondición de AllowSetForegroundWindow antes de cada intento.
+    while ((Get-Date) -lt $overallDeadline -and -not (Test-ForegroundReady)) {
+        Start-Sleep -Milliseconds 500
+    }
+    [Win.Fg]::SystemParametersInfo(0x2001, 0, [System.IntPtr]::Zero, 0x3) | Out-Null
+
+    Write-Log "intento ${attempt}: lanzando komorebi.exe"
     try {
         $p = Start-Process -FilePath $exe -WindowStyle Hidden -PassThru `
                 -RedirectStandardOutput $outLog -RedirectStandardError $errLog
     }
     catch {
-        Write-Log "intento ${i}: fallo al lanzar: $($_.Exception.Message)"
+        Write-Log "intento ${attempt}: fallo al lanzar: $($_.Exception.Message)"
         Start-Sleep -Seconds 2
         continue
     }
 
     Start-Sleep -Seconds 8
-    if (-not $p.HasExited) { Write-Log "intento ${i}: komorebi sigue vivo tras 8s. OK."; exit 0 }
+    if (-not $p.HasExited) { Write-Log "intento ${attempt}: komorebi sigue vivo tras 8s. OK."; exit 0 }
 
     # komorebi salió rápido: preservar su stderr (el siguiente intento lo sobrescribe).
     $code = try { $p.ExitCode } catch { '?' }
-    Write-Log "intento ${i}: komorebi salió rápido (código '$code'). stderr:"
-    if (Test-Path $errLog) {
-        $stderr = (Get-Content $errLog -Raw -ErrorAction SilentlyContinue)
-        if ($stderr) { foreach ($ln in ($stderr -split "`r?`n" | Where-Object { $_ })) { Write-Log "    | $ln" } }
-        else { Write-Log '    | (stderr vacío)' }
+    Write-Log "intento ${attempt}: komorebi salió rápido (código '$code'). stderr:"
+    $stderr = if (Test-Path $errLog) { (Get-Content $errLog -Raw -ErrorAction SilentlyContinue) } else { '' }
+    if ($stderr) { foreach ($ln in ($stderr -split "`r?`n" | Where-Object { $_ })) { Write-Log "    | $ln" } }
+    else { Write-Log '    | (stderr vacío)' }
+
+    # Si fue el foreground, esperar un poco más a que asiente antes de reintentar.
+    if ($stderr -match 'AllowSetForegroundWindow') {
+        Write-Log "intento ${attempt}: foreground aún no listo; espero y reintento."
+        Start-Sleep -Seconds 5
     }
-    Start-Sleep -Seconds 3
+    else {
+        Start-Sleep -Seconds 3
+    }
 }
 
-Write-Log "agotados $maxAttempts intentos; komorebi no quedó arriba."
+Write-Log "vencido el presupuesto de 5 min; komorebi no quedó arriba."
 exit 1
