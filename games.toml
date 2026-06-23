@@ -32,3 +32,6 @@ exe = "cs2.exe"
 
 [[games]]
 exe = "DeadByDaylight-Win64-Shipping.exe"
+
+[[games]]
+exe = "SnippingTool.exe"
