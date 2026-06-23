@@ -754,6 +754,8 @@ AccentWatch() {
 
 ; --- Themes / help --------------------------------------------------------------------
 #+t::Winarchy('theme next')                       ; next theme
+#+v::Run('"' EnvGet('ProgramFiles') '\\ShareX\\ShareX.exe" -ScreenRecorder')    ; screen recording
+#+g::Run('"' EnvGet('ProgramFiles') '\\ShareX\\ShareX.exe" -ScreenRecorderGIF') ; GIF recording
 #^t::Winarchy('theme gallery')                    ; theme gallery
 #k::ToggleKeyOverlay()                            ; this keybindings overlay
 
