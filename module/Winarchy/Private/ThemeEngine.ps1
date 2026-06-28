@@ -501,9 +501,18 @@ function Invoke-WinarchyReload {
     param([switch]$Light)
     if (Test-WinarchyProcess 'komorebi') { komorebic reload-configuration 2>$null | Out-Null }
     else { Start-WinarchyKomorebi }
-    if (Get-Command yasbc -ErrorAction SilentlyContinue) { yasbc reload 2>$null | Out-Null }
-    elseif (Test-WinarchyProcess 'yasb') {
+    # YASB: reinicio limpio (kill + start) en vez de `yasbc reload`. El hot-reload de
+    # YASB re-suscribe su widget de komorebi al named pipe pero deja viva la suscripción
+    # anterior; con >1 reactor vivo las barras pelean el foco y mandan FocusWorkspaceNumber(0),
+    # que te tira al workspace 1 al minimizar/maximizar o abrir un juego. Un kill+start deja
+    # un único suscriptor y elimina la pelea. (Investigación 2026-06-28; ver también
+    # watch_config/watch_stylesheet apagados en config/yasb/config.yaml.)
+    if (Test-WinarchyProcess 'yasb') {
         Stop-Process -Name 'yasb' -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 300
+    }
+    if (Get-Command yasbc -ErrorAction SilentlyContinue) { Start-Process 'yasbc' -ArgumentList 'start' -WindowStyle Hidden }
+    else {
         $yasbExe = Get-Command yasb -ErrorAction SilentlyContinue
         if ($yasbExe) { Start-Process $yasbExe.Source }
     }

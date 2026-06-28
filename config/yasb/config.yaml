@@ -1,7 +1,12 @@
 # Winarchy — YASB config (estático; los colores viven en styles.css generado por el theme engine)
 # NOTA: verificar nombres de widgets contra la wiki de YASB v2.x en el smoke test (tarea 9.1).
-watch_stylesheet: true
-watch_config: true
+# watch_* en false a propósito: el hot-reload de YASB re-suscribe el widget de komorebi
+# al named pipe sin cerrar la suscripción previa; con >1 reactor vivo las barras pelean
+# el foco (mandan FocusWorkspaceNumber(0)) y te saltan al workspace 1 al minimizar/abrir
+# un juego. Winarchy recarga YASB con un reinicio limpio (kill+start) desde `winarchy
+# theme set` / `winarchy reload`, así que no hace falta el watcher. (Investigación 2026-06-28)
+watch_stylesheet: false
+watch_config: false
 # Identidad unificada: YASB no muestra tray propio (el tray del stack lo hostea AHK)
 # ni corre su update checker (los updates los maneja `winarchy update`). El widget
 # `systray` de la barra (más abajo) NO se ve afectado: sigue mostrando iconos de terceros.
