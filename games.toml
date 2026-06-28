@@ -4,8 +4,12 @@
 # (c) exclusión en PowerToys Quick Accent (solo si está instalado).
 # Alta rápida: `winarchy game-mode add <exe>` / baja: `winarchy game-mode remove <exe>`.
 # `exe` es el nombre del proceso sin ruta (con o sin .exe).
+#
+# Los [[games]] de abajo son defaults curados de varias generaciones. Si un .exe
+# no coincide con ningún proceso, simplemente no hace nada (no rompe). Se evitan
+# nombres genéricos (javaw.exe, hl2.exe, ShooterGame.exe) que matchearían apps no-juego.
 
-# Lanzadores que tampoco deben tilearse (overlays/splash):
+# --- Lanzadores: overlays/splash/clientes que tampoco deben tilearse ----------
 [[launchers]]
 exe = "steamwebhelper.exe"
 
@@ -18,20 +22,211 @@ exe = "GalaxyClient.exe"
 [[launchers]]
 exe = "Riot Client.exe"
 
+[[launchers]]
+exe = "Battle.net.exe"
+
+[[launchers]]
+exe = "EADesktop.exe"
+
+[[launchers]]
+exe = "upc.exe"                       # Ubisoft Connect
+
+# --- Utilidades / ventanitas que conviene flotar -----------------------------
+[[games]]
+exe = "faceitclient.exe"             # ventanita mini del cliente FACEIT
+
+[[games]]
+exe = "Moonlight.exe"
+
+[[games]]
+exe = "SnippingTool.exe"
+
+# --- FPS / shooters competitivos ---------------------------------------------
 [[games]]
 exe = "VALORANT-Win64-Shipping.exe"
-
-[[games]]
-exe = "re9.exe"
-
-[[games]]
-exe = "domekeeper.exe"
 
 [[games]]
 exe = "cs2.exe"
 
 [[games]]
-exe = "DeadByDaylight-Win64-Shipping.exe"
+exe = "csgo.exe"                     # CS:GO (legacy)
 
 [[games]]
-exe = "SnippingTool.exe"
+exe = "r5apex.exe"                   # Apex Legends
+
+[[games]]
+exe = "r5apex_dx12.exe"
+
+[[games]]
+exe = "Overwatch.exe"               # Overwatch 2
+
+[[games]]
+exe = "FortniteClient-Win64-Shipping.exe"
+
+[[games]]
+exe = "cod.exe"                      # Call of Duty / Warzone (launcher unificado)
+
+[[games]]
+exe = "destiny2.exe"
+
+[[games]]
+exe = "TslGame.exe"                  # PUBG: Battlegrounds
+
+[[games]]
+exe = "RainbowSix.exe"              # Rainbow Six Siege
+
+[[games]]
+exe = "RainbowSix_DX11.exe"
+
+[[games]]
+exe = "RainbowSix_Vulkan.exe"
+
+[[games]]
+exe = "HaloInfinite.exe"
+
+[[games]]
+exe = "helldivers2.exe"
+
+[[games]]
+exe = "Marvel-Win64-Shipping.exe"   # Marvel Rivals
+
+[[games]]
+exe = "RustClient.exe"
+
+[[games]]
+exe = "SoTGame.exe"                  # Sea of Thieves
+
+[[games]]
+exe = "bf2042.exe"                   # Battlefield 2042
+
+[[games]]
+exe = "bf1.exe"                      # Battlefield 1
+
+[[games]]
+exe = "bfv.exe"                      # Battlefield V
+
+# --- MOBA / RTS --------------------------------------------------------------
+[[games]]
+exe = "League of Legends.exe"
+
+[[games]]
+exe = "LeagueClient.exe"
+
+[[games]]
+exe = "dota2.exe"
+
+[[games]]
+exe = "SC2_x64.exe"                  # StarCraft II
+
+[[games]]
+exe = "AoE2DE_s.exe"                 # Age of Empires II: DE
+
+[[games]]
+exe = "RelicCardinal.exe"           # Age of Empires IV
+
+# --- RPG / ARPG / MMO --------------------------------------------------------
+[[games]]
+exe = "Diablo IV.exe"
+
+[[games]]
+exe = "D2R.exe"                      # Diablo II: Resurrected
+
+[[games]]
+exe = "PathOfExile_x64.exe"
+
+[[games]]
+exe = "PathOfExile.exe"
+
+[[games]]
+exe = "eldenring.exe"
+
+[[games]]
+exe = "witcher3.exe"
+
+[[games]]
+exe = "Cyberpunk2077.exe"
+
+[[games]]
+exe = "SkyrimSE.exe"
+
+[[games]]
+exe = "bg3.exe"                      # Baldur's Gate 3
+
+[[games]]
+exe = "bg3_dx11.exe"
+
+[[games]]
+exe = "Wow.exe"                      # World of Warcraft
+
+[[games]]
+exe = "eso64.exe"                    # The Elder Scrolls Online
+
+[[games]]
+exe = "Gw2-64.exe"                   # Guild Wars 2
+
+[[games]]
+exe = "Warframe.x64.exe"
+
+[[games]]
+exe = "LostArk.exe"
+
+[[games]]
+exe = "NewWorld.exe"
+
+[[games]]
+exe = "GenshinImpact.exe"
+
+[[games]]
+exe = "StarRail.exe"                 # Honkai: Star Rail
+
+# --- Acción / single-player populares ----------------------------------------
+[[games]]
+exe = "GTA5.exe"                     # Grand Theft Auto V
+
+[[games]]
+exe = "RDR2.exe"                     # Red Dead Redemption 2
+
+[[games]]
+exe = "DOOMEternalx64vk.exe"
+
+[[games]]
+exe = "HogwartsLegacy.exe"
+
+[[games]]
+exe = "Hades.exe"
+
+[[games]]
+exe = "RocketLeague.exe"
+
+[[games]]
+exe = "re9.exe"                      # Resident Evil
+
+# --- Battle royale / party ---------------------------------------------------
+[[games]]
+exe = "FallGuys_client_game.exe"
+
+[[games]]
+exe = "Among Us.exe"
+
+[[games]]
+exe = "DeadByDaylight-Win64-Shipping.exe"
+
+# --- Indies / clásicos (varias generaciones) ---------------------------------
+[[games]]
+exe = "Terraria.exe"
+
+[[games]]
+exe = "Stardew Valley.exe"
+
+[[games]]
+exe = "hollow_knight.exe"
+
+[[games]]
+exe = "Celeste.exe"
+
+[[games]]
+exe = "domekeeper.exe"
+
+# --- Cartas ------------------------------------------------------------------
+[[games]]
+exe = "Hearthstone.exe"
