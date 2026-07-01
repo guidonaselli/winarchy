@@ -30,7 +30,17 @@ New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 Add-Type -Namespace Win -Name Fg -MemberDefinition @'
 [DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
 [DllImport("user32.dll", SetLastError=true)] public static extern bool SystemParametersInfo(uint a, uint b, System.IntPtr c, uint d);
+[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, System.UIntPtr extra);
 '@
+
+function Reset-ForegroundLock {
+    # Sintetiza un tap de Alt (down/up). Windows suelta el foreground-lock cuando la
+    # sesión recibe un evento de input, dejando que komorebi complete su
+    # AllowSetForegroundWindow. Sin esto, en boots donde otra app retiene el foreground,
+    # komorebi corta a los 5 reintentos (main.rs:219) durante todo el presupuesto.
+    [Win.Fg]::keybd_event(0x12, 0, 0, [System.UIntPtr]::Zero)        # VK_MENU down
+    [Win.Fg]::keybd_event(0x12, 0, 0x2, [System.UIntPtr]::Zero)      # VK_MENU up (KEYEVENTF_KEYUP)
+}
 
 function Test-ForegroundReady {
     [bool]((Get-Process explorer -ErrorAction SilentlyContinue) -and `
@@ -86,6 +96,7 @@ while ((Get-Date) -lt $overallDeadline) {
         Start-Sleep -Milliseconds 500
     }
     [Win.Fg]::SystemParametersInfo(0x2001, 0, [System.IntPtr]::Zero, 0x3) | Out-Null
+    Reset-ForegroundLock
 
     Write-Log "intento ${attempt}: lanzando komorebi.exe"
     try {
@@ -99,7 +110,22 @@ while ((Get-Date) -lt $overallDeadline) {
     }
 
     Start-Sleep -Seconds 8
-    if (-not $p.HasExited) { Write-Log "intento ${attempt}: komorebi sigue vivo tras 8s. OK."; exit 0 }
+    if (-not $p.HasExited) {
+        Write-Log "intento ${attempt}: komorebi sigue vivo tras 8s. OK."
+        # Mitigación: en algunos boots el monitor principal (índice 0) queda enfocado en
+        # el workspace 2 (índice 1) en vez del 1. No hallamos la causa raíz; forzamos el
+        # workspace 0 del monitor principal solo en el arranque fresco. komorebic necesita
+        # el socket ya bindeado, por eso va tras la ventana de supervivencia.
+        $komorebic = Join-Path (Split-Path $exe) 'komorebic.exe'
+        if (Test-Path $komorebic) {
+            try {
+                & $komorebic focus-monitor-workspace 0 0 *> $null
+                Write-Log 'monitor principal reenfocado a workspace 0.'
+            }
+            catch { Write-Log "no pude reenfocar workspace 0: $($_.Exception.Message)" }
+        }
+        exit 0
+    }
 
     # komorebi salió rápido: preservar su stderr (el siguiente intento lo sobrescribe).
     $code = try { $p.ExitCode } catch { '?' }
