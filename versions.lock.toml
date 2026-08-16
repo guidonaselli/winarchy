@@ -34,3 +34,15 @@ ahk = "2.0.26"
 "eza-community.eza" = true
 "sharkdp.bat" = true
 "Fastfetch-cli.Fastfetch" = true
+
+[scoop]
+# Las mismas herramientas pueden venir de scoop en vez de winget. Se declaran por nombre
+# de app de scoop para que `winarchy update` actualice SOLO estas y no todo lo que tengas
+# instalado con scoop, que no es asunto de Winarchy.
+starship = true
+fzf = true
+zoxide = true
+eza = true
+bat = true
+fastfetch = true
+"JetBrainsMono-NF" = true

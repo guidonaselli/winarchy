@@ -55,9 +55,17 @@ function Invoke-WinarchyUpdate {
     }
     $results = @($results)
 
-    if (-not $Core -and (Get-Command scoop -ErrorAction SilentlyContinue)) {
-        Write-WinarchyInfo 'Updating scoop packages...'
-        scoop update *
+    $scoopUpdated = 0
+    if (-not $Core -and $lock.ContainsKey('scoop') -and (Get-Command scoop -ErrorAction SilentlyContinue)) {
+        # Solo las apps que Winarchy declara. `scoop update *` actualizaba todo lo que
+        # tuvieras instalado con scoop (ffmpeg, 7zip, lo que sea), que no es asunto nuestro.
+        $listed = scoop list 2>$null | Out-String
+        $targets = @($lock['scoop'].Keys | Where-Object { $listed -match "(?m)^\s*$([regex]::Escape($_))\s" })
+        if ($targets.Count -gt 0) {
+            Write-WinarchyInfo "Updating scoop packages declared by Winarchy: $($targets -join ', ')"
+            scoop update @targets
+            $scoopUpdated = $targets.Count
+        }
     }
 
     # Los fallos se reportan: antes se perdían en la salida de winget y un paquete que no
@@ -72,7 +80,7 @@ function Invoke-WinarchyUpdate {
     # "no instalado" sería un falso positivo — `winarchy doctor` es quien verifica
     # presencia real, por comando y no por gestor.
     foreach ($m in $missing) {
-        Write-WinarchyInfo "$($m.Id): not managed by winget here (installed from another source, or absent — see `winarchy doctor`)."
+        Write-WinarchyInfo "$($m.Id): not managed by winget here (installed from another source, or absent — check with: winarchy doctor)."
     }
 
     if ($Core) {
@@ -92,8 +100,9 @@ function Invoke-WinarchyUpdate {
     }
     Write-WinarchyUpdateNotice | Out-Null
     $updated = @($results | Where-Object { $_.Status -eq 'updated' }).Count
-    if ($failed.Count -gt 0) { Write-WinarchyErr "Update finished with $($failed.Count) failure(s); $updated package(s) updated." }
-    else { Write-WinarchyOk "Update complete: $updated package(s) updated." }
+    $summary = "$updated winget package(s) updated$(if ($scoopUpdated) { ", $scoopUpdated scoop app(s) checked" })."
+    if ($failed.Count -gt 0) { Write-WinarchyErr "Update finished with $($failed.Count) failure(s); $summary" }
+    else { Write-WinarchyOk "Update complete: $summary" }
 }
 
 function Update-WinarchyLockfile {
