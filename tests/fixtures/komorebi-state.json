@@ -1,0 +1,67 @@
+{
+  "monitors": {
+    "elements": [
+      {
+        "device": "AAA1111",
+        "device_id": "AAA1111-5&aaaaaaa&1&UID4355",
+        "name": "DISPLAY1",
+        "workspaces": {
+          "elements": [
+            {
+              "name": "1",
+              "containers": {
+                "elements": [
+                  { "id": "c1", "windows": { "elements": [
+                    { "hwnd": 1, "title": "editor", "exe": "Code.exe", "class": "Chrome_WidgetWin_1" },
+                    { "hwnd": 2, "title": "shell", "exe": "WindowsTerminal.exe", "class": "CASCADIA_HOSTING_WINDOW_CLASS" }
+                  ] } }
+                ]
+              },
+              "floating_windows": { "elements": [], "focused": 0 }
+            },
+            {
+              "name": "2",
+              "containers": {
+                "elements": [
+                  { "id": "c2", "windows": { "elements": [
+                    { "hwnd": 3, "title": "chat", "exe": "WhatsApp.Root.exe", "class": "WinUIDesktopWin32WindowClass" }
+                  ] } }
+                ]
+              },
+              "floating_windows": { "elements": [], "focused": 0 }
+            }
+          ]
+        }
+      },
+      {
+        "device": "BBB2222",
+        "device_id": "BBB2222-5&bbbbbbb&1&UID4353",
+        "name": "DISPLAY2",
+        "workspaces": {
+          "elements": [
+            {
+              "name": "A",
+              "containers": {
+                "elements": [
+                  { "id": "c3", "windows": { "elements": [
+                    { "hwnd": 4, "title": "chat", "exe": "Discord.exe", "class": "Chrome_WidgetWin_1" }
+                  ] } },
+                  { "id": "c4", "windows": { "elements": [
+                    { "hwnd": 5, "title": "game", "exe": "Hearthstone.exe", "class": "UnityWndClass" },
+                    { "hwnd": 6, "title": "browser", "exe": "Code.exe", "class": "Chrome_WidgetWin_1" }
+                  ] } }
+                ]
+              },
+              "floating_windows": { "elements": [], "focused": 0 }
+            },
+            {
+              "name": "B",
+              "containers": { "elements": [] },
+              "floating_windows": { "elements": [], "focused": 0 }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -57,6 +57,18 @@ function Invoke-WinarchyDoctor {
         $(if (-not $gameFlag) { 'game-mode off' } elseif ($anyGameRunning) { 'game-mode on with a registered game running' } else { 'flag set but no games.toml process alive' }) `
         'winarchy game-mode off'
 
+    # Una preferencia que apunta a un monitor desconectado no se aplica y hoy eso es mudo:
+    # la app aparece donde cae y parece que el stack se olvidó de la preferencia.
+    $prefs = @(Import-WinarchyWindowPrefs)
+    $orphanPrefs = @()
+    if ($prefs.Count -gt 0 -and (Test-WinarchyProcess 'komorebi')) {
+        $monitorMap = Get-WinarchyMonitorIndexMap -State (Get-WinarchyKomorebiState)
+        $orphanPrefs = @($prefs | Where-Object { -not $monitorMap.ContainsKey($_.Monitor) })
+    }
+    Add-Check 'window placements resolve' ($orphanPrefs.Count -eq 0) `
+        $(if ($prefs.Count -eq 0) { 'none saved' } elseif ($orphanPrefs.Count -eq 0) { "$($prefs.Count) placement(s) OK" } else { "monitor missing for: $($orphanPrefs.Exe -join ', ')" }) `
+        'winarchy layout list  (then re-save or: winarchy layout forget <exe>)'
+
     # --- Autostart (Scheduled Tasks At-LogOn) ----------------------------------
     $autostart = Get-WinarchyAutostartStatus
     $autoMissing = @($autostart.Keys | Where-Object { -not $autostart[$_] })

@@ -147,6 +147,7 @@ winarchy menu
 winarchy webapp install <name> <url> | remove <name> | list
 winarchy screenshot [region|window|full]
 winarchy game-mode on|off|status|add <exe>|remove <exe>
+winarchy layout save | apply | list | forget <exe>
 winarchy accent sync [--force] | status
 winarchy reload
 winarchy doctor
@@ -284,6 +285,37 @@ winarchy game-mode on
 winarchy game-mode off
 winarchy game-mode add <exe>
 ```
+
+---
+
+## Window placement memory
+
+komorebi decides where a new window lands based on what is focused at that moment, so the
+same app ends up somewhere different depending on the order you opened things. Winarchy
+lets you capture the arrangement instead of declaring it:
+
+```powershell
+winarchy layout save      # remember where every app currently lives
+winarchy layout list      # review what was captured
+winarchy layout forget <exe>
+```
+
+Preferences land in `config/windows.toml` — your machine, not the repo, so no application
+is ever hardcoded into Winarchy. They are re-applied automatically when komorebi starts
+and on every `winarchy reload`.
+
+Monitors are stored by their `device_id`, not by index: the index depends on the order
+Windows enumerates displays and changes when you reconnect or switch ports. If a saved
+monitor is not connected, that entry is skipped with a warning rather than applied to the
+wrong screen — and `winarchy doctor` reports it.
+
+By default a preference only applies the **first time** a window appears, so the app is
+born where you want it and you can still move it freely afterwards. Set `pin = true` on an
+entry to have komorebi keep returning it there.
+
+**What this does not cover:** which side of the layout a window takes. komorebi has no
+primitive to pin an app to a slot within a workspace — that is decided by the order windows
+open. For an app you always want to see the same way, give it a workspace of its own.
 
 ---
 

@@ -15,6 +15,8 @@
         'Test-WinarchyUpdateAvailable', 'Write-WinarchyUpdateNotice', 'Test-WinarchyGitCheckout',
         'Enable-WinarchyGameMode', 'Disable-WinarchyGameMode', 'Get-WinarchyGameModeStatus',
         'Add-WinarchyGame', 'Remove-WinarchyGame',
+        'Save-WinarchyWindowLayout', 'Invoke-WinarchyLayoutApply', 'Get-WinarchyWindowLayout',
+        'Remove-WinarchyWindowPref',
         'Install-WinarchyWebapp', 'Remove-WinarchyWebapp', 'Get-WinarchyWebapps',
         'Invoke-WinarchyScreenshot', 'Show-WinarchyMenu',
         'Install-WinarchyShellProfile', 'Remove-WinarchyShellProfile',

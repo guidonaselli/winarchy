@@ -17,6 +17,7 @@ config/fastfetch/config.jsonc
 # Overrides del usuario (locales a cada máquina)
 config/ahk/user.ahk
 config/pwsh/user.ps1
+config/windows.toml
 
 # Planning interno (specs/changes de OpenSpec y tooling de agentes) — no es parte del producto
 openspec/

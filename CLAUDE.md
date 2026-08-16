@@ -9,6 +9,9 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
 - Los archivos generados llevan header "managed by winarchy" y NO se editan a mano:
   se regeneran desde `templates/*.tpl` con `winarchy theme set`.
 - Personalización del usuario va en archivos override, no en los generados.
+- `config/windows.toml` (ubicación de ventanas) es dato de la máquina, no del producto:
+  gitignored y nunca con apps hardcodeadas en el repo. Las reglas de ubicación viven en el
+  proceso de komorebi, así que se reaplican al arrancarlo y en cada reload.
 - `settings.json` de Windows Terminal se modifica solo por merge quirúrgico del scheme "Winarchy".
 - Componentes core (komorebi, YASB) fijados en `versions.lock.toml`; solo `winarchy update --core` los toca.
 - Winarchy es el ÚNICO canal de updates: los auto-updaters de terceros (YASB `update_check`,

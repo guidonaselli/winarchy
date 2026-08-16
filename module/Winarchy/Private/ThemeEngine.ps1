@@ -510,6 +510,10 @@ function Invoke-WinarchyReload {
         $flow = "$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe"
         if (Test-Path $flow) { Start-Process $flow }
     }
+    # Las reglas de ubicación son runtime: un komorebi que arrancó de cero las perdió.
+    # Best-effort a propósito: no puede tumbar un reload ni disparar el rollback de
+    # `theme set`, que llama a esta función dentro de su try.
+    try { Invoke-WinarchyLayoutApply -Quiet } catch { Write-WinarchyWarn "Window placement rules not applied: $($_.Exception.Message)" }
 }
 
 function Set-WinarchyTheme {

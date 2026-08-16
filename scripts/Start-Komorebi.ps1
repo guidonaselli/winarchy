@@ -136,6 +136,14 @@ while ((Get-Date) -lt $overallDeadline) {
             }
             catch { Write-Log "no pude reenfocar workspace 0: $($_.Exception.Message)" }
         }
+        # Las reglas de ubicación de ventanas viven en el proceso de komorebi: un arranque
+        # en frío las perdió. Se reaplican acá, con el socket ya bindeado.
+        try {
+            Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'module\Winarchy\Winarchy.psd1') -Force
+            Invoke-WinarchyLayoutApply -Quiet
+            Write-Log 'reglas de ubicacion de ventanas reaplicadas.'
+        }
+        catch { Write-Log "no pude reaplicar las reglas de ubicacion: $($_.Exception.Message)" }
         exit 0
     }
 

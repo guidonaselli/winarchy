@@ -139,6 +139,97 @@ exe = "Placeholder*.exe"
     }
 }
 
+Describe 'Window placement' {
+    BeforeAll {
+        $script:State = Get-Content (Join-Path $PSScriptRoot 'fixtures\komorebi-state.json') -Raw | ConvertFrom-Json
+    }
+
+    It 'flattens the komorebi state to exe + monitor + workspace' {
+        InModuleScope Winarchy -Parameters @{ State = $script:State } {
+            param($State)
+            $p = @(Get-WinarchyWindowPlacements -State $State)
+            $p.Count | Should -Be 5
+            $discord = $p | Where-Object { $_.Exe -eq 'Discord.exe' }
+            $discord.Monitor       | Should -Be 'BBB2222-5&bbbbbbb&1&UID4353'
+            $discord.Workspace     | Should -Be 0
+            $discord.WorkspaceName | Should -Be 'A'
+
+            $whatsapp = $p | Where-Object { $_.Exe -eq 'WhatsApp.Root.exe' }
+            $whatsapp.Workspace | Should -Be 1
+            $whatsapp.Monitor   | Should -Be 'AAA1111-5&aaaaaaa&1&UID4355'
+        }
+    }
+
+    It 'keeps the first workspace when an app spans several' {
+        InModuleScope Winarchy -Parameters @{ State = $script:State } {
+            param($State)
+            # Code.exe aparece en el monitor 0/ws 0 y en el monitor 1/ws 0
+            $code = @(Get-WinarchyWindowPlacements -State $State | Where-Object { $_.Exe -eq 'Code.exe' })
+            $code.Count      | Should -Be 1
+            $code[0].Monitor | Should -Be 'AAA1111-5&aaaaaaa&1&UID4355'
+        }
+    }
+
+    It 'maps device_id to monitor index' {
+        InModuleScope Winarchy -Parameters @{ State = $script:State } {
+            param($State)
+            $map = Get-WinarchyMonitorIndexMap -State $State
+            $map['AAA1111-5&aaaaaaa&1&UID4355'] | Should -Be 0
+            $map['BBB2222-5&bbbbbbb&1&UID4353'] | Should -Be 1
+            $map.ContainsKey('NOPE')             | Should -BeFalse
+        }
+    }
+
+    It 'round-trips preferences through the repo TOML parser' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            New-Item -ItemType Directory -Path (Join-Path $TestDrive 'config') -Force | Out-Null
+            $prefs = @(
+                [pscustomobject]@{ Exe = 'Discord.exe'; Monitor = 'BBB2222-5&b&1&UID1'; Workspace = 2; WorkspaceName = 'A'; Pin = $false }
+                [pscustomobject]@{ Exe = 'Code.exe';    Monitor = 'AAA1111-5&a&1&UID2'; Workspace = 0; WorkspaceName = '1'; Pin = $true }
+            )
+            Export-WinarchyWindowPrefs -Pref $prefs
+            $back = @(Import-WinarchyWindowPrefs)
+            $back.Count | Should -Be 2
+            $discord = $back | Where-Object { $_.Exe -eq 'Discord.exe' }
+            $discord.Workspace | Should -Be 2
+            $discord.Monitor   | Should -Be 'BBB2222-5&b&1&UID1'
+            $discord.Pin       | Should -BeFalse
+            ($back | Where-Object { $_.Exe -eq 'Code.exe' }).Pin | Should -BeTrue
+        }
+    }
+
+    It 'returns an empty array when no preferences file exists' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { Join-Path $TestDrive 'nowhere' }
+            @(Import-WinarchyWindowPrefs).Count | Should -Be 0
+        }
+    }
+
+    It 'forgetting an entry leaves the others intact' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            New-Item -ItemType Directory -Path (Join-Path $TestDrive 'config') -Force | Out-Null
+            Export-WinarchyWindowPrefs -Pref @(
+                [pscustomobject]@{ Exe = 'Discord.exe'; Monitor = 'M1'; Workspace = 0; WorkspaceName = 'A'; Pin = $false }
+                [pscustomobject]@{ Exe = 'Code.exe';    Monitor = 'M2'; Workspace = 1; WorkspaceName = '1'; Pin = $false }
+            )
+            Remove-WinarchyWindowPref -Exe 'Discord'
+            $back = @(Import-WinarchyWindowPrefs)
+            $back.Count   | Should -Be 1
+            $back[0].Exe  | Should -Be 'Code.exe'
+        }
+    }
+
+    It 'excludes games and ignore-rule exes from capture' {
+        InModuleScope Winarchy {
+            $skip = Get-WinarchyUnplaceableExes
+            $skip | Should -Contain 'Hearthstone.exe'
+            $skip | Should -Contain 'Flow.Launcher.exe'
+        }
+    }
+}
+
 Describe 'games.toml (shipped)' {
     It 'parses and every entry carries an exe' {
         InModuleScope Winarchy {
