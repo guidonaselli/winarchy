@@ -1,11 +1,14 @@
 # Versiones fijadas de los componentes core de Winarchy.
 # `winarchy update` NO actualiza estos componentes; solo `winarchy update --core`
 # los actualiza (y reescribe este archivo) tras revisar changelogs.
-# Fijado el 2026-06-09.
+# Fijado el 2026-06-09. Último repaso de dependencias: 2026-08-16
+# (komorebi 0.1.41 y Flow 2.1.3 ya estaban al día; YASB 2.0.2 -> 2.0.6, ShareX 20.2 -> 21.0,
+#  starship, zoxide y fastfetch al último. Changelogs de YASB y ShareX sin breaking changes
+#  que nos afecten: el widget removido de YASB es AI Chat, que no usamos.)
 
 [core]
 komorebi = "0.1.41"
-yasb = "2.0.2"
+yasb = "2.0.6"
 
 [winget]
 # id de winget -> requerido (true = lo instala install.ps1)

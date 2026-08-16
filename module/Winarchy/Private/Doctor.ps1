@@ -117,6 +117,15 @@ function Invoke-WinarchyDoctor {
     Add-Check 'komorebi at lockfile version' $verOk $verDetail `
         'winarchy update --core  (or reinstall the pinned version)'
 
+    # YASB también está pinneado en el lockfile pero no se verificaba: se quedó en 2.0.2
+    # mientras el upstream iba por 2.0.6 y nada lo reportaba (winget oculta los pins).
+    $yasbProc = Get-Process -Name 'yasb' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $yasbInstalled = if ($yasbProc) { $yasbProc.MainModule.FileVersionInfo.ProductVersion } else { $null }
+    $yasbOk = $yasbInstalled -eq $lock['core']['yasb']
+    Add-Check 'YASB at lockfile version' $yasbOk `
+        $(if ($yasbInstalled) { "installed=$yasbInstalled lockfile=$($lock['core']['yasb'])" } else { 'YASB not running; cannot read its version' }) `
+        'winarchy update --core  (or reinstall the pinned version)'
+
     # --- Dueños de hotkeys duplicados ----------------------------------------------
     $whkd = Test-WinarchyProcess 'whkd'
     Add-Check 'no duplicate hotkey owners (whkd)' (-not $whkd) `
