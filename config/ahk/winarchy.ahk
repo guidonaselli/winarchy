@@ -46,19 +46,39 @@ WinarchyTerminal(args) {
     Run('wt.exe pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "' WinarchyPs1 '" ' args)
 }
 
+FlowWindow := 'Flow.Launcher ahk_exe Flow.Launcher.exe'
+
 ToggleFlow() {
-    ; Flow Launcher es single-instance: relanzarlo togglea la ventana de búsqueda.
-    ; La instancia en background no siempre puede tomar el foreground (lock de
-    ; Windows), así que AHK activa la ventana para que el foco quede en el query.
+    ; Flow Launcher es single-instance: relanzarlo togglea la ventana de búsqueda. No
+    ; expone CLI ni IPC para togglear, así que relanzar el exe es la única vía.
+    ; Devuelve el hwnd con el foco puesto, o 0 si esta pulsación ocultó la ventana.
+    global FlowWindow
     flow := EnvGet('LOCALAPPDATA') '\FlowLauncher\Flow.Launcher.exe'
     if !FileExist(flow)
-        return
+        return 0
+    ; Si la ventana ya está visible, esta pulsación la oculta: no hay nada que esperar
+    ; ni activar, y quedarnos en el WinWait bloquearía el hotkey el timeout entero.
+    closing := WinExist(FlowWindow)
     Run('"' flow '"')
-    hwnd := WinWait('Flow.Launcher ahk_exe Flow.Launcher.exe', , 2)
-    ; Cuando el toggle OCULTA la ventana, puede desaparecer entre el WinWait
-    ; y el WinActivate: en ese caso no hay nada que activar.
-    if hwnd
+    if closing
+        return 0
+    ; Tras el logon Flow sigue indexando programas y tarda bastante más que los 2 s que
+    ; esperábamos antes: se vencía el WinWait, no se activaba nada y la primera pulsación
+    ; del día se sentía muerta.
+    hwnd := WinWait(FlowWindow, , 5)
+    if !hwnd
+        return 0
+    ; La instancia en background no siempre puede tomar el foreground (lock de Windows):
+    ; reintentar la activación hasta que el foco quede realmente en el query box.
+    loop 10 {
+        if !WinExist('ahk_id ' hwnd)
+            return 0
         try WinActivate('ahk_id ' hwnd)
+        if WinActive('ahk_id ' hwnd)
+            return hwnd
+        Sleep(30)
+    }
+    return 0
 }
 
 ToggleFlowApps() {
@@ -66,21 +86,11 @@ ToggleFlowApps() {
     ; (Identity.ps1) agrega "app" como ActionKeyword extra del plugin Program de Flow, así
     ; que esto queda scoped a solo programas instalados — paridad con el Apps de Walker en
     ; Omarchy, sin curar una lista a mano.
-    flow := EnvGet('LOCALAPPDATA') '\FlowLauncher\Flow.Launcher.exe'
-    if !FileExist(flow)
+    if !ToggleFlow()
         return
-    Run('"' flow '"')
-    hwnd := WinWait('Flow.Launcher ahk_exe Flow.Launcher.exe', , 2)
-    if hwnd {
-        try WinActivate('ahk_id ' hwnd)
-        ; solo tipear si la activación realmente puso el foco en Flow (si falló,
-        ; el foco sigue en lo que estaba antes y no hay que mandarle texto)
-        if WinActive('ahk_id ' hwnd) {
-            Sleep(50)
-            Send('^a')
-            SendText('app ')
-        }
-    }
+    Sleep(50)
+    Send('^a')
+    SendText('app ')
 }
 
 DefaultBrowser() {
