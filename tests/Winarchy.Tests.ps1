@@ -264,11 +264,41 @@ Describe 'Window placement' {
         }
     }
 
-    It 'excludes games and ignore-rule exes from capture' {
+    # Hermético a propósito: config/komorebi/komorebi.json es generado y gitignored, así
+    # que en un checkout limpio no existe. Apoyarse en él hacía pasar el test solo en una
+    # máquina con el stack ya instalado.
+    It 'excludes both games.toml entries and komorebi ignore-rule exes' {
         InModuleScope Winarchy {
-            $skip = Get-WinarchyUnplaceableExes
-            $skip | Should -Contain 'Hearthstone.exe'
-            $skip | Should -Contain 'Flow.Launcher.exe'
+            Mock Get-WinarchyRoot { $TestDrive }
+            New-Item -ItemType Directory -Path (Join-Path $TestDrive 'config\komorebi') -Force | Out-Null
+            Set-Content (Join-Path $TestDrive 'games.toml') -Value @'
+[[games]]
+exe = "Hearthstone.exe"
+
+[[launchers]]
+exe = "Steam.exe"
+'@
+            Set-Content (Join-Path $TestDrive 'config\komorebi\komorebi.json') -Value @'
+{ "ignore_rules": [
+    { "kind": "Exe", "id": "Flow.Launcher.exe", "matching_strategy": "Equals" },
+    { "kind": "Class", "id": "#32770", "matching_strategy": "Equals" }
+] }
+'@
+            $skip = @(Get-WinarchyUnplaceableExes)
+            $skip | Should -Contain 'Hearthstone.exe'      # [[games]]
+            $skip | Should -Contain 'Steam.exe'            # [[launchers]]
+            $skip | Should -Contain 'Flow.Launcher.exe'    # ignore_rules
+            $skip | Should -Not -Contain '#32770'          # solo las reglas de tipo Exe
+        }
+    }
+
+    It 'survives a missing komorebi.json (clean checkout)' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            New-Item -ItemType Directory -Path $TestDrive -Force | Out-Null
+            Set-Content (Join-Path $TestDrive 'games.toml') -Value "[[games]]`nexe = `"Hearthstone.exe`""
+            { Get-WinarchyUnplaceableExes } | Should -Not -Throw
+            @(Get-WinarchyUnplaceableExes) | Should -Contain 'Hearthstone.exe'
         }
     }
 }
