@@ -30,4 +30,7 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
 
 ## Workflow
 - Spec-driven con OpenSpec (`openspec/`, local y no versionado). Cambios no triviales: proposal primero.
-- Validar PowerShell con `[System.Management.Automation.Language.Parser]::ParseFile` antes de commitear.
+- Antes de commitear: `.\tests\Invoke-WinarchyChecks.ps1` (parseo de todo el PowerShell + Pester).
+  Lo mismo corre en CI (`.github/workflows/ci.yml`). Requiere Pester 5+.
+- `bin\winarchy.cmd` debe quedar en CRLF (`.gitattributes` lo fuerza): con LF, cmd.exe no
+  parsea los bloques `if (...) else (...)`.

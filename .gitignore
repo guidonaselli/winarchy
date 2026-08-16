@@ -21,3 +21,4 @@ config/pwsh/user.ps1
 # Planning interno (specs/changes de OpenSpec y tooling de agentes) — no es parte del producto
 openspec/
 .claude/
+.memsearch/

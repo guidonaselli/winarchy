@@ -15,6 +15,8 @@ sync con el tag.
 
 ## Pasos para publicar una versión
 
+0. **Checks en verde**: `.\tests\Invoke-WinarchyChecks.ps1` (parseo + Pester). Es lo mismo
+   que corre CI; una release no sale con el gate en rojo.
 1. **Bump** de `ModuleVersion` en `Winarchy.psd1` (semver: MAJOR.MINOR.PATCH).
 2. Commit en `main` con el changelog del cambio.
 3. **Tag**: `git tag -a vX.Y.Z -m "winarchy vX.Y.Z"` y `git push origin vX.Y.Z`.

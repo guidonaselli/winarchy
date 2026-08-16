@@ -1,0 +1,20 @@
+name: ci
+
+on:
+  push:
+    branches: [main, release]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Pester
+        shell: pwsh
+        run: Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Syntax + tests
+        shell: pwsh
+        run: .\tests\Invoke-WinarchyChecks.ps1
