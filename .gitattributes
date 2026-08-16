@@ -1,0 +1,8 @@
+* text=auto
+
+# cmd.exe no parsea batch con finales LF (rompe los bloques if/else): forzar CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+*.png binary
+*.ico binary
