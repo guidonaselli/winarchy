@@ -510,10 +510,6 @@ function Invoke-WinarchyReload {
         $flow = "$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe"
         if (Test-Path $flow) { Start-Process $flow }
     }
-    # Las reglas de ubicación son runtime: un komorebi que arrancó de cero las perdió.
-    # Best-effort a propósito: no puede tumbar un reload ni disparar el rollback de
-    # `theme set`, que llama a esta función dentro de su try.
-    try { Invoke-WinarchyLayoutApply -Quiet } catch { Write-WinarchyWarn "Window placement rules not applied: $($_.Exception.Message)" }
 }
 
 function Set-WinarchyTheme {
@@ -570,6 +566,8 @@ function Set-WinarchyTheme {
     foreach ($t in $targets) {
         $tpl = Join-Path $root "templates\$($t.Template)"
         $rendered = Invoke-WinarchyTemplate -TemplatePath $tpl -Context $ctx
+        # Las preferencias de ubicación van dentro del config: por runtime no sobreviven al reload.
+        if ($t.Template -eq 'komorebi.json.tpl') { $rendered = Add-WinarchyWindowRulesToKomorebiJson -Json $rendered }
         $stagedFile = Join-Path $staging (Split-Path $t.Output -Leaf)
         Set-Content -Path $stagedFile -Value $rendered -Encoding UTF8 -NoNewline
         switch ($t.Validate) {

@@ -96,6 +96,7 @@ function Update-WinarchyKomorebiRules {
     $theme = Import-WinarchyToml -Path (Join-Path $themeDir 'theme.toml')
     $ctx = Build-WinarchyThemeContext -Theme $theme -ThemeDir $themeDir
     $rendered = Invoke-WinarchyTemplate -TemplatePath (Join-Path $root 'templates\komorebi.json.tpl') -Context $ctx
+    $rendered = Add-WinarchyWindowRulesToKomorebiJson -Json $rendered
     $rendered | ConvertFrom-Json | Out-Null
     Set-Content -Path (Join-Path $root 'config\komorebi\komorebi.json') -Value $rendered -Encoding UTF8 -NoNewline
     if (Test-WinarchyProcess 'komorebi') { komorebic reload-configuration 2>$null | Out-Null }

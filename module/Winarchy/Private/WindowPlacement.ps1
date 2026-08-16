@@ -14,6 +14,45 @@ function Get-WinarchyKomorebiState {
     $raw | ConvertFrom-Json
 }
 
+function Add-WinarchyWindowRulesToKomorebiJson {
+    <#
+      Inyecta las preferencias de ubicación como `initial_workspace_rules` dentro del
+      komorebi.json generado.
+
+      Van en el config y no por `komorebic initial-workspace-rule` porque las reglas de
+      runtime NO sobreviven a un reload: cuando komorebi.json cambia de verdad, el reload
+      las limpia en un momento indeterminado posterior, así que aplicarlas y verificar es
+      una carrera que se pierde seguido. Dentro del config, el reload las aplica.
+
+      El índice de monitor se resuelve contra el estado vivo (las preferencias guardan
+      device_id). Sin komorebi corriendo no hay a qué resolver: se devuelve el JSON tal
+      cual y las reglas entran en la próxima regeneración.
+    #>
+    param([Parameter(Mandatory)][string]$Json)
+    $prefs = @(Import-WinarchyWindowPrefs)
+    if ($prefs.Count -eq 0) { return $Json }
+    if (-not (Test-WinarchyProcess 'komorebi')) { return $Json }
+    try { $map = Get-WinarchyMonitorIndexMap -State (Get-WinarchyKomorebiState) }
+    catch { return $Json }
+
+    $config = $Json | ConvertFrom-Json
+    foreach ($pref in $prefs) {
+        if (-not $map.ContainsKey($pref.Monitor)) { continue }
+        $monitor = $config.monitors[$map[$pref.Monitor]]
+        if (-not $monitor -or $pref.Workspace -ge @($monitor.workspaces).Count) { continue }
+        $workspace = $monitor.workspaces[$pref.Workspace]
+        $key = if ($pref.Pin) { 'workspace_rules' } else { 'initial_workspace_rules' }
+        $rule = [pscustomobject]@{ kind = 'Exe'; id = $pref.Exe; matching_strategy = 'Equals' }
+        if ($workspace.PSObject.Properties[$key]) {
+            $workspace.$key = @($workspace.$key) + $rule
+        }
+        else {
+            $workspace | Add-Member -NotePropertyName $key -NotePropertyValue @($rule)
+        }
+    }
+    $config | ConvertTo-Json -Depth 50
+}
+
 function Get-WinarchyWindowPlacements {
     <# Aplana el estado de komorebi a (Exe, Monitor, Workspace, WorkspaceName).
        El monitor se identifica por device_id: el índice depende del orden en que Windows
@@ -137,11 +176,11 @@ function Save-WinarchyWindowLayout {
     }
     Export-WinarchyWindowPrefs -Pref $prefs
     Write-WinarchyOk "Layout saved: $added new, $updated updated ($($prefs.Count) total) → $(Get-WinarchyWindowPrefsPath)"
+    Write-WinarchyInfo 'Apply it with: winarchy layout apply'
 }
 
 function Invoke-WinarchyLayoutApply {
-    <# Traduce las preferencias a reglas de komorebi. Best-effort: nunca debe tumbar un
-       reload ni un `theme set`. #>
+    <# Regenera komorebi.json con las preferencias adentro y lo recarga. #>
     param([switch]$Quiet)
     $prefs = @(Import-WinarchyWindowPrefs)
     if ($prefs.Count -eq 0) {
@@ -153,31 +192,13 @@ function Invoke-WinarchyLayoutApply {
         return
     }
     $map = Get-WinarchyMonitorIndexMap -State (Get-WinarchyKomorebiState)
-    $resolved = @($prefs | Where-Object { $map.ContainsKey($_.Monitor) })
-    $skipped = @($prefs | Where-Object { -not $map.ContainsKey($_.Monitor) })
-
-    # Limpiar antes de aplicar: las reglas se agregan, no se reemplazan, así que sin esto
-    # cada reload acumula reglas contradictorias. clear-workspace-rules es por
-    # monitor+workspace, no global.
-    $touched = @{}
-    foreach ($pref in $resolved) {
-        $key = "$($map[$pref.Monitor]),$($pref.Workspace)"
-        if (-not $touched.ContainsKey($key)) {
-            $touched[$key] = $true
-            komorebic clear-workspace-rules $map[$pref.Monitor] $pref.Workspace 2>$null | Out-Null
-        }
-    }
-    foreach ($pref in $resolved) {
-        # initial: la ventana nace donde el usuario la dejó y después la mueve libremente.
-        # La permanente la devolvería a su sitio cada vez, que es una jaula, no una preferencia.
-        $verb = if ($pref.Pin) { 'workspace-rule' } else { 'initial-workspace-rule' }
-        komorebic $verb exe $pref.Exe $map[$pref.Monitor] $pref.Workspace 2>$null | Out-Null
-    }
-    foreach ($pref in $skipped) {
+    foreach ($pref in @($prefs | Where-Object { -not $map.ContainsKey($_.Monitor) })) {
         Write-WinarchyWarn "'$($pref.Exe)': monitor '$($pref.Monitor)' not connected; rule skipped."
     }
+    Update-WinarchyKomorebiRules
     if (-not $Quiet) {
-        Write-WinarchyOk "$($resolved.Count) window rule(s) applied$(if ($skipped.Count) { ", $($skipped.Count) skipped" })."
+        $applied = @($prefs | Where-Object { $map.ContainsKey($_.Monitor) }).Count
+        Write-WinarchyOk "$applied window placement rule(s) written to komorebi.json and reloaded."
     }
 }
 

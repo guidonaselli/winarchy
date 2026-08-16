@@ -221,6 +221,38 @@ Describe 'Window placement' {
         }
     }
 
+    It 'injects the rules into the generated komorebi.json' {
+        InModuleScope Winarchy -Parameters @{ State = $script:State } {
+            param($State)
+            Mock Get-WinarchyRoot { $TestDrive }
+            Mock Test-WinarchyProcess { $true }
+            Mock Get-WinarchyKomorebiState { $State }
+            New-Item -ItemType Directory -Path (Join-Path $TestDrive 'config') -Force | Out-Null
+            Export-WinarchyWindowPrefs -Pref @(
+                [pscustomobject]@{ Exe = 'Discord.exe'; Monitor = 'BBB2222-5&bbbbbbb&1&UID4353'; Workspace = 0; WorkspaceName = 'A'; Pin = $false }
+                [pscustomobject]@{ Exe = 'Code.exe';    Monitor = 'AAA1111-5&aaaaaaa&1&UID4355'; Workspace = 1; WorkspaceName = '2'; Pin = $true }
+                [pscustomobject]@{ Exe = 'Ghost.exe';   Monitor = 'NOT-CONNECTED';               Workspace = 0; WorkspaceName = 'X'; Pin = $false }
+            )
+            $base = '{"monitors":[{"workspaces":[{"name":"1"},{"name":"2"}]},{"workspaces":[{"name":"A"}]}]}'
+            $out = Add-WinarchyWindowRulesToKomorebiJson -Json $base | ConvertFrom-Json
+
+            # initial por default, en el monitor/workspace correctos
+            $out.monitors[1].workspaces[0].initial_workspace_rules.id | Should -Be 'Discord.exe'
+            # pin = true usa la regla permanente
+            $out.monitors[0].workspaces[1].workspace_rules.id | Should -Be 'Code.exe'
+            # un monitor ausente no debe caer en otra pantalla
+            ($out | ConvertTo-Json -Depth 20) | Should -Not -Match 'Ghost.exe'
+        }
+    }
+
+    It 'leaves the json untouched when komorebi is not running' {
+        InModuleScope Winarchy {
+            Mock Test-WinarchyProcess { $false }
+            $base = '{"monitors":[{"workspaces":[{"name":"1"}]}]}'
+            Add-WinarchyWindowRulesToKomorebiJson -Json $base | Should -Be $base
+        }
+    }
+
     It 'excludes games and ignore-rule exes from capture' {
         InModuleScope Winarchy {
             $skip = Get-WinarchyUnplaceableExes

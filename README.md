@@ -301,8 +301,10 @@ winarchy layout forget <exe>
 ```
 
 Preferences land in `config/windows.toml` — your machine, not the repo, so no application
-is ever hardcoded into Winarchy. They are re-applied automatically when komorebi starts
-and on every `winarchy reload`.
+is ever hardcoded into Winarchy. `winarchy layout apply` bakes them into the generated
+`komorebi.json`, so they survive reloads and cold starts. Runtime rules
+(`komorebic workspace-rule`) are deliberately not used: a config reload wipes those at an
+indeterminate point afterwards.
 
 Monitors are stored by their `device_id`, not by index: the index depends on the order
 Windows enumerates displays and changes when you reconnect or switch ports. If a saved
