@@ -89,7 +89,7 @@ function Invoke-WinarchyDoctor {
     foreach ($t in Get-WinarchyThemes) {
         try {
             $data = Import-WinarchyToml -Path (Join-Path (Get-WinarchyThemesDir) "$t\theme.toml")
-            $missing = Test-WinarchyThemeData -Theme $data
+            $missing = @(Test-WinarchyThemeData -Theme $data)
             if ($missing.Count -gt 0) { $themesOk = $false; $themesDetail += "$t (missing: $($missing -join ','))" }
         }
         catch { $themesOk = $false; $themesDetail += "$t (does not parse)" }

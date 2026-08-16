@@ -53,7 +53,7 @@ function Disable-WinarchyGameMode {
 
 function Get-WinarchyGameModeStatus {
     $flag = Test-Path (Get-WinarchyGameModeFlag)
-    $games = Get-WinarchyGames
+    $games = @(Get-WinarchyGames)
     [pscustomobject]@{
         Active     = $flag
         GamesCount = $games.Count
@@ -67,7 +67,7 @@ function Get-WinarchyGames {
        para komorebi y AHK las dos secciones significan lo mismo (no tilear + estado de
        game-mode), la separación es solo documental. #>
     $gamesToml = Join-Path (Get-WinarchyRoot) 'games.toml'
-    if (-not (Test-Path $gamesToml)) { return , @() }
+    if (-not (Test-Path $gamesToml)) { return }
     $data = Import-WinarchyToml -Path $gamesToml
     $list = @(
         foreach ($section in @('games', 'launchers')) {
@@ -81,7 +81,10 @@ function Get-WinarchyGames {
             }
         }
     ) | Sort-Object -Unique
-    , @($list)
+    # Sin `, @(...)`: eso preserva el array al asignar pero lo emite como UN objeto al
+    # pipear, así que `@(Get-WinarchyGames).Count` daba 1 en vez de la cantidad real.
+    # Los llamadores envuelven con @().
+    $list
 }
 
 function Update-WinarchyKomorebiRules {
@@ -166,7 +169,7 @@ function Add-WinarchyGame {
     param([Parameter(Mandatory)][string]$Exe)
     if ($Exe -notlike '*.exe') { $Exe = "$Exe.exe" }
     $gamesToml = Join-Path (Get-WinarchyRoot) 'games.toml'
-    $existing = Get-WinarchyGames
+    $existing = @(Get-WinarchyGames)
     if ($existing -contains $Exe) {
         Write-WinarchyInfo "'$Exe' was already in games.toml."
         Update-WinarchyQuickAccentExclusion -Exe $Exe

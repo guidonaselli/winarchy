@@ -28,7 +28,8 @@ function Show-WinarchyHelp {
     webapp list               List installed webapps
     screenshot [region|window|full]   Capture via ShareX (default: region)
     game-mode on|off|status   Manual game mode (AHK also enables it on its own)
-    layout save               Remember where each app currently lives (monitor+workspace)
+    layout save [exe]         Remember where each app currently lives (monitor+workspace)
+                              (one exe if given; --dry-run to preview without saving)
     layout apply              Re-apply the saved placement rules to komorebi
     layout list               Show saved placements (* = monitor not connected)
     layout forget <exe>       Drop a saved placement
@@ -124,7 +125,11 @@ function Invoke-Winarchy {
         'layout' {
             $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'list' }
             switch ($sub) {
-                'save' { Save-WinarchyWindowLayout }
+                'save' {
+                    $target = @($rest | Select-Object -Skip 1 | Where-Object { $_ -notlike '-*' }) | Select-Object -First 1
+                    Save-WinarchyWindowLayout -Exe $target `
+                        -WhatIf:($rest -contains '--dry-run' -or $rest -contains '-WhatIf')
+                }
                 'apply' { Invoke-WinarchyLayoutApply }
                 'list' { Get-WinarchyWindowLayout }
                 'forget' {

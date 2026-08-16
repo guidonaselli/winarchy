@@ -153,12 +153,25 @@ function Export-WinarchyWindowPrefs {
 
 function Save-WinarchyWindowLayout {
     <# Captura la disposición actual. Mergea aditivo: guardar con media sesión abierta no
-       debe borrar las preferencias de apps que en ese momento no estaban corriendo. #>
+       debe borrar las preferencias de apps que en ese momento no estaban corriendo.
+       -Exe captura una sola app; -WhatIf muestra qué se guardaría sin escribir. #>
+    param([string]$Exe, [switch]$WhatIf)
+    if ($Exe -and $Exe -notlike '*.exe') { $Exe = "$Exe.exe" }
     $state = Get-WinarchyKomorebiState
-    $skip = Get-WinarchyUnplaceableExes
-    $live = @(Get-WinarchyWindowPlacements -State $state | Where-Object { $skip -notcontains $_.Exe })
+    $skip = @(Get-WinarchyUnplaceableExes)
+    $live = @(Get-WinarchyWindowPlacements -State $state |
+        Where-Object { $skip -notcontains $_.Exe } |
+        Where-Object { -not $Exe -or $_.Exe -ieq $Exe })
     if ($live.Count -eq 0) {
-        Write-WinarchyWarn 'No managed windows to capture.'
+        if ($Exe) { Write-WinarchyWarn "'$Exe' is not a managed window right now." }
+        else { Write-WinarchyWarn 'No managed windows to capture.' }
+        return
+    }
+    if ($WhatIf) {
+        Write-WinarchyInfo 'Would save:'
+        foreach ($p in ($live | Sort-Object Exe)) {
+            Write-Host ("    {0,-34} workspace {1} ({2})" -f $p.Exe, $p.Workspace, $p.WorkspaceName)
+        }
         return
     }
     $prefs = @(Import-WinarchyWindowPrefs)

@@ -45,7 +45,9 @@ function Test-WinarchyThemeData {
             if (-not $Theme['borders'].ContainsKey($k)) { $missing.Add("borders.$k") }
         }
     }
-    , $missing
+    # Sin la coma: envuelta, `@(Test-WinarchyThemeData ...)` daba un array con la List
+    # adentro y .Count siempre valía 1. Los llamadores envuelven con @().
+    $missing
 }
 
 function Get-WinarchyGameIgnoreRulesJson {
@@ -534,7 +536,7 @@ function Set-WinarchyTheme {
 
     # 1. Validación — falla ANTES de modificar nada
     $theme = Import-WinarchyToml -Path $themeToml
-    $missing = Test-WinarchyThemeData -Theme $theme
+    $missing = @(Test-WinarchyThemeData -Theme $theme)
     if ($missing.Count -gt 0) {
         throw "Invalid theme.toml for '$Name'. Missing keys: $($missing -join ', ')"
     }

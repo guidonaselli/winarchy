@@ -122,7 +122,7 @@ exe = "steam.exe"
 exe = "Placeholder*.exe"
 '@
             Mock Get-WinarchyRoot { $TestDrive }
-            $games = Get-WinarchyGames
+            $games = @(Get-WinarchyGames)
             $games | Should -Contain 'steam.exe'
             $games | Should -Contain 'Hades.exe'
             $games | Should -Not -Contain 'Placeholder*.exe'
@@ -133,8 +133,19 @@ exe = "Placeholder*.exe"
     It 'returns an empty array when games.toml is absent' {
         InModuleScope Winarchy {
             Mock Get-WinarchyRoot { Join-Path $TestDrive 'nowhere' }
-            , (Get-WinarchyGames) | Should -BeOfType [array]
-            (Get-WinarchyGames).Count | Should -Be 0
+            @(Get-WinarchyGames).Count | Should -Be 0
+        }
+    }
+
+    # Regresión: con `return , @($list)` la función emitía el array como UN objeto al
+    # pipear, así que @(...).Count daba 1 y Where-Object recibía todo junto. Andaba solo
+    # por accidente de cómo PowerShell compara un array contra un string.
+    It 'survives being piped and counted' {
+        InModuleScope Winarchy {
+            $direct = @(Get-WinarchyGames)
+            $direct.Count | Should -BeGreaterThan 10
+            @(Get-WinarchyGames | Where-Object { $_ -like '*.exe' }).Count | Should -Be $direct.Count
+            @(foreach ($g in (Get-WinarchyGames)) { $g }).Count           | Should -Be $direct.Count
         }
     }
 }
