@@ -117,14 +117,29 @@ function Invoke-WinarchyDoctor {
     Add-Check 'komorebi at lockfile version' $verOk $verDetail `
         'winarchy update --core  (or reinstall the pinned version)'
 
-    # YASB también está pinneado en el lockfile pero no se verificaba: se quedó en 2.0.2
-    # mientras el upstream iba por 2.0.6 y nada lo reportaba (winget oculta los pins).
-    $yasbProc = Get-Process -Name 'yasb' -ErrorAction SilentlyContinue | Select-Object -First 1
-    $yasbInstalled = if ($yasbProc) { $yasbProc.MainModule.FileVersionInfo.ProductVersion } else { $null }
-    $yasbOk = $yasbInstalled -eq $lock['core']['yasb']
-    Add-Check 'YASB at lockfile version' $yasbOk `
-        $(if ($yasbInstalled) { "installed=$yasbInstalled lockfile=$($lock['core']['yasb'])" } else { 'YASB not running; cannot read its version' }) `
-        'winarchy update --core  (or reinstall the pinned version)'
+    # Todo lo pinneado se verifica. Antes solo se miraba komorebi, así que YASB se quedó
+    # cuatro versiones atrás sin que nada lo dijera (winget oculta los paquetes pinneados).
+    foreach ($pinned in @(
+        @{ Name = 'YASB'; Key = 'yasb'; Path = (Get-Command yasb -ErrorAction SilentlyContinue).Source },
+        @{ Name = 'Flow Launcher'; Key = 'flow'; Path = "$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe" },
+        @{ Name = 'AutoHotkey v2'; Key = 'ahk'; Path = Get-WinarchyAhkExe }
+    )) {
+        $found = $pinned.Path -and (Test-Path $pinned.Path)
+        $installed = if ($found) { (Get-Item $pinned.Path).VersionInfo.ProductVersion } else { $null }
+        # Flow reporta 4 componentes (2.1.3.0) contra el 2.1.3 del lockfile
+        $matchesLock = $installed -and $installed.StartsWith($lock['core'][$pinned.Key])
+        Add-Check "$($pinned.Name) at lockfile version" ([bool]$matchesLock) `
+            $(if ($installed) { "installed=$installed lockfile=$($lock['core'][$pinned.Key])" } else { 'not found on disk' }) `
+            'winarchy update --core  (or reinstall the pinned version)'
+    }
+
+    # ShareX no se verificaba y de él dependen cinco hotkeys, `winarchy screenshot` y la
+    # creación de webapps: sin él esos atajos fallan en silencio.
+    $sharex = @("$env:ProgramFiles\ShareX\ShareX.exe", "${env:ProgramFiles(x86)}\ShareX\ShareX.exe") |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
+    Add-Check 'ShareX installed' ([bool]$sharex) `
+        $(if ($sharex) { "screenshots, screen recording and webapps — $((Get-Item $sharex).VersionInfo.ProductVersion)" } else { 'missing: SUPER+Shift+S/W/P/V/G and `winarchy screenshot` will fail' }) `
+        'winget install ShareX.ShareX'
 
     # --- Dueños de hotkeys duplicados ----------------------------------------------
     $whkd = Test-WinarchyProcess 'whkd'

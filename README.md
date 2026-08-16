@@ -159,9 +159,14 @@ Winarchy is the single update channel; third-party auto-updaters (YASB, Flow) ar
 
 | Command | Updates | How |
 | --- | --- | --- |
-| `winarchy update` | third-party apps (winget + scoop) | core pinned out via `winget pin`; also warns if a new Winarchy release exists |
-| `winarchy update --core` | komorebi / YASB (pinned core) | unpins, upgrades, repins, rewrites `versions.lock.toml` |
+| `winarchy update` | the packages Winarchy declares in `versions.lock.toml`, plus scoop | reports the outcome per package; warns if a core or Winarchy update is available |
+| `winarchy update --core` | pinned core: komorebi / YASB / Flow Launcher / AutoHotkey | unpins, upgrades, repins, rewrites `versions.lock.toml` |
 | `winarchy update --self` | Winarchy itself (CLI, templates, configs, AHK, themes) | `git pull --ff-only origin release` + idempotent migration (`install.ps1`, mode preserved) |
+
+`winarchy update` deliberately touches only what Winarchy declares, not every package on
+the machine: the stack owns its own dependencies, not your unrelated apps. Core components
+are pinned because the stack depends on their concrete behaviour, so a major release never
+lands without someone reading the changelog first.
 
 The version check is best-effort (GitHub Releases API), cached 6 h, and never blocks the
 flow. `winarchy doctor` shows installed vs latest release. Self-update only runs on a git

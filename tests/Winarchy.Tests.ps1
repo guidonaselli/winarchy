@@ -344,6 +344,45 @@ Describe 'versions.lock.toml' {
     }
 }
 
+Describe 'Keybindings documentation' {
+    # docs/keybindings.md se desincronizó del .ahk: SUPER+Shift+V y +G (grabación de
+    # pantalla) vivieron sin documentar. Este test compara la fuente con la doc.
+    BeforeAll {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk')
+        $script:Doc = Get-Content (Join-Path $script:Root 'docs\keybindings.md') -Raw
+        # Las teclas de dígito y las flechas están colapsadas a propósito en la doc
+        # (SUPER+1..9, SUPER+←/→/↑/↓), así que se verifican por su forma colapsada.
+        $collapsed = '^([1-9]|Left|Right|Up|Down)$'
+        $script:Hotkeys = foreach ($line in $ahk) {
+            if ($line -notmatch '^#(?<mods>[!+^]*)(?<key>[^:\s]+)::') { continue }
+            if ($Matches['key'] -match $collapsed) { continue }
+            $label = 'SUPER'
+            if ($Matches['mods'] -like '*!*') { $label += '+Alt' }
+            if ($Matches['mods'] -like '*^*') { $label += '+Ctrl' }
+            if ($Matches['mods'] -like '*+*') { $label += '+Shift' }
+            # AHK acepta Enter y Return como la misma tecla; la doc usa Return (convención
+            # heredada de Omarchy/Hyprland).
+            $key = $Matches['key'] -replace '^Enter$', 'Return'
+            "$label+$key"
+        }
+    }
+
+    It 'finds hotkeys to check' {
+        @($script:Hotkeys).Count | Should -BeGreaterThan 15
+    }
+
+    It 'documents every SUPER hotkey defined in winarchy.ahk' {
+        $undocumented = @($script:Hotkeys | Where-Object { $script:Doc -notmatch [regex]::Escape($_) })
+        $undocumented -join ', ' | Should -BeNullOrEmpty
+    }
+
+    It 'documents the collapsed workspace and direction ranges' {
+        foreach ($range in 'SUPER+1..9', 'SUPER+Shift+1..9') {
+            $script:Doc | Should -Match ([regex]::Escape($range))
+        }
+    }
+}
+
 Describe 'Module manifest' {
     It 'exports every function the CLI dispatcher calls' {
         $manifest = Test-ModuleManifest (Join-Path $script:Root 'module\Winarchy\Winarchy.psd1')

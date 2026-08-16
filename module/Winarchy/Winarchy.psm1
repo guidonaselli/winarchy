@@ -19,7 +19,8 @@ function Show-WinarchyHelp {
     theme list                List installed themes (* = active)
     theme preview [name]      Render synthetic preview cards (all themes by default)
     theme gallery             Visual theme picker (WPF grid)
-    update [--core]           Update winget+scoop; --core also komorebi/YASB
+    update [--core]           Update the packages Winarchy declares (+ scoop)
+                              --core: the pinned ones (komorebi/YASB/Flow/AHK)
                               (único canal de updates: YASB/Flow tienen su auto-update off)
     update --self             Update Winarchy itself (git pull release + migration)
     menu                      Navigable menu (themes, screenshots, game-mode, ...)

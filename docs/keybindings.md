@@ -65,12 +65,14 @@ manual app list: Flow already indexes installed programs.
 | `SUPER+,` / `SUPER+.` | Focus previous / next monitor |
 | `SUPER+Shift+,` / `SUPER+Shift+.` | Move window to previous / next monitor |
 
-## Screenshots (ShareX)
+## Screenshots and screen recording (ShareX)
 | Keybinding | Action |
 |---|---|
 | `SUPER+Shift+S` | Region capture |
 | `SUPER+Shift+W` | Active window capture |
 | `SUPER+Shift+P` | Full screen capture |
+| `SUPER+Shift+V` | Screen recording |
+| `SUPER+Shift+G` | GIF recording |
 
 ## Themes
 | Keybinding | Action |

@@ -28,7 +28,12 @@ Write-Host "`n== Winarchy install ==" -ForegroundColor Cyan
 $startup = [Environment]::GetFolderPath('Startup')
 $snapshot = New-WinarchySnapshot -Label 'pre-install' -Path @(
     $startup,
-    "$env:LOCALAPPDATA\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json"
+    "$env:LOCALAPPDATA\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json",
+    # Overrides del usuario: son locales y gitignored, así que un reinstall o un checkout
+    # limpio se los lleva puestos sin dejar rastro si no se respaldan acá.
+    (Join-Path $Root 'config\windows.toml'),
+    (Join-Path $Root 'config\ahk\user.ahk'),
+    (Join-Path $Root 'config\pwsh\user.ps1')
 )
 Write-WinarchyOk "Snapshot previo: $snapshot"
 

@@ -9,6 +9,11 @@
 [core]
 komorebi = "0.1.41"
 yasb = "2.0.6"
+# Flow y AHK también van pinneados: el stack depende de su comportamiento concreto
+# (ToggleFlow relanza el exe de Flow; AHK es el dueño único de hotkeys), así que un major
+# suyo no debe entrar por `winarchy update` sin que alguien lea el changelog.
+flow = "2.1.3"
+ahk = "2.0.26"
 
 [winget]
 # id de winget -> requerido (true = lo instala install.ps1)
@@ -19,7 +24,10 @@ yasb = "2.0.6"
 "ShareX.ShareX" = true
 "Microsoft.WindowsTerminal" = true
 "DEVCOM.JetBrainsMonoNerdFont" = true
-# Herramientas del terminal profile (no core, sin pin: siguen su último release)
+# Herramientas del terminal profile (no core, sin pin: siguen su último release).
+# Algunas pueden venir de scoop en vez de winget; en ese caso las actualiza el paso de
+# scoop de `winarchy update`, y quien verifica que estén es `doctor`, que las busca por
+# comando y no por gestor.
 "Starship.Starship" = true
 "junegunn.fzf" = true
 "ajeetdsouza.zoxide" = true
