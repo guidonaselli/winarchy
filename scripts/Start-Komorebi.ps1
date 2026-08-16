@@ -73,6 +73,18 @@ foreach ($stale in @('komorebi.sock', 'komorebi.hwnd.json')) {
     }
 }
 
+# El estado de game-mode es por sesión: las session-float-rules murieron con komorebi.
+# Si el flag sobrevive al reboot, AHK arranca creyéndose en juego y deja el AccentWatch
+# inerte para siempre, sin señal visible.
+$stateDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'state'
+foreach ($stale in @('game-mode.flag', 'game-mode-floated')) {
+    $f = Join-Path $stateDir $stale
+    if (Test-Path $f) {
+        Remove-Item $f -Force -ErrorAction SilentlyContinue
+        Write-Log "limpiado estado de sesión stale: $stale"
+    }
+}
+
 # Presupuesto total para que el escritorio asiente y komorebi quede arriba. Cubre el
 # caso de desbloqueo rápido, donde el foreground tarda en existir.
 $overallDeadline = (Get-Date).AddMinutes(5)

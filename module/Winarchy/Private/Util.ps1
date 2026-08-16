@@ -1,5 +1,7 @@
 # Util.ps1 — paths, logging, backups y motor de templates de Winarchy
 
+$script:WinarchySnapshotKeep = 10
+
 function Get-WinarchyRoot {
     # Private/ -> Winarchy/ -> module/ -> <repo>
     (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
@@ -67,6 +69,13 @@ function New-WinarchySnapshot {
             Copy-Item -Path $p -Destination (Join-Path $dest $leaf) -Recurse -Force
         }
     }
+    # Poda por label: `theme set` (y `theme next` en hotkey) crea un snapshot por
+    # invocación. Se conservan los N más recientes de ESTE label para que una ráfaga
+    # de cambios de theme no desaloje snapshots de otra clase (ej. los de install).
+    Get-ChildItem -Path (Get-WinarchyBackupsDir) -Directory -Filter "*-$Label" |
+        Sort-Object Name -Descending |
+        Select-Object -Skip $script:WinarchySnapshotKeep |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     $dest
 }
 

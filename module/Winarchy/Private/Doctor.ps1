@@ -11,8 +11,13 @@ function Invoke-WinarchyDoctor {
     # --- Procesos core vivos -------------------------------------------------
     Add-Check 'komorebi running' (Test-WinarchyProcess 'komorebi') `
         'tiling window manager' 'komorebic start'
-    Add-Check 'YASB running' (Test-WinarchyProcess 'yasb') `
-        'status bar' 'yasbc start  (or launch YASB from the Start Menu)'
+    # Un solo proceso yasb: con >1 vivo, cada uno mantiene su suscripción al named pipe
+    # de komorebi y las barras pelean el foco mandando FocusWorkspaceNumber(0) — el
+    # sintoma es "salto al workspace 1" al minimizar o abrir un juego.
+    $yasbCount = @(Get-Process -Name 'yasb' -ErrorAction SilentlyContinue).Count
+    Add-Check 'YASB running (single instance)' ($yasbCount -eq 1) `
+        $(if ($yasbCount -eq 0) { 'status bar down' } elseif ($yasbCount -eq 1) { 'status bar' } else { "$yasbCount yasb processes — duplicate komorebi subscribers" }) `
+        $(if ($yasbCount -gt 1) { 'winarchy reload  (kill+start leaves a single subscriber)' } else { 'yasbc start  (or launch YASB from the Start Menu)' })
     # Primero por PID file (winarchy.ahk lo escribe al arrancar; CommandLine depende
     # de WMI/CIM, que no está disponible en todos los entornos)
     $ahkAlive = $false
@@ -30,6 +35,27 @@ function Invoke-WinarchyDoctor {
         'sole hotkey owner' "AutoHotkey64.exe `"$root\config\ahk\winarchy.ahk`""
     Add-Check 'Flow Launcher running' (Test-WinarchyProcess 'Flow.Launcher') `
         'launcher' "& `"$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe`""
+
+    # --- Estado de sesión stale ------------------------------------------------
+    # komorebi.sock es AF_UNIX: si komorebi crasheó, el archivo queda y el próximo
+    # arranque no bindea hasta limpiarlo (komorebi "offline al boot, no levanta solo").
+    $sock = Join-Path $env:LOCALAPPDATA 'komorebi\komorebi.sock'
+    $staleSock = (Test-Path $sock) -and -not (Test-WinarchyProcess 'komorebi')
+    Add-Check 'no stale komorebi socket' (-not $staleSock) `
+        $(if ($staleSock) { "$sock left behind by a dirty exit" } else { 'clean' }) `
+        'Remove-Item "$env:LOCALAPPDATA\komorebi\komorebi.sock"; then .\scripts\Start-Komorebi.ps1'
+
+    # game-mode.flag es estado de sesión: si sobrevive a un crash/reboot, AHK arranca
+    # creyéndose en juego y deja el AccentWatch inerte sin ninguna señal visible.
+    $gameFlag = Test-Path (Get-WinarchyGameModeFlag)
+    $anyGameRunning = $false
+    if ($gameFlag) {
+        $running = (Get-Process -ErrorAction SilentlyContinue).ProcessName
+        $anyGameRunning = $null -ne (Get-WinarchyGames | Where-Object { $running -contains ($_ -replace '\.exe$') })
+    }
+    Add-Check 'no orphan game-mode flag' (-not ($gameFlag -and -not $anyGameRunning)) `
+        $(if (-not $gameFlag) { 'game-mode off' } elseif ($anyGameRunning) { 'game-mode on with a registered game running' } else { 'flag set but no games.toml process alive' }) `
+        'winarchy game-mode off'
 
     # --- Autostart (Scheduled Tasks At-LogOn) ----------------------------------
     $autostart = Get-WinarchyAutostartStatus

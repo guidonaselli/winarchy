@@ -36,6 +36,12 @@ function ConvertFrom-WinarchyToml {
             $key = if ($Matches['qkey']) { $Matches['qkey'] } else { $Matches['key'] }
             $raw = $Matches['val'].Trim()
 
+            # Formas no soportadas: sin este guard caen al fallback de valor desnudo y
+            # se guardan como string basura ('["x"' para un array inline) en vez de fallar.
+            if ($raw -match '^[\[\{]' -or $raw.StartsWith('"""') -or $raw.StartsWith("'''")) {
+                throw "Unsupported TOML value for key '$key': $raw"
+            }
+
             if ($raw -match '^"(?<s>(?:[^"\\]|\\.)*)"') {
                 $value = $Matches['s'] -replace '\\"', '"' -replace '\\\\', '\'
             }
