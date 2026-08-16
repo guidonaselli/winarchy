@@ -50,23 +50,8 @@ function Test-WinarchyThemeData {
 
 function Get-WinarchyGameIgnoreRulesJson {
     <# Fragmento JSON de ignore-rules de komorebi generado desde games.toml. #>
-    $gamesToml = Join-Path (Get-WinarchyRoot) 'games.toml'
-    if (-not (Test-Path $gamesToml)) { return '' }
-    $data = Import-WinarchyToml -Path $gamesToml
-    $exes = [System.Collections.Generic.List[string]]::new()
-    foreach ($section in @('games', 'launchers')) {
-        if ($data.ContainsKey($section)) {
-            foreach ($entry in $data[$section]) {
-                if ($entry.ContainsKey('exe') -and $entry['exe'] -notlike '*`**') {
-                    $exe = $entry['exe']
-                    if ($exe -notlike '*.exe') { $exe = "$exe.exe" }
-                    $exes.Add($exe)
-                }
-            }
-        }
-    }
     $fragment = ''
-    foreach ($exe in ($exes | Sort-Object -Unique)) {
+    foreach ($exe in (Get-WinarchyGames)) {
         $fragment += ",`n    { `"kind`": `"Exe`", `"id`": `"$exe`", `"matching_strategy`": `"Equals`" }"
     }
     $fragment

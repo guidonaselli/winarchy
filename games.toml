@@ -9,7 +9,10 @@
 # no coincide con ningún proceso, simplemente no hace nada (no rompe). Se evitan
 # nombres genéricos (javaw.exe, hl2.exe, ShooterGame.exe) que matchearían apps no-juego.
 
-# --- Lanzadores: overlays/splash/clientes que tampoco deben tilearse ----------
+# --- Lanzadores y ventanas no-juego que tampoco deben tilearse ----------------
+[[launchers]]
+exe = "steam.exe"
+
 [[launchers]]
 exe = "steamwebhelper.exe"
 
@@ -30,6 +33,9 @@ exe = "EADesktop.exe"
 
 [[launchers]]
 exe = "upc.exe"                       # Ubisoft Connect
+
+[[launchers]]
+exe = "rustdesk.exe"                  # escritorio remoto: la sesión no debe tilearse
 
 # --- Utilidades / ventanitas que conviene flotar -----------------------------
 [[games]]
@@ -201,6 +207,12 @@ exe = "RocketLeague.exe"
 [[games]]
 exe = "re9.exe"                      # Resident Evil
 
+[[games]]
+exe = "re4.exe"                      # Resident Evil 4 Remake
+
+[[games]]
+exe = "Palworld-Win64-Shipping.exe"
+
 # --- Battle royale / party ---------------------------------------------------
 [[games]]
 exe = "FallGuys_client_game.exe"
@@ -226,6 +238,12 @@ exe = "Celeste.exe"
 
 [[games]]
 exe = "domekeeper.exe"
+
+[[games]]
+exe = "StarVaders.exe"
+
+[[games]]
+exe = "Sephiria.exe"
 
 # --- Cartas ------------------------------------------------------------------
 [[games]]

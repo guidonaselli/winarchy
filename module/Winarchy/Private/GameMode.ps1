@@ -63,14 +63,25 @@ function Get-WinarchyGameModeStatus {
 }
 
 function Get-WinarchyGames {
+    <# Exes de games.toml, normalizados con .exe y sin duplicados. Incluye [[launchers]]:
+       para komorebi y AHK las dos secciones significan lo mismo (no tilear + estado de
+       game-mode), la separación es solo documental. #>
     $gamesToml = Join-Path (Get-WinarchyRoot) 'games.toml'
-    if (-not (Test-Path $gamesToml)) { return @() }
+    if (-not (Test-Path $gamesToml)) { return , @() }
     $data = Import-WinarchyToml -Path $gamesToml
-    $list = @()
-    if ($data.ContainsKey('games')) {
-        $list = @($data['games'] | ForEach-Object { $_['exe'] } | Where-Object { $_ -and $_ -notlike '*`**' })
-    }
-    , $list
+    $list = @(
+        foreach ($section in @('games', 'launchers')) {
+            if ($data.ContainsKey($section)) {
+                foreach ($entry in $data[$section]) {
+                    $exe = $entry['exe']
+                    if (-not $exe -or $exe -like '*`**') { continue }
+                    if ($exe -notlike '*.exe') { $exe = "$exe.exe" }
+                    $exe
+                }
+            }
+        }
+    ) | Sort-Object -Unique
+    , @($list)
 }
 
 function Update-WinarchyKomorebiRules {
