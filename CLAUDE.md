@@ -9,6 +9,9 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
 - Los archivos generados llevan header "managed by winarchy" y NO se editan a mano:
   se regeneran desde `templates/*.tpl` con `winarchy theme set`.
 - Personalización del usuario va en archivos override, no en los generados.
+- El reconciliador de slots (`scripts/Start-WindowSlots.ps1`) es lo único que reordena
+  containers solo: corrige cuando aparece una ventana y aprende cuando la movés vos. No
+  registra hotkeys ni tray propio.
 - `config/windows.toml` (ubicación de ventanas) es dato de la máquina, no del producto:
   gitignored y nunca con apps hardcodeadas en el repo. Sus reglas se inyectan DENTRO del
   komorebi.json generado; no usar `komorebic workspace-rule` por runtime, que un reload

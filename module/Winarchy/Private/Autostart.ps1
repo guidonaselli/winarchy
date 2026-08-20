@@ -11,7 +11,7 @@ $script:WinarchyTaskFolder = 'Winarchy'
 
 function Get-WinarchyAutostartComponents {
     <#
-      Definición de los 3 componentes de autostart. Devuelve solo los presentes
+      Definición de los componentes de autostart. Devuelve solo los presentes
       (ejecutable encontrado). Cada item: Key, TaskName, LnkName, Exe, Arguments.
     #>
     $root = Get-WinarchyRoot
@@ -47,6 +47,21 @@ function Get-WinarchyAutostartComponents {
         $items.Add([pscustomobject]@{
             Key = 'yasb'; TaskName = 'yasb'; LnkName = 'Winarchy YASB.lnk'
             Exe = $yasb; Arguments = 'start'; Delay = 'PT5S'
+        })
+    }
+
+    # El reconciliador de slots vive con el mismo patrón que komorebi: un host oculto
+    # corriendo el launcher, que espera a komorebi y se re-suscribe cuando vuelve. A
+    # diferencia de Start-Komorebi.ps1 necesita pwsh: carga el módulo, que usa sintaxis de
+    # PowerShell 7 y no parsea en Windows PowerShell 5.1.
+    $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+    if ($komorebiExe -and $pwsh) {
+        $slots = Join-Path $root 'scripts\Start-WindowSlots.ps1'
+        $items.Add([pscustomobject]@{
+            Key = 'window-slots'; TaskName = 'window-slots'; LnkName = 'Winarchy window slots.lnk'
+            Exe = $pwsh
+            Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$slots`""
+            Delay = 'PT10S'
         })
     }
 
@@ -144,7 +159,7 @@ function New-WinarchyTaskXml {
 
 function Register-WinarchyAutostart {
     <#
-      Registra el autostart de komorebi/YASB/AHK como Scheduled Tasks At-LogOn del
+      Registra el autostart de los componentes del stack como Scheduled Tasks At-LogOn del
       usuario actual, delay 0, sin elevar y solo en sesión interactiva. Migra borrando
       primero los .lnk legacy de Startup. Idempotente. Si el registro de una tarea
       falla, cae al .lnk en Startup para ese componente.
@@ -154,7 +169,7 @@ function Register-WinarchyAutostart {
     $user = "$env:USERDOMAIN\$env:USERNAME"
     $components = Get-WinarchyAutostartComponents
     if ($components.Count -eq 0) {
-        Write-WinarchyWarn 'Autostart: ningún componente instalado (komorebi/YASB/AHK).'
+        Write-WinarchyWarn 'Autostart: ningún componente instalado.'
         return
     }
 

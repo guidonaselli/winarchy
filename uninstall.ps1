@@ -33,6 +33,7 @@ function Invoke-Step {
 }
 
 Invoke-Step 'Detener komorebi, YASB y el AHK de Winarchy' {
+    Stop-WinarchyWindowSlots
     if (Get-Process -Name komorebi -ErrorAction SilentlyContinue) { komorebic stop 2>$null | Out-Null }
     Stop-Process -Name yasb -Force -ErrorAction SilentlyContinue
     Get-Process -Name 'AutoHotkey*' -ErrorAction SilentlyContinue |

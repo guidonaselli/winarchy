@@ -5,13 +5,18 @@
 function Get-WinarchyWindowPrefsPath { Join-Path (Get-WinarchyRoot) 'config\windows.toml' }
 
 function Get-WinarchyKomorebiState {
-    <# Estado vivo de komorebi como objeto. Falla claro si komorebi no está corriendo. #>
+    <# Estado vivo de komorebi como objeto. Falla claro si komorebi no está corriendo.
+       Reintenta: consultado justo después de reordenar, komorebi puede tardar más de lo que
+       komorebic espera y contestar vacío (o con un timeout de socket) aunque esté sano. #>
     if (-not (Test-WinarchyProcess 'komorebi')) {
         throw 'komorebi is not running; there is no live state to read.'
     }
-    $raw = & komorebic state 2>$null | Out-String
-    if (-not $raw.Trim()) { throw 'komorebic state returned nothing.' }
-    $raw | ConvertFrom-Json
+    foreach ($attempt in 1, 2, 3) {
+        $raw = Invoke-WinarchyKomorebic state
+        if ($raw.Trim()) { return $raw | ConvertFrom-Json }
+        Start-Sleep -Milliseconds (300 * $attempt)
+    }
+    throw 'komorebic state returned nothing after 3 attempts.'
 }
 
 function Add-WinarchyWindowRulesToKomorebiJson {
@@ -54,7 +59,8 @@ function Add-WinarchyWindowRulesToKomorebiJson {
 }
 
 function Get-WinarchyWindowPlacements {
-    <# Aplana el estado de komorebi a (Exe, Monitor, Workspace, WorkspaceName).
+    <# Aplana el estado de komorebi a (Exe, Monitor, Workspace, WorkspaceName, Slot).
+       Slot es el índice del container dentro del workspace: la posición del tile.
        El monitor se identifica por device_id: el índice depende del orden en que Windows
        enumera las pantallas y cambia al reconectar o cambiar de puerto.
        Si una app tiene ventanas en más de un workspace, gana la primera. #>
@@ -64,7 +70,9 @@ function Get-WinarchyWindowPlacements {
         $index = -1
         foreach ($workspace in $monitor.workspaces.elements) {
             $index++
+            $slot = -1
             foreach ($container in $workspace.containers.elements) {
+                $slot++
                 foreach ($window in $container.windows.elements) {
                     if (-not $window.exe) { continue }
                     if (-not $seen.Add($window.exe)) { continue }
@@ -73,6 +81,7 @@ function Get-WinarchyWindowPlacements {
                         Monitor       = $monitor.device_id
                         Workspace     = $index
                         WorkspaceName = $workspace.name
+                        Slot          = $slot
                         Pin           = $false
                     }
                 }
@@ -127,6 +136,7 @@ function Import-WinarchyWindowPrefs {
             Monitor       = $entry['monitor']
             Workspace     = [int]$entry['workspace']
             WorkspaceName = if ($entry.ContainsKey('workspace_name')) { $entry['workspace_name'] } else { '' }
+            Slot          = if ($entry.ContainsKey('slot')) { [int]$entry['slot'] } else { $null }
             Pin           = $entry.ContainsKey('pin') -and $entry['pin']
         }
     }
@@ -139,6 +149,7 @@ function Export-WinarchyWindowPrefs {
     $lines.Add('# Se captura con `winarchy layout save` y se reproduce con `winarchy layout apply`.')
     $lines.Add('# El monitor va por device_id porque el índice cambia al reconectar pantallas.')
     $lines.Add('# `pin = true` fija la ventana permanentemente en vez de solo al abrirla.')
+    $lines.Add('# `slot` es la posición del tile dentro del workspace (0 = el primero).')
     foreach ($p in ($Pref | Sort-Object Exe)) {
         $lines.Add('')
         $lines.Add('[[windows]]')
@@ -146,6 +157,7 @@ function Export-WinarchyWindowPrefs {
         $lines.Add("monitor = `"$($p.Monitor)`"")
         $lines.Add("workspace = $($p.Workspace)")
         if ($p.WorkspaceName) { $lines.Add("workspace_name = `"$($p.WorkspaceName)`"") }
+        if ($null -ne $p.Slot) { $lines.Add("slot = $($p.Slot)") }
         if ($p.Pin) { $lines.Add('pin = true') }
     }
     Set-Content -Path (Get-WinarchyWindowPrefsPath) -Value ($lines -join "`r`n") -Encoding UTF8 -NoNewline
@@ -170,7 +182,7 @@ function Save-WinarchyWindowLayout {
     if ($WhatIf) {
         Write-WinarchyInfo 'Would save:'
         foreach ($p in ($live | Sort-Object Exe)) {
-            Write-Host ("    {0,-34} workspace {1} ({2})" -f $p.Exe, $p.Workspace, $p.WorkspaceName)
+            Write-Host ("    {0,-34} workspace {1} ({2}), slot {3}" -f $p.Exe, $p.Workspace, $p.WorkspaceName, $p.Slot)
         }
         return
     }
@@ -230,7 +242,8 @@ function Get-WinarchyWindowLayout {
         $where = if ($map.ContainsKey($pref.Monitor)) { "monitor $($map[$pref.Monitor])" } else { 'monitor NOT CONNECTED' }
         $name = if ($pref.WorkspaceName) { " ($($pref.WorkspaceName))" } else { '' }
         $pin = if ($pref.Pin) { ' [pinned]' } else { '' }
-        Write-Host ("  {0,-34} {1}, workspace {2}{3}{4}" -f $pref.Exe, $where, $pref.Workspace, $name, $pin)
+        $slot = if ($null -ne $pref.Slot) { ", slot $($pref.Slot)" } else { '' }
+        Write-Host ("  {0,-34} {1}, workspace {2}{3}{4}{5}" -f $pref.Exe, $where, $pref.Workspace, $name, $slot, $pin)
     }
 }
 

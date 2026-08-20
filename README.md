@@ -147,7 +147,7 @@ winarchy menu
 winarchy webapp install <name> <url> | remove <name> | list
 winarchy screenshot [region|window|full]
 winarchy game-mode on|off|status|add <exe>|remove <exe>
-winarchy layout save | apply | list | forget <exe>
+winarchy layout save | apply | order | list | forget <exe>
 winarchy accent sync [--force] | status
 winarchy reload
 winarchy doctor
@@ -300,7 +300,7 @@ same app ends up somewhere different depending on the order you opened things. W
 lets you capture the arrangement instead of declaring it:
 
 ```powershell
-winarchy layout save      # remember where every app currently lives
+winarchy layout save      # remember where every app currently lives (monitor, workspace, tile)
 winarchy layout list      # review what was captured
 winarchy layout forget <exe>
 ```
@@ -320,9 +320,39 @@ By default a preference only applies the **first time** a window appears, so the
 born where you want it and you can still move it freely afterwards. Set `pin = true` on an
 entry to have komorebi keep returning it there.
 
-**What this does not cover:** which side of the layout a window takes. komorebi has no
-primitive to pin an app to a slot within a workspace — that is decided by the order windows
-open. For an app you always want to see the same way, give it a workspace of its own.
+### Tile position (slots)
+
+The workspace is only half the answer: within it, komorebi orders windows by insertion, so
+whichever app opens first takes the main tile. `winarchy layout save` also records the tile
+position of each window as a `slot` (0 = the first tile), and a background reconciler keeps
+it that way:
+
+```powershell
+winarchy layout order     # put every window back in its saved slot, right now
+```
+
+The reconciler reacts to komorebi's own events, and what it does depends on who moved the
+window:
+
+| What happened | What it does |
+| --- | --- |
+| A window appears in the workspace | Puts the windows back in their saved slots |
+| **You** move a window | **Learns it** — the new position becomes the saved slot |
+
+So a workspace with Discord pinned to `slot = 0` keeps Discord on the left whatever you open
+next to it, and the day you decide Discord belongs on the right, you just move it and that
+sticks. Nothing to re-run.
+
+Only the slot is learned: the monitor, the workspace and `pin` stay as they were, and an app
+without a saved preference never gets one just for being moved.
+
+To opt out, delete the `slot` line from that entry in `config/windows.toml` — an entry with
+no slot is never reordered. The reconciler runs as its own hidden process, started at logon
+alongside the rest of the stack; `winarchy doctor` reports it when there are slots to keep,
+and its log lives in `%LOCALAPPDATA%\winarchy\window-slots.log`.
+
+**What this does not cover:** geometry. Slots fix the *order* of the tiles, not their size —
+how wide each tile is stays a komorebi layout decision.
 
 ---
 

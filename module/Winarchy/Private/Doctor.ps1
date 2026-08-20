@@ -35,6 +35,13 @@ function Invoke-WinarchyDoctor {
         'sole hotkey owner' "AutoHotkey64.exe `"$root\config\ahk\winarchy.ahk`""
     Add-Check 'Flow Launcher running' (Test-WinarchyProcess 'Flow.Launcher') `
         'launcher' "& `"$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe`""
+    # Solo importa si hay slots declarados: sin ellos el daemon no tendría nada que hacer.
+    $slotPrefs = @(Import-WinarchyWindowPrefs | Where-Object { $null -ne $_.Slot })
+    if ($slotPrefs.Count -gt 0) {
+        Add-Check 'window slots daemon running' (Test-WinarchyWindowSlots) `
+            "keeps $($slotPrefs.Count) window(s) in their tile position" `
+            'winarchy reload   (or run scripts\Start-WindowSlots.ps1 hidden)'
+    }
 
     # --- Estado de sesión stale ------------------------------------------------
     # komorebi.sock es AF_UNIX: si komorebi crasheó, el archivo queda y el próximo
@@ -72,7 +79,7 @@ function Invoke-WinarchyDoctor {
     # --- Autostart (Scheduled Tasks At-LogOn) ----------------------------------
     $autostart = Get-WinarchyAutostartStatus
     $autoMissing = @($autostart.Keys | Where-Object { -not $autostart[$_] })
-    Add-Check 'autostart registered (komorebi/YASB/AHK)' ($autoMissing.Count -eq 0) `
+    Add-Check 'autostart registered' ($autoMissing.Count -eq 0) `
         $(if ($autoMissing) { "missing: $($autoMissing -join ', ')" } else { 'At-LogOn tasks present' }) `
         '.\install.ps1 -Activate  (registers the At-LogOn tasks)'
 

@@ -160,3 +160,30 @@ public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwPro
     if (-not $proc) { return $null }
     "$($proc.ProcessName).exe"
 }
+
+function Invoke-WinarchyKomorebic {
+    <#
+      Corre komorebic sin abrir una ventana de consola y devuelve su stdout.
+
+      `& komorebic ...` desde un proceso sin consola propia (el daemon de slots corre oculto)
+      hace que Windows le asigne una consola nueva a cada invocación: una ventana que komorebi
+      tilea por un instante. Para el reconciliador eso es una realimentación —ve aparecer una
+      ventana, reconcilia, y al reconciliar abre otra—, así que acá se lanza el proceso con
+      CreateNoWindow y stdout redirigido.
+    #>
+    param([Parameter(Mandatory, ValueFromRemainingArguments)][string[]]$Arguments)
+    $exe = (Get-Command komorebic -ErrorAction SilentlyContinue).Source
+    if (-not $exe) { throw 'komorebic not found in PATH.' }
+    $info = [System.Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = $exe
+    foreach ($argument in $Arguments) { $info.ArgumentList.Add($argument) }
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $process = [System.Diagnostics.Process]::Start($info)
+    $out = $process.StandardOutput.ReadToEnd()
+    $null = $process.StandardError.ReadToEnd()
+    $process.WaitForExit()
+    $out
+}

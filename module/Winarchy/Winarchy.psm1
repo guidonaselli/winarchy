@@ -29,9 +29,10 @@ function Show-WinarchyHelp {
     webapp list               List installed webapps
     screenshot [region|window|full]   Capture via ShareX (default: region)
     game-mode on|off|status   Manual game mode (AHK also enables it on its own)
-    layout save [exe]         Remember where each app currently lives (monitor+workspace)
+    layout save [exe]         Remember where each app currently lives (monitor+workspace+slot)
                               (one exe if given; --dry-run to preview without saving)
     layout apply              Re-apply the saved placement rules to komorebi
+    layout order              Move every window to its saved slot (tile position)
     layout list               Show saved placements (* = monitor not connected)
     layout forget <exe>       Drop a saved placement
     game-mode add <exe>       Register a game (no tiling/hotkeys, excluded from Quick Accent)
@@ -132,12 +133,13 @@ function Invoke-Winarchy {
                         -WhatIf:($rest -contains '--dry-run' -or $rest -contains '-WhatIf')
                 }
                 'apply' { Invoke-WinarchyLayoutApply }
+                'order' { $null = Invoke-WinarchySlotReconcile }
                 'list' { Get-WinarchyWindowLayout }
                 'forget' {
                     if ($rest.Count -lt 2) { throw 'Usage: winarchy layout forget <exe>' }
                     Remove-WinarchyWindowPref -Exe $rest[1]
                 }
-                default { throw "Unknown subcommand: layout $sub (save|apply|list|forget)" }
+                default { throw "Unknown subcommand: layout $sub (save|apply|order|list|forget)" }
             }
         }
         'accent' {

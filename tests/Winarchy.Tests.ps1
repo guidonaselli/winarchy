@@ -196,8 +196,8 @@ Describe 'Window placement' {
             Mock Get-WinarchyRoot { $TestDrive }
             New-Item -ItemType Directory -Path (Join-Path $TestDrive 'config') -Force | Out-Null
             $prefs = @(
-                [pscustomobject]@{ Exe = 'Discord.exe'; Monitor = 'BBB2222-5&b&1&UID1'; Workspace = 2; WorkspaceName = 'A'; Pin = $false }
-                [pscustomobject]@{ Exe = 'Code.exe';    Monitor = 'AAA1111-5&a&1&UID2'; Workspace = 0; WorkspaceName = '1'; Pin = $true }
+                [pscustomobject]@{ Exe = 'Discord.exe'; Monitor = 'BBB2222-5&b&1&UID1'; Workspace = 2; WorkspaceName = 'A'; Slot = 0; Pin = $false }
+                [pscustomobject]@{ Exe = 'Code.exe';    Monitor = 'AAA1111-5&a&1&UID2'; Workspace = 0; WorkspaceName = '1'; Slot = $null; Pin = $true }
             )
             Export-WinarchyWindowPrefs -Pref $prefs
             $back = @(Import-WinarchyWindowPrefs)
@@ -206,6 +206,8 @@ Describe 'Window placement' {
             $discord.Workspace | Should -Be 2
             $discord.Monitor   | Should -Be 'BBB2222-5&b&1&UID1'
             $discord.Pin       | Should -BeFalse
+            $discord.Slot      | Should -Be 0
+            ($back | Where-Object { $_.Exe -eq 'Code.exe' }).Slot | Should -BeNullOrEmpty
             ($back | Where-Object { $_.Exe -eq 'Code.exe' }).Pin | Should -BeTrue
         }
     }
@@ -222,8 +224,8 @@ Describe 'Window placement' {
             Mock Get-WinarchyRoot { $TestDrive }
             New-Item -ItemType Directory -Path (Join-Path $TestDrive 'config') -Force | Out-Null
             Export-WinarchyWindowPrefs -Pref @(
-                [pscustomobject]@{ Exe = 'Discord.exe'; Monitor = 'M1'; Workspace = 0; WorkspaceName = 'A'; Pin = $false }
-                [pscustomobject]@{ Exe = 'Code.exe';    Monitor = 'M2'; Workspace = 1; WorkspaceName = '1'; Pin = $false }
+                [pscustomobject]@{ Exe = 'Discord.exe'; Monitor = 'M1'; Workspace = 0; WorkspaceName = 'A'; Slot = $null; Pin = $false }
+                [pscustomobject]@{ Exe = 'Code.exe';    Monitor = 'M2'; Workspace = 1; WorkspaceName = '1'; Slot = $null; Pin = $false }
             )
             Remove-WinarchyWindowPref -Exe 'Discord'
             $back = @(Import-WinarchyWindowPrefs)
@@ -240,9 +242,9 @@ Describe 'Window placement' {
             Mock Get-WinarchyKomorebiState { $State }
             New-Item -ItemType Directory -Path (Join-Path $TestDrive 'config') -Force | Out-Null
             Export-WinarchyWindowPrefs -Pref @(
-                [pscustomobject]@{ Exe = 'Discord.exe'; Monitor = 'BBB2222-5&bbbbbbb&1&UID4353'; Workspace = 0; WorkspaceName = 'A'; Pin = $false }
-                [pscustomobject]@{ Exe = 'Code.exe';    Monitor = 'AAA1111-5&aaaaaaa&1&UID4355'; Workspace = 1; WorkspaceName = '2'; Pin = $true }
-                [pscustomobject]@{ Exe = 'Ghost.exe';   Monitor = 'NOT-CONNECTED';               Workspace = 0; WorkspaceName = 'X'; Pin = $false }
+                [pscustomobject]@{ Exe = 'Discord.exe'; Monitor = 'BBB2222-5&bbbbbbb&1&UID4353'; Workspace = 0; WorkspaceName = 'A'; Slot = 0;     Pin = $false }
+                [pscustomobject]@{ Exe = 'Code.exe';    Monitor = 'AAA1111-5&aaaaaaa&1&UID4355'; Workspace = 1; WorkspaceName = '2'; Slot = $null; Pin = $true }
+                [pscustomobject]@{ Exe = 'Ghost.exe';   Monitor = 'NOT-CONNECTED';               Workspace = 0; WorkspaceName = 'X'; Slot = $null; Pin = $false }
             )
             $base = '{"monitors":[{"workspaces":[{"name":"1"},{"name":"2"}]},{"workspaces":[{"name":"A"}]}]}'
             $out = Add-WinarchyWindowRulesToKomorebiJson -Json $base | ConvertFrom-Json
@@ -422,5 +424,214 @@ Describe 'Module manifest' {
     It 'has a ModuleVersion matching the release tag format' {
         $manifest = Test-ModuleManifest (Join-Path $script:Root 'module\Winarchy\Winarchy.psd1')
         $manifest.Version.ToString() | Should -Match '^\d+\.\d+\.\d+$'
+    }
+}
+
+Describe 'Window slots' {
+    BeforeAll {
+        $script:State = Get-Content (Join-Path $PSScriptRoot 'fixtures\komorebi-state.json') -Raw | ConvertFrom-Json
+        # El monitor BBB (índice 1), workspace 0: [Discord] [Hearthstone+Code].
+        $script:Monitor2 = 'BBB2222-5&bbbbbbb&1&UID4353'
+        $script:Swapped = Get-Content (Join-Path $PSScriptRoot 'fixtures\komorebi-state.json') -Raw | ConvertFrom-Json
+        $ws = $script:Swapped.monitors.elements[1].workspaces.elements[0]
+        $ws.containers.elements = @($ws.containers.elements[1], $ws.containers.elements[0])
+    }
+
+    It 'captures the container index as the slot' {
+        InModuleScope Winarchy -Parameters @{ State = $script:State } {
+            param($State)
+            $p = @(Get-WinarchyWindowPlacements -State $State)
+            ($p | Where-Object { $_.Exe -eq 'Discord.exe' }).Slot     | Should -Be 0
+            ($p | Where-Object { $_.Exe -eq 'Hearthstone.exe' }).Slot | Should -Be 1
+        }
+    }
+
+    It 'reads a preferences file written before slots existed' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            New-Item -ItemType Directory -Path (Join-Path $TestDrive 'config') -Force | Out-Null
+            $legacy = "[[windows]]`nexe = `"Discord.exe`"`nmonitor = `"M1`"`nworkspace = 0"
+            Set-Content -Path (Join-Path $TestDrive 'config\windows.toml') -Encoding UTF8 -Value $legacy
+            $back = @(Import-WinarchyWindowPrefs)
+            $back.Count   | Should -Be 1
+            $back[0].Slot | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'emits no moves when every window already sits in its slot' {
+        InModuleScope Winarchy -Parameters @{ State = $script:State; Monitor = $script:Monitor2 } {
+            param($State, $Monitor)
+            $prefs = @([pscustomobject]@{ Exe = 'Discord.exe'; Monitor = $Monitor; Workspace = 0; WorkspaceName = 'A'; Slot = 0; Pin = $false })
+            @(Get-WinarchySlotMoves -State $State -Pref $prefs).Count | Should -Be 0
+        }
+    }
+
+    It 'moves the anchor back to its slot' {
+        InModuleScope Winarchy -Parameters @{ State = $script:Swapped; Monitor = $script:Monitor2 } {
+            param($State, $Monitor)
+            $prefs = @([pscustomobject]@{ Exe = 'Discord.exe'; Monitor = $Monitor; Workspace = 0; WorkspaceName = 'A'; Slot = 0; Pin = $false })
+            $moves = @(Get-WinarchySlotMoves -State $State -Pref $prefs)
+            $moves.Count      | Should -Be 1
+            $moves[0].From    | Should -Be 1
+            $moves[0].To      | Should -Be 0
+            $moves[0].Monitor | Should -Be 1
+        }
+    }
+
+    It 'ignores preferences without a slot and monitors that are not connected' {
+        InModuleScope Winarchy -Parameters @{ State = $script:Swapped; Monitor = $script:Monitor2 } {
+            param($State, $Monitor)
+            $noSlot = @([pscustomobject]@{ Exe = 'Discord.exe'; Monitor = $Monitor; Workspace = 0; WorkspaceName = 'A'; Slot = $null; Pin = $false })
+            @(Get-WinarchySlotMoves -State $State -Pref $noSlot).Count | Should -Be 0
+
+            $absent = @([pscustomobject]@{ Exe = 'Discord.exe'; Monitor = 'NOT-CONNECTED'; Workspace = 0; WorkspaceName = 'A'; Slot = 0; Pin = $false })
+            @(Get-WinarchySlotMoves -State $State -Pref $absent).Count | Should -Be 0
+        }
+    }
+
+    It 'navigates by index, never by exe, to execute a move' {
+        InModuleScope Winarchy {
+            # foco en el container 0, hay que mover el container 2 hasta el 0
+            $commands = @(Get-WinarchySlotCommands -Move ([pscustomobject]@{
+                        Exe = 'Discord.exe'; Monitor = 1; Workspace = 0; From = 2; To = 0; Focused = 0; Count = 3 }))
+            $commands[0] | Should -Be @('focus-monitor-workspace', '1', '0')
+            # dos cycle-focus para pararse en el container 2, dos cycle-move para bajarlo a 0
+            @($commands | Where-Object { $_[0] -eq 'cycle-focus' }).Count | Should -Be 2
+            @($commands | Where-Object { $_[0] -eq 'cycle-move' }).Count | Should -Be 2
+            $commands[-1] | Should -Be @('cycle-move', 'previous')
+            # nunca por exe: eager-focus agarraría la ventana de otro monitor
+            @($commands | Where-Object { $_[0] -eq 'eager-focus' }).Count | Should -Be 0
+        }
+    }
+
+    It 'walks the shortest way around when the focus is past the target' {
+        InModuleScope Winarchy {
+            # foco en el container 2 de 3, hay que tomar el 0: un solo cycle-focus da la vuelta
+            $commands = @(Get-WinarchySlotCommands -Move ([pscustomobject]@{
+                        Exe = 'Discord.exe'; Monitor = 0; Workspace = 1; From = 0; To = 1; Focused = 2; Count = 3 }))
+            @($commands | Where-Object { $_[0] -eq 'cycle-focus' }).Count | Should -Be 1
+            @($commands | Where-Object { $_[0] -eq 'cycle-move' }).Count | Should -Be 1
+            $commands[-1] | Should -Be @('cycle-move', 'next')
+        }
+    }
+
+    It 'restores the focus to the window it was on, by location' {
+        InModuleScope Winarchy -Parameters @{ State = $script:State } {
+            param($State)
+            # hwnd 4 = Discord, container 0 del monitor 1 / workspace 0
+            $location = Get-WinarchyWindowLocation -State $State -Hwnd 4
+            $location.Monitor   | Should -Be 1
+            $location.Workspace | Should -Be 0
+            $location.Index     | Should -Be 0
+            $location.Count     | Should -Be 2
+
+            Get-WinarchyWindowLocation -State $State -Hwnd 999999 | Should -BeNullOrEmpty
+
+            $commands = @(Get-WinarchyFocusCommands -Location $location)
+            $commands[0] | Should -Be @('focus-monitor-workspace', '1', '0')
+        }
+    }
+
+    It 'learns the window of the workspace the preference names, not the first with that exe' {
+        InModuleScope Winarchy -Parameters @{ State = $script:State } {
+            param($State)
+            # Code.exe está en m0/ws0 (container 0) y también en m1/ws0 (container 1).
+            # La preferencia apunta al segundo: se aprende ESE, no el primero que matchea.
+            $prefs = @([pscustomobject]@{
+                    Exe = 'Code.exe'; Monitor = 'BBB2222-5&bbbbbbb&1&UID4353'; Workspace = 0
+                    WorkspaceName = 'A'; Slot = 0; Pin = $false })
+            $learned = Get-WinarchyLearnedSlots -State $State -Pref $prefs
+            @($learned)[0].Slot | Should -Be 1
+        }
+    }
+
+    It 'wakes up on the events that can change the layout, and only those' {
+        InModuleScope Winarchy {
+            foreach ($type in 'Show', 'ManageWindow', 'Uncloak', 'UnmanageWindow',
+                              'MoveWindow', 'CycleMoveWindow', 'PromoteSwap',
+                              'MouseCapture', 'MoveResizeEnd') {
+                Test-WinarchySlotEvent -Type $type | Should -BeTrue -Because "$type cambia el layout"
+            }
+            foreach ($type in 'FocusChange', 'TitleUpdate', 'MoveResizeStart', 'SomethingNew') {
+                Test-WinarchySlotEvent -Type $type | Should -BeFalse -Because "$type es ruido"
+            }
+        }
+    }
+
+    It 'tells a window appearing apart from a window being reordered' {
+        InModuleScope Winarchy -Parameters @{ State = $script:State; Swapped = $script:Swapped } {
+            param($State, $Swapped)
+            $before = Get-WinarchyWorkspaceSignature -State $State
+            $reordered = Get-WinarchyWorkspaceSignature -State $Swapped
+
+            # mismas ventanas en otro orden: lo movió el usuario
+            Test-WinarchyWindowsAppeared -Previous $before -Current $reordered | Should -BeFalse
+
+            # una ventana menos: apareció o se fue algo
+            $fewer = Get-WinarchyWorkspaceSignature -State $State
+            $fewer['1,0'] = 'Discord.exe'
+            Test-WinarchyWindowsAppeared -Previous $before -Current $fewer | Should -BeTrue
+
+            # sin referencia previa no se concluye nada
+            Test-WinarchyWindowsAppeared -Previous $null -Current $before | Should -BeFalse
+        }
+    }
+
+    It 'learns the new position without touching anything else' {
+        InModuleScope Winarchy -Parameters @{ State = $script:Swapped; Monitor = $script:Monitor2 } {
+            param($State, $Monitor)
+            $prefs = @(
+                [pscustomobject]@{ Exe = 'Discord.exe'; Monitor = $Monitor; Workspace = 0; WorkspaceName = 'A'; Slot = 0; Pin = $true }
+                [pscustomobject]@{ Exe = 'Zen.exe';     Monitor = $Monitor; Workspace = 0; WorkspaceName = 'A'; Slot = 3; Pin = $false }
+            )
+            $learned = Get-WinarchyLearnedSlots -State $State -Pref $prefs
+            $learned | Should -Not -BeNullOrEmpty
+            $discord = $learned | Where-Object { $_.Exe -eq 'Discord.exe' }
+            $discord.Slot      | Should -Be 1
+            $discord.Workspace | Should -Be 0
+            $discord.Pin       | Should -BeTrue
+            # Zen no está en el estado vivo: su preferencia queda intacta
+            ($learned | Where-Object { $_.Exe -eq 'Zen.exe' }).Slot | Should -Be 3
+        }
+    }
+
+    It 'does not learn when nothing changed' {
+        InModuleScope Winarchy -Parameters @{ State = $script:State; Monitor = $script:Monitor2 } {
+            param($State, $Monitor)
+            $prefs = @([pscustomobject]@{ Exe = 'Discord.exe'; Monitor = $Monitor; Workspace = 0; WorkspaceName = 'A'; Slot = 0; Pin = $false })
+            Get-WinarchyLearnedSlots -State $State -Pref $prefs | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'does not give a slot to an app without a preference' {
+        InModuleScope Winarchy -Parameters @{ State = $script:Swapped; Monitor = $script:Monitor2 } {
+            param($State, $Monitor)
+            $prefs = @([pscustomobject]@{ Exe = 'Discord.exe'; Monitor = $Monitor; Workspace = 0; WorkspaceName = 'A'; Slot = 0; Pin = $false })
+            $learned = @(Get-WinarchyLearnedSlots -State $State -Pref $prefs)
+            $learned.Count | Should -Be 1
+            $learned[0].Exe | Should -Be 'Discord.exe'
+        }
+    }
+
+    It 'reports how many move events the reconciliation emitted' {
+        InModuleScope Winarchy -Parameters @{ State = $script:Swapped; Monitor = $script:Monitor2 } {
+            param($State, $Monitor)
+            # nombres propios: dentro del mock, $State resolvería al parámetro homónimo de
+            # la función bajo prueba (scoping dinámico), no al de la prueba
+            $fixture = $State
+            $device = $Monitor
+            Mock Test-WinarchyProcess { $true }
+            Mock Get-WinarchyKomorebiState { $fixture }
+            Mock Import-WinarchyWindowPrefs {
+                [pscustomobject]@{ Exe = 'Discord.exe'; Monitor = $device; Workspace = 0; WorkspaceName = 'A'; Slot = 0; Pin = $false }
+            }
+            Mock Invoke-WinarchyKomorebic { }
+            Invoke-WinarchySlotReconcile -Quiet | Should -Be 1
+            # y con el estado inyectado no hace falta leerlo de komorebi
+            Invoke-WinarchySlotReconcile -Quiet -State $fixture | Should -Be 1
+            # los comandos salen por el canal sin consola: una consola nueva sería una
+            # ventana más que komorebi tilea, y el daemon la leería como "apareció algo"
+            Should -Invoke Invoke-WinarchyKomorebic -Scope It
+        }
     }
 }

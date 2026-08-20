@@ -504,6 +504,7 @@ function Invoke-WinarchyReload {
         if ($yasbExe) { Start-Process $yasbExe.Source }
     }
     if ($Light) { return }
+    Start-WinarchyWindowSlots
     $ahk = Join-Path (Get-WinarchyRoot) 'config\ahk\winarchy.ahk'
     $ahkExe = Get-WinarchyAhkExe
     if ($ahkExe) { Start-Process $ahkExe -ArgumentList "/restart `"$ahk`"" }
