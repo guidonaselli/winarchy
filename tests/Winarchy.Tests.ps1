@@ -635,3 +635,39 @@ Describe 'Window slots' {
         }
     }
 }
+
+Describe 'Autostart' {
+    BeforeAll {
+        $script:MockPwsh = 'C:\Program Files\PowerShell\7\pwsh.exe'
+    }
+
+    It 'launches the slots daemon through Start-Process, not as the task action itself' {
+        InModuleScope Winarchy -Parameters @{ Pwsh = $script:MockPwsh } {
+            param($Pwsh)
+            Mock Get-WinarchyKomorebiExe { 'C:\Program Files\komorebi\bin\komorebi.exe' }
+            Mock Get-Command { [pscustomobject]@{ Source = $null } }
+            Mock Get-Command { [pscustomobject]@{ Source = $Pwsh } } -ParameterFilter { $Name -eq 'pwsh' }
+
+            $slots = Get-WinarchyAutostartComponents | Where-Object Key -eq 'window-slots'
+            $slots           | Should -Not -BeNullOrEmpty
+            $slots.Exe       | Should -BeLike '*\WindowsPowerShell\v1.0\powershell.exe'
+            $slots.Arguments | Should -BeLike "*Start-Process -FilePath '$Pwsh' -WindowStyle Hidden*"
+            $slots.Arguments | Should -BeLike '*Start-WindowSlots.ps1*'
+        }
+    }
+
+    It 'renders task XML that parses, for every component' {
+        InModuleScope Winarchy -Parameters @{ Pwsh = $script:MockPwsh } {
+            param($Pwsh)
+            Mock Get-WinarchyKomorebiExe { 'C:\Program Files\komorebi\bin\komorebi.exe' }
+            Mock Get-Command { [pscustomobject]@{ Source = $null } }
+            Mock Get-Command { [pscustomobject]@{ Source = $Pwsh } } -ParameterFilter { $Name -eq 'pwsh' }
+
+            $components = @(Get-WinarchyAutostartComponents)
+            $components.Count | Should -BeGreaterThan 0
+            foreach ($c in $components) {
+                { [xml](New-WinarchyTaskXml -Component $c -User 'DOMAIN\user') } | Should -Not -Throw
+            }
+        }
+    }
+}
