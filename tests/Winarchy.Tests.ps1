@@ -387,6 +387,34 @@ Describe 'games.toml (shipped)' {
             $dupes -join ', ' | Should -BeNullOrEmpty
         }
     }
+
+    It 'uses one line ending throughout' {
+        $bytes = [System.IO.File]::ReadAllBytes((Join-Path $script:Root 'games.toml'))
+        $bare = 0
+        for ($i = 0; $i -lt $bytes.Length; $i++) {
+            if ($bytes[$i] -eq 0x0A -and ($i -eq 0 -or $bytes[$i - 1] -ne 0x0D)) { $bare++ }
+        }
+        ($bare -eq 0 -or $bare -eq ($bytes | Where-Object { $_ -eq 0x0A }).Count) | Should -BeTrue
+    }
+}
+
+Describe 'Game registration round-trip' {
+    It 'add then remove leaves games.toml byte for byte identical' {
+        InModuleScope Winarchy {
+            $toml = Join-Path $TestDrive 'games.toml'
+            Set-Content -Path $toml -Value "[[games]]`r`nexe = `"Existing.exe`"`r`n" -Encoding UTF8 -NoNewline
+            $before = (Get-FileHash $toml -Algorithm SHA256).Hash
+
+            Mock Get-WinarchyRoot { Split-Path $toml -Parent }
+            Mock Update-WinarchyKomorebiRules { }
+            Mock Update-WinarchyQuickAccentExclusion { }
+
+            Add-WinarchyGame -Exe 'RoundTrip' | Out-Null
+            (Get-Content $toml -Raw) | Should -Match 'RoundTrip\.exe'
+            Remove-WinarchyGame -Exe 'RoundTrip' | Out-Null
+            (Get-FileHash $toml -Algorithm SHA256).Hash | Should -Be $before
+        }
+    }
 }
 
 Describe 'Shipped themes' {

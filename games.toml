@@ -245,6 +245,9 @@ exe = "StarVaders.exe"
 [[games]]
 exe = "Sephiria.exe"
 
+[[games]]
+exe = "isaac-ng.exe"
+
 # --- Cartas ------------------------------------------------------------------
 [[games]]
 exe = "Hearthstone.exe"

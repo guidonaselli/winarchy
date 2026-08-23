@@ -112,7 +112,7 @@ function Restart-WinarchyPowerToys {
        tome los cambios que escribimos por disco sin perderlos. No-op si no corre. #>
     $procs = @(Get-Process PowerToys -ErrorAction SilentlyContinue)
     if ($procs.Count -eq 0) { return }
-    $exe = ($procs | Where-Object { $_.Path } | Select-Object -First 1).Path
+    $exe = $procs | Where-Object { $_.Path } | Select-Object -First 1 -ExpandProperty Path
     if (-not $exe) {
         $exe = @(
             "$env:LOCALAPPDATA\PowerToys\PowerToys.exe",
@@ -175,7 +175,7 @@ function Add-WinarchyGame {
         Update-WinarchyQuickAccentExclusion -Exe $Exe
         return
     }
-    Add-Content -Path $gamesToml -Value "`n[[games]]`nexe = `"$Exe`"" -Encoding UTF8
+    Add-Content -Path $gamesToml -Value @('', '[[games]]', "exe = `"$Exe`"") -Encoding UTF8
     Update-WinarchyKomorebiRules
     # reload-configuration no des-maneja instancias ya corriendo; la regla runtime sí
     if (Test-WinarchyProcess 'komorebi') { komorebic ignore-rule exe $Exe 2>$null | Out-Null }
@@ -189,7 +189,7 @@ function Remove-WinarchyGame {
     $gamesToml = Join-Path (Get-WinarchyRoot) 'games.toml'
     if (-not (Test-Path $gamesToml)) { Write-WinarchyWarn 'games.toml does not exist.'; return }
     $content = Get-Content $gamesToml -Raw -Encoding UTF8
-    $pattern = "(?ms)^\[\[games\]\]\s*\r?\nexe\s*=\s*`"$([regex]::Escape($Exe))`"\s*(\r?\n)?"
+    $pattern = "(?ms)(\r?\n)?^\[\[games\]\]\s*\r?\nexe\s*=\s*`"$([regex]::Escape($Exe))`"[ \t]*(\r?\n)?"
     $updated = [regex]::Replace($content, $pattern, '')
     if ($updated -eq $content) { Write-WinarchyWarn "'$Exe' was not in games.toml."; return }
     Set-Content -Path $gamesToml -Value $updated -Encoding UTF8 -NoNewline
