@@ -1,0 +1,51 @@
+# rules.toml — tus reglas de komorebi por aplicación.
+#
+# Copiá este archivo a `rules.toml` (mismo directorio) y editalo. `rules.toml` está
+# gitignored: ni un `git pull` ni `winarchy update` lo tocan nunca, porque es una capa
+# aparte y no el mismo archivo que las reglas del producto o las de la comunidad.
+#
+# Precedencia (gana el de más abajo):
+#   1. vendor/asc/applications.json   comunidad, pinneado
+#   2. templates/komorebi.json.tpl    Winarchy
+#   3. games.toml                     Winarchy
+#   4. este archivo                   vos
+#
+# Ubicación (ignore/manage/floating) es excluyente: si vos decís `ignore`, se saca el
+# `manage` que hubiera puesto una capa de abajo. Los atributos (tray_and_multi_window,
+# object_name_change, slow_application, layered, transparency_ignore) se suman.
+#
+# Cada entrada lleva exactamente uno de: exe / class / title.
+# `matching_strategy` es opcional (default "Equals"; komorebi acepta Legacy, Equals,
+# StartsWith, EndsWith, Contains, Regex, DoesNotEqual, ...).
+#
+# Verificá el resultado con:  winarchy rules explain <exe>
+
+# --- Ubicación ---------------------------------------------------------------
+# [[ignore]]                 nunca se tilea
+# exe = "GalaxyClient.exe"
+
+# [[manage]]                 forzar a que se tilee aunque komorebi no lo detecte
+# exe = "MiAppRara.exe"
+
+# [[floating]]               se maneja pero siempre flotando
+# class = "MiDialogo"
+
+# --- Atributos ---------------------------------------------------------------
+# [[tray_and_multi_window]]  minimiza a la bandeja y reaparece mal
+# exe = "MiApp.exe"
+
+# [[object_name_change]]     anuncia su ventana tarde y no se tilea sola
+# exe = "MiApp.exe"
+
+# [[slow_application]]       tarda en asentarse después de abrir
+# exe = "MiApp.exe"
+
+# [[layered]]                tiene WS_EX_LAYERED (bordes/ocultamiento rotos)
+# exe = "MiApp.exe"
+
+# --- Desactivar una app de ASC entera ----------------------------------------
+# Por NOMBRE de la app tal como aparece en vendor/asc/applications.json. Va por nombre
+# y no por identificador a propósito: así sobrevive a que upstream le agregue reglas
+# nuevas a esa app mañana.
+# [[disable]]
+# asc = "GOG Galaxy"

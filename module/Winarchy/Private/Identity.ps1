@@ -1,7 +1,7 @@
 # Identity.ps1 — identidad unificada del stack: que Winarchy se sienta "un solo
 # producto". Apaga el tray icon propio y el auto-update de los componentes de
 # terceros para que la única bandeja/canal de updates sea el de Winarchy.
-#   - YASB: se configura por su config.yaml (estático), fuera de este archivo.
+#   - YASB: se configura por su config.yaml (generado desde templates/), fuera de este archivo.
 #   - Flow Launcher: merge quirúrgico de Settings.json (acá abajo).
 #   - AHK: su tray ES el de Winarchy (winarchy.ahk). komorebi no tiene tray.
 

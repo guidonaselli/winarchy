@@ -2,8 +2,8 @@
 /* Theme: {{name}} */
 
 * {
-    font-size: 13px;
-    font-family: 'JetBrainsMono NF', 'Segoe UI', sans-serif;
+    font-size: {{bar.font_size}}px;
+    font-family: '{{bar.font_family}}', 'Segoe UI', sans-serif;
     color: {{colors.foreground}};
     font-weight: 500;
     margin: 0;
@@ -12,7 +12,7 @@
 
 .yasb-bar {
     background-color: {{colors.background}};
-    padding: 0 8px;
+    padding: 0 {{bar.padding}}px;
 }
 
 .widget {
@@ -42,7 +42,7 @@
     border: none;
     padding: 0 6px;
     margin: 0 2px;
-    font-size: 13px;
+    font-size: {{bar.font_size}}px;
 }
 
 .komorebi-workspaces .ws-btn.populated_workspace {
@@ -108,7 +108,7 @@
 .gpu-widget .icon,
 .cpu-widget .icon,
 .memory-widget .icon {
-    color: {{colors.color6}};
+    color: {{ui.system}};
 }
 
 .volume-widget .label,
@@ -117,7 +117,7 @@
 .volume-widget .icon,
 .microphone-widget .icon,
 .media-widget .icon {
-    color: {{colors.color5}};
+    color: {{ui.media}};
 }
 
 .notification-widget .label,
@@ -133,7 +133,7 @@
 .bluetooth-widget .label,
 .wifi-widget .icon,
 .bluetooth-widget .icon {
-    color: {{colors.color4}};
+    color: {{ui.net}};
 }
 
 /* El QLabel del icono de wifi se queda corto cuando el glifo cambia
@@ -181,7 +181,7 @@
 }
 
 .wifi-menu .footer .settings-button {
-    color: {{colors.color4}};
+    color: {{ui.net}};
     padding: 6px 10px;
 }
 
@@ -212,7 +212,7 @@
 
 /* La "flechita" que despliega los iconos no fijados */
 .systray .unpinned-visibility-btn {
-    color: {{colors.color4}};
+    color: {{ui.net}};
     background: transparent;
     border: none;
     border-radius: 4px;
@@ -235,6 +235,13 @@
 
 .systray .button:hover {
     background-color: {{colors.color0}};
+}
+
+/* Misma identidad que el logo de la izquierda: los dos abren el mismo menu. */
+.winarchy-menu-widget .label {
+    color: {{colors.accent_ui}};
+    font-size: 15px;
+    padding: 0 6px;
 }
 
 .game-mode-widget .label {

@@ -15,6 +15,25 @@
     "monocle": "{{borders.monocle}}",
     "unfocused": "{{borders.unfocused}}"
   },
+  "animation": {
+    "enabled": true,
+    "style": "EaseOutCubic",
+    "duration": 200,
+    "fps": 60
+  },
+  "stackbar": {
+    "height": 26,
+    "mode": "OnStack",
+    "label": "Title",
+    "tabs": {
+      "width": 220,
+      "background": "{{colors.color0}}",
+      "focused_text": "{{colors.accent_ui}}",
+      "unfocused_text": "{{colors.color8}}",
+      "font_family": "{{bar.font_family}}",
+      "font_size": 12
+    }
+  },
   "monitors": [
     {
       "workspaces": [

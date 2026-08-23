@@ -57,6 +57,14 @@ manual app list: Flow already indexes installed programs.
 | `SUPER+=` / `SUPER+-` | Horizontal resize +/- |
 | `SUPER+Shift+=` / `SUPER+Shift+-` | Vertical resize +/- |
 
+## Stacks (komorebi draws them as tabs in the stackbar)
+
+| Key | Action |
+|---|---|
+| `SUPER+Alt+←/→/↑/↓` | Stack the focused window onto its neighbour |
+| `SUPER+Alt+u` | Unstack the focused window |
+| `SUPER+Alt+,` / `SUPER+Alt+.` | Previous / next tab in the stack |
+
 ## Workspaces (komorebi, per monitor)
 | Keybinding | Action |
 |---|---|

@@ -637,8 +637,10 @@ GameWatch() {
     if (active && !GameModeActive) {
         GameModeActive := true
         LoadGames()                              ; refresco para altas en caliente
+        Komorebic('animation disable')           ; nada de reflows animados mientras jugás
     } else if (!active && GameModeActive) {
         GameModeActive := false
+        Komorebic('animation enable')
     }
 }
 
@@ -722,6 +724,15 @@ AccentWatch() {
 #+Right::Komorebic('move right')
 #+Up::Komorebic('move up')
 #+Down::Komorebic('move down')
+
+; --- Stacks (komorebi los dibuja como pestanas en la stackbar) --------------------
+#!Left::Komorebic('stack left')                  ; apilar con la ventana vecina
+#!Right::Komorebic('stack right')
+#!Up::Komorebic('stack up')
+#!Down::Komorebic('stack down')
+#!u::Komorebic('unstack')                        ; sacar la ventana del stack
+#!,::Komorebic('cycle-stack previous')           ; pestana anterior del stack
+#!.::Komorebic('cycle-stack next')               ; pestana siguiente del stack
 
 ; --- Resize -----------------------------------------------------------------------
 #=::Komorebic('resize-axis horizontal increase') ; width +

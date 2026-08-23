@@ -33,6 +33,15 @@ color13 = "#bb9af7"
 color14 = "#0db9d7"
 color15 = "#ffffff"
 
+# La paleta ANSI de arriba es fija (el rojo tiene que ser rojo en la terminal), pero el
+# accent lo pone el wallpaper: si la barra usara esos slots, el cyan/violeta/azul de la
+# base chocaria con cualquier accent. Base neutra con jerarquia por brillo — el accent
+# queda reservado para identidad y alertas (reloj, logo, menu, notificacion, workspace).
+[ui]
+system = "#c8c8c8"
+media = "#9ba3b8"
+net = "#7e8699"
+
 [borders]
 focused = "#0078d4"
 unfocused = "#333333"

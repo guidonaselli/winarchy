@@ -197,6 +197,30 @@ winarchy theme set my-theme
 
 regenerates and applies the full surface atomically.
 
+`theme.toml` also takes an optional `[bar]` section that drives the YASB bar geometry and
+typography (and the stackbar font komorebi draws over stacked windows). Omit it and the
+theme inherits the defaults:
+
+```toml
+[bar]
+height = 34
+font_family = "JetBrainsMono NF"
+font_size = 13
+padding = 8
+```
+
+`color0`-`color15` are the ANSI palette (terminal, btop, nvim), where red has to stay red.
+The bar reads them by default for its icon groups, but a theme can decouple the two with an
+optional `[ui]` section — useful when the accent is dynamic and a fixed palette would clash
+(see `auto-accent`):
+
+```toml
+[ui]
+system = "#c8c8c8"   # gpu / cpu / memory   (default: color6)
+media = "#9ba3b8"    # volume / mic / media (default: color5)
+net = "#7e8699"      # wifi / bluetooth     (default: color4)
+```
+
 Included themes track the current Omarchy catalog, plus Winarchy's own
 `auto-accent` dynamic theme:
 
@@ -353,6 +377,62 @@ and its log lives in `%LOCALAPPDATA%\winarchy\window-slots.log`.
 
 **What this does not cover:** geometry. Slots fix the *order* of the tiles, not their size —
 how wide each tile is stays a komorebi layout decision.
+
+---
+
+## Application rules
+
+Some apps do not behave under a tiling window manager: they minimise to the tray and come
+back wrong, spawn ghost child windows, announce their window too late to be tiled, or use
+`WS_EX_LAYERED` and break borders. komorebi has a knob for each case, and the community
+maintains those answers for hundreds of apps in
+[komorebi-application-specific-configuration](https://github.com/LGUG2Z/komorebi-application-specific-configuration).
+
+Winarchy vendors that file (`vendor/asc/applications.json`, pinned in `versions.lock.toml`)
+and **compiles it into the generated `komorebi.json`** instead of pointing komorebi at it
+with `app_specific_configuration_path`. That way Winarchy owns the precedence, the result is
+a single inspectable file, and no third-party path stays live at runtime.
+
+Four layers, lowest priority first:
+
+| # | layer | who edits it |
+|---|---|---|
+| 1 | `vendor/asc/applications.json` | the community (vendored, pinned) |
+| 2 | `templates/komorebi.json.tpl` | Winarchy |
+| 3 | `games.toml` | Winarchy |
+| 4 | `config/komorebi/rules.toml` | **you** — gitignored, never overwritten |
+
+**Placement** (`ignore` / `manage` / `floating`) is exclusive: the highest layer that has an
+opinion about a window wins, and its decision *replaces* the lower ones. That is what makes
+your `[[ignore]]` actually beat a community `manage` — komorebi's lists are additive, so
+adding the ignore is not enough, the manage has to be removed.
+
+**Attributes** (`tray_and_multi_window`, `object_name_change`, `slow_application`, `layered`,
+`transparency_ignore`) describe behaviour rather than placement, so they are unioned across
+every layer and never override each other.
+
+Copy `config/komorebi/rules.toml.example` to `config/komorebi/rules.toml` to add your own:
+
+```toml
+[[ignore]]
+exe = "GalaxyClient.exe"      # beats the community `manage` for this window
+
+[[disable]]
+asc = "GOG Galaxy"            # drop that community entry entirely, by app name
+```
+
+`rules.toml` is gitignored, so neither `git pull` nor `winarchy update` can touch it — it is
+a separate layer, not the same file.
+
+```powershell
+winarchy rules explain zen.exe   # which rules match, and which layer won
+winarchy rules collisions        # community rules a higher layer overrode
+winarchy rules sync              # diff the upstream file (--apply to re-vendor it)
+```
+
+`winarchy rules sync` shows the per-app diff before changing anything and flags which of
+those apps you have disabled locally. `winarchy doctor` reports the pinned revision and the
+current collisions.
 
 ---
 

@@ -39,6 +39,10 @@ function Show-WinarchyHelp {
     game-mode remove <exe>    Unregister a game
     accent sync [--force]     Re-sync the dynamic theme with the Windows accent
     accent status             Show system accent vs applied accent
+    rules explain <text>      Which app rule applies to a window, and which layer won
+    rules collisions          ASC rules dropped because a higher layer decided otherwise
+    rules sync [--apply]      Refresh the vendored community ASC (shows the diff first;
+                              never touches your config/komorebi/rules.toml)
     reload                    Reload komorebi, YASB, AHK and Flow
     doctor                    Stack diagnostics (green/red + suggested fix)
 
@@ -148,6 +152,24 @@ function Invoke-Winarchy {
                 'sync' { Update-WinarchyAccent -Force:($rest -contains '--force' -or $rest -contains '-force') }
                 'status' { Get-WinarchyAccentStatus }
                 default { throw "Unknown subcommand: accent $sub (sync|status)" }
+            }
+        }
+        'rules' {
+            $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'collisions' }
+            switch ($sub) {
+                'explain' {
+                    if ($rest.Count -lt 2) { throw 'Usage: winarchy rules explain <exe|class|title fragment>' }
+                    $report = @(Get-WinarchyAppRuleReport -Match $rest[1])
+                    if ($report.Count -eq 0) { Write-WinarchyInfo "No app rule matches '$($rest[1])'."; break }
+                    $report | Format-Table Layer, Category, Rule, Applied, Source -AutoSize
+                }
+                'collisions' {
+                    $coll = @(Get-WinarchyAppRuleCollisions)
+                    if ($coll.Count -eq 0) { Write-WinarchyOk 'No ASC rule is being overridden.'; break }
+                    $coll | Format-Table App, Rule, AscSaid, Winner -AutoSize
+                }
+                'sync' { Sync-WinarchyAsc -Apply:($rest -contains '--apply' -or $rest -contains '-apply') }
+                default { throw "Unknown subcommand: rules $sub (explain|collisions|sync)" }
             }
         }
         'reload' { Invoke-WinarchyReload; Write-WinarchyOk 'Stack reloaded.' }

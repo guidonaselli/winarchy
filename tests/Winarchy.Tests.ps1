@@ -102,6 +102,70 @@ Describe 'Test-WinarchyThemeData' {
             $missing | Should -Contain "mode (must be 'dark' or 'light')"
         }
     }
+
+    It 'rejects a bad colour and an unknown key in the optional [ui] section' {
+        InModuleScope Winarchy {
+            $missing = Test-WinarchyThemeData -Theme @{ name = 'x'; mode = 'dark'; ui = @{ system = 'red'; nope = '#ffffff' } }
+            $missing | Should -Contain 'ui.system (must be #rrggbb)'
+            $missing | Should -Contain 'ui.nope (unknown key)'
+        }
+    }
+
+    It 'rejects non-integer measures in the optional [bar] section' {
+        InModuleScope Winarchy {
+            $missing = Test-WinarchyThemeData -Theme @{ name = 'x'; mode = 'dark'; bar = @{ height = '34px' } }
+            $missing | Should -Contain 'bar.height (must be an integer)'
+        }
+    }
+
+    It 'accepts a theme without [bar] (inherits the defaults)' {
+        InModuleScope Winarchy {
+            $missing = Test-WinarchyThemeData -Theme @{ name = 'x'; mode = 'dark' }
+            $missing | Where-Object { $_ -like 'bar.*' } | Should -BeNullOrEmpty
+        }
+    }
+}
+
+Describe 'Theme defaults' {
+    It 'fills the [bar] section when the theme omits it' {
+        InModuleScope Winarchy {
+            $theme = @{ name = 'x'; mode = 'dark'; colors = @{ accent = '#7aa2f7'; background = '#1a1b26' } }
+            $ctx = Build-WinarchyThemeContext -Theme $theme -ThemeDir (Join-Path (Get-WinarchyThemesDir) 'tokyo-night')
+            $ctx['bar.height'] | Should -Be 34
+            $ctx['bar.font_family'] | Should -Be 'JetBrainsMono NF'
+        }
+    }
+
+    It 'falls the [ui] colours back to the ANSI slots the bar used to read' {
+        InModuleScope Winarchy {
+            $theme = @{ name = 'x'; mode = 'dark'
+                colors = @{ accent = '#7aa2f7'; background = '#1a1b26'; color4 = '#111111'; color5 = '#222222'; color6 = '#333333' } }
+            $ctx = Build-WinarchyThemeContext -Theme $theme -ThemeDir (Join-Path (Get-WinarchyThemesDir) 'tokyo-night')
+            $ctx['ui.system'] | Should -Be '#333333'
+            $ctx['ui.media']  | Should -Be '#222222'
+            $ctx['ui.net']    | Should -Be '#111111'
+        }
+    }
+
+    It 'lets a theme decouple the bar colours from its ANSI palette' {
+        InModuleScope Winarchy {
+            $theme = @{ name = 'x'; mode = 'dark'; ui = @{ system = '#abcdef' }
+                colors = @{ accent = '#7aa2f7'; background = '#1a1b26'; color4 = '#111111'; color5 = '#222222'; color6 = '#333333' } }
+            $ctx = Build-WinarchyThemeContext -Theme $theme -ThemeDir (Join-Path (Get-WinarchyThemesDir) 'tokyo-night')
+            $ctx['ui.system'] | Should -Be '#abcdef'
+            $ctx['ui.net']    | Should -Be '#111111'
+        }
+    }
+
+    It 'lets the theme override a default' {
+        InModuleScope Winarchy {
+            $theme = @{ name = 'x'; mode = 'dark'; bar = @{ height = 40 }
+                colors = @{ accent = '#7aa2f7'; background = '#1a1b26' } }
+            $ctx = Build-WinarchyThemeContext -Theme $theme -ThemeDir (Join-Path (Get-WinarchyThemesDir) 'tokyo-night')
+            $ctx['bar.height'] | Should -Be 40
+            $ctx['bar.font_size'] | Should -Be 13
+        }
+    }
 }
 
 Describe 'Get-WinarchyGames' {
@@ -347,10 +411,15 @@ Describe 'Shipped themes' {
         }
     }
 
-    # Cubre de punta a punta lo que antes solo se sabía al aplicar un theme: los 10
+    # Cubre de punta a punta lo que antes solo se sabía al aplicar un theme: los 11
     # templates renderizan sin tokens sin resolver y el JSON/XML generado parsea.
     It '<Name> renders every template (theme set -StageOnly)' -ForEach $script:ThemeCases {
         { Set-WinarchyTheme -Name $Name -StageOnly } | Should -Not -Throw
+        # config.yaml de YASB no tiene validador de sintaxis en el pipeline (no hay parser
+        # YAML en PowerShell): al menos la geometria inyectada tiene que quedar numerica,
+        # que es lo unico que un theme puede romper ahi.
+        $staged = Join-Path (Get-WinarchyStateDir) 'staging\config.yaml'
+        (Get-Content $staged -Raw) | Should -Match '(?m)^\s+height: \d+\s*$'
     }
 }
 
@@ -372,6 +441,104 @@ Describe 'versions.lock.toml' {
         InModuleScope Winarchy {
             $lock = Import-WinarchyToml -Path (Join-Path (Get-WinarchyRoot) 'versions.lock.toml')
             $lock['core'].Keys | Should -Contain 'komorebi'
+        }
+    }
+}
+
+Describe 'App rules (community ASC + user layer)' {
+    BeforeAll {
+        # Capas sinteticas: el merge se prueba solo, sin depender de las 226 entradas reales.
+        $script:MakeLayer = {
+            param($Entries)
+            [object[]]@(foreach ($e in $Entries) {
+                    @{ Category = $e[0]
+                        Rule     = [pscustomobject]@{ kind = 'Exe'; id = $e[1]; matching_strategy = 'Equals' }
+                        Source   = $e[2]
+                    }
+                })
+        }
+    }
+
+    It 'keeps the layers separate instead of flattening them' {
+        InModuleScope Winarchy {
+            $config = [pscustomobject]@{ ignore_rules = @() }
+            $layers = Get-WinarchyAppRuleLayers -Config $config
+            # Con [object[]] las capas vacias se desenrollan y la precedencia se pierde en
+            # silencio: el conteo es lo unico que lo delata.
+            $layers.Count | Should -Be 3
+        }
+    }
+
+    It 'lets a higher layer move a window to another placement category' {
+        InModuleScope Winarchy -Parameters @{ Make = $script:MakeLayer } {
+            param($Make)
+            $merged = Merge-WinarchyAppRules -Layers @(
+                (& $Make @(, @('manage_rules', 'GalaxyClient.exe', 'asc:GOG Galaxy'))),
+                (& $Make @(, @('ignore_rules', 'GalaxyClient.exe', 'winarchy')))
+            )
+            @($merged['ignore_rules']).Count | Should -Be 1
+            # No alcanza con sumar el ignore: las listas de komorebi son aditivas, asi que
+            # el manage de la capa de abajo TIENE que desaparecer.
+            @($merged['manage_rules']).Count | Should -Be 0
+        }
+    }
+
+    It 'unions attribute categories instead of overriding them' {
+        InModuleScope Winarchy -Parameters @{ Make = $script:MakeLayer } {
+            param($Make)
+            $merged = Merge-WinarchyAppRules -Layers @(
+                (& $Make @(, @('layered_applications', 'Discord.exe', 'asc:Discord'))),
+                (& $Make @(, @('ignore_rules', 'Discord.exe', 'user:rules.toml')))
+            )
+            @($merged['ignore_rules']).Count | Should -Be 1
+            @($merged['layered_applications']).Count | Should -Be 1
+        }
+    }
+
+    It 'deduplicates identical rules across layers' {
+        InModuleScope Winarchy -Parameters @{ Make = $script:MakeLayer } {
+            param($Make)
+            $merged = Merge-WinarchyAppRules -Layers @(
+                (& $Make @(, @('ignore_rules', 'Steam.exe', 'asc:Steam'))),
+                (& $Make @(, @('ignore_rules', 'steam.exe', 'winarchy')))
+            )
+            @($merged['ignore_rules']).Count | Should -Be 1
+        }
+    }
+
+    It 'drops a whole ASC app listed in [[disable]]' {
+        InModuleScope Winarchy {
+            $rules = ConvertFrom-WinarchyToml -Content "[[disable]]`nasc = `"GOG Galaxy`""
+            $disabled = @(Get-WinarchyDisabledAscApps -UserRules $rules)
+            $disabled | Should -Contain 'GOG Galaxy'
+            $layer = @(Get-WinarchyAscLayer -Disabled $disabled)
+            @($layer | Where-Object { $_.Source -eq 'asc:GOG Galaxy' }).Count | Should -Be 0
+            # el resto de ASC sigue entero
+            @($layer | Where-Object { $_.Source -eq 'asc:Zen Browser' }).Count | Should -BeGreaterThan 0
+        }
+    }
+
+    It 'rejects a rules.toml entry without exe/class/title' {
+        InModuleScope Winarchy {
+            $rules = ConvertFrom-WinarchyToml -Content "[[ignore]]`nnope = `"x`""
+            { Get-WinarchyUserRuleLayer -UserRules $rules } | Should -Throw '*exe/class/title*'
+        }
+    }
+
+    It 'vendors the ASC revision pinned in versions.lock.toml' {
+        InModuleScope Winarchy {
+            $lock = Import-WinarchyToml -Path (Join-Path (Get-WinarchyRoot) 'versions.lock.toml')
+            $lock.ContainsKey('asc') | Should -BeTrue
+            (Get-FileHash (Get-WinarchyAscPath) -Algorithm SHA256).Hash.ToLower() | Should -Be $lock['asc']['sha256']
+        }
+    }
+
+    It 'compiles the community rules into the generated komorebi.json' {
+        InModuleScope Winarchy {
+            $json = Get-Content (Join-Path (Get-WinarchyRoot) 'config\komorebi\komorebi.json') -Raw -Encoding UTF8
+            # MozillaDialogClass solo puede venir de ASC: es la ventana hija fantasma de
+            # los forks de Firefox, que Winarchy no declaraba por su cuenta.
+            $json | Should -Match 'MozillaDialogClass'
         }
     }
 }

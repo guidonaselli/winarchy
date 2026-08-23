@@ -6,6 +6,7 @@ backups/
 # Archivos generados por el theme engine (se regeneran con `winarchy theme set`)
 config/komorebi/komorebi.json
 config/yasb/styles.css
+config/yasb/config.yaml
 config/btop/winarchy.theme
 config/nvim/winarchy-theme.lua
 config/flow/Winarchy.xaml
@@ -13,11 +14,13 @@ config/terminal/winarchy-scheme.json
 config/ahk/theme.ini
 config/pwsh/starship.toml
 config/fastfetch/config.jsonc
+config/obsidian/winarchy-theme.css
 
 # Overrides del usuario (locales a cada máquina)
 config/ahk/user.ahk
 config/pwsh/user.ps1
 config/windows.toml
+config/komorebi/rules.toml
 
 # Planning interno (specs/changes de OpenSpec y tooling de agentes) — no es parte del producto
 openspec/

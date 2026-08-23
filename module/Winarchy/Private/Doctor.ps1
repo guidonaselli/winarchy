@@ -92,6 +92,23 @@ function Invoke-WinarchyDoctor {
     Add-Check 'komorebi.json valid' $komorebiOk `
         $komorebiJson 'winarchy theme set <theme>  (regenerates it)'
 
+    # Las reglas de ASC que pierden contra una capa superior no son un error (para eso
+    # existe la precedencia), pero tienen que ser visibles: si una ventana se porta raro,
+    # esta lista es el primer lugar donde mirar.
+    $ascPath = Get-WinarchyAscPath
+    if (Test-Path $ascPath) {
+        $lock = Import-WinarchyToml -Path (Join-Path $root 'versions.lock.toml')
+        $pinned = $lock.ContainsKey('asc') -and (Get-FileHash $ascPath -Algorithm SHA256).Hash.ToLower() -eq $lock['asc']['sha256']
+        Add-Check 'community app rules vendored' $pinned `
+            "$(Get-WinarchyAscAppCount) community app rules, pinned $($lock['asc']['date']) ($($lock['asc']['commit'].Substring(0, 7)))" `
+            'winarchy rules sync --apply  (re-pins the vendored copy)'
+        $collisions = @(Get-WinarchyAppRuleCollisions)
+        Add-Check 'app rule collisions' $true `
+            $(if ($collisions.Count -eq 0) { 'no ASC rule overridden' }
+              else { "$($collisions.Count) ASC rule(s) overridden: $((($collisions | Select-Object -First 4).App | Sort-Object -Unique) -join ', ')" }) `
+            'winarchy rules collisions  (full list)'
+    }
+
     $themesOk = $true; $themesDetail = @()
     foreach ($t in Get-WinarchyThemes) {
         try {

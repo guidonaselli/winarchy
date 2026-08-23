@@ -101,11 +101,18 @@ Install-WinarchyShellProfile
 # --- 3c. Skill "winarchy" en los agentes de IA detectados (estilo Omarchy) ----------
 Install-WinarchySkill
 
-# --- 4. Theme inicial (genera todos los configs) ------------------------------------
-if (-not (Get-WinarchyCurrentTheme)) {
+# --- 4. Theme (genera todos los configs) --------------------------------------------
+# Siempre re-renderiza, no solo en la primera instalacion: install.ps1 es tambien la
+# migracion de `winarchy update --self`, y sin esto un cambio en templates/ nunca
+# llegaba a los configs de quien ya tenia un theme seteado.
+$initialTheme = Get-WinarchyCurrentTheme
+if ($initialTheme) {
+    Write-WinarchyInfo "Regenerando configs desde los templates (theme: $initialTheme)..."
+} else {
+    $initialTheme = 'tokyo-night'
     Write-WinarchyInfo 'Generando configs con el theme inicial (tokyo-night)...'
-    Set-WinarchyTheme -Name 'tokyo-night'
 }
+Set-WinarchyTheme -Name $initialTheme
 
 # --- 4b. Identidad unificada: tray único + auto-updates de terceros off ---------------
 # Idempotente: se reaplica en cada install/repair, así un update de Flow no reintroduce

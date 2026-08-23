@@ -15,6 +15,16 @@ yasb = "2.0.6"
 flow = "2.1.3"
 ahk = "2.0.26"
 
+# Reglas por aplicacion de la comunidad de komorebi (vendorizado en vendor/asc/).
+# Se compila DENTRO del komorebi.json generado; no se usa app_specific_configuration_path
+# (Winarchy define la precedencia, no komorebi). Viaja con el release: lo refresca
+# `winarchy rules sync`, que muestra el diff y no pisa config/komorebi/rules.toml.
+[asc]
+repo = "LGUG2Z/komorebi-application-specific-configuration"
+commit = "e647fc15970964777dedbb4ba79d5e8547d722fb"
+date = "2026-07-16"
+sha256 = "c4680fda08b7e188017ceabed65d2d7252e6a0c0a3e0933a00aa54638a3e4f50"
+
 [winget]
 # id de winget -> requerido (true = lo instala install.ps1)
 "LGUG2Z.komorebi" = true

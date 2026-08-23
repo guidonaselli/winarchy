@@ -8,6 +8,17 @@ $script:ThemeRequiredColorKeys = @(
 ) + (0..15 | ForEach-Object { "color$_" })
 $script:ThemeRequiredBorderKeys = @('focused', 'unfocused', 'urgent', 'monocle', 'stack')
 
+# Secciones opcionales del theme: el theme que no las declara hereda estos valores,
+# así los 23 themes existentes siguen renderizando sin tocar su theme.toml.
+$script:ThemeDefaults = @{
+    bar = @{
+        height      = 34
+        font_family = 'JetBrainsMono NF'
+        font_size   = 13
+        padding     = 8
+    }
+}
+
 function Get-WinarchyThemesDir { Join-Path (Get-WinarchyRoot) 'themes' }
 
 function Get-WinarchyThemes {
@@ -45,6 +56,22 @@ function Test-WinarchyThemeData {
             if (-not $Theme['borders'].ContainsKey($k)) { $missing.Add("borders.$k") }
         }
     }
+    # [ui] desacopla los colores de la barra de la paleta ANSI (ver Build-WinarchyThemeContext).
+    if ($Theme.ContainsKey('ui')) {
+        foreach ($k in $Theme['ui'].Keys) {
+            if ($k -notin @('system', 'media', 'net')) { $missing.Add("ui.$k (unknown key)") }
+            elseif ($Theme['ui'][$k] -notmatch '^#[0-9a-fA-F]{6}$') { $missing.Add("ui.$k (must be #rrggbb)") }
+        }
+    }
+    # [bar] es opcional (hereda ThemeDefaults), pero si el theme la declara sus medidas
+    # entran en el YAML/CSS generado: un valor no numerico rompe la barra entera.
+    if ($Theme.ContainsKey('bar')) {
+        foreach ($k in @('height', 'font_size', 'padding')) {
+            if ($Theme['bar'].ContainsKey($k) -and $Theme['bar'][$k] -isnot [int]) {
+                $missing.Add("bar.$k (must be an integer)")
+            }
+        }
+    }
     # Sin la coma: envuelta, `@(Test-WinarchyThemeData ...)` daba un array con la List
     # adentro y .Count siempre valía 1. Los llamadores envuelven con @().
     $missing
@@ -61,7 +88,8 @@ function Get-WinarchyGameIgnoreRulesJson {
 
 function Build-WinarchyThemeContext {
     param([Parameter(Mandatory)][hashtable]$Theme, [Parameter(Mandatory)][string]$ThemeDir)
-    $ctx = ConvertTo-WinarchyFlatContext -Data $Theme
+    $ctx = ConvertTo-WinarchyFlatContext -Data $script:ThemeDefaults
+    foreach ($kv in (ConvertTo-WinarchyFlatContext -Data $Theme).GetEnumerator()) { $ctx[$kv.Key] = $kv.Value }
     $ctx['computed.theme_dir'] = Split-Path $ThemeDir -Leaf
     # Raíz del repo con forward slashes: apto para rutas dentro de JSON generado
     $ctx['computed.root'] = (Get-WinarchyRoot) -replace '\\', '/'
@@ -71,6 +99,13 @@ function Build-WinarchyThemeContext {
     # apps con fondo del theme, y on_accent el texto legible sobre ese accent_ui.
     $ctx['colors.accent_ui'] = Get-WinarchyReadableAccentHex -Accent $Theme['colors']['accent'] -Background $Theme['colors']['background']
     $ctx['colors.on_accent'] = Get-WinarchyOnAccentHex -Hex $ctx['colors.accent_ui']
+    # Colores semanticos de la barra. color0-15 son la paleta ANSI (terminal, btop,
+    # nvim), donde el rojo tiene que ser rojo; la barra los reusaba como colores de UI.
+    # Por default siguen cayendo en los mismos slots, pero un theme puede declarar [ui]
+    # aparte cuando su accent es dinamico y una paleta fija choca (ver auto-accent).
+    foreach ($pair in @(@('system', 'color6'), @('media', 'color5'), @('net', 'color4'))) {
+        if (-not $ctx.ContainsKey("ui.$($pair[0])")) { $ctx["ui.$($pair[0])"] = $ctx["colors.$($pair[1])"] }
+    }
     # Accent como "R;G;B" decimal, para escapes ANSI truecolor (fastfetch usa "38;2;R;G;B")
     $accentHex = $ctx['colors.accent_ui'].TrimStart('#')
     $ctx['colors.accent_ansi_rgb'] = (0, 2, 4 | ForEach-Object {
@@ -84,6 +119,7 @@ function Get-WinarchyRenderTargets {
     @(
         @{ Template = 'komorebi.json.tpl';                Output = Join-Path $root 'config\komorebi\komorebi.json';      Validate = 'json' }
         @{ Template = 'yasb-styles.css.tpl';              Output = Join-Path $root 'config\yasb\styles.css';             Validate = $null }
+        @{ Template = 'yasb-config.yaml.tpl';             Output = Join-Path $root 'config\yasb\config.yaml';            Validate = $null }
         @{ Template = 'windows-terminal-scheme.json.tpl'; Output = Join-Path $root 'config\terminal\winarchy-scheme.json'; Validate = 'json' }
         @{ Template = 'flow-theme.xaml.tpl';              Output = Join-Path $root 'config\flow\Winarchy.xaml';          Validate = 'xml' }
         @{ Template = 'btop.theme.tpl';                   Output = Join-Path $root 'config\btop\winarchy.theme';         Validate = $null }
@@ -570,7 +606,10 @@ function Set-WinarchyTheme {
         $tpl = Join-Path $root "templates\$($t.Template)"
         $rendered = Invoke-WinarchyTemplate -TemplatePath $tpl -Context $ctx
         # Las preferencias de ubicación van dentro del config: por runtime no sobreviven al reload.
-        if ($t.Template -eq 'komorebi.json.tpl') { $rendered = Add-WinarchyWindowRulesToKomorebiJson -Json $rendered }
+        if ($t.Template -eq 'komorebi.json.tpl') {
+            $rendered = Add-WinarchyAppRulesToKomorebiJson -Json $rendered
+            $rendered = Add-WinarchyWindowRulesToKomorebiJson -Json $rendered
+        }
         $stagedFile = Join-Path $staging (Split-Path $t.Output -Leaf)
         Set-Content -Path $stagedFile -Value $rendered -Encoding UTF8 -NoNewline
         switch ($t.Validate) {
