@@ -534,12 +534,11 @@ Describe 'App rules (community ASC + user layer)' {
     }
 
     It 'compiles the community rules into the generated komorebi.json' {
-        InModuleScope Winarchy {
-            $json = Get-Content (Join-Path (Get-WinarchyRoot) 'config\komorebi\komorebi.json') -Raw -Encoding UTF8
-            # MozillaDialogClass solo puede venir de ASC: es la ventana hija fantasma de
-            # los forks de Firefox, que Winarchy no declaraba por su cuenta.
-            $json | Should -Match 'MozillaDialogClass'
-        }
+        Set-WinarchyTheme -Name (Get-WinarchyThemes | Select-Object -First 1) -StageOnly
+        $json = Get-Content (Join-Path (Get-WinarchyStateDir) 'staging\komorebi.json') -Raw -Encoding UTF8
+        # MozillaDialogClass solo puede venir de ASC.
+        $json | Should -Match 'MozillaDialogClass'
+        ($json | ConvertFrom-Json).layered_applications.id | Should -Contain 'Discord.exe'
     }
 }
 

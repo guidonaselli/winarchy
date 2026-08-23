@@ -4,5 +4,7 @@
 *.cmd text eol=crlf
 *.bat text eol=crlf
 
+vendor/asc/*.json -text
+
 *.png binary
 *.ico binary
