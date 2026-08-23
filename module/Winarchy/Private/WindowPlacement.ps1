@@ -199,6 +199,7 @@ function Save-WinarchyWindowLayout {
         else { $added++ }
         $prefs += $placement
     }
+    $null = Resolve-WinarchySlotConflicts -Pref $prefs -Live (Get-WinarchyLiveSlotKeys -State $state)
     Export-WinarchyWindowPrefs -Pref $prefs
     Write-WinarchyOk "Layout saved: $added new, $updated updated ($($prefs.Count) total) → $(Get-WinarchyWindowPrefsPath)"
     Write-WinarchyInfo 'Apply it with: winarchy layout apply'

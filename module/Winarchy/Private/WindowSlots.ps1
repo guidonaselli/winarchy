@@ -265,19 +265,12 @@ function Invoke-WinarchySlotReconcile {
     $steps
 }
 
-function Get-WinarchyLearnedSlots {
-    <# Preferencias con el slot actualizado a la posición viva. Sólo se toca el slot: una app
-       sin preferencia previa no adquiere una por haber sido movida. $null = nada cambió. #>
-    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Pref)
-    # Clave compuesta y no sólo el exe: una app puede tener ventanas en varios workspaces, y
-    # la que importa es la del workspace que declara la preferencia.
+function Get-WinarchyLiveSlotKeys {
+    <# Slot vivo de cada ventana, por `exe|device_id|workspace`. La clave es compuesta y no
+       sólo el exe: una app puede tener ventanas en varios workspaces. #>
+    param([Parameter(Mandatory)]$State)
     $live = @{}
-    $map = Get-WinarchyMonitorIndexMap -State $State
-    $reverse = @{}
-    foreach ($device in $map.Keys) { $reverse[$map[$device]] = $device }
-    $monitorIndex = -1
     foreach ($monitor in $State.monitors.elements) {
-        $monitorIndex++
         $workspaceIndex = -1
         foreach ($workspace in $monitor.workspaces.elements) {
             $workspaceIndex++
@@ -292,6 +285,14 @@ function Get-WinarchyLearnedSlots {
             }
         }
     }
+    $live
+}
+
+function Get-WinarchyLearnedSlots {
+    <# Preferencias con el slot actualizado a la posición viva. Sólo se toca el slot: una app
+       sin preferencia previa no adquiere una por haber sido movida. $null = nada cambió. #>
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Pref)
+    $live = Get-WinarchyLiveSlotKeys -State $State
     $changed = $false
     # `$entry` y no `$pref`: las variables de PowerShell son case-insensitive, así que un
     # `foreach ($pref in $Pref)` le asigna cada elemento al propio parámetro, y la restricción
@@ -307,6 +308,26 @@ function Get-WinarchyLearnedSlots {
     @($Pref)
 }
 
+function Resolve-WinarchySlotConflicts {
+    <# Slots únicos por workspace: el duplicado se corre al primer libre. `Live` no se mueve. #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Pref,
+        [hashtable]$Live = @{}
+    )
+    $changed = $false
+    $groups = $Pref | Where-Object { $null -ne $_.Slot } | Group-Object { "$($_.Monitor)|$($_.Workspace)" }
+    foreach ($group in $groups) {
+        $taken = [System.Collections.Generic.HashSet[int]]::new()
+        $ordered = $group.Group | Sort-Object @{ Expression = { -not $Live.ContainsKey("$($_.Exe)|$($_.Monitor)|$($_.Workspace)") } }, Slot, Exe
+        foreach ($entry in $ordered) {
+            $slot = $entry.Slot
+            while (-not $taken.Add($slot)) { $slot++ }
+            if ($slot -ne $entry.Slot) { $entry.Slot = $slot; $changed = $true }
+        }
+    }
+    $changed
+}
+
 function Update-WinarchySlotFromState {
     <# Aprende la posición que el usuario acaba de darle a una ventana. #>
     param([switch]$Quiet, $State)
@@ -316,6 +337,7 @@ function Update-WinarchySlotFromState {
     if (-not $State) { $State = Get-WinarchyKomorebiState }
     $learned = Get-WinarchyLearnedSlots -State $State -Pref $prefs
     if (-not $learned) { return }
+    $null = Resolve-WinarchySlotConflicts -Pref $learned -Live (Get-WinarchyLiveSlotKeys -State $State)
     Export-WinarchyWindowPrefs -Pref $learned
     if (-not $Quiet) { Write-WinarchyOk 'Slots updated from the current arrangement.' }
     $true

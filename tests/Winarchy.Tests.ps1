@@ -681,6 +681,21 @@ Describe 'Window slots' {
         }
     }
 
+    It 'moves the app that is not open off a slot another one already holds' {
+        InModuleScope Winarchy -Parameters @{ Monitor = $script:Monitor2 } {
+            param($Monitor)
+            $prefs = @(
+                [pscustomobject]@{ Exe = 'Absent.exe'; Monitor = $Monitor; Workspace = 0; WorkspaceName = 'A'; Slot = 0; Pin = $false }
+                [pscustomobject]@{ Exe = 'Discord.exe'; Monitor = $Monitor; Workspace = 0; WorkspaceName = 'A'; Slot = 0; Pin = $false }
+            )
+            $live = @{ "Discord.exe|$Monitor|0" = 0 }
+            Resolve-WinarchySlotConflicts -Pref $prefs -Live $live | Should -BeTrue
+            ($prefs | Where-Object { $_.Exe -eq 'Discord.exe' }).Slot | Should -Be 0
+            ($prefs | Where-Object { $_.Exe -eq 'Absent.exe' }).Slot  | Should -Be 1
+            Resolve-WinarchySlotConflicts -Pref $prefs -Live $live | Should -BeFalse
+        }
+    }
+
     It 'does not fight itself when two apps claim the same slot' {
         InModuleScope Winarchy -Parameters @{ State = $script:Swapped; Monitor = $script:Monitor2 } {
             param($State, $Monitor)
