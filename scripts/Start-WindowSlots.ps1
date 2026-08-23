@@ -35,6 +35,7 @@ if ((Test-Path $log) -and (Get-Item $log).Length -gt 1MB) { Remove-Item $log -Fo
 
 function Write-Log {
     param([string]$Message)
+    if ((Test-Path $log) -and (Get-Item $log).Length -gt 1MB) { Remove-Item $log -Force }
     "{0:yyyy-MM-dd HH:mm:ss} {1}" -f (Get-Date), $Message | Add-Content -Path $log -Encoding UTF8
 }
 
@@ -96,6 +97,11 @@ while ($true) {
         $selfMoves = 0
         $pending = $false
         $quiet = 0
+        # cortacircuito para una reconciliación que no converge
+        $burst = 0
+        $burstLimit = 10
+        $suspendUntil = [datetime]::MinValue
+        $lastReconcile = [datetime]::MinValue
 
         while (-not $handle.IsCompleted) {
             $type = $null
@@ -116,10 +122,26 @@ while ($true) {
                 $current = Get-WinarchyWorkspaceSignature -State $state
                 $appeared = Test-WinarchyWindowsAppeared -Previous $signature -Current $current
 
+                if (($appeared -or $selfMoves -gt 0) -and (Get-Date) -lt $suspendUntil) {
+                    $signature = $current
+                    continue
+                }
+
                 if ($appeared -or $selfMoves -gt 0) {
                     $emitted = [int](Invoke-WinarchySlotReconcile -Quiet -State $state)
                     $selfMoves = $emitted
+                    if (-not $emitted -or ((Get-Date) - $lastReconcile).TotalSeconds -gt 10) { $burst = 0 }
+                    $lastReconcile = Get-Date
                     if ($emitted) {
+                        $burst++
+                        if ($burst -ge $burstLimit) {
+                            Write-Log "reconcile loop detected ($burst in a row); pausing 60s"
+                            $suspendUntil = (Get-Date).AddSeconds(60)
+                            $burst = 0
+                            $selfMoves = 0
+                            $signature = Get-WinarchyWorkspaceSignature -State (Get-WinarchyKomorebiState)
+                            continue
+                        }
                         Write-Log "reconciled ($emitted move(s))"
                         # la referencia es el estado corregido, no el que disparó
                         $signature = Get-WinarchyWorkspaceSignature -State (Get-WinarchyKomorebiState)

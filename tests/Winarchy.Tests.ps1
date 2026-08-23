@@ -672,6 +672,28 @@ Describe 'Window slots' {
         }
     }
 
+    It 'survives a focused index that points past the last element' {
+        InModuleScope Winarchy -Parameters @{ State = $script:State } {
+            param($State)
+            $State.monitors | Add-Member -NotePropertyName focused -NotePropertyValue @($State.monitors.elements).Count -Force
+            { Get-WinarchyFocusedHwnd -State $State } | Should -Not -Throw
+            Get-WinarchyFocusedHwnd -State $State | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'does not fight itself when two apps claim the same slot' {
+        InModuleScope Winarchy -Parameters @{ State = $script:Swapped; Monitor = $script:Monitor2 } {
+            param($State, $Monitor)
+            $prefs = @(
+                [pscustomobject]@{ Exe = 'Discord.exe'; Monitor = $Monitor; Workspace = 0; WorkspaceName = 'A'; Slot = 0; Pin = $false }
+                [pscustomobject]@{ Exe = 'Hearthstone.exe'; Monitor = $Monitor; Workspace = 0; WorkspaceName = 'A'; Slot = 0; Pin = $false }
+            )
+            $moves = @(Get-WinarchySlotMoves -State $State -Pref $prefs)
+            $moves.Count   | Should -Be 1
+            $moves[0].Exe  | Should -Be 'Discord.exe'
+        }
+    }
+
     It 'ignores preferences without a slot and monitors that are not connected' {
         InModuleScope Winarchy -Parameters @{ State = $script:Swapped; Monitor = $script:Monitor2 } {
             param($State, $Monitor)

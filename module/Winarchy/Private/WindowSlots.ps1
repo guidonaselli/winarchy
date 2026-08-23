@@ -87,6 +87,9 @@ function Get-WinarchySlotMoves {
                 Where-Object { $_.Workspace -eq $workspaceIndex } |
                 Sort-Object Slot)
 
+            # un slot se reclama una sola vez por workspace
+            $claimed = [System.Collections.Generic.HashSet[int]]::new()
+
             foreach ($target in $targets) {
                 $from = -1
                 for ($i = 0; $i -lt $exes.Count; $i++) {
@@ -94,6 +97,7 @@ function Get-WinarchySlotMoves {
                 }
                 if ($from -lt 0) { continue }
                 $to = [Math]::Min($target.Slot, $exes.Count - 1)
+                if (-not $claimed.Add($to)) { continue }
                 if ($from -eq $to) { continue }
                 $exes.RemoveAt($from)
                 $exes.Insert($to, $target.Exe)
@@ -138,7 +142,10 @@ function Get-WinarchyFocusedHwnd {
     param([Parameter(Mandatory)]$State)
     function Get-Focused($collection) {
         if (-not $collection -or -not $collection.PSObject.Properties['focused']) { return }
-        @($collection.elements)[$collection.focused]
+        # `focused` puede apuntar a un elemento que ya no está
+        $elements = @($collection.elements)
+        if ($collection.focused -ge $elements.Count) { return }
+        $elements[$collection.focused]
     }
     $monitor = Get-Focused $State.monitors
     if (-not $monitor) { return }
