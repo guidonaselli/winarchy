@@ -87,6 +87,7 @@ manual app list: Flow already indexes installed programs.
 |---|---|
 | `SUPER+Shift+T` | Next theme (`winarchy theme next`) |
 | `SUPER+Ctrl+T` | Theme gallery (`winarchy theme gallery`) |
+| `SUPER+Ctrl+Space` | Next background of the active theme (`winarchy background next`) |
 
 ## User overrides
 Create `config\ahk\user.ahk` (gitignored) to add your own hotkeys without touching

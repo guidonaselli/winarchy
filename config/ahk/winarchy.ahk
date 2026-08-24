@@ -193,6 +193,7 @@ SetupTray() {
     themes := Menu()
     themes.Add("Next theme`tSUPER+Shift+T", (*) => Winarchy('theme next'))
     themes.Add("Gallery`tSUPER+Ctrl+T", (*) => Winarchy('theme gallery'))
+    themes.Add("Next background`tSUPER+Ctrl+Space", (*) => Winarchy('background next'))
 
     tray.Add("Apps", (*) => ToggleFlowApps())
     tray.Default := "Apps"
@@ -258,7 +259,8 @@ WinarchyMenuItems() {
         {text:'Apps',          hint:'SUPER+Space',   action:(*)=>ToggleFlowApps()},
         {text:'Themes',        sub:[
             {text:'Next theme', hint:'SUPER+Shift+T', action:(*)=>Winarchy('theme next')},
-            {text:'Gallery',    hint:'SUPER+Ctrl+T',  action:(*)=>Winarchy('theme gallery')} ]},
+            {text:'Gallery',    hint:'SUPER+Ctrl+T',  action:(*)=>Winarchy('theme gallery')},
+            {text:'Next background', hint:'SUPER+Ctrl+Space', action:(*)=>Winarchy('background next')} ]},
         {text:'Reload stack',  hint:'SUPER+Shift+R', action:(*)=>Winarchy('reload')},
         {text:'Game mode',     hint:(FileExist(GameFlag) ? 'ON' : 'OFF'), action:(*)=>ToggleGameMode()},
         {text:'Doctor',                              action:(*)=>WinarchyTerminal('doctor')},
@@ -778,6 +780,7 @@ AccentWatch() {
 #+v::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -ScreenRecorder')    ; screen recording
 #+g::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -ScreenRecorderGIF') ; GIF recording
 #^t::Winarchy('theme gallery')                    ; theme gallery
+#^Space::Winarchy('background next')              ; next background of the active theme
 #k::ToggleKeyOverlay()                            ; this keybindings overlay
 
 ; --- Override de usuario (config\ahk\user.ahk, no versionado; sus hotkeys

@@ -9,6 +9,8 @@
         'Invoke-Winarchy',
         'Set-WinarchyTheme', 'Set-WinarchyNextTheme', 'Get-WinarchyThemes', 'Get-WinarchyCurrentTheme',
         'Update-WinarchyAccent', 'Get-WinarchyAccentStatus',
+        'Get-WinarchyBackgrounds', 'Get-WinarchyBackground', 'Set-WinarchyBackground',
+        'Get-WinarchyBackgroundStatus',
         'New-WinarchyThemePreview', 'Update-WinarchyThemePreviews', 'Show-WinarchyThemeGallery',
         'Invoke-WinarchyUpdate', 'Invoke-WinarchyDoctor', 'Invoke-WinarchyReload',
         'Invoke-WinarchySelfUpdate', 'Get-WinarchyVersion', 'Get-WinarchyLatestRelease',

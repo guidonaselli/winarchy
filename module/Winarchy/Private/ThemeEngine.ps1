@@ -518,17 +518,16 @@ function Set-WinarchyWallpaper {
             return
         }
     }
-    $wallpaper = Get-ChildItem -Path $ThemeDir -File |
-        Where-Object { $_.Name -match '^wallpaper\.(jpg|jpeg|png|bmp)$' } |
-        Select-Object -First 1
-    if ($wallpaper) {
+    $chosen = Get-WinarchyBackground -Name (Split-Path $ThemeDir -Leaf)
+    if ($chosen) {
+        $wallpaper = Join-Path $ThemeDir "backgrounds\$chosen"
         if (-not ('Winarchy.Native.Wallpaper' -as [type])) {
             Add-Type -Namespace Winarchy.Native -Name Wallpaper -MemberDefinition @'
 [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
 public static extern int SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
 '@
         }
-        [Winarchy.Native.Wallpaper]::SystemParametersInfo(20, 0, $wallpaper.FullName, 3) | Out-Null
+        [Winarchy.Native.Wallpaper]::SystemParametersInfo(20, 0, $wallpaper, 3) | Out-Null
     }
 }
 
@@ -691,7 +690,7 @@ function Set-WinarchyTheme {
             Sync-WinarchyVSCode -ThemeDir $themeDir
             Sync-WinarchyObsidian -CssPath (Join-Path $root 'config\obsidian\winarchy-theme.css')
             Set-WinarchyWindowsAppearance -Mode $theme['mode'] -AccentHex $theme['colors']['accent'] -SkipAccent:$dynamicAccent
-            Set-WinarchyWallpaper -ThemeDir $themeDir
+            if (-not $dynamicAccent) { Set-WinarchyWallpaper -ThemeDir $themeDir }
         }
 
         # 6. Persistencia + recarga de servicios

@@ -184,11 +184,16 @@ Themes are drop-in folders inside `themes/`.
 themes/my-theme/
   theme.toml
   preview.png
-  wallpaper.png
+  backgrounds/
   wallpaper-engine.txt
   jetbrains.icls
   vscode.json
 ```
+
+Everything in `backgrounds/` is a wallpaper the theme offers. Applying the theme sets the
+one you picked last time for it (the first one otherwise); `winarchy background next` and
+`SUPER + CTRL + SPACE` cycle through the rest. A theme without the folder leaves the
+wallpaper alone, and `wallpaper-engine.txt` wins over it when Wallpaper Engine is installed.
 
 Only `theme.toml` is required, and any other file is ignored: keep leftovers from other
 ecosystems out of the folder.

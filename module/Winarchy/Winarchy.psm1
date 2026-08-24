@@ -19,6 +19,9 @@ function Show-WinarchyHelp {
     theme list                List installed themes (* = active)
     theme preview [name]      Render synthetic preview cards (all themes by default)
     theme gallery             Visual theme picker (WPF grid)
+    background list           Backgrounds shipped by the active theme (* = applied)
+    background set <file>     Apply one of them
+    background next           Cycle to the next background
     update [--core]           Update the packages Winarchy declares (+ scoop)
                               --core: the pinned ones (komorebi/YASB/Flow/AHK)
                               (único canal de updates: YASB/Flow tienen su auto-update off)
@@ -152,6 +155,18 @@ function Invoke-Winarchy {
                 'sync' { Update-WinarchyAccent -Force:($rest -contains '--force' -or $rest -contains '-force') }
                 'status' { Get-WinarchyAccentStatus }
                 default { throw "Unknown subcommand: accent $sub (sync|status)" }
+            }
+        }
+        'background' {
+            $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'list' }
+            switch ($sub) {
+                'list' { Get-WinarchyBackgroundStatus }
+                'next' { Set-WinarchyBackground -Next }
+                'set' {
+                    if ($rest.Count -lt 2) { throw 'Usage: winarchy background set <file>' }
+                    Set-WinarchyBackground -File $rest[1]
+                }
+                default { throw "Unknown subcommand: background $sub (list|set|next)" }
             }
         }
         'rules' {

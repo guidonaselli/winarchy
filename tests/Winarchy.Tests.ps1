@@ -185,6 +185,67 @@ Describe 'Theme VS Code drop-in' {
     }
 }
 
+Describe 'Backgrounds' {
+    BeforeAll {
+        $script:BgTheme = Get-WinarchyThemes | Where-Object { (Get-WinarchyBackgrounds -Name $_).Count -gt 1 } | Select-Object -First 1
+        $script:BgPrefs = InModuleScope Winarchy { Get-WinarchyBackgroundPrefsPath }
+        $script:BgPrefsBackup = if (Test-Path $script:BgPrefs) { Get-Content $script:BgPrefs -Raw } else { $null }
+    }
+    AfterAll {
+        if ($script:BgPrefsBackup) { Set-Content $script:BgPrefs -Value $script:BgPrefsBackup -NoNewline -Encoding UTF8 }
+        elseif (Test-Path $script:BgPrefs) { Remove-Item $script:BgPrefs -Force }
+    }
+
+    It 'falls back to the first background when nothing was chosen' {
+        if (Test-Path $script:BgPrefs) { Remove-Item $script:BgPrefs -Force }
+        Get-WinarchyBackground -Name $script:BgTheme | Should -Be (Get-WinarchyBackgrounds -Name $script:BgTheme)[0]
+    }
+
+    It 'round-trips a choice through the repo TOML parser' {
+        InModuleScope Winarchy -Parameters @{ Theme = $script:BgTheme } {
+            param($Theme)
+            $second = (Get-WinarchyBackgrounds -Name $Theme)[1]
+            Export-WinarchyBackgroundPrefs -Pref @{ $Theme = $second }
+            Get-WinarchyBackground -Name $Theme | Should -Be $second
+        }
+    }
+
+    # Un theme puede perder una imagen en un update y dejar la elección apuntando a la nada.
+    It 'ignores a choice whose file is gone' {
+        InModuleScope Winarchy -Parameters @{ Theme = $script:BgTheme } {
+            param($Theme)
+            Export-WinarchyBackgroundPrefs -Pref @{ $Theme = 'deleted-upstream.png' }
+            Get-WinarchyBackground -Name $Theme | Should -Be (Get-WinarchyBackgrounds -Name $Theme)[0]
+        }
+    }
+
+    It 'returns nothing for a theme that ships no backgrounds' {
+        $bare = Get-WinarchyThemes | Where-Object { (Get-WinarchyBackgrounds -Name $_).Count -eq 0 } | Select-Object -First 1
+        Get-WinarchyBackground -Name $bare | Should -BeNullOrEmpty
+    }
+
+    It 'cycles and wraps around' {
+        InModuleScope Winarchy -Parameters @{ Theme = $script:BgTheme } {
+            param($Theme)
+            Mock Get-WinarchyCurrentTheme { $Theme }
+            Mock Set-WinarchyWallpaper {}
+            Mock Write-WinarchyOk {}
+            $all = Get-WinarchyBackgrounds -Name $Theme
+            Export-WinarchyBackgroundPrefs -Pref @{ $Theme = $all[-1] }
+            Set-WinarchyBackground -Next
+            Get-WinarchyBackground -Name $Theme | Should -Be $all[0]
+        }
+    }
+
+    It 'refuses a background the theme does not ship' {
+        InModuleScope Winarchy -Parameters @{ Theme = $script:BgTheme } {
+            param($Theme)
+            Mock Get-WinarchyCurrentTheme { $Theme }
+            { Set-WinarchyBackground -File 'nope.png' } | Should -Throw '*has no background*'
+        }
+    }
+}
+
 Describe 'Theme folder format' {
     BeforeDiscovery {
         $themesDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'themes'
