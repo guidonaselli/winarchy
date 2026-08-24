@@ -7,6 +7,9 @@ $script:ThemeRequiredColorKeys = @(
     'selection_background', 'selection_foreground'
 ) + (0..15 | ForEach-Object { "color$_" })
 $script:ThemeRequiredBorderKeys = @('focused', 'unfocused', 'urgent', 'monocle', 'stack')
+$script:ThemeHexPattern = '^#[0-9a-fA-F]{6}$'
+$script:ThemeFontPattern = '^[A-Za-z0-9 .\-]{1,64}$'
+$script:VSCodeExtensionPattern = '^[A-Za-z0-9][A-Za-z0-9\-]*\.[A-Za-z0-9][A-Za-z0-9\-]*$'
 
 # Secciones opcionales del theme: el theme que no las declara hereda estos valores,
 # así los 23 themes existentes siguen renderizando sin tocar su theme.toml.
@@ -44,23 +47,27 @@ function Test-WinarchyThemeData {
     if ($Theme.ContainsKey('mode') -and $Theme['mode'] -notin @('dark', 'light')) {
         $missing.Add("mode (must be 'dark' or 'light')")
     }
+    # Los valores se sustituyen textualmente en JSON/CSS/YAML/XAML/INI/TOML/Lua generados:
+    # el formato se valida acá, en el boundary, y no se escapa por destino.
     if (-not $Theme.ContainsKey('colors')) { $missing.Add('[colors]') }
     else {
         foreach ($k in $script:ThemeRequiredColorKeys) {
             if (-not $Theme['colors'].ContainsKey($k)) { $missing.Add("colors.$k") }
+            elseif ($Theme['colors'][$k] -notmatch $script:ThemeHexPattern) { $missing.Add("colors.$k (must be #rrggbb)") }
         }
     }
     if (-not $Theme.ContainsKey('borders')) { $missing.Add('[borders]') }
     else {
         foreach ($k in $script:ThemeRequiredBorderKeys) {
             if (-not $Theme['borders'].ContainsKey($k)) { $missing.Add("borders.$k") }
+            elseif ($Theme['borders'][$k] -notmatch $script:ThemeHexPattern) { $missing.Add("borders.$k (must be #rrggbb)") }
         }
     }
     # [ui] desacopla los colores de la barra de la paleta ANSI (ver Build-WinarchyThemeContext).
     if ($Theme.ContainsKey('ui')) {
         foreach ($k in $Theme['ui'].Keys) {
             if ($k -notin @('system', 'media', 'net')) { $missing.Add("ui.$k (unknown key)") }
-            elseif ($Theme['ui'][$k] -notmatch '^#[0-9a-fA-F]{6}$') { $missing.Add("ui.$k (must be #rrggbb)") }
+            elseif ($Theme['ui'][$k] -notmatch $script:ThemeHexPattern) { $missing.Add("ui.$k (must be #rrggbb)") }
         }
     }
     # [bar] es opcional (hereda ThemeDefaults), pero si el theme la declara sus medidas
@@ -70,6 +77,9 @@ function Test-WinarchyThemeData {
             if ($Theme['bar'].ContainsKey($k) -and $Theme['bar'][$k] -isnot [int]) {
                 $missing.Add("bar.$k (must be an integer)")
             }
+        }
+        if ($Theme['bar'].ContainsKey('font_family') -and $Theme['bar']['font_family'] -notmatch $script:ThemeFontPattern) {
+            $missing.Add('bar.font_family (must be a font name)')
         }
     }
     # Sin la coma: envuelta, `@(Test-WinarchyThemeData ...)` daba un array con la List
@@ -321,6 +331,10 @@ function Sync-WinarchyVSCode {
     try { $spec = Get-Content $dropin -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable }
     catch { Write-WinarchyWarn "Theme's vscode.json does not parse; VS Code skipped."; return }
     if (-not $spec -or -not $spec['name']) { return }
+    if ($spec['extension'] -and $spec['extension'] -notmatch $script:VSCodeExtensionPattern) {
+        Write-WinarchyWarn "Theme's vscode.json declares an extension that is not publisher.name; not installed."
+        $spec['extension'] = $null
+    }
 
     foreach ($editor in Get-WinarchyVSCodeEditors) {
         $cli = Get-Command $editor.Cli -ErrorAction SilentlyContinue

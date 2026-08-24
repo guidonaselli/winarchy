@@ -183,11 +183,20 @@ Themes are drop-in folders inside `themes/`.
 ```text
 themes/my-theme/
   theme.toml
+  preview.png
   wallpaper.png
   wallpaper-engine.txt
   jetbrains.icls
   vscode.json
 ```
+
+Only `theme.toml` is required, and any other file is ignored: keep leftovers from other
+ecosystems out of the folder.
+
+Values are substituted into generated JSON, CSS, YAML, XAML, INI, TOML and Lua, so their
+format is checked on the way in and the whole theme is rejected before anything is written:
+`colors.*`, `borders.*` and `ui.*` must be `#rrggbb`; the `[bar]` measures must be integers
+and `font_family` a font name; the `extension` in `vscode.json` must be `publisher.name`.
 
 Running:
 

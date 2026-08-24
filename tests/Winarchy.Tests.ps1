@@ -124,6 +124,83 @@ Describe 'Test-WinarchyThemeData' {
             $missing | Where-Object { $_ -like 'bar.*' } | Should -BeNullOrEmpty
         }
     }
+
+    # Los valores llegan por reemplazo textual a JSON/CSS/YAML/XAML/INI/TOML/Lua generados:
+    # un valor que no es un color escribe fuera de su lugar en el archivo generado.
+    It 'rejects a <Section> value that is not #rrggbb' -ForEach @(
+        @{ Section = 'colors'; Key = 'background'; Value = '#000000", "injected": "yes' }
+        @{ Section = 'borders'; Key = 'focused'; Value = 'red' }
+    ) {
+        InModuleScope Winarchy -Parameters @{ Section = $Section; Key = $Key; Value = $Value } {
+            param($Section, $Key, $Value)
+            $theme = Import-WinarchyToml -Path (Join-Path (Get-WinarchyThemesDir) 'catppuccin\theme.toml')
+            $theme[$Section][$Key] = $Value
+            Test-WinarchyThemeData -Theme $theme | Should -Contain "$Section.$Key (must be #rrggbb)"
+        }
+    }
+
+    It 'rejects a bar.font_family that is not a font name' {
+        InModuleScope Winarchy {
+            $missing = Test-WinarchyThemeData -Theme @{ name = 'x'; mode = 'dark'; bar = @{ font_family = "Foo`n  bad: yes" } }
+            $missing | Should -Contain 'bar.font_family (must be a font name)'
+        }
+    }
+
+    It 'accepts the font family shipped as the default' {
+        InModuleScope Winarchy {
+            $missing = Test-WinarchyThemeData -Theme @{ name = 'x'; mode = 'dark'; bar = @{ font_family = 'JetBrainsMono NF' } }
+            $missing | Where-Object { $_ -like 'bar.font_family*' } | Should -BeNullOrEmpty
+        }
+    }
+}
+
+Describe 'Theme VS Code drop-in' {
+    BeforeAll {
+        $script:VSCodeThemeDir = Join-Path ([IO.Path]::GetTempPath()) "winarchy-vscode-$([guid]::NewGuid())"
+        New-Item -ItemType Directory -Path $script:VSCodeThemeDir -Force | Out-Null
+    }
+    AfterAll { Remove-Item $script:VSCodeThemeDir -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'refuses to install an extension that is not publisher.name' {
+        $dir = $script:VSCodeThemeDir
+        '{ "name": "X", "extension": "evil; rm -rf /" }' | Set-Content (Join-Path $dir 'vscode.json') -Encoding UTF8
+        InModuleScope Winarchy -Parameters @{ Dir = $dir } {
+            param($Dir)
+            Mock Write-WinarchyWarn {}
+            Mock Get-WinarchyVSCodeEditors { @() }
+            Sync-WinarchyVSCode -ThemeDir $Dir
+            Should -Invoke Write-WinarchyWarn -Times 1 -ParameterFilter { $Message -like '*publisher.name*' }
+        }
+    }
+
+    It 'accepts the extension ids shipped by the themes' {
+        InModuleScope Winarchy {
+            Get-ChildItem (Get-WinarchyThemesDir) -Directory -Filter * |
+                ForEach-Object { Join-Path $_.FullName 'vscode.json' } |
+                Where-Object { Test-Path $_ } |
+                ForEach-Object { (Get-Content $_ -Raw | ConvertFrom-Json -AsHashtable)['extension'] } |
+                Where-Object { $_ } |
+                ForEach-Object { $_ | Should -Match $script:VSCodeExtensionPattern }
+        }
+    }
+}
+
+Describe 'Theme folder format' {
+    BeforeDiscovery {
+        $themesDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'themes'
+        $script:FormatCases = @(
+            Get-ChildItem $themesDir -Directory |
+                Where-Object { Test-Path (Join-Path $_.FullName 'theme.toml') } |
+                ForEach-Object { @{ Name = $_.Name } }
+        )
+    }
+
+    It '<Name> contains only files the engine reads' -ForEach $script:FormatCases {
+        $allowed = @('theme.toml', 'preview.png', 'vscode.json', 'jetbrains.icls', 'wallpaper-engine.txt', 'backgrounds')
+        Get-ChildItem (Join-Path (Split-Path $PSScriptRoot -Parent) "themes\$Name") |
+            Where-Object { $_.Name -notin $allowed -and $_.Name -notmatch '^wallpaper\.(jpg|jpeg|png|bmp)$' } |
+            ForEach-Object { $_.Name } | Should -BeNullOrEmpty
+    }
 }
 
 Describe 'Theme defaults' {
