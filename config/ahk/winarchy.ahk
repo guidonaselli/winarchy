@@ -261,6 +261,7 @@ WinarchyMenuItems() {
             {text:'Next theme', hint:'SUPER+Shift+T', action:(*)=>Winarchy('theme next')},
             {text:'Gallery',    hint:'SUPER+Ctrl+T',  action:(*)=>Winarchy('theme gallery')},
             {text:'Next background', hint:'SUPER+Ctrl+Space', action:(*)=>Winarchy('background next')} ]},
+        {text:'Coding agent',  hint:'SUPER+Ctrl+Shift+A', action:(*)=>Winarchy('agent launch')},
         {text:'Reload stack',  hint:'SUPER+Shift+R', action:(*)=>Winarchy('reload')},
         {text:'Game mode',     hint:(FileExist(GameFlag) ? 'ON' : 'OFF'), action:(*)=>ToggleGameMode()},
         {text:'Doctor',                              action:(*)=>WinarchyTerminal('doctor')},
@@ -781,6 +782,7 @@ AccentWatch() {
 #+g::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -ScreenRecorderGIF') ; GIF recording
 #^t::Winarchy('theme gallery')                    ; theme gallery
 #^Space::Winarchy('background next')              ; next background of the active theme
+#^+a::Winarchy('agent launch')                    ; preferred coding agent
 #k::ToggleKeyOverlay()                            ; this keybindings overlay
 
 ; --- Override de usuario (config\ahk\user.ahk, no versionado; sus hotkeys

@@ -185,6 +185,109 @@ Describe 'Theme VS Code drop-in' {
     }
 }
 
+Describe 'Set-WinarchyJsonSetting' {
+    BeforeAll {
+        $script:JsonFile = Join-Path ([IO.Path]::GetTempPath()) "winarchy-json-$([guid]::NewGuid()).json"
+    }
+    AfterAll { Remove-Item $script:JsonFile -Force -ErrorAction SilentlyContinue }
+
+    It 'replaces an existing value and leaves the rest of the file alone' {
+        @'
+{
+  // un comentario que un re-serialize borraria
+  "model": "opus",
+  "theme": "light"
+}
+'@ | Set-Content $script:JsonFile -Encoding UTF8
+        InModuleScope Winarchy -Parameters @{ Path = $script:JsonFile } {
+            param($Path)
+            Set-WinarchyJsonSetting -Path $Path -Key 'theme' -Value 'dark'
+        }
+        $raw = Get-Content $script:JsonFile -Raw
+        $raw | Should -Match '"theme":\s*"dark"'
+        $raw | Should -Match 'un comentario'
+        $raw | Should -Match '"model":\s*"opus"'
+    }
+
+    It 'inserts the key when it is not there yet' {
+        '{ "model": "opus" }' | Set-Content $script:JsonFile -Encoding UTF8
+        InModuleScope Winarchy -Parameters @{ Path = $script:JsonFile } {
+            param($Path)
+            Set-WinarchyJsonSetting -Path $Path -Key 'workbench.colorTheme' -Value 'Winarchy'
+        }
+        (Get-Content $script:JsonFile -Raw | ConvertFrom-Json).'workbench.colorTheme' | Should -Be 'Winarchy'
+    }
+
+    It 'writes a whole file when there is none' {
+        Remove-Item $script:JsonFile -Force -ErrorAction SilentlyContinue
+        InModuleScope Winarchy -Parameters @{ Path = $script:JsonFile } {
+            param($Path)
+            Set-WinarchyJsonSetting -Path $Path -Key 'theme' -Value 'dark'
+        }
+        (Get-Content $script:JsonFile -Raw | ConvertFrom-Json).theme | Should -Be 'dark'
+    }
+}
+
+Describe 'Coding agent' {
+    BeforeAll {
+        $script:AgentPref = InModuleScope Winarchy { Get-WinarchyCodingAgentPath }
+        $script:AgentBackup = if (Test-Path $script:AgentPref) { Get-Content $script:AgentPref -Raw } else { $null }
+    }
+    AfterAll {
+        if ($script:AgentBackup) { Set-Content $script:AgentPref -Value $script:AgentBackup -NoNewline -Encoding UTF8 }
+        elseif (Test-Path $script:AgentPref) { Remove-Item $script:AgentPref -Force }
+    }
+
+    It 'refuses an agent it does not know' {
+        { Set-WinarchyCodingAgent -Id 'nope' } | Should -Throw '*Unknown agent*'
+    }
+
+    It 'prefers the chosen agent when it is installed' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyCodingAgents {
+                @([pscustomobject]@{ Id = 'codex'; Label = 'C'; Command = 'codex'; Installed = $true }
+                  [pscustomobject]@{ Id = 'claude'; Label = 'CC'; Command = 'claude'; Installed = $true })
+            }
+            Set-Content (Get-WinarchyCodingAgentPath) -Value 'claude' -NoNewline -Encoding UTF8
+            (Get-WinarchyCodingAgent).Id | Should -Be 'claude'
+        }
+    }
+
+    # La eleccion sobrevive a desinstalar ese agente: el hotkey tiene que seguir sirviendo.
+    It 'falls back to the first installed one when the chosen agent is gone' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyCodingAgents {
+                @([pscustomobject]@{ Id = 'codex'; Label = 'C'; Command = 'codex'; Installed = $true }
+                  [pscustomobject]@{ Id = 'claude'; Label = 'CC'; Command = 'claude'; Installed = $false })
+            }
+            Set-Content (Get-WinarchyCodingAgentPath) -Value 'claude' -NoNewline -Encoding UTF8
+            (Get-WinarchyCodingAgent).Id | Should -Be 'codex'
+        }
+    }
+
+    It 'launches nothing when no agent is installed' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyCodingAgents { @() }
+            Mock Start-Process {}
+            Mock Write-WinarchyWarn {}
+            Start-WinarchyCodingAgent
+            Should -Not -Invoke Start-Process
+            Should -Invoke Write-WinarchyWarn -Times 1
+        }
+    }
+
+    It 'launches the agent command through Windows Terminal' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyCodingAgents { @([pscustomobject]@{ Id = 'codex'; Label = 'C'; Command = 'codex'; Installed = $true }) }
+            Mock Start-Process {}
+            Start-WinarchyCodingAgent
+            Should -Invoke Start-Process -Times 1 -ParameterFilter {
+                $FilePath -eq 'wt.exe' -and $ArgumentList -contains 'codex'
+            }
+        }
+    }
+}
+
 Describe 'Backgrounds' {
     BeforeAll {
         $script:BgTheme = Get-WinarchyThemes | Where-Object { (Get-WinarchyBackgrounds -Name $_).Count -gt 1 } | Select-Object -First 1

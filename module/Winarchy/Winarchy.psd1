@@ -11,6 +11,8 @@
         'Update-WinarchyAccent', 'Get-WinarchyAccentStatus',
         'Get-WinarchyBackgrounds', 'Get-WinarchyBackground', 'Set-WinarchyBackground',
         'Get-WinarchyBackgroundStatus',
+        'Get-WinarchyCodingAgents', 'Get-WinarchyCodingAgent', 'Set-WinarchyCodingAgent',
+        'Start-WinarchyCodingAgent', 'Get-WinarchyCodingAgentStatus',
         'New-WinarchyThemePreview', 'Update-WinarchyThemePreviews', 'Show-WinarchyThemeGallery',
         'Invoke-WinarchyUpdate', 'Invoke-WinarchyDoctor', 'Invoke-WinarchyReload',
         'Invoke-WinarchySelfUpdate', 'Get-WinarchyVersion', 'Get-WinarchyLatestRelease',

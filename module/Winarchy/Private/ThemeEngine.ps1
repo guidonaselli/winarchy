@@ -231,26 +231,30 @@ function Get-WinarchyVSCodeProfileNames {
     catch { @() }
 }
 
-function Set-WinarchyVSCodeColorTheme {
-    <# Setea workbench.colorTheme editando solo ese valor en el texto: los settings de
-       VS Code son JSONC (comentarios, trailing commas) y un parse/re-serialize los
+function Set-WinarchyJsonSetting {
+    <# Setea una clave string editando solo ese valor en el texto: los settings de estas
+       apps son JSONC (comentarios, trailing commas) y un parse/re-serialize los
        destruiría. Valida que el resultado siga parseando antes de escribir. #>
-    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Name)
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Key,
+        [Parameter(Mandatory)][string]$Value
+    )
     $raw = if (Test-Path $Path) { Get-Content $Path -Raw -Encoding UTF8 } else { '' }
     if (-not $raw -or -not $raw.Trim()) {
-        "{`n  `"workbench.colorTheme`": `"$Name`"`n}" | Set-Content -Path $Path -Encoding UTF8
+        "{`n  `"$Key`": `"$Value`"`n}" | Set-Content -Path $Path -Encoding UTF8
         return
     }
-    $pattern = [regex]'("workbench\.colorTheme"\s*:\s*")(?:[^"\\]|\\.)*(")'
+    $pattern = [regex]("(`"$([regex]::Escape($Key))`"\s*:\s*`")(?:[^`"\\]|\\.)*(`")")
     if ($pattern.IsMatch($raw)) {
-        $updated = $pattern.Replace($raw, "`${1}$Name`${2}", 1)
+        $updated = $pattern.Replace($raw, "`${1}$Value`${2}", 1)
     }
     else {
         $brace = $raw.IndexOf('{')
         if ($brace -lt 0) { throw "no root JSON object: $Path" }
         $rest = $raw.Substring($brace + 1)
         $comma = if ($rest -match '^\s*\}') { '' } else { ',' }
-        $updated = $raw.Substring(0, $brace + 1) + "`n  `"workbench.colorTheme`": `"$Name`"$comma" + $rest
+        $updated = $raw.Substring(0, $brace + 1) + "`n  `"$Key`": `"$Value`"$comma" + $rest
     }
     $null = $updated | ConvertFrom-Json -AsHashtable   # sanity: sigue siendo JSON(C) válido
     Set-Content -Path $Path -Value $updated -Encoding UTF8
@@ -357,10 +361,19 @@ function Sync-WinarchyVSCode {
         $dir = Split-Path $editor.Settings -Parent
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
         foreach ($settingsPath in Get-WinarchyVSCodeSettingsFiles $editor) {
-            try { Set-WinarchyVSCodeColorTheme -Path $settingsPath -Name $spec['name'] }
+            try { Set-WinarchyJsonSetting -Path $settingsPath -Key 'workbench.colorTheme' -Value $spec['name'] }
             catch { Write-WinarchyWarn "$($editor.Id) settings not updatable ($settingsPath); colorTheme not applied there." }
         }
     }
+}
+
+function Sync-WinarchyClaudeCode {
+    <# Alinea el theme de Claude Code con el dark/light del theme activo. #>
+    param([Parameter(Mandatory)][ValidateSet('dark', 'light')][string]$Mode)
+    $settings = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.claude\settings.json'
+    if (-not (Test-Path $settings)) { return }
+    try { Set-WinarchyJsonSetting -Path $settings -Key 'theme' -Value $Mode }
+    catch { Write-WinarchyWarn "Claude Code settings not updatable ($settings); theme not applied there." }
 }
 
 function Sync-WinarchyObsidian {
@@ -689,6 +702,7 @@ function Set-WinarchyTheme {
             Sync-WinarchyJetBrains -ThemeDir $themeDir
             Sync-WinarchyVSCode -ThemeDir $themeDir
             Sync-WinarchyObsidian -CssPath (Join-Path $root 'config\obsidian\winarchy-theme.css')
+            Sync-WinarchyClaudeCode -Mode $theme['mode']
             Set-WinarchyWindowsAppearance -Mode $theme['mode'] -AccentHex $theme['colors']['accent'] -SkipAccent:$dynamicAccent
             if (-not $dynamicAccent) { Set-WinarchyWallpaper -ThemeDir $themeDir }
         }

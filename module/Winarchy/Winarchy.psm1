@@ -22,6 +22,9 @@ function Show-WinarchyHelp {
     background list           Backgrounds shipped by the active theme (* = applied)
     background set <file>     Apply one of them
     background next           Cycle to the next background
+    agent list                Known coding agents (* = preferred, marks what is installed)
+    agent set <id>            Pick the coding agent SUPER+Shift+Ctrl+A launches
+    agent launch              Open it in Windows Terminal
     update [--core]           Update the packages Winarchy declares (+ scoop)
                               --core: the pinned ones (komorebi/YASB/Flow/AHK)
                               (único canal de updates: YASB/Flow tienen su auto-update off)
@@ -155,6 +158,18 @@ function Invoke-Winarchy {
                 'sync' { Update-WinarchyAccent -Force:($rest -contains '--force' -or $rest -contains '-force') }
                 'status' { Get-WinarchyAccentStatus }
                 default { throw "Unknown subcommand: accent $sub (sync|status)" }
+            }
+        }
+        'agent' {
+            $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'list' }
+            switch ($sub) {
+                'list' { Get-WinarchyCodingAgentStatus }
+                'launch' { Start-WinarchyCodingAgent }
+                'set' {
+                    if ($rest.Count -lt 2) { throw 'Usage: winarchy agent set <id>' }
+                    Set-WinarchyCodingAgent -Id $rest[1].ToLower()
+                }
+                default { throw "Unknown subcommand: agent $sub (list|set|launch)" }
             }
         }
         'background' {

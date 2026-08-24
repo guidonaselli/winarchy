@@ -142,6 +142,8 @@ Rollback:
 
 ```text
 winarchy theme set <name> | next | list
+winarchy background list | set <file> | next
+winarchy agent list | set <id> | launch
 winarchy update [--core | --self]
 winarchy menu
 winarchy webapp install <name> <url> | remove <name> | list
@@ -270,6 +272,7 @@ If a theme ships the optional drop-ins, Winarchy can also sync:
 - **JetBrains IDEs**
 - **VS Code / Cursor**
 - **Obsidian**
+- **Claude Code** — follows the theme's `mode` (dark/light); no drop-in needed
 
 Missing apps are skipped silently. Existing rollback snapshots cover these external writes too.
 
