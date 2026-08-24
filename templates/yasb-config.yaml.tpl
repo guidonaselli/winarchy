@@ -121,6 +121,10 @@ widgets:
       label: "{%H:%M}"
       label_alt: "{%A %d %b %Y · %H:%M:%S}"
       timezones: []
+      callbacks:
+        on_left: "toggle_calendar"
+        on_middle: "next_timezone"
+        on_right: "toggle_label"
 
   # Qué está sonando (Spotify, navegador, etc). Click: play/pausa.
   media:
@@ -145,6 +149,9 @@ widgets:
       label: "<span>󰢮</span> {info[utilization]}%"
       label_alt: "<span>󰢮</span> {info[mem_used]}/{info[mem_total]}"
       update_interval: 2000
+      callbacks:
+        on_left: "toggle_menu"
+        on_right: "toggle_label"
 
   cpu:
     type: "yasb.cpu.CpuWidget"
@@ -152,6 +159,9 @@ widgets:
       label: "<span></span> {info[percent][total]}%"
       label_alt: "<span></span> {info[histograms][cpu_percent]}"
       update_interval: 2000
+      callbacks:
+        on_left: "toggle_menu"
+        on_right: "toggle_label"
 
   memory:
     type: "yasb.memory.MemoryWidget"
@@ -159,6 +169,9 @@ widgets:
       label: "<span>󰍛</span> {virtual_mem_percent}%"
       label_alt: "<span>󰍛</span> {virtual_mem_free}"
       update_interval: 5000
+      callbacks:
+        on_left: "toggle_menu"
+        on_right: "toggle_label"
 
   # Indicador de red propio (CustomWidget). El yasb.wifi.WifiWidget nativo deja
   # el placeholder {wifi_icon} literal mientras su WiFiWorker (winrt) no puede
@@ -202,7 +215,8 @@ widgets:
       label: "<span>{icon}</span>"
       label_alt: "<span>{icon}</span> {device_name}"
       callbacks:
-        on_left: "exec cmd.exe /c start ms-settings:bluetooth"
+        on_left: "toggle_menu"
+        on_middle: "exec cmd.exe /c start ms-settings:bluetooth"
         on_right: "toggle_label"
 
   # Click: mute mic. Click derecho: menú de micrófonos.
@@ -221,6 +235,10 @@ widgets:
     options:
       label: "<span>{icon}</span> {level}"
       label_alt: "{volume}"
+      callbacks:
+        on_left: "toggle_volume_menu"
+        on_middle: "toggle_label"
+        on_right: "toggle_mute"
 
   # Click: centro de notificaciones de Windows. Click derecho: limpiar.
   notifications:

@@ -185,6 +185,25 @@ Describe 'Theme VS Code drop-in' {
     }
 }
 
+Describe 'Bar callbacks' {
+    It 'wires only callbacks the pinned YASB registers' {
+        $known = @(
+            'do_nothing', 'toggle_label', 'update_label', 'toggle_menu',
+            'toggle_calendar', 'next_timezone', 'context_menu', 'toggle_timer', 'toggle_alarm',
+            'toggle_mute', 'toggle_volume_menu', 'toggle_mic_menu',
+            'toggle_play_pause', 'open_media_source',
+            'toggle_notification', 'clear_notifications'
+        )
+        $tpl = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'templates\yasb-config.yaml.tpl') -Raw
+        $used = [regex]::Matches($tpl, '(?m)^\s+on_(?:left|middle|right):\s*"([^"]+)"') |
+            ForEach-Object { $_.Groups[1].Value } |
+            Where-Object { $_ -notlike 'exec *' } |
+            Sort-Object -Unique
+        $used | Should -Not -BeNullOrEmpty
+        $used | Where-Object { $_ -notin $known } | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Set-WinarchyJsonSetting' {
     BeforeAll {
         $script:JsonFile = Join-Path ([IO.Path]::GetTempPath()) "winarchy-json-$([guid]::NewGuid()).json"
