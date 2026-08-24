@@ -238,8 +238,8 @@ Included themes track the current Omarchy catalog, plus Winarchy's own
 | `catppuccin` | `catppuccin-latte` |
 | `ethereal` | `flexoki-light` |
 | `everforest` | `rose-pine` |
-| `gruvbox` | `white` |
-| `hackerman` | |
+| `gruvbox` | `lupine` |
+| `hackerman` | `white` |
 | `kanagawa` | |
 | `last-horizon` | |
 | `lumon` | |
