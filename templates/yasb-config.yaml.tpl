@@ -95,11 +95,18 @@ widgets:
       hide_if_offline: true
       label: "{icon}"
       # Sin esto YASB usa sus defaults, que son ASCII ("[\]", "[M]", "><>"): el unico
-      # elemento no nerd-font de toda la barra. Solo se mapean los layouts alcanzables
-      # con las hotkeys de Winarchy (BSP por defecto + monocle/float/pause); el resto
-      # se queda con el default de YASB porque no hay forma de llegar a ellos.
+      # elemento no nerd-font de toda la barra. Se mapean los nueve layouts porque
+      # SUPER+Shift+L cicla entre todos.
       layout_icons:
         bsp: "󰕰"
+        columns: "󰕱"
+        rows: "󰙀"
+        grid: "󰝘"
+        scrolling: "󰡍"
+        vertical_stack: "󰓡"
+        horizontal_stack: "󰓢"
+        ultrawide_vertical_stack: "󰤼"
+        right_main_vertical_stack: "󰤻"
         monocle: "󰊓"
         maximized: "󰊔"
         floating: "󰖯"
