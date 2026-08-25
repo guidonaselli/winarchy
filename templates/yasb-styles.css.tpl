@@ -28,11 +28,13 @@
 }
 
 /* Iconos nerd-font (<span> en los labels): YASB les pone clase "icon" (sin "label").
-   El padding les da aire contra el número y evita que Qt recorte glifos
-   más anchos que su caja */
+   Qt dimensiona el QLabel por el advance de la fuente y muchos glifos pintan más
+   ancho que eso, así que se recortan: min-width les reserva la caja completa. */
 .widget .icon {
     font-size: 15px;
-    padding: 0 7px 0 2px;
+    padding: 0 5px;
+    min-width: 18px;
+    qproperty-alignment: AlignCenter;
 }
 
 /* Workspaces komorebi */
@@ -145,7 +147,8 @@
     font-size: 16px;
     background: transparent;
     border: none;
-    padding: 0 6px;
+    padding: 0 5px;
+    min-width: 18px;
 }
 
 .extras-grouper .grouper-button:hover {
@@ -167,20 +170,6 @@
 .wifi-widget .icon,
 .bluetooth-widget .icon {
     color: {{ui.net}};
-}
-
-/* El QLabel del icono de wifi se queda corto cuando el glifo cambia
-   (arranca con el de wifi y pasa al de ethernet): ancho mínimo explícito */
-.wifi-widget .icon {
-    min-width: 20px;
-}
-
-/* Widgets de solo icono: padding simétrico para que la separación
-   con los vecinos quede pareja (el 0 7px 0 2px es para icono+número) */
-.wifi-widget .icon,
-.bluetooth-widget .icon,
-.microphone-widget .icon {
-    padding: 0 3px;
 }
 
 /* Popup del selector de redes wifi */
@@ -249,9 +238,10 @@
     background: transparent;
     border: none;
     border-radius: 4px;
-    padding: 0 4px;
+    padding: 0 5px;
     margin: 0 2px;
     font-size: 16px;
+    min-width: 18px;
 }
 
 .systray .unpinned-visibility-btn:hover {
