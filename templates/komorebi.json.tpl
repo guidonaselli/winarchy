@@ -7,6 +7,7 @@
   "default_container_padding": 2,
   "mouse_follows_focus": false,
   "border": true,
+  "border_style": "Rounded",
   "border_width": 1,
   "border_offset": -1,
   "border_colours": {

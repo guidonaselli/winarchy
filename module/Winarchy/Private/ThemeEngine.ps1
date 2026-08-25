@@ -231,6 +231,7 @@ function Set-WinarchyFlowTheme {
         if ($FontFamily) {
             foreach ($k in @('QueryBoxFont', 'ResultFont', 'ResultSubFont')) { $settings[$k] = $FontFamily }
         }
+        $settings['IgnoreHotkeysOnFullscreen'] = $true
         $settings | ConvertTo-Json -Depth 50 | Set-Content -Path $settingsPath -Encoding UTF8
     }
 }

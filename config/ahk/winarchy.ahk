@@ -717,6 +717,7 @@ AccentWatch() {
 #+r::Winarchy('reload')                          ; reload whole stack
 #+Enter::Komorebic('promote')                    ; promote window to the largest tile
 #+l::Komorebic('cycle-layout next')              ; next layout (bsp, columns, rows, grid, ...)
+#Tab::Komorebic('focus-last-workspace')          ; back to the previous workspace
 #+d::Komorebic('toggle-transparency')            ; dim unfocused windows
 
 ; --- Focus -----------------------------------------------------------

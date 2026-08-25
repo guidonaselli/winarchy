@@ -91,6 +91,7 @@ manual app list: Flow already indexes installed programs.
 | `SUPER+Ctrl+Shift+A` | Launch the preferred coding agent (`winarchy agent launch`) |
 | `SUPER+Shift+Return` | Promote the focused window to the largest tile |
 | `SUPER+Shift+L` | Cycle to the next layout (BSP, columns, rows, grid, scrolling, …) |
+| `SUPER+Tab` | Back to the workspace you came from |
 | `SUPER+Shift+D` | Dim unfocused windows (toggle transparency) |
 | `SUPER+Ctrl+1`–`9` | Send the window to workspace N without following it |
 
