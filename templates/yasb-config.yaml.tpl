@@ -26,7 +26,7 @@ bars:
     screens: ["*"]
     class_name: "yasb-bar"
     alignment:
-      position: "top"
+      position: "{{computed.bar_position}}"
       align: "center"
     blur_effect:
       enabled: false

@@ -265,6 +265,38 @@ Describe 'Command palette' {
     }
 }
 
+Describe 'Bar position' {
+    AfterAll {
+        InModuleScope Winarchy { Remove-Item (Get-WinarchyBarPositionPath) -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'defaults to top' {
+        InModuleScope Winarchy {
+            Remove-Item (Get-WinarchyBarPositionPath) -Force -ErrorAction SilentlyContinue
+            Get-WinarchyBarPosition | Should -Be 'top'
+        }
+    }
+
+    It 'falls back to top when the stored value is not a position' {
+        InModuleScope Winarchy {
+            Set-Content (Get-WinarchyBarPositionPath) -Value 'sideways' -NoNewline -Encoding UTF8
+            Get-WinarchyBarPosition | Should -Be 'top'
+        }
+    }
+
+    It 'refuses a position YASB does not support' {
+        { Set-WinarchyBarPosition -Position 'left' } | Should -Throw
+    }
+
+    It 'reaches the generated bar config' {
+        InModuleScope Winarchy {
+            Set-Content (Get-WinarchyBarPositionPath) -Value 'bottom' -NoNewline -Encoding UTF8
+            Set-WinarchyTheme -Name (Get-WinarchyCurrentTheme) -StageOnly | Out-Null
+            (Get-Content (Join-Path (Get-WinarchyStateDir) 'staging\config.yaml') -Raw) | Should -Match 'position: "bottom"'
+        }
+    }
+}
+
 Describe 'Update indicator flag' {
     AfterAll {
         InModuleScope Winarchy { Remove-Item (Join-Path (Get-WinarchyStateDir) 'update-available.flag') -Force -ErrorAction SilentlyContinue }

@@ -142,6 +142,7 @@ function Build-WinarchyThemeContext {
     # Raíz del repo con forward slashes: apto para rutas dentro de JSON generado
     $ctx['computed.root'] = (Get-WinarchyRoot) -replace '\\', '/'
     $ctx['computed.game_ignore_rules'] = Get-WinarchyGameIgnoreRulesJson
+    $ctx['computed.bar_position'] = Get-WinarchyBarPosition
     # auto-accent puede traer un accent tan oscuro (o claro) como el background:
     # accent_ui es el accent corregido para usarse como texto/superficie dentro de
     # apps con fondo del theme, y on_accent el texto legible sobre ese accent_ui.

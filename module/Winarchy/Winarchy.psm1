@@ -22,6 +22,7 @@ function Show-WinarchyHelp {
     background list           Backgrounds shipped by the active theme (* = applied)
     background set <file>     Apply one of them
     background next           Cycle to the next background
+    bar position [top|bottom] Where the bar sits (no arg: show current)
     agent list                Known coding agents (* = preferred, marks what is installed)
     agent set <id>            Pick the coding agent SUPER+Shift+Ctrl+A launches
     agent launch              Open it in Windows Terminal
@@ -158,6 +159,16 @@ function Invoke-Winarchy {
                 'sync' { Update-WinarchyAccent -Force:($rest -contains '--force' -or $rest -contains '-force') }
                 'status' { Get-WinarchyAccentStatus }
                 default { throw "Unknown subcommand: accent $sub (sync|status)" }
+            }
+        }
+        'bar' {
+            $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'position' }
+            switch ($sub) {
+                'position' {
+                    if ($rest.Count -lt 2) { Write-Host "  bar position: $(Get-WinarchyBarPosition)"; break }
+                    Set-WinarchyBarPosition -Position $rest[1].ToLower()
+                }
+                default { throw "Unknown subcommand: bar $sub (position)" }
             }
         }
         'agent' {
