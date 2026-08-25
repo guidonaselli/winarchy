@@ -214,7 +214,7 @@ function Merge-WinarchyTerminalScheme {
 
 function Set-WinarchyFlowTheme {
     <# Copia el xaml al dir de themes de Flow y apunta Settings.json a "Winarchy". #>
-    param([Parameter(Mandatory)][string]$XamlPath)
+    param([Parameter(Mandatory)][string]$XamlPath, [string]$FontFamily)
     $flowDir = "$env:APPDATA\FlowLauncher"
     if (-not (Test-Path $flowDir)) {
         Write-WinarchyWarn 'Flow Launcher not found; Flow theme not applied.'
@@ -228,6 +228,9 @@ function Set-WinarchyFlowTheme {
     if (Test-Path $settingsPath) {
         $settings = Get-Content $settingsPath -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable
         $settings['Theme'] = 'Winarchy'
+        if ($FontFamily) {
+            foreach ($k in @('QueryBoxFont', 'ResultFont', 'ResultSubFont')) { $settings[$k] = $FontFamily }
+        }
         $settings | ConvertTo-Json -Depth 50 | Set-Content -Path $settingsPath -Encoding UTF8
     }
 }
@@ -730,7 +733,7 @@ function Set-WinarchyTheme {
 
         # 5. Superficies externas
         Merge-WinarchyTerminalScheme -SchemeJsonPath (Join-Path $root 'config\terminal\winarchy-scheme.json') | Out-Null
-        Set-WinarchyFlowTheme -XamlPath (Join-Path $root 'config\flow\Winarchy.xaml')
+        Set-WinarchyFlowTheme -XamlPath (Join-Path $root 'config\flow\Winarchy.xaml') -FontFamily $ctx['bar.font_family']
         $btopThemes = "$env:USERPROFILE\.config\btop\themes"
         if (Test-Path (Split-Path $btopThemes -Parent)) {
             if (-not (Test-Path $btopThemes)) { New-Item -ItemType Directory -Path $btopThemes -Force | Out-Null }
