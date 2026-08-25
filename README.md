@@ -217,6 +217,28 @@ winarchy theme set my-theme
 
 regenerates and applies the full surface atomically.
 
+A theme can also name its colors instead of numbering them, and Winarchy derives the rest:
+
+```toml
+[colors]
+accent = "#3264eb"
+selection = "#d0d0d0"
+muted = "#9e9e9e"
+background = "#fafafa"
+darker_background = "#dedede"
+foreground = "#212121"
+light_foreground = "#424242"
+bright_foreground = "#000000"
+red = "#c900c4"
+green = "#4a2fd0"
+# ... yellow, blue, magenta, cyan and their bright_ variants
+```
+
+`color0`-`color15`, `cursor`, `selection_background`, `selection_foreground` and the whole
+`[borders]` section are filled in from those names. Whatever the theme declares itself always
+wins, so both forms can be mixed and an existing ANSI theme keeps working untouched. Porting
+a theme is then a copy of its upstream palette rather than a manual remap.
+
 `theme.toml` also takes an optional `[bar]` section that drives the YASB bar geometry and
 typography (and the stackbar font komorebi draws over stacked windows). Omit it and the
 theme inherits the defaults:

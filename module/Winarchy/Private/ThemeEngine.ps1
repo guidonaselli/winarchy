@@ -87,6 +87,44 @@ function Test-WinarchyThemeData {
     $missing
 }
 
+$script:SemanticToAnsi = [ordered]@{
+    color0 = 'darker_background'; color1 = 'red';            color2 = 'green'
+    color3 = 'yellow';            color4 = 'blue';           color5 = 'magenta'
+    color6 = 'cyan';              color7 = 'light_foreground'
+    color8 = 'muted';             color9 = 'bright_red';     color10 = 'bright_green'
+    color11 = 'bright_yellow';    color12 = 'bright_blue';   color13 = 'bright_magenta'
+    color14 = 'bright_cyan';      color15 = 'bright_foreground'
+}
+
+function Expand-WinarchyThemePalette {
+    <# Completa los slots ANSI y los bordes desde una paleta con nombres semánticos.
+       Lo ya declarado nunca se pisa. #>
+    param([Parameter(Mandatory)][hashtable]$Theme)
+    if (-not $Theme.ContainsKey('colors')) { return $Theme }
+    $c = $Theme['colors']
+
+    foreach ($slot in $script:SemanticToAnsi.Keys) {
+        $from = $script:SemanticToAnsi[$slot]
+        if (-not $c.ContainsKey($slot) -and $c.ContainsKey($from)) { $c[$slot] = $c[$from] }
+    }
+    if (-not $c.ContainsKey('cursor') -and $c.ContainsKey('foreground')) { $c['cursor'] = $c['foreground'] }
+    if (-not $c.ContainsKey('selection_background') -and $c.ContainsKey('selection')) { $c['selection_background'] = $c['selection'] }
+    if (-not $c.ContainsKey('selection_foreground') -and $c.ContainsKey('background')) { $c['selection_foreground'] = $c['background'] }
+
+    if (-not $Theme.ContainsKey('borders')) {
+        $derived = @{
+            focused = 'accent'; unfocused = 'darker_background'; urgent = 'red'
+            monocle = 'magenta'; stack = 'cyan'
+        }
+        $borders = @{}
+        foreach ($k in $derived.Keys) {
+            if ($c.ContainsKey($derived[$k])) { $borders[$k] = $c[$derived[$k]] }
+        }
+        if ($borders.Count -eq $derived.Count) { $Theme['borders'] = $borders }
+    }
+    $Theme
+}
+
 function Get-WinarchyGameIgnoreRulesJson {
     <# Fragmento JSON de ignore-rules de komorebi generado desde games.toml. #>
     $fragment = ''
@@ -598,7 +636,7 @@ function Set-WinarchyTheme {
     }
 
     # 1. Validación — falla ANTES de modificar nada
-    $theme = Import-WinarchyToml -Path $themeToml
+    $theme = Expand-WinarchyThemePalette -Theme (Import-WinarchyToml -Path $themeToml)
     $missing = @(Test-WinarchyThemeData -Theme $theme)
     if ($missing.Count -gt 0) {
         throw "Invalid theme.toml for '$Name'. Missing keys: $($missing -join ', ')"

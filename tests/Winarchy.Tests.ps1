@@ -154,6 +154,55 @@ Describe 'Test-WinarchyThemeData' {
     }
 }
 
+Describe 'Expand-WinarchyThemePalette' {
+    It 'derives the ANSI slots from the semantic names' {
+        InModuleScope Winarchy {
+            $t = Expand-WinarchyThemePalette -Theme @{
+                name = 'x'; mode = 'dark'
+                colors = @{
+                    background = '#111111'; foreground = '#eeeeee'; accent = '#3264eb'
+                    selection = '#d0d0d0'; muted = '#9e9e9e'; darker_background = '#dedede'
+                    light_foreground = '#424242'; bright_foreground = '#000000'
+                    red = '#c900c4'; green = '#4a2fd0'; yellow = '#026fde'
+                    blue = '#3264eb'; magenta = '#8a4ad7'; cyan = '#0c67de'
+                    bright_red = '#f930fb'; bright_green = '#9f85e0'; bright_yellow = '#358fff'
+                    bright_blue = '#5482ff'; bright_magenta = '#b363ff'; bright_cyan = '#3986ff'
+                }
+            }
+            $t['colors']['color0']  | Should -Be '#dedede'
+            $t['colors']['color1']  | Should -Be '#c900c4'
+            $t['colors']['color7']  | Should -Be '#424242'
+            $t['colors']['color8']  | Should -Be '#9e9e9e'
+            $t['colors']['color15'] | Should -Be '#000000'
+            $t['colors']['cursor']  | Should -Be '#eeeeee'
+            $t['colors']['selection_background'] | Should -Be '#d0d0d0'
+            $t['colors']['selection_foreground'] | Should -Be '#111111'
+            $t['borders']['focused'] | Should -Be '#3264eb'
+            $t['borders']['urgent']  | Should -Be '#c900c4'
+            (Test-WinarchyThemeData -Theme $t) -join ', ' | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'never overwrites what the theme declared itself' {
+        InModuleScope Winarchy {
+            $t = Expand-WinarchyThemePalette -Theme @{
+                colors = @{ red = '#ff0000'; color1 = '#00ff00'; foreground = '#ffffff'; cursor = '#123456' }
+            }
+            $t['colors']['color1'] | Should -Be '#00ff00'
+            $t['colors']['cursor'] | Should -Be '#123456'
+        }
+    }
+
+    It 'leaves an ANSI-only theme untouched' {
+        InModuleScope Winarchy {
+            $before = Import-WinarchyToml -Path (Join-Path (Get-WinarchyThemesDir) 'catppuccin\theme.toml')
+            $after = Expand-WinarchyThemePalette -Theme (Import-WinarchyToml -Path (Join-Path (Get-WinarchyThemesDir) 'catppuccin\theme.toml'))
+            $after['colors'].Count | Should -Be $before['colors'].Count
+            $after['borders']['focused'] | Should -Be $before['borders']['focused']
+        }
+    }
+}
+
 Describe 'Theme VS Code drop-in' {
     BeforeAll {
         $script:VSCodeThemeDir = Join-Path ([IO.Path]::GetTempPath()) "winarchy-vscode-$([guid]::NewGuid())"
@@ -726,7 +775,7 @@ Describe 'Shipped themes' {
     It '<Name> has a valid theme.toml' -ForEach $script:ThemeCases {
         InModuleScope Winarchy -Parameters @{ Name = $Name } {
             param($Name)
-            $data = Import-WinarchyToml -Path (Join-Path (Get-WinarchyThemesDir) "$Name\theme.toml")
+            $data = Expand-WinarchyThemePalette -Theme (Import-WinarchyToml -Path (Join-Path (Get-WinarchyThemesDir) "$Name\theme.toml"))
             (Test-WinarchyThemeData -Theme $data) -join ', ' | Should -BeNullOrEmpty
         }
     }
