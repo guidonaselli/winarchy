@@ -88,6 +88,19 @@ manual app list: Flow already indexes installed programs.
 | `SUPER+Ctrl+Q` | Decode a QR code from a screen region |
 | `SUPER+Ctrl+O` | Read text from a screen region (OCR) |
 
+## System panels
+The bar widgets open their own richer popups on click (per-app audio mixer, device
+pickers). These go to the native Windows panels, and mirror Quattro's `SUPER+CTRL`
+control panels — `W` is `N` here because `SUPER+Ctrl+W` is stay awake.
+
+| Keybinding | Action |
+|---|---|
+| `SUPER+Ctrl+A` | Sound |
+| `SUPER+Ctrl+B` | Bluetooth |
+| `SUPER+Ctrl+N` | Network |
+| `SUPER+Ctrl+D` | Display |
+| `SUPER+Ctrl+P` | Power and sleep |
+
 ## Themes
 | Keybinding | Action |
 |---|---|

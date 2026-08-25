@@ -839,6 +839,13 @@ AccentWatch() {
 #^v::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -StopScreenRecording') ; stop recording
 #^q::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -QRCodeScanRegion')  ; decode a QR on screen
 #^o::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -OCR')               ; text from screen
+
+; --- Paneles del sistema --------------------------------------------------------
+#^a::Run('explorer.exe ms-settings:sound')       ; audio
+#^b::Run('explorer.exe ms-settings:bluetooth')   ; bluetooth
+#^n::Run('explorer.exe ms-settings:network')     ; network
+#^d::Run('explorer.exe ms-settings:display')     ; display
+#^p::Run('explorer.exe ms-settings:powersleep')  ; power
 #+g::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -ScreenRecorderGIF') ; GIF recording
 #^t::Winarchy('theme gallery')                    ; theme gallery
 #^Space::Winarchy('background next')              ; next background of the active theme
