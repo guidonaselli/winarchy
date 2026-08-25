@@ -344,8 +344,23 @@ Describe 'Generated JetBrains scheme' {
 }
 
 Describe 'Bar position' {
+    BeforeAll {
+        $script:BarStateBackup = InModuleScope Winarchy {
+            @{
+                Position    = if (Test-Path (Get-WinarchyBarPositionPath)) { Get-Content (Get-WinarchyBarPositionPath) -Raw } else { $null }
+                Transparent = Test-Path (Get-WinarchyBarTransparentPath)
+            }
+        }
+    }
+
     AfterAll {
-        InModuleScope Winarchy { Remove-Item (Get-WinarchyBarPositionPath) -Force -ErrorAction SilentlyContinue }
+        InModuleScope Winarchy -Parameters @{ Saved = $script:BarStateBackup } {
+            param($Saved)
+            Remove-Item (Get-WinarchyBarPositionPath) -Force -ErrorAction SilentlyContinue
+            Remove-Item (Get-WinarchyBarTransparentPath) -Force -ErrorAction SilentlyContinue
+            if ($null -ne $Saved.Position) { Set-Content (Get-WinarchyBarPositionPath) -Value $Saved.Position -NoNewline -Encoding UTF8 }
+            if ($Saved.Transparent) { Set-Content (Get-WinarchyBarTransparentPath) -Value '' -NoNewline }
+        }
     }
 
     It 'defaults to top' {
@@ -379,15 +394,27 @@ Describe 'Bar position' {
     It 'reaches the generated bar config' {
         InModuleScope Winarchy {
             Set-Content (Get-WinarchyBarPositionPath) -Value 'bottom' -NoNewline -Encoding UTF8
-            Set-WinarchyTheme -Name (Get-WinarchyCurrentTheme) -StageOnly | Out-Null
+            Set-WinarchyTheme -Name 'catppuccin' -StageOnly | Out-Null
             (Get-Content (Join-Path (Get-WinarchyStateDir) 'staging\config.yaml') -Raw) | Should -Match 'position: "bottom"'
         }
     }
 }
 
 Describe 'Update indicator flag' {
+    BeforeAll {
+        $script:UpdateFlagBackup = InModuleScope Winarchy {
+            $f = Join-Path (Get-WinarchyStateDir) 'update-available.flag'
+            if (Test-Path $f) { Get-Content $f -Raw } else { $null }
+        }
+    }
+
     AfterAll {
-        InModuleScope Winarchy { Remove-Item (Join-Path (Get-WinarchyStateDir) 'update-available.flag') -Force -ErrorAction SilentlyContinue }
+        InModuleScope Winarchy -Parameters @{ Saved = $script:UpdateFlagBackup } {
+            param($Saved)
+            $f = Join-Path (Get-WinarchyStateDir) 'update-available.flag'
+            Remove-Item $f -Force -ErrorAction SilentlyContinue
+            if ($null -ne $Saved) { Set-Content $f -Value $Saved -NoNewline }
+        }
     }
 
     It 'raises the flag when a release is newer' {
