@@ -142,6 +142,14 @@
     color: {{ui.system}};
 }
 
+.extras-grouper .widget {
+    padding: 0 2px;
+}
+
+.extras-grouper .widget .icon {
+    padding: 0 4px;
+}
+
 .tool-widget .icon {
     color: {{ui.system}};
 }
@@ -156,7 +164,7 @@
     background: transparent;
     border: none;
     padding: 0 5px;
-    min-width: 50px;
+    min-width: 18px;
 }
 
 .extras-grouper .grouper-button:hover {

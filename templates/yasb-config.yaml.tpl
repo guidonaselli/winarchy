@@ -43,9 +43,9 @@ bars:
       bottom: 0
       right: 0
     widgets:
-      left: ["home", "komorebi_workspaces", "komorebi_active_layout", "active_window"]
-      center: ["extras", "clock", "weather"]
-      right: ["game_mode", "stay_awake", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
+      left: ["home", "komorebi_workspaces", "komorebi_active_layout", "active_window", "extras"]
+      center: ["clock"]
+      right: ["weather", "game_mode", "stay_awake", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
     layouts:
       left:
         alignment: "left"
@@ -304,6 +304,8 @@ widgets:
     options:
       label: "<span></span>"
       class_name: "tool-widget"
+      tooltip: true
+      tooltip_label: "Region capture"
       callbacks:
         on_left: "exec winarchy screenshot region"
         on_middle: "do_nothing"
@@ -314,6 +316,8 @@ widgets:
     options:
       label: "<span></span>"
       class_name: "tool-widget"
+      tooltip: true
+      tooltip_label: "Screen recording"
       callbacks:
         on_left: "exec winarchy screenshot record"
         on_middle: "do_nothing"
@@ -324,6 +328,8 @@ widgets:
     options:
       label: "<span></span>"
       class_name: "tool-widget"
+      tooltip: true
+      tooltip_label: "Stop recording"
       callbacks:
         on_left: "exec winarchy screenshot stop"
         on_middle: "do_nothing"
@@ -334,6 +340,8 @@ widgets:
     options:
       label: "<span></span>"
       class_name: "tool-widget"
+      tooltip: true
+      tooltip_label: "Text from screen (OCR)"
       callbacks:
         on_left: "exec winarchy screenshot ocr"
         on_middle: "do_nothing"
@@ -344,6 +352,8 @@ widgets:
     options:
       label: "<span></span>"
       class_name: "tool-widget"
+      tooltip: true
+      tooltip_label: "Scan a QR on screen"
       callbacks:
         on_left: "exec winarchy screenshot qr"
         on_middle: "do_nothing"
@@ -354,6 +364,8 @@ widgets:
     options:
       label: "<span></span>"
       class_name: "tool-widget"
+      tooltip: true
+      tooltip_label: "Colour picker"
       callbacks:
         on_left: "exec winarchy screenshot color"
         on_middle: "do_nothing"
@@ -367,9 +379,9 @@ widgets:
       hide_empty: false
       collapse_options:
         enabled: true
-        label_position: "right"
-        collapsed_label: "◂"
-        expanded_label: "▸"
+        label_position: "left"
+        collapsed_label: "▸"
+        expanded_label: "◂"
 
   # La ubicacion se elige en el popup y YASB la guarda en %LOCALAPPDATA%.
   weather:
