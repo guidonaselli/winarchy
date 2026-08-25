@@ -237,12 +237,12 @@ Describe 'Theme VS Code drop-in' {
 Describe 'Bar layout' {
     BeforeAll { $script:BarTpl = Get-Content (Join-Path $script:Root 'templates\yasb-config.yaml.tpl') -Raw }
 
-    It 'keeps the centre section to the clock alone' {
-        $script:BarTpl | Should -Match '(?m)^\s*center: \["clock"\]\s*$'
+    It 'keeps the drawer, the clock and the weather in that order in the centre' {
+        $script:BarTpl | Should -Match '(?m)^\s*center: \["extras", "clock", "weather"\]\s*$'
     }
 
-    It 'puts the tools drawer outside the centre section' {
-        [regex]::Match($script:BarTpl, '(?m)^\s*left: \[(.+)\]\s*$').Groups[1].Value | Should -Match '"extras"'
+    It 'opens the drawer away from the clock' {
+        $script:BarTpl | Should -Match 'label_position: "right"'
     }
 
     It 'gives every tool button a tooltip' {

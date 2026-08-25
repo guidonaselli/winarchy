@@ -164,7 +164,7 @@
     background: transparent;
     border: none;
     padding: 0 5px;
-    min-width: 18px;
+    min-width: 50px;
 }
 
 .extras-grouper .grouper-button:hover {
