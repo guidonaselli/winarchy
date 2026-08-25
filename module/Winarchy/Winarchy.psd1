@@ -12,6 +12,7 @@
         'Get-WinarchyBackgrounds', 'Get-WinarchyBackground', 'Set-WinarchyBackground',
         'Get-WinarchyBackgroundStatus',
         'Get-WinarchyBarPosition', 'Set-WinarchyBarPosition',
+        'Test-WinarchyBarTransparent', 'Set-WinarchyBarTransparent', 'Get-WinarchyBarBackground',
         'Get-WinarchyCodingAgents', 'Get-WinarchyCodingAgent', 'Set-WinarchyCodingAgent',
         'Start-WinarchyCodingAgent', 'Get-WinarchyCodingAgentStatus',
         'New-WinarchyThemePreview', 'Update-WinarchyThemePreviews', 'Show-WinarchyThemeGallery',

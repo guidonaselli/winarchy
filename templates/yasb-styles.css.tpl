@@ -11,7 +11,7 @@
 }
 
 .yasb-bar {
-    background-color: {{colors.background}};
+    background-color: {{computed.bar_background}};
     padding: 0 {{bar.padding}}px;
 }
 

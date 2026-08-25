@@ -321,6 +321,16 @@ Describe 'Bar position' {
         { Set-WinarchyBarPosition -Position 'left' } | Should -Throw
     }
 
+    It 'turns the bar background into rgba only while transparent' {
+        InModuleScope Winarchy {
+            Remove-Item (Get-WinarchyBarTransparentPath) -Force -ErrorAction SilentlyContinue
+            Get-WinarchyBarBackground -Hex '#1a1b26' | Should -Be '#1a1b26'
+            Set-Content (Get-WinarchyBarTransparentPath) -Value '' -NoNewline
+            Get-WinarchyBarBackground -Hex '#1a1b26' | Should -Be 'rgba(26, 27, 38, 0.72)'
+            Remove-Item (Get-WinarchyBarTransparentPath) -Force
+        }
+    }
+
     It 'reaches the generated bar config' {
         InModuleScope Winarchy {
             Set-Content (Get-WinarchyBarPositionPath) -Value 'bottom' -NoNewline -Encoding UTF8

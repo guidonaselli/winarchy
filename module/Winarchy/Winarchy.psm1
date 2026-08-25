@@ -23,6 +23,7 @@ function Show-WinarchyHelp {
     background set <file>     Apply one of them
     background next           Cycle to the next background
     bar position [top|bottom] Where the bar sits (no arg: show current)
+    bar transparent [on|off]  See through the bar (no arg: toggle)
     agent list                Known coding agents (* = preferred, marks what is installed)
     agent set <id>            Pick the coding agent SUPER+Shift+Ctrl+A launches
     agent launch              Open it in Windows Terminal
@@ -168,7 +169,11 @@ function Invoke-Winarchy {
                     if ($rest.Count -lt 2) { Write-Host "  bar position: $(Get-WinarchyBarPosition)"; break }
                     Set-WinarchyBarPosition -Position $rest[1].ToLower()
                 }
-                default { throw "Unknown subcommand: bar $sub (position)" }
+                'transparent' {
+                    $mode = if ($rest.Count -ge 2) { $rest[1].ToLower() } else { 'toggle' }
+                    Set-WinarchyBarTransparent -Mode $mode
+                }
+                default { throw "Unknown subcommand: bar $sub (position|transparent)" }
             }
         }
         'agent' {
