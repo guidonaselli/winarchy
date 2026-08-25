@@ -45,7 +45,7 @@ bars:
     widgets:
       left: ["home", "komorebi_workspaces", "komorebi_active_layout", "active_window"]
       center: ["clock"]
-      right: ["game_mode", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "dnd", "battery", "notifications", "systray", "winarchy_menu"]
+      right: ["game_mode", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "brightness", "dnd", "power_plan", "battery", "notifications", "systray", "winarchy_menu"]
 
 widgets:
   # Logo arriba-izquierda: abre el mismo menú principal de winarchy.ahk
@@ -250,6 +250,30 @@ widgets:
         on_left: "toggle_status"
         on_middle: "toggle_label"
         on_right: "cycle_status"
+
+  # Brillo del monitor enfocado. En externos va por DDC/CI; hide_unsupported
+  # esconde el widget donde no hay control de brillo.
+  brightness:
+    type: "yasb.brightness.BrightnessWidget"
+    options:
+      label: "<span>{icon}</span>"
+      label_alt: "<span>{icon}</span> {percent}%"
+      hide_unsupported: true
+      scroll_step: 5
+      callbacks:
+        on_left: "toggle_brightness_menu"
+        on_middle: "toggle_label"
+        on_right: "toggle_label"
+
+  power_plan:
+    type: "yasb.power_plan.PowerPlanWidget"
+    options:
+      label: "<span>󰈐</span>"
+      label_alt: "<span>󰈐</span> {active_plan}"
+      callbacks:
+        on_left: "toggle_menu"
+        on_middle: "do_nothing"
+        on_right: "toggle_label"
 
   # hide_unsupported deja el widget invisible en una maquina sin bateria,
   # asi el mismo config sirve para desktop y portatil.

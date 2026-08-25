@@ -131,8 +131,12 @@
 
 .dnd-widget .label,
 .battery-widget .label,
+.brightness-widget .label,
+.power-plan-widget .label,
 .dnd-widget .icon,
-.battery-widget .icon {
+.battery-widget .icon,
+.brightness-widget .icon,
+.power-plan-widget .icon {
     color: {{ui.system}};
 }
 
