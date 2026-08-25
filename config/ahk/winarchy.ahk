@@ -716,6 +716,8 @@ AccentWatch() {
 #r::Komorebic('retile')                          ; force retile
 #+r::Winarchy('reload')                          ; reload whole stack
 #+Enter::Komorebic('promote')                    ; promote window to the largest tile
+#+l::Komorebic('cycle-layout next')              ; next layout (bsp, columns, rows, grid, ...)
+#+d::Komorebic('toggle-transparency')            ; dim unfocused windows
 
 ; --- Focus -----------------------------------------------------------
 #Left::Komorebic('focus left')                   ; move focus

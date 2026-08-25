@@ -15,6 +15,8 @@
     "monocle": "{{borders.monocle}}",
     "unfocused": "{{borders.unfocused}}"
   },
+  "transparency": false,
+  "transparency_alpha": 225,
   "animation": {
     "enabled": true,
     "style": "EaseOutCubic",
