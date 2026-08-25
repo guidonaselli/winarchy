@@ -42,6 +42,9 @@ exe = "rustdesk.exe"                  # escritorio remoto: la sesión no debe ti
 exe = "faceitclient.exe"             # ventanita mini del cliente FACEIT
 
 [[games]]
+exe = "blitz.exe"                    # overlay/coach de LoL y Valorant
+
+[[games]]
 exe = "Moonlight.exe"
 
 [[games]]
