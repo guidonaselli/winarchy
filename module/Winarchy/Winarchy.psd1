@@ -26,6 +26,7 @@
         'Install-WinarchyShellProfile', 'Remove-WinarchyShellProfile',
         'Set-WinarchyFlowIdentity', 'Set-WinarchyFlowAppsKeyword',
         # helpers usados por install.ps1 y scripts\*.ps1
+        'Sync-WinarchyPalette', 'Remove-WinarchyPalette',
         'New-WinarchySnapshot', 'Import-WinarchyToml', 'Get-WinarchyAhkExe', 'Get-WinarchyStateDir',
         'Disable-WinarchyXMouse',
         'Register-WinarchyAutostart', 'Unregister-WinarchyAutostart', 'Get-WinarchyAutostartStatus',

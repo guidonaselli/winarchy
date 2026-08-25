@@ -185,6 +185,37 @@ Describe 'Theme VS Code drop-in' {
     }
 }
 
+Describe 'Command palette' {
+    It 'every command maps to a subcommand the dispatcher knows' {
+        InModuleScope Winarchy {
+            $psm1 = Get-Content (Join-Path (Get-WinarchyRoot) 'module\Winarchy\Winarchy.psm1') -Raw
+            $verbs = [regex]::Matches($psm1, "(?m)^\s{8}'([a-z-]+)'\s*\{") | ForEach-Object { $_.Groups[1].Value }
+            $verbs | Should -Not -BeNullOrEmpty
+            foreach ($cmd in $script:PaletteCommands) {
+                ($cmd.Args -split ' ')[0] | Should -BeIn $verbs
+            }
+        }
+    }
+
+    It 'points the shortcuts at a shim that exists' {
+        InModuleScope Winarchy {
+            Test-Path (Join-Path (Get-WinarchyRoot) 'bin\winarchy.ps1') | Should -BeTrue
+        }
+    }
+
+    It 'drops shortcuts that no longer match a command' {
+        InModuleScope Winarchy {
+            $dir = Get-WinarchyPaletteDir
+            $stale = Join-Path $dir 'Winarchy Retired command.lnk'
+            Set-Content $stale -Value '' -Encoding UTF8
+            Mock Write-WinarchyOk {}
+            Sync-WinarchyPalette
+            Test-Path $stale | Should -BeFalse
+            (Get-ChildItem $dir -Filter '*.lnk').Count | Should -Be $script:PaletteCommands.Count
+        }
+    }
+}
+
 Describe 'Bar callbacks' {
     It 'wires only callbacks the pinned YASB registers' {
         $known = @(

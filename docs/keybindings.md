@@ -8,7 +8,7 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 | Keybinding | Action |
 |---|---|
 | `SUPER+Return` | Windows Terminal |
-| `SUPER+Space` | Flow Launcher (launcher) |
+| `SUPER+Space` | Flow Launcher — applications and Winarchy's own commands in one search |
 | `SUPER+B` | Default browser |
 | `SUPER+E` | File explorer |
 | `SUPER+N` | Notification center (Windows native — not intercepted, so YASB's bell works) |

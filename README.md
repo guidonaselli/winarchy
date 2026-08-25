@@ -93,6 +93,10 @@ That means Winarchy optimizes for:
     - btop
     - optional app adapters
 
+- **One launcher for apps and commands**
+  - `SUPER+Space` searches Winarchy's own commands alongside your applications
+  - `SUPER+Alt+Space` keeps the nested menu for browsing rather than typing
+
 - **Atomic theme application with rollback**
   - changes are staged
   - snapshots are created

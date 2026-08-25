@@ -64,6 +64,9 @@ Invoke-Step 'Revertir el delay de Startup al default de Windows' {
 Invoke-Step 'Quitar la skill "winarchy" de los agentes de IA' { Uninstall-WinarchySkill } `
     'Skill desinstalada'
 
+Invoke-Step 'Quitar los comandos de Winarchy del menu de inicio' { Remove-WinarchyPalette } `
+    'Paleta de comandos quitada'
+
 Invoke-Step 'Revertir env vars (KOMOREBI_CONFIG_HOME, YASB_CONFIG_HOME) y sacar bin\ del PATH' {
     [Environment]::SetEnvironmentVariable('KOMOREBI_CONFIG_HOME', $null, 'User')
     [Environment]::SetEnvironmentVariable('YASB_CONFIG_HOME', $null, 'User')
