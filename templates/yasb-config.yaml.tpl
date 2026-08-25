@@ -205,7 +205,7 @@ widgets:
     type: "yasb.cpu.CpuWidget"
     options:
       label: "<span></span> {info[percent][total]}%"
-      label_alt: "<span></span> {info[histograms][cpu_percent]}"
+      label_alt: "<span></span> {info[freq][current]} MHz"
       update_interval: 2000
       callbacks:
         on_left: "toggle_menu"
@@ -282,7 +282,7 @@ widgets:
     type: "yasb.volume.VolumeWidget"
     options:
       label: "<span>{icon}</span> {level}"
-      label_alt: "{volume}"
+      label_alt: "<span>{icon}</span> {volume}"
       callbacks:
         on_left: "toggle_volume_menu"
         on_middle: "toggle_label"
@@ -342,8 +342,8 @@ widgets:
   power_plan:
     type: "yasb.power_plan.PowerPlanWidget"
     options:
-      label: "<span>󰈐</span>"
-      label_alt: "<span>󰈐</span> {active_plan}"
+      label: "<span>󰓅</span>"
+      label_alt: "<span>󰓅</span> {active_plan}"
       callbacks:
         on_left: "toggle_menu"
         on_middle: "do_nothing"
@@ -381,7 +381,7 @@ widgets:
     type: "yasb.notifications.NotificationsWidget"
     options:
       label: "<span>{icon}</span> {count}"
-      label_alt: "{count} notificaciones"
+      label_alt: "<span>{icon}</span> {count} unread"
       hide_empty: false
       callbacks:
         on_left: "toggle_notification"
