@@ -265,6 +265,31 @@ Describe 'Command palette' {
     }
 }
 
+Describe 'Update indicator flag' {
+    AfterAll {
+        InModuleScope Winarchy { Remove-Item (Join-Path (Get-WinarchyStateDir) 'update-available.flag') -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'raises the flag when a release is newer' {
+        InModuleScope Winarchy {
+            Mock Test-WinarchyUpdateAvailable { [pscustomobject]@{ Available = $true; Local = '0.1.0'; Latest = 'v0.2.0' } }
+            Mock Write-WinarchyWarn {}
+            Write-WinarchyUpdateNotice | Out-Null
+            $flag = Join-Path (Get-WinarchyStateDir) 'update-available.flag'
+            Test-Path $flag | Should -BeTrue
+            (Get-Content $flag -Raw) | Should -Be 'v0.2.0'
+        }
+    }
+
+    It 'clears the flag once there is nothing newer' {
+        InModuleScope Winarchy {
+            Mock Test-WinarchyUpdateAvailable { [pscustomobject]@{ Available = $false; Local = '0.2.0'; Latest = 'v0.2.0' } }
+            Write-WinarchyUpdateNotice | Out-Null
+            Test-Path (Join-Path (Get-WinarchyStateDir) 'update-available.flag') | Should -BeFalse
+        }
+    }
+}
+
 Describe 'Bar shell commands' {
     It 'never quotes a path inside a run_cmd or an exec callback' {
         $tpl = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'templates\yasb-config.yaml.tpl') -Raw

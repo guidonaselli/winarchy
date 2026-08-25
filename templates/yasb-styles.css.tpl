@@ -260,6 +260,11 @@
     padding: 0 6px;
 }
 
+.winarchy-update-widget .label {
+    color: {{colors.accent_ui}};
+    font-weight: 700;
+}
+
 .game-mode-widget .label {
     color: {{borders.urgent}};
     font-weight: 700;

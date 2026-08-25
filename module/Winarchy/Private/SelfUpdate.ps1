@@ -86,9 +86,12 @@ function Write-WinarchyUpdateNotice {
     <# Aviso no intrusivo de versión nueva. Silencioso si no hay update o no se pudo chequear. #>
     param([switch]$Force)
     $check = Test-WinarchyUpdateAvailable -Force:$Force
+    $flag = Join-Path (Get-WinarchyStateDir) 'update-available.flag'
     if ($check.Available) {
         Write-WinarchyWarn "Winarchy $($check.Latest) is available (you have $($check.Local)). Apply it with: winarchy update --self"
+        Set-Content -Path $flag -Value $check.Latest -Encoding UTF8 -NoNewline
     }
+    elseif (Test-Path $flag) { Remove-Item $flag -Force }
     $check
 }
 

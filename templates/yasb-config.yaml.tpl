@@ -45,7 +45,7 @@ bars:
     widgets:
       left: ["home", "komorebi_workspaces", "komorebi_active_layout", "active_window"]
       center: ["clock"]
-      right: ["game_mode", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "brightness", "dnd", "power_plan", "battery", "notifications", "systray", "winarchy_menu"]
+      right: ["game_mode", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "brightness", "dnd", "power_plan", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
 
 widgets:
   # Logo arriba-izquierda: abre el mismo menú principal de winarchy.ahk
@@ -81,6 +81,23 @@ widgets:
         run_interval: 3000
         return_format: "string"
         use_shell: true
+
+  # Lee el flag que escribe Write-WinarchyUpdateNotice cuando hay release nueva.
+  winarchy_update:
+    type: "yasb.custom.CustomWidget"
+    options:
+      label: "{data}"
+      label_alt: "{data}"
+      class_name: "winarchy-update-widget"
+      exec_options:
+        run_cmd: 'cmd.exe /c if exist %KOMOREBI_CONFIG_HOME%\..\..\state\update-available.flag echo UPDATE'
+        run_interval: 60000
+        return_format: "string"
+        use_shell: true
+      callbacks:
+        on_left: "exec winarchy update --self"
+        on_middle: "do_nothing"
+        on_right: "do_nothing"
 
   komorebi_workspaces:
     type: "komorebi.workspaces.WorkspaceWidget"
