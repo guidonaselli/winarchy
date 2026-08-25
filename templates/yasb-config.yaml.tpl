@@ -375,7 +375,7 @@ widgets:
   weather:
     type: "yasb.open_meteo.OpenMeteoWidget"
     options:
-      label: "<span>{icon}</span>"
+      label: "<span>{icon}</span> {temp}"
       label_alt: "<span>{icon}</span> {temp} {location}"
       hide_decimal: true
       units: "metric"
