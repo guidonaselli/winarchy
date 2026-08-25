@@ -265,6 +265,51 @@ Describe 'Command palette' {
     }
 }
 
+Describe 'Installing a theme from a repository' {
+    BeforeAll {
+        $script:RepoDir = Join-Path ([IO.Path]::GetTempPath()) "winarchy-themerepo-$([guid]::NewGuid())"
+        New-Item -ItemType Directory -Path (Join-Path $script:RepoDir 'backgrounds') -Force | Out-Null
+        Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) 'themes\lupine\theme.toml') $script:RepoDir
+        'x' | Set-Content (Join-Path $script:RepoDir 'backgrounds\a.png')
+        'payload' | Set-Content (Join-Path $script:RepoDir 'evil.exe')
+        Push-Location $script:RepoDir
+        git init -q; git add -A; git -c user.email=t@t -c user.name=t commit -qm init
+        Pop-Location
+        $script:Installed = Join-Path (Split-Path $PSScriptRoot -Parent) 'themes\pester-probe'
+    }
+    AfterAll {
+        Remove-Item $script:RepoDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $script:Installed -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'copies only the files the theme format documents' {
+        Add-WinarchyTheme -Url $script:RepoDir -Name 'pester-probe' | Out-Null
+        Test-Path (Join-Path $script:Installed 'theme.toml') | Should -BeTrue
+        Test-Path (Join-Path $script:Installed 'backgrounds\a.png') | Should -BeTrue
+        Test-Path (Join-Path $script:Installed 'evil.exe') | Should -BeFalse
+        Test-Path (Join-Path $script:Installed '.git') | Should -BeFalse
+    }
+
+    It 'refuses to overwrite a theme that is already there' {
+        { Add-WinarchyTheme -Url $script:RepoDir -Name 'pester-probe' } | Should -Throw '*already exists*'
+    }
+
+    It 'refuses a name that is not a folder-safe slug' {
+        { Add-WinarchyTheme -Url $script:RepoDir -Name 'Bad Name' } | Should -Throw '*lowercase letters*'
+    }
+
+    It 'rejects a repository whose theme.toml does not validate, leaving nothing behind' {
+        $bad = Join-Path ([IO.Path]::GetTempPath()) "winarchy-badrepo-$([guid]::NewGuid())"
+        New-Item -ItemType Directory -Path $bad -Force | Out-Null
+        "name = `"Bad`"`nmode = `"dark`"" | Set-Content (Join-Path $bad 'theme.toml')
+        Push-Location $bad; git init -q; git add -A; git -c user.email=t@t -c user.name=t commit -qm init; Pop-Location
+        $dest = Join-Path (Split-Path $PSScriptRoot -Parent) 'themes\pester-bad'
+        { Add-WinarchyTheme -Url $bad -Name 'pester-bad' } | Should -Throw '*Invalid theme.toml*'
+        Test-Path $dest | Should -BeFalse
+        Remove-Item $bad -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Describe 'Generated JetBrains scheme' {
     It 'mixes two colours by weight' {
         InModuleScope Winarchy {

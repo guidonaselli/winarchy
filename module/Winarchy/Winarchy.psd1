@@ -7,7 +7,7 @@
     PowerShellVersion = '7.0'
     FunctionsToExport = @(
         'Invoke-Winarchy',
-        'Set-WinarchyTheme', 'Set-WinarchyNextTheme', 'Get-WinarchyThemes', 'Get-WinarchyCurrentTheme',
+        'Set-WinarchyTheme', 'Set-WinarchyNextTheme', 'Add-WinarchyTheme', 'Get-WinarchyThemes', 'Get-WinarchyCurrentTheme',
         'Update-WinarchyAccent', 'Get-WinarchyAccentStatus',
         'Get-WinarchyBackgrounds', 'Get-WinarchyBackground', 'Set-WinarchyBackground',
         'Get-WinarchyBackgroundStatus',

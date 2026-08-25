@@ -19,6 +19,7 @@ function Show-WinarchyHelp {
     theme list                List installed themes (* = active)
     theme preview [name]      Render synthetic preview cards (all themes by default)
     theme gallery             Visual theme picker (WPF grid)
+    theme add <git-url> [name]  Install a theme from a repository
     background list           Backgrounds shipped by the active theme (* = applied)
     background set <file>     Apply one of them
     background next           Cycle to the next background
@@ -91,7 +92,11 @@ function Invoke-Winarchy {
                     else { Update-WinarchyThemePreviews }
                 }
                 'gallery' { Show-WinarchyThemeGallery }
-                default { throw "Unknown subcommand: theme $sub (set|next|list|preview|gallery)" }
+                'add' {
+                    if ($rest.Count -lt 2) { throw 'Usage: winarchy theme add <git-url> [name]' }
+                    Add-WinarchyTheme -Url $rest[1] -Name $(if ($rest.Count -ge 3) { $rest[2] } else { '' })
+                }
+                default { throw "Unknown subcommand: theme $sub (set|next|list|preview|gallery|add)" }
             }
         }
         'update' {
