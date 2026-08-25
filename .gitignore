@@ -26,3 +26,4 @@ config/komorebi/rules.toml
 openspec/
 .claude/
 .memsearch/
+config/ahk/user-menu.ahk

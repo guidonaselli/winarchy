@@ -16,6 +16,9 @@ GamesToml := RepoRoot "\games.toml"
 WinarchyPs1 := RepoRoot "\bin\winarchy.ps1"
 DirCreate(StateDir)
 
+; Define WinarchyUserMenu con entradas propias del menu y del tray.
+#Include *i %A_ScriptDir%\user-menu.ahk
+
 ; PID propio para que `winarchy doctor` nos detecte sin depender de WMI/CIM
 try FileOpen(StateDir "\ahk.pid", "w").Write(DllCall("GetCurrentProcessId"))
 
@@ -289,6 +292,15 @@ WinarchyMenuItems() {
         {text:'Quit Winarchy',                       action:(*)=>QuitStack()} ]
 }
 
+WinarchyMenuItemsWithUser() {
+    items := WinarchyMenuItems()
+    if IsSet(WinarchyUserMenu) && WinarchyUserMenu is Array {
+        for entry in WinarchyUserMenu
+            items.InsertAt(items.Length, entry)     ; antes de Quit, que cierra la lista
+    }
+    return items
+}
+
 WinarchySysItems() {
     return [
         {text:'Settings…',                       action:(*)=>Run('explorer.exe ms-settings:')},
@@ -318,7 +330,7 @@ ShowMainMenu(*) {
         return
     }
     MenuStack := []
-    RenderMenu(WinarchyMenuItems(), 'Winarchy')
+    RenderMenu(WinarchyMenuItemsWithUser(), 'Winarchy')
 }
 
 RenderMenu(items, title) {
