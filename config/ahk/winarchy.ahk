@@ -715,6 +715,7 @@ AccentWatch() {
 #p::Komorebic('toggle-pause')                    ; pause tiling
 #r::Komorebic('retile')                          ; force retile
 #+r::Winarchy('reload')                          ; reload whole stack
+#+Enter::Komorebic('promote')                    ; promote window to the largest tile
 
 ; --- Focus -----------------------------------------------------------
 #Left::Komorebic('focus left')                   ; move focus
@@ -764,6 +765,16 @@ AccentWatch() {
 #+7::Komorebic('move-to-workspace 6')
 #+8::Komorebic('move-to-workspace 7')
 #+9::Komorebic('move-to-workspace 8')
+
+#^1::Komorebic('send-to-workspace 0')               ; send window to workspace N (focus stays)
+#^2::Komorebic('send-to-workspace 1')
+#^3::Komorebic('send-to-workspace 2')
+#^4::Komorebic('send-to-workspace 3')
+#^5::Komorebic('send-to-workspace 4')
+#^6::Komorebic('send-to-workspace 5')
+#^7::Komorebic('send-to-workspace 6')
+#^8::Komorebic('send-to-workspace 7')
+#^9::Komorebic('send-to-workspace 8')
 
 ; --- Monitors ------------------------------------------------------------------------
 #,::Komorebic('cycle-focus-monitor previous')    ; focus previous monitor

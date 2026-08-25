@@ -89,6 +89,8 @@ manual app list: Flow already indexes installed programs.
 | `SUPER+Ctrl+T` | Theme gallery (`winarchy theme gallery`) |
 | `SUPER+Ctrl+Space` | Next background of the active theme (`winarchy background next`) |
 | `SUPER+Ctrl+Shift+A` | Launch the preferred coding agent (`winarchy agent launch`) |
+| `SUPER+Shift+Return` | Promote the focused window to the largest tile |
+| `SUPER+Ctrl+1`–`9` | Send the window to workspace N without following it |
 
 ## User overrides
 Create `config\ahk\user.ahk` (gitignored) to add your own hotkeys without touching
