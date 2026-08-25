@@ -140,6 +140,11 @@
     color: {{ui.system}};
 }
 
+.open-meteo-widget .label,
+.open-meteo-widget .icon {
+    color: {{ui.net}};
+}
+
 .claude-usage .label,
 .claude-usage .icon {
     color: {{ui.media}};

@@ -429,6 +429,7 @@ Describe 'Bar callbacks' {
             'toggle_mute', 'toggle_volume_menu', 'toggle_mic_menu',
             'toggle_status', 'cycle_status', 'refresh',
             'toggle_brightness_menu', 'toggle_level_next', 'toggle_level_prev',
+            'toggle_card',
             'toggle_play_pause', 'open_media_source',
             'toggle_notification', 'clear_notifications'
         )

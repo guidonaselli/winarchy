@@ -45,7 +45,7 @@ bars:
     widgets:
       left: ["home", "komorebi_workspaces", "komorebi_active_layout", "active_window"]
       center: ["clock"]
-      right: ["game_mode", "stay_awake", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "brightness", "dnd", "power_plan", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
+      right: ["game_mode", "stay_awake", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "weather", "brightness", "dnd", "power_plan", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
 
 widgets:
   # Logo arriba-izquierda: abre el mismo menú principal de winarchy.ahk
@@ -288,6 +288,20 @@ widgets:
         on_left: "toggle_status"
         on_middle: "toggle_label"
         on_right: "cycle_status"
+
+  # La ubicacion se elige en el popup y YASB la guarda en %LOCALAPPDATA%.
+  weather:
+    type: "yasb.open_meteo.OpenMeteoWidget"
+    options:
+      label: "<span>{icon}</span> {temp}"
+      label_alt: "<span>{icon}</span> {location} {min_temp}/{max_temp}"
+      hide_decimal: true
+      units: "metric"
+      update_interval: 1800
+      callbacks:
+        on_left: "toggle_card"
+        on_middle: "do_nothing"
+        on_right: "toggle_label"
 
   # Brillo del monitor enfocado. En externos va por DDC/CI; hide_unsupported
   # esconde el widget donde no hay control de brillo.
