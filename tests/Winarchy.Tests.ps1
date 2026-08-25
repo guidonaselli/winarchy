@@ -234,6 +234,48 @@ Describe 'Theme VS Code drop-in' {
     }
 }
 
+Describe 'Bar layout' {
+    BeforeAll { $script:BarTpl = Get-Content (Join-Path $script:Root 'templates\yasb-config.yaml.tpl') -Raw }
+
+    It 'keeps the centre section to the clock alone' {
+        $script:BarTpl | Should -Match '(?m)^\s*center: \["clock"\]\s*$'
+    }
+
+    It 'puts the tools drawer outside the centre section' {
+        [regex]::Match($script:BarTpl, '(?m)^\s*left: \[(.+)\]\s*$').Groups[1].Value | Should -Match '"extras"'
+    }
+
+    It 'gives every tool button a tooltip' {
+        $tools = [regex]::Matches($script:BarTpl, '(?ms)^  (tool_\w+):\r?\n(.+?)(?=^  \w)')
+        $tools.Count | Should -BeGreaterThan 0
+        foreach ($t in $tools) {
+            $t.Groups[2].Value | Should -Match 'tooltip: true' -Because "$($t.Groups[1].Value) no tiene tooltip"
+            $t.Groups[2].Value | Should -Match 'tooltip_label: "[^"]+"'
+        }
+    }
+}
+
+Describe 'CLI errors' {
+    It 'reports a bad argument without a PowerShell stack trace' {
+        $shim = Join-Path $script:Root 'bin\winarchy.ps1'
+        $out = & pwsh -NoProfile -ExecutionPolicy Bypass -File $shim screenshot nope 2>&1 | Out-String
+        $out | Should -Match '\[XX\] Unknown capture'
+        $out | Should -Not -Match 'at <ScriptBlock>'
+    }
+}
+
+Describe 'Capture actions' {
+    It 'every capture the menu offers is a kind the CLI knows' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $kinds = [regex]::Matches($ahk, "Winarchy\('screenshot ([a-z-]+)'\)") | ForEach-Object { $_.Groups[1].Value }
+        $kinds | Should -Not -BeNullOrEmpty
+        InModuleScope Winarchy -Parameters @{ Kinds = $kinds } {
+            param($Kinds)
+            foreach ($k in $Kinds) { $script:CaptureActions.Contains($k) | Should -BeTrue -Because "'$k' no existe en la CLI" }
+        }
+    }
+}
+
 Describe 'Command palette' {
     It 'every command maps to a subcommand the dispatcher knows' {
         InModuleScope Winarchy {

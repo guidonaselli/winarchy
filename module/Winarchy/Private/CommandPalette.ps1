@@ -1,4 +1,4 @@
-# CommandPalette.ps1 — comandos de Winarchy como accesos directos que Flow indexa
+﻿# CommandPalette.ps1 — comandos de Winarchy como accesos directos que Flow indexa
 
 $script:PaletteCommands = @(
     @{ Name = 'Next theme';        Args = 'theme next' }
@@ -16,6 +16,12 @@ $script:PaletteCommands = @(
     @{ Name = 'Sync accent';       Args = 'accent sync' }
     @{ Name = 'Screenshot region'; Args = 'screenshot region' }
     @{ Name = 'Screenshot window'; Args = 'screenshot window' }
+    @{ Name = 'Screen recording';  Args = 'screenshot record' }
+    @{ Name = 'Stop recording';    Args = 'screenshot stop' }
+    @{ Name = 'Text from screen';  Args = 'screenshot ocr' }
+    @{ Name = 'Bar top';           Args = 'bar position top' }
+    @{ Name = 'Bar bottom';        Args = 'bar position bottom' }
+    @{ Name = 'Bar transparent';   Args = 'bar transparent' }
     @{ Name = 'Update';            Args = 'update' }
     @{ Name = 'Update Winarchy';   Args = 'update --self' }
 )
