@@ -45,7 +45,7 @@ bars:
     widgets:
       left: ["home", "komorebi_workspaces", "komorebi_active_layout", "active_window"]
       center: ["clock"]
-      right: ["game_mode", "media", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "notifications", "systray", "winarchy_menu"]
+      right: ["game_mode", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "dnd", "battery", "notifications", "systray", "winarchy_menu"]
 
 widgets:
   # Logo arriba-izquierda: abre el mismo menú principal de winarchy.ahk
@@ -239,6 +239,44 @@ widgets:
         on_left: "toggle_volume_menu"
         on_middle: "toggle_label"
         on_right: "toggle_mute"
+
+  # Focus Assist de Windows. Click: on/off. Click derecho: cicla prioridad/alarmas.
+  dnd:
+    type: "yasb.dnd.DndWidget"
+    options:
+      label: "<span>{icon}</span>"
+      label_alt: "<span>{icon}</span> {status}"
+      callbacks:
+        on_left: "toggle_status"
+        on_middle: "toggle_label"
+        on_right: "cycle_status"
+
+  # hide_unsupported deja el widget invisible en una maquina sin bateria,
+  # asi el mismo config sirve para desktop y portatil.
+  battery:
+    type: "yasb.battery.BatteryWidget"
+    options:
+      label: "<span>{icon}</span>"
+      label_alt: "<span>{icon}</span> {percent}%"
+      hide_unsupported: true
+      update_interval: 10000
+      callbacks:
+        on_left: "toggle_label"
+        on_right: "toggle_label"
+
+  # Uso de la suscripcion de Claude Code (ventanas de 5 horas y 7 dias).
+  # cache_ttl alto a proposito: el endpoint esta rate-limiteado.
+  claude_usage:
+    type: "yasb.claude_usage.ClaudeUsageWidget"
+    options:
+      label: "<span>󰧑</span> {five_hour}%"
+      label_alt: "<span>󰧑</span> {seven_day}%"
+      update_interval: 300
+      cache_ttl: 300
+      callbacks:
+        on_left: "toggle_menu"
+        on_middle: "do_nothing"
+        on_right: "toggle_label"
 
   # Click: centro de notificaciones de Windows. Click derecho: limpiar.
   notifications:

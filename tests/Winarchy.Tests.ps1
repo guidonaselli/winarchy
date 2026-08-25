@@ -222,6 +222,7 @@ Describe 'Bar callbacks' {
             'do_nothing', 'toggle_label', 'update_label', 'toggle_menu',
             'toggle_calendar', 'next_timezone', 'context_menu', 'toggle_timer', 'toggle_alarm',
             'toggle_mute', 'toggle_volume_menu', 'toggle_mic_menu',
+            'toggle_status', 'cycle_status', 'refresh',
             'toggle_play_pause', 'open_media_source',
             'toggle_notification', 'clear_notifications'
         )

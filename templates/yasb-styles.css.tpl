@@ -129,6 +129,18 @@
     color: {{colors.accent_ui}};
 }
 
+.dnd-widget .label,
+.battery-widget .label,
+.dnd-widget .icon,
+.battery-widget .icon {
+    color: {{ui.system}};
+}
+
+.claude-usage .label,
+.claude-usage .icon {
+    color: {{ui.media}};
+}
+
 .wifi-widget .label,
 .bluetooth-widget .label,
 .wifi-widget .icon,
