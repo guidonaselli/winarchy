@@ -238,11 +238,17 @@ Describe 'Bar layout' {
     BeforeAll { $script:BarTpl = Get-Content (Join-Path $script:Root 'templates\yasb-config.yaml.tpl') -Raw }
 
     It 'keeps the drawer, the clock and the weather in that order in the centre' {
-        $script:BarTpl | Should -Match '(?m)^\s*center: \["extras", "clock", "weather"\]\s*$'
+        [regex]::Match($script:BarTpl, '(?m)^\s*center: \[(.+)\]\s*$').Groups[1].Value | Should -BeLike '"extras", "clock", "weather"*'
     }
 
     It 'opens the drawer away from the clock' {
         $script:BarTpl | Should -Match 'label_position: "right"'
+    }
+
+    It 'keeps the collapsed label calibrated to the number of children' {
+        $children = ([regex]::Match($script:BarTpl, '(?m)^\s*widgets: \[(.+)\]\s*$').Groups[1].Value -split ',').Count
+        $children | Should -Be 9
+        [regex]::Match($script:BarTpl, 'collapsed_label: "( *)◂"').Groups[1].Value.Length | Should -Be 28
     }
 
     It 'gives every tool button a tooltip' {

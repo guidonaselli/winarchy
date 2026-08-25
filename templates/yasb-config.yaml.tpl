@@ -44,8 +44,8 @@ bars:
       right: 0
     widgets:
       left: ["home", "komorebi_workspaces", "komorebi_active_layout", "active_window"]
-      center: ["extras", "clock", "weather"]
-      right: ["game_mode", "stay_awake", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
+      center: ["extras", "clock", "weather", "claude_usage", "gpu", "memory"]
+      right: ["game_mode", "stay_awake", "media", "cpu", "wifi", "bluetooth", "microphone", "volume", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
     layouts:
       left:
         alignment: "left"
@@ -380,7 +380,7 @@ widgets:
       collapse_options:
         enabled: true
         label_position: "right"
-        collapsed_label: "◂"
+        collapsed_label: "                            ◂"
         expanded_label: "▸"
 
   # La ubicacion se elige en el popup y YASB la guarda en %LOCALAPPDATA%.
