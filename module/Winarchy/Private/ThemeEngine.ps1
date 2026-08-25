@@ -359,8 +359,9 @@ function Get-WinarchyObsidianVaults {
     try { $data = Get-Content $index -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable }
     catch { return @() }
     if (-not $data -or -not $data.ContainsKey('vaults')) { return @() }
-    @($data['vaults'].Values | ForEach-Object { $_['path'] } |
-            Where-Object { $_ -and (Test-Path (Join-Path $_ '.obsidian')) })
+    @($data['vaults'].Values | ForEach-Object { $_['path'] } | Where-Object {
+            $_ -and (Test-Path -LiteralPath "$_\.obsidian")
+        })
 }
 
 function Sync-WinarchyJetBrains {
