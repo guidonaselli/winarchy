@@ -718,6 +718,8 @@ AccentWatch() {
 #+Enter::Komorebic('promote')                    ; promote window to the largest tile
 #+l::Komorebic('cycle-layout next')              ; next layout (bsp, columns, rows, grid, ...)
 #Tab::Komorebic('focus-last-workspace')          ; back to the previous workspace
+#!Home::Komorebic('quick-save-resize')           ; remember the current tile sizes
+#Home::Komorebic('quick-load-resize')            ; restore them
 #+d::Komorebic('toggle-transparency')            ; dim unfocused windows
 
 ; --- Focus -----------------------------------------------------------

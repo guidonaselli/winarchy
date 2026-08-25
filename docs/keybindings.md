@@ -95,6 +95,8 @@ manual app list: Flow already indexes installed programs.
 | `SUPER+Shift+Return` | Promote the focused window to the largest tile |
 | `SUPER+Shift+L` | Cycle to the next layout (BSP, columns, rows, grid, scrolling, …) |
 | `SUPER+Tab` | Back to the workspace you came from |
+| `SUPER+Alt+Home` | Remember the current tile sizes |
+| `SUPER+Home` | Restore the remembered tile sizes |
 | `SUPER+Shift+D` | Dim unfocused windows (toggle transparency) |
 | `SUPER+Ctrl+1`–`9` | Send the window to workspace N without following it |
 
