@@ -741,6 +741,8 @@ AccentWatch() {
 #Home::Komorebic('quick-load-resize')            ; restore them
 #+d::Komorebic('toggle-transparency')            ; dim unfocused windows
 #^w::ToggleStayAwake()                           ; keep the machine awake
+#^m::Komorebic('minimize')                       ; minimize the focused window
+#^f::Komorebic('toggle-workspace-layer')         ; switch between the tiling and floating layers
 #^l::Komorebic('toggle-lock')                    ; pin the container so new windows do not displace it
 
 ; --- Focus -----------------------------------------------------------
@@ -761,6 +763,8 @@ AccentWatch() {
 #!Up::Komorebic('stack up')
 #!Down::Komorebic('stack down')
 #!u::Komorebic('unstack')                        ; sacar la ventana del stack
+#^s::Komorebic('stack-all')                      ; apilar todo el workspace
+#^u::Komorebic('unstack-all')                    ; desapilar el contenedor entero
 #!,::Komorebic('cycle-stack previous')           ; pestana anterior del stack
 #!.::Komorebic('cycle-stack next')               ; pestana siguiente del stack
 

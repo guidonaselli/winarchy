@@ -63,6 +63,7 @@ manual app list: Flow already indexes installed programs.
 |---|---|
 | `SUPER+Alt+←/→/↑/↓` | Stack the focused window onto its neighbour |
 | `SUPER+Alt+u` | Unstack the focused window |
+| `SUPER+Ctrl+S` / `SUPER+Ctrl+U` | Stack every window in the workspace / unstack the whole container |
 | `SUPER+Alt+,` / `SUPER+Alt+.` | Previous / next tab in the stack |
 
 ## Workspaces (komorebi, per monitor)
@@ -100,6 +101,8 @@ manual app list: Flow already indexes installed programs.
 | `SUPER+Home` | Restore the remembered tile sizes |
 | `SUPER+Shift+D` | Dim unfocused windows (toggle transparency) |
 | `SUPER+Ctrl+L` | Lock the container so new windows do not displace it |
+| `SUPER+Ctrl+M` | Minimize the focused window |
+| `SUPER+Ctrl+F` | Switch between the tiling and floating layers |
 | `SUPER+Ctrl+W` | Keep the machine awake (toggle) |
 | `SUPER+Ctrl+1`–`9` | Send the window to workspace N without following it |
 
