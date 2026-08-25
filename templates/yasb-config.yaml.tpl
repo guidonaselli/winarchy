@@ -44,8 +44,18 @@ bars:
       right: 0
     widgets:
       left: ["home", "komorebi_workspaces", "komorebi_active_layout", "active_window"]
-      center: ["clock"]
-      right: ["game_mode", "stay_awake", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "weather", "brightness", "dnd", "power_plan", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
+      center: ["extras", "clock", "weather"]
+      right: ["game_mode", "stay_awake", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
+    layouts:
+      left:
+        alignment: "left"
+        stretch: true
+      center:
+        alignment: "center"
+        stretch: false
+      right:
+        alignment: "right"
+        stretch: true
 
 widgets:
   # Logo arriba-izquierda: abre el mismo menú principal de winarchy.ahk
@@ -289,12 +299,24 @@ widgets:
         on_middle: "toggle_label"
         on_right: "cycle_status"
 
+  extras:
+    type: "yasb.grouper.GrouperWidget"
+    options:
+      class_name: "extras-grouper"
+      widgets: ["dnd", "brightness", "power_plan"]
+      hide_empty: false
+      collapse_options:
+        enabled: true
+        label_position: "left"
+        collapsed_label: "▸"
+        expanded_label: "▾"
+
   # La ubicacion se elige en el popup y YASB la guarda en %LOCALAPPDATA%.
   weather:
     type: "yasb.open_meteo.OpenMeteoWidget"
     options:
-      label: "<span>{icon}</span> {temp}"
-      label_alt: "<span>{icon}</span> {location} {min_temp}/{max_temp}"
+      label: "<span>{icon}</span>"
+      label_alt: "<span>{icon}</span> {temp} {location}"
       hide_decimal: true
       units: "metric"
       update_interval: 1800

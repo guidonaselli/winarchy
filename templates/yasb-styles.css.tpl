@@ -140,6 +140,18 @@
     color: {{ui.system}};
 }
 
+.extras-grouper .grouper-button {
+    color: {{ui.net}};
+    font-size: 16px;
+    background: transparent;
+    border: none;
+    padding: 0 6px;
+}
+
+.extras-grouper .grouper-button:hover {
+    color: {{colors.foreground}};
+}
+
 .open-meteo-widget .label,
 .open-meteo-widget .icon {
     color: {{ui.net}};
