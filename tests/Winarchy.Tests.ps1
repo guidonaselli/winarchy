@@ -938,6 +938,11 @@ Describe 'Shipped themes' {
         }
     }
 
+    It 'doctor valida el theme expandido, igual que el render' {
+        $src = Get-Content (Join-Path $script:Root 'module\Winarchy\Private\Doctor.ps1') -Raw
+        $src | Should -Match 'Expand-WinarchyThemePalette -Theme \(Import-WinarchyToml'
+    }
+
     # Cubre de punta a punta lo que antes solo se sabía al aplicar un theme: los 11
     # templates renderizan sin tokens sin resolver y el JSON/XML generado parsea.
     It '<Name> renders every template (theme set -StageOnly)' -ForEach $script:ThemeCases {
