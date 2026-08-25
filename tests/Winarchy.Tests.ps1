@@ -265,6 +265,39 @@ Describe 'Command palette' {
     }
 }
 
+Describe 'Generated JetBrains scheme' {
+    It 'mixes two colours by weight' {
+        InModuleScope Winarchy {
+            Get-WinarchyMixedHex -A '#000000' -B '#ffffff' -Weight 0 | Should -Be '#000000'
+            Get-WinarchyMixedHex -A '#000000' -B '#ffffff' -Weight 1 | Should -Be '#ffffff'
+            Get-WinarchyMixedHex -A '#000000' -B '#ffffff' -Weight 0.5 | Should -Be '#808080'
+        }
+    }
+
+    It 'renders a scheme every theme without a drop-in can use' {
+        InModuleScope Winarchy {
+            $bare = Get-WinarchyThemes | Where-Object { -not (Test-Path (Join-Path (Get-WinarchyThemesDir) "$_\jetbrains.icls")) }
+            $bare | Should -Not -BeNullOrEmpty
+            foreach ($name in $bare) {
+                Set-WinarchyTheme -Name $name -StageOnly | Out-Null
+                $xml = [xml](Get-Content (Join-Path (Get-WinarchyStateDir) 'staging\winarchy.icls') -Raw)
+                $xml.scheme.name | Should -Be "Winarchy $((Import-WinarchyToml -Path (Join-Path (Get-WinarchyThemesDir) "$name\theme.toml"))['name'])"
+                $shipped = [xml](Get-Content (Join-Path (Get-WinarchyThemesDir) 'catppuccin\jetbrains.icls') -Raw)
+                $xml.SelectNodes('//option[@value]').Count | Should -Be $shipped.SelectNodes('//option[@value]').Count
+            }
+        }
+    }
+
+    It 'lets a theme override the generated scheme with its own' {
+        InModuleScope Winarchy {
+            Mock Write-WinarchyWarn {}
+            $themed = Join-Path (Get-WinarchyThemesDir) 'catppuccin\jetbrains.icls'
+            Test-Path $themed | Should -BeTrue
+            ([xml](Get-Content $themed -Raw)).scheme.name | Should -Be 'Winarchy Catppuccin'
+        }
+    }
+}
+
 Describe 'Bar position' {
     AfterAll {
         InModuleScope Winarchy { Remove-Item (Get-WinarchyBarPositionPath) -Force -ErrorAction SilentlyContinue }

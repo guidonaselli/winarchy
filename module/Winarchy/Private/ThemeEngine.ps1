@@ -159,6 +159,30 @@ function Build-WinarchyThemeContext {
     $accentHex = $ctx['colors.accent_ui'].TrimStart('#')
     $ctx['colors.accent_ansi_rgb'] = (0, 2, 4 | ForEach-Object {
             [Convert]::ToInt32($accentHex.Substring($_, 2), 16) }) -join ';'
+
+    # Tokens del esquema de JetBrains: hex sin '#' y mezclas de la paleta.
+    foreach ($kv in @($ctx.GetEnumerator() | Where-Object { $_.Key -like 'colors.*' })) {
+        if ($kv.Value -is [string] -and $kv.Value -match '^#[0-9a-fA-F]{6}$') {
+            $ctx["$($kv.Key)_bare"] = $kv.Value.TrimStart('#')
+        }
+    }
+    $c = $Theme['colors']
+    $mixes = if (@($script:ThemeRequiredColorKeys | Where-Object { -not $c.ContainsKey($_) }).Count) { @{} } else { @{
+        icls_caret_row   = @($c['background'], $c['color8'], 0.25)
+        icls_surface     = @($c['background'], $c['foreground'], 0.10)
+        icls_guide       = @($c['color0'], $c['color8'], 0.15)
+        icls_guide_active = @($c['color8'], $c['color15'], 0.80)
+        icls_line_numbers = @($c['foreground'], $c['color0'], 0.70)
+        icls_selection   = @($c['background'], $ctx['colors.accent_ui'], 0.35)
+        icls_search      = @($c['background'], $ctx['colors.accent_ui'], 0.20)
+        icls_vcs_added   = @($c['background'], $c['color2'], 0.20)
+        icls_vcs_deleted = @($c['background'], $c['color1'], 0.20)
+        icls_vcs_modified = @($c['background'], $ctx['colors.accent_ui'], 0.15)
+        icls_warning     = @($c['background'], $c['color3'], 0.30)
+    } }
+    foreach ($k in $mixes.Keys) {
+        $ctx["computed.$k"] = (Get-WinarchyMixedHex -A $mixes[$k][0] -B $mixes[$k][1] -Weight $mixes[$k][2]).TrimStart('#')
+    }
     $ctx
 }
 
@@ -177,6 +201,7 @@ function Get-WinarchyRenderTargets {
         @{ Template = 'obsidian.css.tpl';                 Output = Join-Path $root 'config\obsidian\winarchy-theme.css'; Validate = $null }
         @{ Template = 'starship.toml.tpl';                Output = Join-Path $root 'config\pwsh\starship.toml';          Validate = $null }
         @{ Template = 'fastfetch.jsonc.tpl';              Output = Join-Path $root 'config\fastfetch\config.jsonc';      Validate = 'json' }
+        @{ Template = 'jetbrains.icls.tpl';               Output = Join-Path $root 'config\jetbrains\winarchy.icls';    Validate = 'xml' }
     )
 }
 
@@ -347,6 +372,7 @@ function Sync-WinarchyJetBrains {
     if (-not (Test-Path $jbRoot)) { return }
 
     $icls = Join-Path $ThemeDir 'jetbrains.icls'
+    if (-not (Test-Path $icls)) { $icls = Join-Path (Get-WinarchyRoot) 'config\jetbrains\winarchy.icls' }
     $schemeName = $null
     if (Test-Path $icls) {
         try { $schemeName = ([xml](Get-Content $icls -Raw -Encoding UTF8)).scheme.name }
@@ -521,6 +547,22 @@ function Get-WinarchyShadedHex {
         [int][Math]::Round($c + ($target - $c) * $f)
     }
     '#{0:x2}{1:x2}{2:x2}' -f $rgb[0], $rgb[1], $rgb[2]
+}
+
+function Get-WinarchyMixedHex {
+    <# Interpola dos colores: Weight 0 devuelve A, 1 devuelve B. #>
+    param(
+        [Parameter(Mandatory)][string]$A,
+        [Parameter(Mandatory)][string]$B,
+        [Parameter(Mandatory)][double]$Weight
+    )
+    $ha = $A.TrimStart('#'); $hb = $B.TrimStart('#')
+    $parts = 0, 2, 4 | ForEach-Object {
+        $x = [Convert]::ToInt32($ha.Substring($_, 2), 16)
+        $y = [Convert]::ToInt32($hb.Substring($_, 2), 16)
+        '{0:x2}' -f [int][Math]::Round($x + ($y - $x) * $Weight)
+    }
+    '#' + ($parts -join '')
 }
 
 function Get-WinarchyYiqLuminance {
