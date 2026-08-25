@@ -1,6 +1,6 @@
 @{
     RootModule        = 'Winarchy.psm1'
-    ModuleVersion     = '1.0.1'
+    ModuleVersion     = '1.0.2'
     GUID              = 'b7e3a9c4-2f5d-4e8a-9c1b-6d0f4a7e2b58'
     Author            = 'Guido Naselli'
     Description       = 'Winarchy — Omarchy-style integration layer for Windows 11 (komorebi + YASB + AHK + Flow Launcher + theme engine).'
