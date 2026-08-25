@@ -265,6 +265,17 @@ Describe 'Command palette' {
     }
 }
 
+Describe 'Bar shell commands' {
+    It 'never quotes a path inside a run_cmd or an exec callback' {
+        $tpl = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'templates\yasb-config.yaml.tpl') -Raw
+        $cmds = [regex]::Matches($tpl, '(?m)^\s+(?:run_cmd|on_\w+):\s*(.+)$') |
+            ForEach-Object { $_.Groups[1].Value.Trim() } |
+            Where-Object { $_ -match 'cmd\.exe|powershell|pwsh' }
+        $cmds | Should -Not -BeNullOrEmpty
+        $cmds | Where-Object { $_ -match '\\"|''.*"' } | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Bar callbacks' {
     It 'wires only callbacks the pinned YASB registers' {
         $known = @(

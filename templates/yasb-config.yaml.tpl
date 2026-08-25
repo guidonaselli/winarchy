@@ -58,7 +58,7 @@ widgets:
       label: ""   # logo Windows (nerd font)
       class_name: "home-widget"
       callbacks:
-        on_left: "exec cmd.exe /c copy /y nul \"%KOMOREBI_CONFIG_HOME%\\..\\..\\state\\show-menu.flag\""
+        on_left: "exec cmd.exe /c copy /y nul %KOMOREBI_CONFIG_HOME%\\..\\..\\state\\show-menu.flag"
         # sin esto, el right/middle-click por defecto hace toggle_label → label_alt
         # (no definido) y el logo desaparece hasta volver a togglear.
         on_middle: "do_nothing"
@@ -76,7 +76,8 @@ widgets:
         # cmd, NO powershell: esto corre en loop para siempre y cada powershell.exe
         # cuesta ~435 ms de arranque. `if exist` hace lo mismo por ~25 ms.
         # use_shell expande %KOMOREBI_CONFIG_HOME%.
-        run_cmd: 'cmd.exe /c if exist "%KOMOREBI_CONFIG_HOME%\..\..\state\game-mode.flag" echo GAME'
+        # Rutas sin comillas: YASB las escapa y el comando falla en silencio.
+        run_cmd: 'cmd.exe /c if exist %KOMOREBI_CONFIG_HOME%\..\..\state\game-mode.flag echo GAME'
         run_interval: 3000
         return_format: "string"
         use_shell: true
@@ -349,6 +350,6 @@ widgets:
       label: "☰"
       class_name: "winarchy-menu-widget"
       callbacks:
-        on_left: "exec cmd.exe /c copy /y nul \"%KOMOREBI_CONFIG_HOME%\\..\\..\\state\\show-menu.flag\""
+        on_left: "exec cmd.exe /c copy /y nul %KOMOREBI_CONFIG_HOME%\\..\\..\\state\\show-menu.flag"
         on_middle: "do_nothing"
         on_right: "do_nothing"
