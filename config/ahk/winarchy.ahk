@@ -825,6 +825,8 @@ AccentWatch() {
 #+.::Komorebic('cycle-move-monitor next')        ; move to next monitor
 #^,::Komorebic('cycle-send-to-monitor previous') ; send to previous monitor (focus stays)
 #^.::Komorebic('cycle-send-to-monitor next')     ; send to next monitor (focus stays)
+#!+,::Komorebic('cycle-move-workspace-to-monitor previous')  ; move the whole workspace to the previous monitor
+#!+.::Komorebic('cycle-move-workspace-to-monitor next')      ; move the whole workspace to the next monitor
 
 ; --- Screenshots (ShareX) -------------------------------------------------------------------
 #+s::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -RectangleRegion')  ; region capture

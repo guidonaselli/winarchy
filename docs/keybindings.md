@@ -74,6 +74,7 @@ manual app list: Flow already indexes installed programs.
 | `SUPER+,` / `SUPER+.` | Focus previous / next monitor |
 | `SUPER+Shift+,` / `SUPER+Shift+.` | Move window to previous / next monitor |
 | `SUPER+Ctrl+,` / `SUPER+Ctrl+.` | Send window to previous / next monitor without following it |
+| `SUPER+Alt+Shift+,` / `SUPER+Alt+Shift+.` | Move the whole workspace to the previous / next monitor |
 
 ## Screenshots and screen recording (ShareX)
 | Keybinding | Action |
