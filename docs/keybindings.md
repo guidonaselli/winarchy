@@ -81,6 +81,9 @@ manual app list: Flow already indexes installed programs.
 | `SUPER+Shift+P` | Full screen capture |
 | `SUPER+Shift+V` | Screen recording |
 | `SUPER+Shift+G` | GIF recording |
+| `SUPER+Ctrl+V` | Stop the running recording |
+| `SUPER+Ctrl+Q` | Decode a QR code from a screen region |
+| `SUPER+Ctrl+O` | Read text from a screen region (OCR) |
 
 ## Themes
 | Keybinding | Action |

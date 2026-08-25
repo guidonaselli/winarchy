@@ -793,6 +793,9 @@ AccentWatch() {
 ; --- Themes / help --------------------------------------------------------------------
 #+t::Winarchy('theme next')                       ; next theme
 #+v::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -ScreenRecorder')    ; screen recording
+#^v::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -StopScreenRecording') ; stop recording
+#^q::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -QRCodeScanRegion')  ; decode a QR on screen
+#^o::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -OCR')               ; text from screen
 #+g::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -ScreenRecorderGIF') ; GIF recording
 #^t::Winarchy('theme gallery')                    ; theme gallery
 #^Space::Winarchy('background next')              ; next background of the active theme
