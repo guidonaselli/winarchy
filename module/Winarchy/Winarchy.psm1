@@ -36,7 +36,8 @@ function Show-WinarchyHelp {
     webapp install <n> <url>  Create a webapp as a dedicated window
     webapp remove <n>         Remove a webapp
     webapp list               List installed webapps
-    screenshot [region|window|full]   Capture via ShareX (default: region)
+    screenshot [kind]         Capture via ShareX: region window full last scrolling
+                              record record-gif stop ocr qr color ruler pin
     game-mode on|off|status   Manual game mode (AHK also enables it on its own)
     layout save [exe]         Remember where each app currently lives (monitor+workspace+slot)
                               (one exe if given; --dry-run to preview without saving)

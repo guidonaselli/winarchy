@@ -68,17 +68,31 @@ function Get-WinarchyWebapps {
     }
 }
 
+$script:CaptureActions = [ordered]@{
+    region     = 'RectangleRegion'
+    window     = 'ActiveWindow'
+    full       = 'PrintScreen'
+    last       = 'LastRegion'
+    scrolling  = 'ScrollingCapture'
+    record     = 'ScreenRecorder'
+    'record-gif' = 'ScreenRecorderGIF'
+    stop       = 'StopScreenRecording'
+    ocr        = 'OCR'
+    qr         = 'QRCodeScanRegion'
+    color      = 'ScreenColorPicker'
+    ruler      = 'Ruler'
+    pin        = 'PinToScreen'
+}
+
 function Invoke-WinarchyScreenshot {
-    param([ValidateSet('region', 'window', 'full')][string]$Kind = 'region')
+    param([string]$Kind = 'region')
+    if (-not $script:CaptureActions.Contains($Kind)) {
+        throw "Unknown capture '$Kind'. Available: $($script:CaptureActions.Keys -join ', ')"
+    }
     $sharex = @(
         "$env:ProgramFiles\ShareX\ShareX.exe",
         "${env:ProgramFiles(x86)}\ShareX\ShareX.exe"
     ) | Where-Object { Test-Path $_ } | Select-Object -First 1
     if (-not $sharex) { throw 'ShareX is not installed (winget install ShareX.ShareX).' }
-    $arg = switch ($Kind) {
-        'region' { '-RectangleRegion' }
-        'window' { '-ActiveWindow' }
-        'full'   { '-PrintScreen' }
-    }
-    Start-Process $sharex -ArgumentList $arg
+    Start-Process $sharex -ArgumentList "-$($script:CaptureActions[$Kind])"
 }

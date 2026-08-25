@@ -43,9 +43,9 @@ bars:
       bottom: 0
       right: 0
     widgets:
-      left: ["home", "komorebi_workspaces", "komorebi_active_layout", "active_window"]
-      center: ["extras", "clock", "weather"]
-      right: ["game_mode", "stay_awake", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
+      left: ["home", "komorebi_workspaces", "komorebi_active_layout", "active_window", "extras"]
+      center: ["clock"]
+      right: ["weather", "game_mode", "stay_awake", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
     layouts:
       left:
         alignment: "left"
@@ -299,11 +299,71 @@ widgets:
         on_middle: "toggle_label"
         on_right: "cycle_status"
 
+  tool_region:
+    type: "yasb.custom.CustomWidget"
+    options:
+      label: "<span></span>"
+      class_name: "tool-widget"
+      callbacks:
+        on_left: "exec winarchy screenshot region"
+        on_middle: "do_nothing"
+        on_right: "do_nothing"
+
+  tool_record:
+    type: "yasb.custom.CustomWidget"
+    options:
+      label: "<span></span>"
+      class_name: "tool-widget"
+      callbacks:
+        on_left: "exec winarchy screenshot record"
+        on_middle: "do_nothing"
+        on_right: "do_nothing"
+
+  tool_stop:
+    type: "yasb.custom.CustomWidget"
+    options:
+      label: "<span></span>"
+      class_name: "tool-widget"
+      callbacks:
+        on_left: "exec winarchy screenshot stop"
+        on_middle: "do_nothing"
+        on_right: "do_nothing"
+
+  tool_ocr:
+    type: "yasb.custom.CustomWidget"
+    options:
+      label: "<span></span>"
+      class_name: "tool-widget"
+      callbacks:
+        on_left: "exec winarchy screenshot ocr"
+        on_middle: "do_nothing"
+        on_right: "do_nothing"
+
+  tool_qr:
+    type: "yasb.custom.CustomWidget"
+    options:
+      label: "<span></span>"
+      class_name: "tool-widget"
+      callbacks:
+        on_left: "exec winarchy screenshot qr"
+        on_middle: "do_nothing"
+        on_right: "do_nothing"
+
+  tool_color:
+    type: "yasb.custom.CustomWidget"
+    options:
+      label: "<span></span>"
+      class_name: "tool-widget"
+      callbacks:
+        on_left: "exec winarchy screenshot color"
+        on_middle: "do_nothing"
+        on_right: "do_nothing"
+
   extras:
     type: "yasb.grouper.GrouperWidget"
     options:
       class_name: "extras-grouper"
-      widgets: ["dnd", "brightness", "power_plan"]
+      widgets: ["tool_region", "tool_record", "tool_stop", "tool_ocr", "tool_qr", "tool_color", "dnd", "brightness", "power_plan"]
       hide_empty: false
       collapse_options:
         enabled: true

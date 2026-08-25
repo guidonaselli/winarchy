@@ -142,6 +142,14 @@
     color: {{ui.system}};
 }
 
+.tool-widget .icon {
+    color: {{ui.system}};
+}
+
+.tool-widget .icon:hover {
+    color: {{colors.accent_ui}};
+}
+
 .extras-grouper .grouper-button {
     color: {{ui.net}};
     font-size: 16px;

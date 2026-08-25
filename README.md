@@ -152,7 +152,7 @@ winarchy bar position [top|bottom]
 winarchy update [--core | --self]
 winarchy menu
 winarchy webapp install <name> <url> | remove <name> | list
-winarchy screenshot [region|window|full]
+winarchy screenshot [region|window|full|last|scrolling|record|record-gif|stop|ocr|qr|color|ruler|pin]
 winarchy game-mode on|off|status|add <exe>|remove <exe>
 winarchy layout save | apply | order | list | forget <exe>
 winarchy accent sync [--force] | status
