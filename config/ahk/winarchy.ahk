@@ -721,6 +721,7 @@ AccentWatch() {
 #!Home::Komorebic('quick-save-resize')           ; remember the current tile sizes
 #Home::Komorebic('quick-load-resize')            ; restore them
 #+d::Komorebic('toggle-transparency')            ; dim unfocused windows
+#^l::Komorebic('toggle-lock')                    ; pin the container so new windows do not displace it
 
 ; --- Focus -----------------------------------------------------------
 #Left::Komorebic('focus left')                   ; move focus
@@ -786,6 +787,8 @@ AccentWatch() {
 #.::Komorebic('cycle-focus-monitor next')        ; focus next monitor
 #+,::Komorebic('cycle-move-monitor previous')    ; move to previous monitor
 #+.::Komorebic('cycle-move-monitor next')        ; move to next monitor
+#^,::Komorebic('cycle-send-to-monitor previous') ; send to previous monitor (focus stays)
+#^.::Komorebic('cycle-send-to-monitor next')     ; send to next monitor (focus stays)
 
 ; --- Screenshots (ShareX) -------------------------------------------------------------------
 #+s::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -RectangleRegion')  ; region capture

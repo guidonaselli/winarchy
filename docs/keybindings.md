@@ -72,6 +72,7 @@ manual app list: Flow already indexes installed programs.
 | `SUPER+Shift+1..9` | Move window to workspace N |
 | `SUPER+,` / `SUPER+.` | Focus previous / next monitor |
 | `SUPER+Shift+,` / `SUPER+Shift+.` | Move window to previous / next monitor |
+| `SUPER+Ctrl+,` / `SUPER+Ctrl+.` | Send window to previous / next monitor without following it |
 
 ## Screenshots and screen recording (ShareX)
 | Keybinding | Action |
@@ -98,6 +99,7 @@ manual app list: Flow already indexes installed programs.
 | `SUPER+Alt+Home` | Remember the current tile sizes |
 | `SUPER+Home` | Restore the remembered tile sizes |
 | `SUPER+Shift+D` | Dim unfocused windows (toggle transparency) |
+| `SUPER+Ctrl+L` | Lock the container so new windows do not displace it |
 | `SUPER+Ctrl+1`–`9` | Send the window to workspace N without following it |
 
 ## User overrides
