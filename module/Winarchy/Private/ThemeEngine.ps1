@@ -188,8 +188,14 @@ function Get-WinarchyTerminalSettingsPath {
 }
 
 function Merge-WinarchyTerminalScheme {
-    <# Merge quirúrgico: solo el scheme "Winarchy" + colorScheme del profile default. #>
-    param([Parameter(Mandatory)][string]$SchemeJsonPath)
+    <# Merge quirúrgico: el scheme "Winarchy", el theme "Winarchy" (barra de pestañas,
+       que es una superficie aparte del color scheme) y la fuente del profile default. #>
+    param(
+        [Parameter(Mandatory)][string]$SchemeJsonPath,
+        [string]$FontFamily,
+        [string]$TabBackground,
+        [ValidateSet('dark', 'light')][string]$Mode
+    )
     $settingsPath = Get-WinarchyTerminalSettingsPath
     if (-not $settingsPath) {
         Write-WinarchyWarn 'Windows Terminal settings.json not found; scheme not applied.'
@@ -207,7 +213,25 @@ function Merge-WinarchyTerminalScheme {
             $settings['profiles']['defaults'] = @{}
         }
         $settings['profiles']['defaults']['colorScheme'] = 'Winarchy'
+        if ($FontFamily) {
+            if (-not $settings['profiles']['defaults'].ContainsKey('font') -or $settings['profiles']['defaults']['font'] -isnot [hashtable]) {
+                $settings['profiles']['defaults']['font'] = @{}
+            }
+            $settings['profiles']['defaults']['font']['face'] = $FontFamily
+        }
     }
+
+    if ($TabBackground -and $Mode) {
+        $theme = @{
+            name   = 'Winarchy'
+            tabRow = @{ background = $TabBackground; unfocusedBackground = $TabBackground }
+            window = @{ applicationTheme = $Mode }
+        }
+        if (-not $settings.ContainsKey('themes')) { $settings['themes'] = @() }
+        $settings['themes'] = @($settings['themes'] | Where-Object { $_['name'] -ne 'Winarchy' }) + @($theme)
+        $settings['theme'] = 'Winarchy'
+    }
+
     $settings | ConvertTo-Json -Depth 50 | Set-Content -Path $settingsPath -Encoding UTF8
     $settingsPath
 }
@@ -733,7 +757,8 @@ function Set-WinarchyTheme {
         }
 
         # 5. Superficies externas
-        Merge-WinarchyTerminalScheme -SchemeJsonPath (Join-Path $root 'config\terminal\winarchy-scheme.json') | Out-Null
+        Merge-WinarchyTerminalScheme -SchemeJsonPath (Join-Path $root 'config\terminal\winarchy-scheme.json') `
+            -FontFamily $ctx['bar.font_family'] -TabBackground $theme['colors']['background'] -Mode $theme['mode'] | Out-Null
         Set-WinarchyFlowTheme -XamlPath (Join-Path $root 'config\flow\Winarchy.xaml') -FontFamily $ctx['bar.font_family']
         $btopThemes = "$env:USERPROFILE\.config\btop\themes"
         if (Test-Path (Split-Path $btopThemes -Parent)) {
