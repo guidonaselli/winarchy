@@ -88,7 +88,7 @@ manual app list: Flow already indexes installed programs.
 | `SUPER+Ctrl+Q` | Decode a QR code from a screen region |
 | `SUPER+Ctrl+O` | Read text from a screen region (OCR) |
 
-The bar's tools drawer (the chevron next to the workspaces) has the same capture
+The bar's tools drawer (the chevron left of the clock) has the same capture
 actions as buttons, plus a colour picker.
 
 ## System panels

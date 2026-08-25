@@ -1,4 +1,4 @@
-; ============================================================================
+﻿; ============================================================================
 ; winarchy.ahk — único dueño de hotkeys globales de Winarchy (AHK v2)
 ; Esquema SUPER estilo Omarchy → despacha a komorebic / Flow / Terminal / winarchy
 ; Absorbe el viejo win-space-launcher.ahk (Win+Space → Flow Launcher).
@@ -198,10 +198,20 @@ SetupTray() {
     themes.Add("Gallery`tSUPER+Ctrl+T", (*) => Winarchy('theme gallery'))
     themes.Add("Next background`tSUPER+Ctrl+Space", (*) => Winarchy('background next'))
 
+    capture := Menu()
+    for item in WinarchyCaptureItems()
+        capture.Add(item.text (item.HasOwnProp('hint') ? "`t" item.hint : ""), item.action)
+
+    bar := Menu()
+    for item in WinarchyBarItems()
+        bar.Add(item.text (item.HasOwnProp('hint') ? "`t" item.hint : ""), item.action)
+
     tray.Add("Apps", (*) => ToggleFlowApps())
     tray.Default := "Apps"
     tray.Add()
     tray.Add("Themes", themes)
+    tray.Add("Capture", capture)
+    tray.Add("Bar", bar)
     tray.Add("Reload stack`tSUPER+Shift+R", (*) => Winarchy('reload'))
     tray.Add("Game mode (toggle)", (*) => ToggleGameMode())
     tray.Add("Stay awake (toggle)", (*) => ToggleStayAwake())
@@ -282,6 +292,8 @@ WinarchyMenuItems() {
             {text:'Next theme', hint:'SUPER+Shift+T', action:(*)=>Winarchy('theme next')},
             {text:'Gallery',    hint:'SUPER+Ctrl+T',  action:(*)=>Winarchy('theme gallery')},
             {text:'Next background', hint:'SUPER+Ctrl+Space', action:(*)=>Winarchy('background next')} ]},
+        {text:'Capture',                             sub: WinarchyCaptureItems()},
+        {text:'Bar',                                 sub: WinarchyBarItems()},
         {text:'Coding agent',  hint:'SUPER+Ctrl+Shift+A', action:(*)=>Winarchy('agent launch')},
         {text:'Reload stack',  hint:'SUPER+Shift+R', action:(*)=>Winarchy('reload')},
         {text:'Game mode',     hint:(FileExist(GameFlag) ? 'ON' : 'OFF'), action:(*)=>ToggleGameMode()},
@@ -299,6 +311,30 @@ WinarchyMenuItemsWithUser() {
             items.InsertAt(items.Length, entry)     ; antes de Quit, que cierra la lista
     }
     return items
+}
+
+WinarchyCaptureItems() {
+    return [
+        {text:'Region',          hint:'SUPER+Shift+S', action:(*)=>Winarchy('screenshot region')},
+        {text:'Window',          hint:'SUPER+Shift+W', action:(*)=>Winarchy('screenshot window')},
+        {text:'Full screen',     hint:'SUPER+Shift+P', action:(*)=>Winarchy('screenshot full')},
+        {text:'Repeat last region',                    action:(*)=>Winarchy('screenshot last')},
+        {text:'Scrolling',                             action:(*)=>Winarchy('screenshot scrolling')},
+        {text:'Record',          hint:'SUPER+Shift+V', action:(*)=>Winarchy('screenshot record')},
+        {text:'Record as GIF',                         action:(*)=>Winarchy('screenshot record-gif')},
+        {text:'Stop recording',  hint:'SUPER+Ctrl+V',  action:(*)=>Winarchy('screenshot stop')},
+        {text:'Text from screen (OCR)', hint:'SUPER+Ctrl+O', action:(*)=>Winarchy('screenshot ocr')},
+        {text:'Scan QR',         hint:'SUPER+Ctrl+Q',  action:(*)=>Winarchy('screenshot qr')},
+        {text:'Colour picker',                         action:(*)=>Winarchy('screenshot color')},
+        {text:'Pin to screen',                         action:(*)=>Winarchy('screenshot pin')},
+        {text:'Ruler',                                 action:(*)=>Winarchy('screenshot ruler')} ]
+}
+
+WinarchyBarItems() {
+    return [
+        {text:'Move to top',                           action:(*)=>Winarchy('bar position top')},
+        {text:'Move to bottom',                        action:(*)=>Winarchy('bar position bottom')},
+        {text:'Transparent (toggle)',                  action:(*)=>Winarchy('bar transparent')} ]
 }
 
 WinarchySysItems() {
@@ -828,17 +864,17 @@ AccentWatch() {
 #!+,::Komorebic('cycle-move-workspace-to-monitor previous')  ; move the whole workspace to the previous monitor
 #!+.::Komorebic('cycle-move-workspace-to-monitor next')      ; move the whole workspace to the next monitor
 
-; --- Screenshots (ShareX) -------------------------------------------------------------------
-#+s::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -RectangleRegion')  ; region capture
-#+w::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -ActiveWindow')     ; active window capture
-#+p::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -PrintScreen')      ; fullscreen capture
+; --- Captura (ShareX via `winarchy screenshot`) ----------------------------------------------
+#+s::Winarchy('screenshot region')                ; region capture
+#+w::Winarchy('screenshot window')                ; active window capture
+#+p::Winarchy('screenshot full')                  ; fullscreen capture
+#+v::Winarchy('screenshot record')                ; screen recording
+#^v::Winarchy('screenshot stop')                  ; stop recording
+#^q::Winarchy('screenshot qr')                    ; decode a QR on screen
+#^o::Winarchy('screenshot ocr')                   ; text from screen
 
 ; --- Themes / help --------------------------------------------------------------------
 #+t::Winarchy('theme next')                       ; next theme
-#+v::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -ScreenRecorder')    ; screen recording
-#^v::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -StopScreenRecording') ; stop recording
-#^q::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -QRCodeScanRegion')  ; decode a QR on screen
-#^o::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -OCR')               ; text from screen
 
 ; --- Paneles del sistema --------------------------------------------------------
 #^a::Run('explorer.exe ms-settings:sound')       ; audio
@@ -846,7 +882,7 @@ AccentWatch() {
 #^n::Run('explorer.exe ms-settings:network')     ; network
 #^d::Run('explorer.exe ms-settings:display')     ; display
 #^p::Run('explorer.exe ms-settings:powersleep')  ; power
-#+g::Run('"' EnvGet('ProgramFiles') '\ShareX\ShareX.exe" -ScreenRecorderGIF') ; GIF recording
+#+g::Winarchy('screenshot record-gif')            ; GIF recording
 #^t::Winarchy('theme gallery')                    ; theme gallery
 #^Space::Winarchy('background next')              ; next background of the active theme
 #^+a::Winarchy('agent launch')                    ; preferred coding agent
