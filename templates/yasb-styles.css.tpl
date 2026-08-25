@@ -265,6 +265,11 @@
     font-weight: 700;
 }
 
+.stay-awake-widget .label {
+    color: {{ui.system}};
+    font-weight: 700;
+}
+
 .game-mode-widget .label {
     color: {{borders.urgent}};
     font-weight: 700;

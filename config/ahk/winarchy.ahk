@@ -201,6 +201,7 @@ SetupTray() {
     tray.Add("Themes", themes)
     tray.Add("Reload stack`tSUPER+Shift+R", (*) => Winarchy('reload'))
     tray.Add("Game mode (toggle)", (*) => ToggleGameMode())
+    tray.Add("Stay awake (toggle)", (*) => ToggleStayAwake())
     tray.Add("Doctor", (*) => WinarchyTerminal('doctor'))
     tray.Add("Check for updates", (*) => WinarchyTerminal('update'))
     tray.Add()
@@ -227,6 +228,23 @@ MenuWatch() {
 ToggleGameMode() {
     global GameFlag
     Winarchy(FileExist(GameFlag) ? 'game-mode off' : 'game-mode on')
+}
+
+; --- Stay awake ---------------------------------------------------------------
+AwakeFlag := StateDir "\stay-awake.flag"
+
+ToggleStayAwake() {
+    global AwakeFlag
+    if FileExist(AwakeFlag) {
+        DllCall('SetThreadExecutionState', 'UInt', 0x80000000)   ; ES_CONTINUOUS
+        FileDelete(AwakeFlag)
+        TrayTip('Stay awake: off', 'Winarchy')
+    } else {
+        ; ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED
+        DllCall('SetThreadExecutionState', 'UInt', 0x80000003)
+        FileAppend('', AwakeFlag)
+        TrayTip('Stay awake: on', 'Winarchy')
+    }
 }
 
 QuitStack() {
@@ -264,6 +282,7 @@ WinarchyMenuItems() {
         {text:'Coding agent',  hint:'SUPER+Ctrl+Shift+A', action:(*)=>Winarchy('agent launch')},
         {text:'Reload stack',  hint:'SUPER+Shift+R', action:(*)=>Winarchy('reload')},
         {text:'Game mode',     hint:(FileExist(GameFlag) ? 'ON' : 'OFF'), action:(*)=>ToggleGameMode()},
+        {text:'Stay awake',    hint:'SUPER+Ctrl+W', action:(*)=>ToggleStayAwake()},
         {text:'Doctor',                              action:(*)=>WinarchyTerminal('doctor')},
         {text:'Check updates',                       action:(*)=>WinarchyTerminal('update')},
         {text:'System',        hint:'SUPER+Esc',     sub: WinarchySysItems()},
@@ -721,6 +740,7 @@ AccentWatch() {
 #!Home::Komorebic('quick-save-resize')           ; remember the current tile sizes
 #Home::Komorebic('quick-load-resize')            ; restore them
 #+d::Komorebic('toggle-transparency')            ; dim unfocused windows
+#^w::ToggleStayAwake()                           ; keep the machine awake
 #^l::Komorebic('toggle-lock')                    ; pin the container so new windows do not displace it
 
 ; --- Focus -----------------------------------------------------------

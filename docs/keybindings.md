@@ -100,6 +100,7 @@ manual app list: Flow already indexes installed programs.
 | `SUPER+Home` | Restore the remembered tile sizes |
 | `SUPER+Shift+D` | Dim unfocused windows (toggle transparency) |
 | `SUPER+Ctrl+L` | Lock the container so new windows do not displace it |
+| `SUPER+Ctrl+W` | Keep the machine awake (toggle) |
 | `SUPER+Ctrl+1`–`9` | Send the window to workspace N without following it |
 
 ## User overrides

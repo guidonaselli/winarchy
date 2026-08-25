@@ -45,7 +45,7 @@ bars:
     widgets:
       left: ["home", "komorebi_workspaces", "komorebi_active_layout", "active_window"]
       center: ["clock"]
-      right: ["game_mode", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "brightness", "dnd", "power_plan", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
+      right: ["game_mode", "stay_awake", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "brightness", "dnd", "power_plan", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
 
 widgets:
   # Logo arriba-izquierda: abre el mismo menú principal de winarchy.ahk
@@ -78,6 +78,19 @@ widgets:
         # use_shell expande %KOMOREBI_CONFIG_HOME%.
         # Rutas sin comillas: YASB las escapa y el comando falla en silencio.
         run_cmd: 'cmd.exe /c if exist %KOMOREBI_CONFIG_HOME%\..\..\state\game-mode.flag echo GAME'
+        run_interval: 3000
+        return_format: "string"
+        use_shell: true
+
+  # Lee el flag que levanta ToggleStayAwake (AHK), que es donde vive el estado.
+  stay_awake:
+    type: "yasb.custom.CustomWidget"
+    options:
+      label: "{data}"
+      label_alt: "{data}"
+      class_name: "stay-awake-widget"
+      exec_options:
+        run_cmd: 'cmd.exe /c if exist %KOMOREBI_CONFIG_HOME%\..\..\state\stay-awake.flag echo AWAKE'
         run_interval: 3000
         return_format: "string"
         use_shell: true
