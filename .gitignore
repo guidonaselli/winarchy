@@ -2,6 +2,7 @@
 state/
 backups/
 *.log
+*.log.[0-9]
 
 # Archivos generados por el theme engine (se regeneran con `winarchy theme set`)
 config/komorebi/komorebi.json
