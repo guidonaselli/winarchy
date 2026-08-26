@@ -245,6 +245,12 @@ Describe 'Bar layout' {
         [regex]::Match($script:BarTpl, '(?m)^\s*left: \[(.+)\]\s*$').Groups[1].Value | Should -Match '"extras"'
     }
 
+    It 'hides the flag widgets instead of leaving them padding an empty label' {
+        foreach ($w in 'game-mode-widget', 'stay-awake-widget', 'winarchy-update-widget') {
+            $script:BarTpl | Should -Match "class_name: `"$w`"\r?\n\s*hide_empty: true"
+        }
+    }
+
     It 'gives every tool button a tooltip' {
         $tools = [regex]::Matches($script:BarTpl, '(?ms)^  (tool_\w+):\r?\n(.+?)(?=^  \w)')
         $tools.Count | Should -BeGreaterThan 0

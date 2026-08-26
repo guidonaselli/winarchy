@@ -82,6 +82,7 @@ widgets:
       label: "{data}"
       label_alt: "{data}"
       class_name: "game-mode-widget"
+      hide_empty: true
       exec_options:
         # cmd, NO powershell: esto corre en loop para siempre y cada powershell.exe
         # cuesta ~435 ms de arranque. `if exist` hace lo mismo por ~25 ms.
@@ -99,6 +100,7 @@ widgets:
       label: "{data}"
       label_alt: "{data}"
       class_name: "stay-awake-widget"
+      hide_empty: true
       exec_options:
         run_cmd: 'cmd.exe /c if exist %KOMOREBI_CONFIG_HOME%\..\..\state\stay-awake.flag echo AWAKE'
         run_interval: 3000
@@ -112,6 +114,7 @@ widgets:
       label: "{data}"
       label_alt: "{data}"
       class_name: "winarchy-update-widget"
+      hide_empty: true
       exec_options:
         run_cmd: 'cmd.exe /c if exist %KOMOREBI_CONFIG_HOME%\..\..\state\update-available.flag echo UPDATE'
         run_interval: 60000
