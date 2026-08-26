@@ -247,7 +247,7 @@ Describe 'Bar layout' {
 
     It 'hides the flag widgets instead of leaving them padding an empty label' {
         foreach ($w in 'game-mode-widget', 'stay-awake-widget', 'winarchy-update-widget') {
-            $script:BarTpl | Should -Match "class_name: `"$w`"\r?\n\s*hide_empty: true"
+            $script:BarTpl | Should -Match "class_name: `"$w`"\r?\n\s*exec_options:\r?\n\s*hide_empty: true"
         }
     }
 

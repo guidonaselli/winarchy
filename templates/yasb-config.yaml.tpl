@@ -82,8 +82,8 @@ widgets:
       label: "{data}"
       label_alt: "{data}"
       class_name: "game-mode-widget"
-      hide_empty: true
       exec_options:
+        hide_empty: true
         # cmd, NO powershell: esto corre en loop para siempre y cada powershell.exe
         # cuesta ~435 ms de arranque. `if exist` hace lo mismo por ~25 ms.
         # use_shell expande %KOMOREBI_CONFIG_HOME%.
@@ -100,8 +100,8 @@ widgets:
       label: "{data}"
       label_alt: "{data}"
       class_name: "stay-awake-widget"
-      hide_empty: true
       exec_options:
+        hide_empty: true
         run_cmd: 'cmd.exe /c if exist %KOMOREBI_CONFIG_HOME%\..\..\state\stay-awake.flag echo AWAKE'
         run_interval: 3000
         return_format: "string"
@@ -114,8 +114,8 @@ widgets:
       label: "{data}"
       label_alt: "{data}"
       class_name: "winarchy-update-widget"
-      hide_empty: true
       exec_options:
+        hide_empty: true
         run_cmd: 'cmd.exe /c if exist %KOMOREBI_CONFIG_HOME%\..\..\state\update-available.flag echo UPDATE'
         run_interval: 60000
         return_format: "string"
@@ -400,14 +400,12 @@ widgets:
         on_middle: "do_nothing"
         on_right: "toggle_label"
 
-  # Brillo del monitor enfocado. En externos va por DDC/CI; hide_unsupported
-  # esconde el widget donde no hay control de brillo.
+  # Brillo del monitor enfocado. En externos va por DDC/CI.
   brightness:
     type: "yasb.brightness.BrightnessWidget"
     options:
       label: "<span>{icon}</span>"
       label_alt: "<span>{icon}</span> {percent}%"
-      hide_unsupported: true
       scroll_step: 5
       callbacks:
         on_left: "toggle_brightness_menu"
