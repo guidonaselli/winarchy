@@ -122,6 +122,10 @@
     color: {{ui.media}};
 }
 
+.media-widget .label {
+    font-size: 14px;
+}
+
 .notification-widget .label,
 .notification-widget .icon {
     color: {{colors.color8}};
