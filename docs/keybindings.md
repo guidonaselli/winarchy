@@ -112,6 +112,10 @@ control panels — `W` is `N` here because `SUPER+Ctrl+W` is stay awake.
 | `SUPER+Ctrl+Space` | Next background of the active theme (`winarchy background next`) |
 | `SUPER+Ctrl+Shift+A` | Launch the preferred coding agent (`winarchy agent launch`) |
 | `SUPER+Shift+Return` | Promote the focused window to the largest tile |
+| `SUPER+Ctrl+Return` | Focus the window at the top of the tree |
+| `SUPER+Shift+H` / `SUPER+Shift+J` | Mirror the layout left/right or up/down |
+| `SUPER+Shift+Z` | Stop tiling this workspace |
+| `SUPER+Shift+Tab` | Send the window to the previous workspace |
 | `SUPER+Shift+L` | Cycle to the next layout (BSP, columns, rows, grid, scrolling, …) |
 | `SUPER+Tab` | Back to the workspace you came from |
 | `SUPER+Alt+Home` | Remember the current tile sizes |
