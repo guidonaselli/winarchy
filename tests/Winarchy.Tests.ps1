@@ -268,6 +268,13 @@ Describe 'Shell prompt' {
     }
 }
 
+Describe 'CI workflow' {
+    It 'uses the supported Node 24 checkout action' {
+        $workflow = Get-Content (Join-Path $script:Root '.github\workflows\ci.yml') -Raw
+        $workflow | Should -Match '(?m)^\s*- uses: actions/checkout@v7\s*$'
+    }
+}
+
 Describe 'CLI errors' {
     It 'reports a bad argument without a PowerShell stack trace' {
         $shim = Join-Path $script:Root 'bin\winarchy.ps1'
