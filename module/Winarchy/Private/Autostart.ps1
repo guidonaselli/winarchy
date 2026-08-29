@@ -42,11 +42,17 @@ function Get-WinarchyAutostartComponents {
     # YASB arranca con delay para que komorebi alcance a bindear su named pipe primero;
     # de lo contrario el widget de workspaces queda en blanco hasta que reconecta. El
     # delay es cosmético (YASB reconecta solo), solo achica la ventana de blank.
-    $yasb = (Get-Command yasbc -ErrorAction SilentlyContinue).Source
-    if ($yasb) {
+    $yasbc = (Get-Command yasbc -ErrorAction SilentlyContinue).Source
+    if ($yasbc) {
+        $ps = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $yasbHome = (Join-Path $root 'config\yasb').Replace("'", "''")
+        $yasbExe = $yasbc.Replace("'", "''")
+        $inner = "`$env:YASB_CONFIG_HOME = '$yasbHome'; & '$yasbExe' start"
         $items.Add([pscustomobject]@{
             Key = 'yasb'; TaskName = 'yasb'; LnkName = 'Winarchy YASB.lnk'
-            Exe = $yasb; Arguments = 'start'; Delay = 'PT5S'
+            Exe = $ps
+            Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"$inner`""
+            Delay = 'PT5S'
         })
     }
 

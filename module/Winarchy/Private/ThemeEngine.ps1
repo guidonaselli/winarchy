@@ -659,6 +659,9 @@ function Invoke-WinarchyReload {
     <# Recarga komorebi, YASB, AHK y Flow para reflejar configs nuevas.
        -Light: solo komorebi y YASB (sync de accent: no matar AHK/Flow por un color). #>
     param([switch]$Light)
+    $root = Get-WinarchyRoot
+    $env:KOMOREBI_CONFIG_HOME = Join-Path $root 'config\komorebi'
+    $env:YASB_CONFIG_HOME = Join-Path $root 'config\yasb'
     if (Test-WinarchyProcess 'komorebi') { komorebic reload-configuration 2>$null | Out-Null }
     else { Start-WinarchyKomorebi }
     # YASB: reinicio limpio (kill + start) en vez de `yasbc reload`. El hot-reload de

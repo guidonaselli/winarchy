@@ -261,6 +261,13 @@ Describe 'Bar layout' {
     }
 }
 
+Describe 'Shell prompt' {
+    It 'keeps a 100 ms Starship scan budget in the managed template' {
+        $template = Get-Content (Join-Path $script:Root 'templates\starship.toml.tpl') -Raw
+        $template | Should -Match '(?m)^scan_timeout = 100\s*$'
+    }
+}
+
 Describe 'CLI errors' {
     It 'reports a bad argument without a PowerShell stack trace' {
         $shim = Join-Path $script:Root 'bin\winarchy.ps1'
@@ -1194,6 +1201,13 @@ Describe 'Module manifest' {
         $manifest.ExportedFunctions.Keys | Should -Contain 'Invoke-Winarchy'
     }
 
+    It 'exports helpers used by installer entry points' {
+        $manifest = Test-ModuleManifest (Join-Path $script:Root 'module\Winarchy\Winarchy.psd1')
+        foreach ($name in 'Install-WinarchySkill', 'Uninstall-WinarchySkill') {
+            $manifest.ExportedFunctions.Keys | Should -Contain $name
+        }
+    }
+
     It 'has a ModuleVersion matching the release tag format' {
         $manifest = Test-ModuleManifest (Join-Path $script:Root 'module\Winarchy\Winarchy.psd1')
         $manifest.Version.ToString() | Should -Match '^\d+\.\d+\.\d+$'
@@ -1478,6 +1492,91 @@ Describe 'Autostart' {
             foreach ($c in $components) {
                 { [xml](New-WinarchyTaskXml -Component $c -User 'DOMAIN\user') } | Should -Not -Throw
             }
+        }
+    }
+
+    It 'derives the komorebi config path inside its launcher' {
+        $launcher = Get-Content (Join-Path $script:Root 'scripts\Start-Komorebi.ps1') -Raw
+        $launcher | Should -Match ([regex]::Escape("`$env:KOMOREBI_CONFIG_HOME = Join-Path `$root 'config\komorebi'"))
+    }
+
+    It 'bootstraps the managed YASB path even when the repo path contains spaces' {
+        InModuleScope Winarchy {
+            $root = 'C:\Repo With Space\Winarchy'
+            $yasbc = 'C:\Program Files\YASB\yasbc.exe'
+            Mock Get-WinarchyRoot { $root }
+            Mock Get-WinarchyKomorebiExe { $null }
+            Mock Get-Command { [pscustomobject]@{ Source = $null } }
+            Mock Get-Command { [pscustomobject]@{ Source = $yasbc } } -ParameterFilter { $Name -eq 'yasbc' }
+
+            $yasb = Get-WinarchyAutostartComponents | Where-Object Key -eq 'yasb'
+            $yasb.Exe | Should -BeLike '*\WindowsPowerShell\v1.0\powershell.exe'
+            $yasb.Arguments | Should -Match ([regex]::Escape("`$env:YASB_CONFIG_HOME = 'C:\Repo With Space\Winarchy\config\yasb'"))
+            $yasb.Arguments | Should -Match ([regex]::Escape("& 'C:\Program Files\YASB\yasbc.exe' start"))
+            ([xml](New-WinarchyTaskXml -Component $yasb -User 'DOMAIN\user')).Task.Actions.Exec.Arguments |
+                Should -Match 'YASB_CONFIG_HOME'
+        }
+    }
+}
+
+Describe 'Runtime configuration environment' {
+    It 'repairs missing and stale config paths before starting YASB' {
+        InModuleScope Winarchy -Parameters @{ Root = $script:Root } {
+            param($Root)
+            $oldKomorebi = $env:KOMOREBI_CONFIG_HOME
+            $oldYasb = $env:YASB_CONFIG_HOME
+            try {
+                Mock Get-WinarchyRoot { $Root }
+                Mock Test-WinarchyProcess { $false }
+                Mock Start-WinarchyKomorebi {}
+                Mock Get-Command { [pscustomobject]@{ Source = 'C:\Program Files\YASB\yasbc.exe' } } -ParameterFilter { $Name -eq 'yasbc' }
+                Mock Start-Process {}
+
+                foreach ($initial in @($null, 'C:\stale')) {
+                    $env:KOMOREBI_CONFIG_HOME = $initial
+                    $env:YASB_CONFIG_HOME = $initial
+                    Invoke-WinarchyReload -Light
+                    $env:KOMOREBI_CONFIG_HOME | Should -Be (Join-Path $Root 'config\komorebi')
+                    $env:YASB_CONFIG_HOME | Should -Be (Join-Path $Root 'config\yasb')
+                }
+                Should -Invoke Start-Process -Times 2 -ParameterFilter { $FilePath -eq 'yasbc' }
+            }
+            finally {
+                $env:KOMOREBI_CONFIG_HOME = $oldKomorebi
+                $env:YASB_CONFIG_HOME = $oldYasb
+            }
+        }
+    }
+}
+
+Describe 'Config environment diagnostics' {
+    It 'reports only the current process as stale when user registration is correct' {
+        InModuleScope Winarchy {
+            $root = 'C:\Repo With Space\Winarchy'
+            $expectedKomorebi = Join-Path $root 'config\komorebi'
+            $expectedYasb = Join-Path $root 'config\yasb'
+            $checks = @(Get-WinarchyConfigEnvironmentChecks -Root $root `
+                -ProcessKomorebi '' -ProcessYasb 'C:\stale' `
+                -UserKomorebi $expectedKomorebi -UserYasb $expectedYasb)
+
+            ($checks | Where-Object Name -eq 'config env vars in current process').Ok | Should -BeFalse
+            ($checks | Where-Object Name -eq 'config env vars in current process').Fix | Should -Match 'reopen'
+            ($checks | Where-Object Name -eq 'config env vars registered for user').Ok | Should -BeTrue
+        }
+    }
+
+    It 'reports user registration drift with the installer remediation' {
+        InModuleScope Winarchy {
+            $root = 'C:\Repo With Space\Winarchy'
+            $expectedKomorebi = Join-Path $root 'config\komorebi'
+            $expectedYasb = Join-Path $root 'config\yasb'
+            $checks = @(Get-WinarchyConfigEnvironmentChecks -Root $root `
+                -ProcessKomorebi $expectedKomorebi -ProcessYasb $expectedYasb `
+                -UserKomorebi 'C:\old\komorebi' -UserYasb 'C:\old\yasb')
+
+            ($checks | Where-Object Name -eq 'config env vars in current process').Ok | Should -BeTrue
+            ($checks | Where-Object Name -eq 'config env vars registered for user').Ok | Should -BeFalse
+            ($checks | Where-Object Name -eq 'config env vars registered for user').Fix | Should -Match 'install\.ps1'
         }
     }
 }

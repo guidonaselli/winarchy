@@ -14,9 +14,10 @@
 #   3. Reintenta con presupuesto de tiempo (~5 min) y re-espera el foreground en cada
 #      vuelta, en vez de rendirse a los pocos segundos.
 #
-# Hereda KOMOREBI_CONFIG_HOME del entorno (User var que registra install.ps1).
 # No-op si komorebi ya está corriendo.
 
+$root = Split-Path $PSScriptRoot -Parent
+$env:KOMOREBI_CONFIG_HOME = Join-Path $root 'config\komorebi'
 $exe    = Join-Path $env:ProgramFiles 'komorebi\bin\komorebi.exe'
 $logDir = Join-Path $env:LOCALAPPDATA 'komorebi'
 $log    = Join-Path $logDir 'komorebi-winarchy.log'
@@ -76,7 +77,7 @@ foreach ($stale in @('komorebi.sock', 'komorebi.hwnd.json')) {
 # El estado de game-mode es por sesión: las session-float-rules murieron con komorebi.
 # Si el flag sobrevive al reboot, AHK arranca creyéndose en juego y deja el AccentWatch
 # inerte para siempre, sin señal visible.
-$stateDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'state'
+$stateDir = Join-Path $root 'state'
 foreach ($stale in @('game-mode.flag', 'game-mode-floated')) {
     $f = Join-Path $stateDir $stale
     if (Test-Path $f) {

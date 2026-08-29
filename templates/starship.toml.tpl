@@ -3,6 +3,7 @@
 # STARSHIP_CONFIG propio exportado ahí, que pisa este).
 
 add_newline = true
+scan_timeout = 100
 
 [character]
 success_symbol = "[❯](bold {{colors.accent_ui}})"

@@ -1,5 +1,31 @@
 # Doctor.ps1 — `winarchy doctor`: diagnóstico verde/rojo del stack con remediación
 
+function Get-WinarchyConfigEnvironmentChecks {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [AllowNull()][AllowEmptyString()][string]$ProcessKomorebi = $env:KOMOREBI_CONFIG_HOME,
+        [AllowNull()][AllowEmptyString()][string]$ProcessYasb = $env:YASB_CONFIG_HOME,
+        [AllowNull()][AllowEmptyString()][string]$UserKomorebi = [Environment]::GetEnvironmentVariable('KOMOREBI_CONFIG_HOME', 'User'),
+        [AllowNull()][AllowEmptyString()][string]$UserYasb = [Environment]::GetEnvironmentVariable('YASB_CONFIG_HOME', 'User')
+    )
+    $expectedKomorebi = Join-Path $Root 'config\komorebi'
+    $expectedYasb = Join-Path $Root 'config\yasb'
+    @(
+        [pscustomobject]@{
+            Name = 'config env vars in current process'
+            Ok = $ProcessKomorebi -eq $expectedKomorebi -and $ProcessYasb -eq $expectedYasb
+            Detail = "KOMOREBI_CONFIG_HOME=$ProcessKomorebi; YASB_CONFIG_HOME=$ProcessYasb"
+            Fix = 'reopen the terminal or run winarchy reload'
+        },
+        [pscustomobject]@{
+            Name = 'config env vars registered for user'
+            Ok = $UserKomorebi -eq $expectedKomorebi -and $UserYasb -eq $expectedYasb
+            Detail = "KOMOREBI_CONFIG_HOME=$UserKomorebi; YASB_CONFIG_HOME=$UserYasb"
+            Fix = '.\install.ps1  (registers them for future processes)'
+        }
+    )
+}
+
 function Invoke-WinarchyDoctor {
     $root = Get-WinarchyRoot
     $checks = [System.Collections.Generic.List[object]]::new()
@@ -123,11 +149,9 @@ function Invoke-WinarchyDoctor {
         'fix the theme.toml listed above'
 
     # --- Enlaces / env vars ----------------------------------------------------
-    $envOk = ($env:KOMOREBI_CONFIG_HOME -eq (Join-Path $root 'config\komorebi')) -and
-             ($env:YASB_CONFIG_HOME -eq (Join-Path $root 'config\yasb'))
-    Add-Check 'config env vars pointing at the repo' $envOk `
-        "KOMOREBI_CONFIG_HOME=$env:KOMOREBI_CONFIG_HOME; YASB_CONFIG_HOME=$env:YASB_CONFIG_HOME" `
-        '.\install.ps1  (re-registers them; reopen the terminal)'
+    foreach ($configCheck in Get-WinarchyConfigEnvironmentChecks -Root $root) {
+        Add-Check $configCheck.Name $configCheck.Ok $configCheck.Detail $configCheck.Fix
+    }
 
     # --- Versiones vs lockfile ---------------------------------------------------
     $lock = Import-WinarchyToml -Path (Join-Path $root 'versions.lock.toml')
