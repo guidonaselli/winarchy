@@ -53,6 +53,23 @@ function Test-WinarchyWindowsAppeared {
     $false
 }
 
+function Get-WinarchyChangedWorkspaceKeys {
+    <# Claves "monitor,workspace" cuyo conjunto de ventanas cambió entre dos firmas. #>
+    param($Previous, [Parameter(Mandatory)]$Current)
+    $keys = [System.Collections.Generic.HashSet[string]]::new()
+    if (-not $Previous) {
+        foreach ($key in $Current.Keys) { $null = $keys.Add($key) }
+        return , $keys
+    }
+    foreach ($key in $Current.Keys) {
+        if (-not $Previous.ContainsKey($key) -or $Previous[$key] -ne $Current[$key]) { $null = $keys.Add($key) }
+    }
+    foreach ($key in $Previous.Keys) {
+        if (-not $Current.ContainsKey($key)) { $null = $keys.Add($key) }
+    }
+    , $keys
+}
+
 function Get-WinarchySlotMoves {
     <#
       Movimientos pendientes para que cada app con slot declarado quede en su posición.
@@ -62,8 +79,15 @@ function Get-WinarchySlotMoves {
       después como una serie de `cycle-move`, que va swapeando con el vecino: burbujear un
       elemento hasta su destino equivale a sacarlo y reinsertarlo ahí, así que la simulación
       y la ejecución coinciden.
+
+      `Workspaces` (opcional) acota el cálculo a las claves "monitor,workspace" indicadas; sin
+      filtro se procesan todas.
     #>
-    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Pref)
+    param(
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Pref,
+        $Workspaces = $null
+    )
     $withSlot = @($Pref | Where-Object { $null -ne $_.Slot })
     if ($withSlot.Count -eq 0) { return @() }
     $map = Get-WinarchyMonitorIndexMap -State $State
@@ -75,6 +99,7 @@ function Get-WinarchySlotMoves {
         $workspaceIndex = -1
         foreach ($workspace in $monitor.workspaces.elements) {
             $workspaceIndex++
+            if ($Workspaces -and -not $Workspaces.Contains("$monitorIndex,$workspaceIndex")) { continue }
             $exes = [System.Collections.Generic.List[string]]::new()
             foreach ($exe in (Get-WinarchyWorkspaceExes -Workspace $workspace)) { $exes.Add($exe) }
             if ($exes.Count -lt 2) { continue }
@@ -231,8 +256,9 @@ function Get-WinarchySlotRestore {
 
 function Invoke-WinarchySlotReconcile {
     <# Lleva cada app con slot declarado a su posición. No-op si ya cumplen.
-       Devuelve la cantidad de eventos de movimiento que emitió. #>
-    param([switch]$Quiet, $State)
+       Devuelve la cantidad de eventos de movimiento que emitió.
+       `Workspaces` (opcional): ver `Get-WinarchySlotMoves`. #>
+    param([switch]$Quiet, $State, $Workspaces = $null)
     $prefs = @(Import-WinarchyWindowPrefs)
     if (@($prefs | Where-Object { $null -ne $_.Slot }).Count -eq 0) {
         if (-not $Quiet) { Write-WinarchyInfo 'No saved slots; nothing to order.' }
@@ -243,7 +269,7 @@ function Invoke-WinarchySlotReconcile {
         return
     }
     $state = if ($State) { $State } else { Get-WinarchyKomorebiState }
-    $moves = @(Get-WinarchySlotMoves -State $state -Pref $prefs)
+    $moves = @(Get-WinarchySlotMoves -State $state -Pref $prefs -Workspaces $Workspaces)
     if ($moves.Count -eq 0) {
         if (-not $Quiet) { Write-WinarchyOk 'Every window is already in its slot.' }
         return

@@ -128,7 +128,8 @@ while ($true) {
                 }
 
                 if ($appeared -or $selfMoves -gt 0) {
-                    $emitted = [int](Invoke-WinarchySlotReconcile -Quiet -State $state)
+                    $changed = if ($appeared) { Get-WinarchyChangedWorkspaceKeys -Previous $signature -Current $current } else { $null }
+                    $emitted = [int](Invoke-WinarchySlotReconcile -Quiet -State $state -Workspaces $changed)
                     $selfMoves = $emitted
                     if (-not $emitted -or ((Get-Date) - $lastReconcile).TotalSeconds -gt 10) { $burst = 0 }
                     $lastReconcile = Get-Date

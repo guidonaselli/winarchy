@@ -1003,6 +1003,25 @@ Describe 'Game registration round-trip' {
             (Get-FileHash $toml -Algorithm SHA256).Hash | Should -Be $before
         }
     }
+
+    It 'reapplies rules when the game is already registered' {
+        InModuleScope Winarchy {
+            $toml = Join-Path $TestDrive 'games.toml'
+            Set-Content -Path $toml -Value "[[games]]`r`nexe = `"Existing.exe`"`r`n" -Encoding UTF8 -NoNewline
+            $before = (Get-FileHash $toml -Algorithm SHA256).Hash
+
+            $marker = Join-Path $TestDrive 'rules-updated'
+            Mock Get-WinarchyRoot { Split-Path $toml -Parent }
+            Mock Update-WinarchyKomorebiRules { Set-Content -Path $marker -Value 'updated' }
+            Mock Update-WinarchyQuickAccentExclusion { }
+            Mock Test-WinarchyProcess { $false }
+
+            Add-WinarchyGame -Exe 'Existing.exe' | Out-Null
+
+            Test-Path $marker | Should -BeTrue
+            (Get-FileHash $toml -Algorithm SHA256).Hash | Should -Be $before
+        }
+    }
 }
 
 Describe 'Shipped themes' {
@@ -1269,6 +1288,40 @@ Describe 'Window slots' {
             $moves[0].From    | Should -Be 1
             $moves[0].To      | Should -Be 0
             $moves[0].Monitor | Should -Be 1
+        }
+    }
+
+    It 'skips workspaces outside the requested filter, even if out of slot' {
+        InModuleScope Winarchy -Parameters @{ State = $script:Swapped; Monitor = $script:Monitor2 } {
+            param($State, $Monitor)
+            $prefs = @([pscustomobject]@{ Exe = 'Discord.exe'; Monitor = $Monitor; Workspace = 0; WorkspaceName = 'A'; Slot = 0; Pin = $false })
+            $none = [System.Collections.Generic.HashSet[string]]::new()
+            @(Get-WinarchySlotMoves -State $State -Pref $prefs -Workspaces $none).Count | Should -Be 0
+
+            $withIt = [System.Collections.Generic.HashSet[string]]::new()
+            $null = $withIt.Add('1,0')
+            @(Get-WinarchySlotMoves -State $State -Pref $prefs -Workspaces $withIt).Count | Should -Be 1
+        }
+    }
+
+    It 'flags every key as changed on the first read, with nothing to compare against' {
+        InModuleScope Winarchy -Parameters @{ State = $script:State } {
+            param($State)
+            $current = Get-WinarchyWorkspaceSignature -State $State
+            $changed = Get-WinarchyChangedWorkspaceKeys -Previous $null -Current $current
+            $changed.Count | Should -Be $current.Keys.Count
+        }
+    }
+
+    It 'flags only the workspace whose window set actually changed' {
+        InModuleScope Winarchy -Parameters @{ State = $script:State } {
+            param($State)
+            $before = Get-WinarchyWorkspaceSignature -State $State
+            $after = Get-WinarchyWorkspaceSignature -State $State
+            $after['1,0'] = 'Discord.exe'
+            $changed = Get-WinarchyChangedWorkspaceKeys -Previous $before -Current $after
+            $changed.Count | Should -Be 1
+            $changed.Contains('1,0') | Should -BeTrue
         }
     }
 

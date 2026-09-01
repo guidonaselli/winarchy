@@ -170,16 +170,20 @@ function Add-WinarchyGame {
     if ($Exe -notlike '*.exe') { $Exe = "$Exe.exe" }
     $gamesToml = Join-Path (Get-WinarchyRoot) 'games.toml'
     $existing = @(Get-WinarchyGames)
-    if ($existing -contains $Exe) {
-        Write-WinarchyInfo "'$Exe' was already in games.toml."
-        Update-WinarchyQuickAccentExclusion -Exe $Exe
+    $alreadyRegistered = $existing -contains $Exe
+    if (-not $alreadyRegistered) {
+        Add-Content -Path $gamesToml -Value @('', '[[games]]', "exe = `"$Exe`"") -Encoding UTF8
+    }
+    Update-WinarchyKomorebiRules
+    if (Test-WinarchyProcess 'komorebi') {
+        komorebic ignore-rule exe $Exe 2>$null | Out-Null
+        komorebic retile 2>$null | Out-Null
+    }
+    Update-WinarchyQuickAccentExclusion -Exe $Exe
+    if ($alreadyRegistered) {
+        Write-WinarchyInfo "'$Exe' was already in games.toml; exclusions reapplied."
         return
     }
-    Add-Content -Path $gamesToml -Value @('', '[[games]]', "exe = `"$Exe`"") -Encoding UTF8
-    Update-WinarchyKomorebiRules
-    # reload-configuration no des-maneja instancias ya corriendo; la regla runtime sí
-    if (Test-WinarchyProcess 'komorebi') { komorebic ignore-rule exe $Exe 2>$null | Out-Null }
-    Update-WinarchyQuickAccentExclusion -Exe $Exe
     Write-WinarchyOk "'$Exe' added: excluded from tiling, hotkeys suspended while in the foreground."
 }
 
