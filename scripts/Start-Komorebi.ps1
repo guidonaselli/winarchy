@@ -136,6 +136,18 @@ while ((Get-Date) -lt $overallDeadline) {
                 Write-Log 'monitor principal reenfocado a workspace 0.'
             }
             catch { Write-Log "no pude reenfocar workspace 0: $($_.Exception.Message)" }
+
+            # Apps con ignore_rules (juegos, overlays) que ya arrancaron con Windows antes
+            # de que komorebi terminara de levantar (los ~8s+ de espera de arriba) quedan
+            # tileadas: komorebi las gestionó en su escaneo inicial y las ignore_rules por
+            # exe no se reevalúan solas sobre ventanas preexistentes. Un retile fuerza esa
+            # reevaluación para que las reglas del komorebi.json ya generado se apliquen
+            # también a lo que abrió antes de tiempo, no solo a lo que abra después.
+            try {
+                & $komorebic retile *> $null
+                Write-Log 'retile forzado post-arranque (aplica ignore_rules a ventanas preexistentes).'
+            }
+            catch { Write-Log "no pude forzar retile post-arranque: $($_.Exception.Message)" }
         }
         exit 0
     }
