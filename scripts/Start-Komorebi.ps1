@@ -137,17 +137,32 @@ while ((Get-Date) -lt $overallDeadline) {
             }
             catch { Write-Log "no pude reenfocar workspace 0: $($_.Exception.Message)" }
 
-            # Apps con ignore_rules (juegos, overlays) que ya arrancaron con Windows antes
-            # de que komorebi terminara de levantar (los ~8s+ de espera de arriba) quedan
-            # tileadas: komorebi las gestionó en su escaneo inicial y las ignore_rules por
-            # exe no se reevalúan solas sobre ventanas preexistentes. Un retile fuerza esa
-            # reevaluación para que las reglas del komorebi.json ya generado se apliquen
-            # también a lo que abrió antes de tiempo, no solo a lo que abra después.
+            # Desmanagea ventanas de games.toml que komorebi ya tileó en su escaneo
+            # inicial (retile/ignore-rule no las desmanagean retroactivamente).
             try {
-                & $komorebic retile *> $null
-                Write-Log 'retile forzado post-arranque (aplica ignore_rules a ventanas preexistentes).'
+                Import-Module (Join-Path $root 'module\Winarchy\Winarchy.psm1') -Force
+                $games = @(Get-WinarchyGames)
+                $stateJson = & $komorebic state 2>$null | ConvertFrom-Json
+                $tiledExes = @(
+                    foreach ($m in $stateJson.monitors.elements) {
+                        foreach ($ws in $m.workspaces.elements) {
+                            foreach ($c in $ws.containers.elements) {
+                                foreach ($w in $c.windows.elements) { $w.exe }
+                            }
+                        }
+                    }
+                ) | Sort-Object -Unique
+                $toFree = @($tiledExes | Where-Object { $games -contains $_ })
+                foreach ($gameExe in $toFree) {
+                    & $komorebic eager-focus $gameExe *> $null
+                    & $komorebic unmanage *> $null
+                }
+                if ($toFree.Count -gt 0) {
+                    & $komorebic retile *> $null
+                    Write-Log "desmanageadas $($toFree.Count) ventana(s) de games.toml que ya estaban tileadas ($($toFree -join ', ')) + retile."
+                }
             }
-            catch { Write-Log "no pude forzar retile post-arranque: $($_.Exception.Message)" }
+            catch { Write-Log "no pude desmanagear ventanas de games.toml post-arranque: $($_.Exception.Message)" }
         }
         exit 0
     }
