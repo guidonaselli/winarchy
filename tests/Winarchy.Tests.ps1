@@ -1225,6 +1225,22 @@ Describe 'App rules (community ASC + user layer)' {
         }
     }
 
+    It 'applies the rule immediately instead of requiring a theme set' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            $dir = Join-Path $TestDrive 'config\komorebi'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            Mock Update-WinarchyKomorebiRules { }
+            Mock Test-WinarchyProcess { $true }
+            Mock komorebic { }
+
+            Add-WinarchyUserRule -Category 'floating' -Field 'exe' -Value 'PicView.exe'
+
+            Should -Invoke Update-WinarchyKomorebiRules -Times 1
+            Should -Invoke komorebic -Times 1 -ParameterFilter { $args[0] -eq 'retile' }
+        }
+    }
+
     It 'rejects an unknown category' {
         InModuleScope Winarchy {
             Mock Get-WinarchyRoot { $TestDrive }

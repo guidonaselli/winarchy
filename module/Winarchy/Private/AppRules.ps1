@@ -381,7 +381,8 @@ function Add-WinarchyUserRule {
     if ($MatchingStrategy) { $lines += "matching_strategy = `"$MatchingStrategy`"" }
     Add-Content -Path $path -Value ($lines -join "`n") -Encoding UTF8
     Write-WinarchyOk "Added [[$Category]] $Field = `"$Value`" to $path"
-    Write-WinarchyInfo 'Run `winarchy theme set <active-theme>` to recompile komorebi.json with the new rule.'
+    Update-WinarchyKomorebiRules
+    if (Test-WinarchyProcess 'komorebi') { komorebic retile 2>$null | Out-Null }
 }
 
 function Sync-WinarchyAsc {

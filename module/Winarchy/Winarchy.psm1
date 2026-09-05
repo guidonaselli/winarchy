@@ -50,7 +50,8 @@ function Show-WinarchyHelp {
     accent sync [--force]     Re-sync the dynamic theme with the Windows accent
     accent status             Show system accent vs applied accent
     rules add <cat> <field> <value> [strategy]
-                              Append a rule to rules.toml (no editor needed)
+                              Append a rule to rules.toml and apply it immediately
+                              (recompiles komorebi.json + reload, no theme set needed)
                               cat: ignore|manage|floating|layered|object_name_change|
                                    tray_and_multi_window|slow_application|
                                    transparency_ignore|disable
