@@ -342,6 +342,48 @@ function Get-WinarchyAppRuleCollisions {
     $out
 }
 
+function Add-WinarchyUserRule {
+    <# Appendea una entrada a config/komorebi/rules.toml. #>
+    param(
+        [Parameter(Mandatory)][string]$Category,
+        [Parameter(Mandatory)][ValidateSet('exe', 'class', 'title', 'asc')][string]$Field,
+        [Parameter(Mandatory)][string]$Value,
+        [string]$MatchingStrategy
+    )
+    $validCategories = @((Get-WinarchyAppRuleCategories).Keys) + 'disable'
+    if ($Category -notin $validCategories) {
+        throw "Unknown rule category '$Category'. Valid: $($validCategories -join ', ')"
+    }
+    if ($Category -eq 'disable' -and $Field -ne 'asc') {
+        throw "winarchy rules add disable needs the 'asc' field: winarchy rules add disable asc `"<App Name>`""
+    }
+    if ($Category -ne 'disable' -and $Field -eq 'asc') {
+        throw "'asc' is only valid with the 'disable' category."
+    }
+
+    $path = Get-WinarchyUserRulesPath
+    if (-not (Test-Path $path)) {
+        $example = "$path.example"
+        if (Test-Path $example) { Copy-Item $example $path } else { New-Item -ItemType File -Path $path | Out-Null }
+    }
+
+    $existing = Import-WinarchyToml -Path $path
+    if ($existing -and $existing.ContainsKey($Category)) {
+        foreach ($entry in $existing[$Category]) {
+            if ($entry.ContainsKey($Field) -and [string]$entry[$Field] -eq $Value) {
+                Write-WinarchyInfo "Already in rules.toml: [[$Category]] $Field = `"$Value`""
+                return
+            }
+        }
+    }
+
+    $lines = @('', "[[$Category]]", "$Field = `"$Value`"")
+    if ($MatchingStrategy) { $lines += "matching_strategy = `"$MatchingStrategy`"" }
+    Add-Content -Path $path -Value ($lines -join "`n") -Encoding UTF8
+    Write-WinarchyOk "Added [[$Category]] $Field = `"$Value`" to $path"
+    Write-WinarchyInfo 'Run `winarchy theme set <active-theme>` to recompile komorebi.json with the new rule.'
+}
+
 function Sync-WinarchyAsc {
     <#
       Refresca vendor/asc/applications.json desde upstream y muestra el diff por app.

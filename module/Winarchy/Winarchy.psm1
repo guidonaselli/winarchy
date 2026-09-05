@@ -49,6 +49,12 @@ function Show-WinarchyHelp {
     game-mode remove <exe>    Unregister a game
     accent sync [--force]     Re-sync the dynamic theme with the Windows accent
     accent status             Show system accent vs applied accent
+    rules add <cat> <field> <value> [strategy]
+                              Append a rule to rules.toml (no editor needed)
+                              cat: ignore|manage|floating|layered|object_name_change|
+                                   tray_and_multi_window|slow_application|
+                                   transparency_ignore|disable
+                              field: exe|class|title (asc for disable)
     rules explain <text>      Which app rule applies to a window, and which layer won
     rules collisions          ASC rules dropped because a higher layer decided otherwise
     rules sync [--apply]      Refresh the vendored community ASC (shows the diff first;
@@ -209,6 +215,11 @@ function Invoke-Winarchy {
         'rules' {
             $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'collisions' }
             switch ($sub) {
+                'add' {
+                    if ($rest.Count -lt 4) { throw 'Usage: winarchy rules add <category> <exe|class|title|asc> <value> [matching_strategy]' }
+                    Add-WinarchyUserRule -Category $rest[1].ToLower() -Field $rest[2].ToLower() -Value $rest[3] `
+                        -MatchingStrategy $(if ($rest.Count -ge 5) { $rest[4] } else { '' })
+                }
                 'explain' {
                     if ($rest.Count -lt 2) { throw 'Usage: winarchy rules explain <exe|class|title fragment>' }
                     $report = @(Get-WinarchyAppRuleReport -Match $rest[1])
@@ -221,7 +232,7 @@ function Invoke-Winarchy {
                     $coll | Format-Table App, Rule, AscSaid, Winner -AutoSize
                 }
                 'sync' { Sync-WinarchyAsc -Apply:($rest -contains '--apply' -or $rest -contains '-apply') }
-                default { throw "Unknown subcommand: rules $sub (explain|collisions|sync)" }
+                default { throw "Unknown subcommand: rules $sub (add|explain|collisions|sync)" }
             }
         }
         'reload' { Invoke-WinarchyReload; Write-WinarchyOk 'Stack reloaded.' }

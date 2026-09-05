@@ -1165,6 +1165,93 @@ Describe 'App rules (community ASC + user layer)' {
         }
     }
 
+    It 'creates rules.toml from the example and appends the new rule' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            $exampleDir = Join-Path $TestDrive 'config\komorebi'
+            New-Item -ItemType Directory -Path $exampleDir -Force | Out-Null
+            Set-Content -Path (Join-Path $exampleDir 'rules.toml.example') -Value "# example header`n" -Encoding UTF8
+
+            Add-WinarchyUserRule -Category 'floating' -Field 'exe' -Value 'PicView.exe'
+
+            $path = Join-Path $exampleDir 'rules.toml'
+            Test-Path $path | Should -BeTrue
+            $rules = Import-WinarchyToml -Path $path
+            $rules['floating'][0]['exe'] | Should -Be 'PicView.exe'
+        }
+    }
+
+    It 'does not duplicate an identical rule on a second add' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            $dir = Join-Path $TestDrive 'config\komorebi'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            Remove-Item (Join-Path $dir 'rules.toml') -Force -ErrorAction SilentlyContinue
+
+            Add-WinarchyUserRule -Category 'floating' -Field 'exe' -Value 'PicView.exe'
+            Add-WinarchyUserRule -Category 'floating' -Field 'exe' -Value 'PicView.exe'
+
+            $rules = Import-WinarchyToml -Path (Join-Path $TestDrive 'config\komorebi\rules.toml')
+            @($rules['floating']).Count | Should -Be 1
+        }
+    }
+
+    It 'keeps pre-existing hand-written entries untouched (append-only)' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            $dir = Join-Path $TestDrive 'config\komorebi'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            Set-Content -Path (Join-Path $dir 'rules.toml') -Value "[[ignore]]`nexe = `"GalaxyClient.exe`"`n" -Encoding UTF8
+
+            Add-WinarchyUserRule -Category 'floating' -Field 'exe' -Value 'PicView.exe'
+
+            $rules = Import-WinarchyToml -Path (Join-Path $dir 'rules.toml')
+            $rules['ignore'][0]['exe'] | Should -Be 'GalaxyClient.exe'
+            $rules['floating'][0]['exe'] | Should -Be 'PicView.exe'
+        }
+    }
+
+    It 'writes an optional matching_strategy' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            $dir = Join-Path $TestDrive 'config\komorebi'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            Remove-Item (Join-Path $dir 'rules.toml') -Force -ErrorAction SilentlyContinue
+
+            Add-WinarchyUserRule -Category 'ignore' -Field 'title' -Value 'Picture-in-Picture' -MatchingStrategy 'Contains'
+
+            $rules = Import-WinarchyToml -Path (Join-Path $TestDrive 'config\komorebi\rules.toml')
+            $rules['ignore'][0]['matching_strategy'] | Should -Be 'Contains'
+        }
+    }
+
+    It 'rejects an unknown category' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            { Add-WinarchyUserRule -Category 'nope' -Field 'exe' -Value 'x.exe' } | Should -Throw '*Unknown rule category*'
+        }
+    }
+
+    It 'requires the asc field for disable and rejects it elsewhere' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            { Add-WinarchyUserRule -Category 'disable' -Field 'exe' -Value 'x.exe' } | Should -Throw "*needs the 'asc' field*"
+            { Add-WinarchyUserRule -Category 'ignore' -Field 'asc' -Value 'GOG Galaxy' } | Should -Throw "*only valid with*"
+        }
+    }
+
+    It 'accepts a disable/asc entry' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            New-Item -ItemType Directory -Path (Join-Path $TestDrive 'config\komorebi') -Force | Out-Null
+
+            Add-WinarchyUserRule -Category 'disable' -Field 'asc' -Value 'GOG Galaxy'
+
+            $rules = Import-WinarchyToml -Path (Join-Path $TestDrive 'config\komorebi\rules.toml')
+            $rules['disable'][0]['asc'] | Should -Be 'GOG Galaxy'
+        }
+    }
+
     It 'vendors the ASC revision pinned in versions.lock.toml' {
         InModuleScope Winarchy {
             $lock = Import-WinarchyToml -Path (Join-Path (Get-WinarchyRoot) 'versions.lock.toml')
