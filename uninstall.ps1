@@ -3,8 +3,10 @@
   Desinstalación limpia de Winarchy: revierte autostart, PATH, env vars, pins y taskbar.
 .DESCRIPTION
   No borra el repo ni los backups. Con -RemovePackages también desinstala
-  komorebi/YASB vía winget (AHK, Flow, ShareX y Terminal se conservan: son
-  herramientas generales de la máquina).
+  komorebi/YASB vía winget (AHK, Flow, ShareX, WezTerm y Windows Terminal se
+  conservan: son herramientas generales de la máquina).
+  WEZTERM_CONFIG_FILE se revierte igual, así WezTerm vuelve a su config propia en vez
+  de apuntar a un archivo del repo que puede ya no existir.
 
   -DryRun lista todo lo que haría sin tocar nada. Existe porque este script solo se
   puede probar de verdad destruyendo el setup en uso: sin dry-run quedaba permanentemente
@@ -19,7 +21,7 @@ Import-Module (Join-Path $Root 'module\Winarchy\Winarchy.psd1') -Force
 
 # Pins que pone `winarchy update --core`: hay que sacarlos todos o el usuario queda con
 # paquetes pinneados en winget después de desinstalar Winarchy.
-$CorePinIds = @('LGUG2Z.komorebi', 'AmN.yasb', 'Flow-Launcher.Flow-Launcher', 'AutoHotkey.AutoHotkey')
+$CorePinIds = @('LGUG2Z.komorebi', 'AmN.yasb', 'Flow-Launcher.Flow-Launcher', 'AutoHotkey.AutoHotkey', 'wez.wezterm')
 
 Write-Host "`n== Winarchy uninstall ==" -ForegroundColor Cyan
 if ($DryRun) { Write-WinarchyInfo 'DRY RUN: no se modifica nada.' }
@@ -67,9 +69,10 @@ Invoke-Step 'Quitar la skill "winarchy" de los agentes de IA' { Uninstall-Winarc
 Invoke-Step 'Quitar los comandos de Winarchy del menu de inicio' { Remove-WinarchyPalette } `
     'Paleta de comandos quitada'
 
-Invoke-Step 'Revertir env vars (KOMOREBI_CONFIG_HOME, YASB_CONFIG_HOME) y sacar bin\ del PATH' {
+Invoke-Step 'Revertir env vars (KOMOREBI_CONFIG_HOME, YASB_CONFIG_HOME, WEZTERM_CONFIG_FILE) y sacar bin\ del PATH' {
     [Environment]::SetEnvironmentVariable('KOMOREBI_CONFIG_HOME', $null, 'User')
     [Environment]::SetEnvironmentVariable('YASB_CONFIG_HOME', $null, 'User')
+    [Environment]::SetEnvironmentVariable('WEZTERM_CONFIG_FILE', $null, 'User')
     $binDir = Join-Path $Root 'bin'
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     [Environment]::SetEnvironmentVariable('Path', (($userPath -split ';' | Where-Object { $_ -and $_ -ne $binDir }) -join ';'), 'User')

@@ -33,7 +33,8 @@ $snapshot = New-WinarchySnapshot -Label 'pre-install' -Path @(
     # limpio se los lleva puestos sin dejar rastro si no se respaldan acá.
     (Join-Path $Root 'config\windows.toml'),
     (Join-Path $Root 'config\ahk\user.ahk'),
-    (Join-Path $Root 'config\pwsh\user.ps1')
+    (Join-Path $Root 'config\pwsh\user.ps1'),
+    (Join-Path $Root 'config\wezterm\user.lua')
 )
 Write-WinarchyOk "Snapshot previo: $snapshot"
 
@@ -50,33 +51,55 @@ try {
 catch { Write-WinarchyWarn "No pude exportar tareas previas al snapshot: $($_.Exception.Message)" }
 
 # --- 1. Paquetes (winget, versiones core fijadas) -------------------------------
-if (-not $SkipPackages) {
-    $lock = Import-WinarchyToml -Path (Join-Path $Root 'versions.lock.toml')
-    $coreVersions = @{ 'LGUG2Z.komorebi' = $lock['core']['komorebi']; 'AmN.yasb' = $lock['core']['yasb'] }
-    foreach ($id in $lock['winget'].Keys) {
-        if (-not $lock['winget'][$id]) { continue }
-        $installed = winget list --id $id 2>$null | Out-String
-        if ($installed -match [regex]::Escape($id)) {
-            Write-WinarchyOk "$id ya instalado"
-        }
-        else {
-            Write-WinarchyInfo "Instalando $id ..."
-            $args = @('install', '--id', $id, '--silent', '--accept-package-agreements', '--accept-source-agreements')
-            if ($coreVersions.ContainsKey($id)) { $args += @('--version', $coreVersions[$id]) }
-            winget @args
-        }
-        if ($coreVersions.ContainsKey($id)) {
-            winget pin add --id $id 2>$null | Out-Null   # update general nunca toca el core
-        }
+$lock = Import-WinarchyToml -Path (Join-Path $Root 'versions.lock.toml')
+$coreVersions = @{
+    'LGUG2Z.komorebi' = $lock['core']['komorebi']
+    'AmN.yasb'        = $lock['core']['yasb']
+    'wez.wezterm'     = $lock['core']['wezterm']
+}
+# -SkipPackages (la migración de `winarchy update --self`) igual tiene que traer los
+# componentes core que falten: si no, un core nuevo nunca llega a quien ya tenía Winarchy
+# y el stack queda apuntando a un exe inexistente.
+$packageIds = if ($SkipPackages) { @($coreVersions.Keys) } else { @($lock['winget'].Keys) }
+if ($SkipPackages) { Write-WinarchyInfo 'Verificando que los componentes core estén presentes...' }
+foreach ($id in $packageIds) {
+    if (-not $lock['winget'][$id]) { continue }
+    $installed = winget list --id $id 2>$null | Out-String
+    if ($installed -match [regex]::Escape($id)) {
+        if (-not $SkipPackages) { Write-WinarchyOk "$id ya instalado" }
+    }
+    else {
+        Write-WinarchyInfo "Instalando $id ..."
+        $args = @('install', '--id', $id, '--silent', '--accept-package-agreements', '--accept-source-agreements')
+        if ($coreVersions.ContainsKey($id)) { $args += @('--version', $coreVersions[$id]) }
+        winget @args
+    }
+    if ($coreVersions.ContainsKey($id)) {
+        winget pin add --id $id 2>$null | Out-Null   # update general nunca toca el core
     }
 }
 
 # --- 2. Env vars de config → repo (fuente de verdad, estilo Omarchy) -------------
+@('KOMOREBI_CONFIG_HOME', 'YASB_CONFIG_HOME', 'WEZTERM_CONFIG_FILE') |
+    ForEach-Object { "$_=$([Environment]::GetEnvironmentVariable($_, 'User'))" } |
+    Set-Content -Path (Join-Path $snapshot 'env-user.txt') -Encoding UTF8
+
+$weztermConfig = Join-Path $Root 'config\wezterm\wezterm.lua'
 [Environment]::SetEnvironmentVariable('KOMOREBI_CONFIG_HOME', (Join-Path $Root 'config\komorebi'), 'User')
 [Environment]::SetEnvironmentVariable('YASB_CONFIG_HOME', (Join-Path $Root 'config\yasb'), 'User')
+[Environment]::SetEnvironmentVariable('WEZTERM_CONFIG_FILE', $weztermConfig, 'User')
 $env:KOMOREBI_CONFIG_HOME = Join-Path $Root 'config\komorebi'
 $env:YASB_CONFIG_HOME = Join-Path $Root 'config\yasb'
-Write-WinarchyOk 'KOMOREBI_CONFIG_HOME / YASB_CONFIG_HOME registradas (User)'
+$env:WEZTERM_CONFIG_FILE = $weztermConfig
+Write-WinarchyOk 'KOMOREBI_CONFIG_HOME / YASB_CONFIG_HOME / WEZTERM_CONFIG_FILE registradas (User)'
+
+# WEZTERM_CONFIG_FILE gana sobre el descubrimiento por home: si el usuario ya tenía su
+# propio wezterm.lua, queda huérfano en silencio. Avisar dónde está y dónde va ahora.
+foreach ($orphan in @("$env:USERPROFILE\.wezterm.lua", "$env:USERPROFILE\.config\wezterm\wezterm.lua")) {
+    if (Test-Path $orphan) {
+        Write-WinarchyWarn "Tu config previa de WezTerm ($orphan) ya no se carga: ahora manda $weztermConfig. Portá lo tuyo a config\wezterm\user.lua."
+    }
+}
 
 # --- 3. PATH: comando winarchy ----------------------------------------------------
 $binDir = Join-Path $Root 'bin'

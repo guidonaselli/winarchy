@@ -6,21 +6,24 @@ function Get-WinarchyConfigEnvironmentChecks {
         [AllowNull()][AllowEmptyString()][string]$ProcessKomorebi = $env:KOMOREBI_CONFIG_HOME,
         [AllowNull()][AllowEmptyString()][string]$ProcessYasb = $env:YASB_CONFIG_HOME,
         [AllowNull()][AllowEmptyString()][string]$UserKomorebi = [Environment]::GetEnvironmentVariable('KOMOREBI_CONFIG_HOME', 'User'),
-        [AllowNull()][AllowEmptyString()][string]$UserYasb = [Environment]::GetEnvironmentVariable('YASB_CONFIG_HOME', 'User')
+        [AllowNull()][AllowEmptyString()][string]$UserYasb = [Environment]::GetEnvironmentVariable('YASB_CONFIG_HOME', 'User'),
+        [AllowNull()][AllowEmptyString()][string]$ProcessWezterm = $env:WEZTERM_CONFIG_FILE,
+        [AllowNull()][AllowEmptyString()][string]$UserWezterm = [Environment]::GetEnvironmentVariable('WEZTERM_CONFIG_FILE', 'User')
     )
     $expectedKomorebi = Join-Path $Root 'config\komorebi'
     $expectedYasb = Join-Path $Root 'config\yasb'
+    $expectedWezterm = Join-Path $Root 'config\wezterm\wezterm.lua'
     @(
         [pscustomobject]@{
             Name = 'config env vars in current process'
-            Ok = $ProcessKomorebi -eq $expectedKomorebi -and $ProcessYasb -eq $expectedYasb
-            Detail = "KOMOREBI_CONFIG_HOME=$ProcessKomorebi; YASB_CONFIG_HOME=$ProcessYasb"
+            Ok = $ProcessKomorebi -eq $expectedKomorebi -and $ProcessYasb -eq $expectedYasb -and $ProcessWezterm -eq $expectedWezterm
+            Detail = "KOMOREBI_CONFIG_HOME=$ProcessKomorebi; YASB_CONFIG_HOME=$ProcessYasb; WEZTERM_CONFIG_FILE=$ProcessWezterm"
             Fix = 'reopen the terminal or run winarchy reload'
         },
         [pscustomobject]@{
             Name = 'config env vars registered for user'
-            Ok = $UserKomorebi -eq $expectedKomorebi -and $UserYasb -eq $expectedYasb
-            Detail = "KOMOREBI_CONFIG_HOME=$UserKomorebi; YASB_CONFIG_HOME=$UserYasb"
+            Ok = $UserKomorebi -eq $expectedKomorebi -and $UserYasb -eq $expectedYasb -and $UserWezterm -eq $expectedWezterm
+            Detail = "KOMOREBI_CONFIG_HOME=$UserKomorebi; YASB_CONFIG_HOME=$UserYasb; WEZTERM_CONFIG_FILE=$UserWezterm"
             Fix = '.\install.ps1  (registers them for future processes)'
         }
     )
@@ -170,7 +173,8 @@ function Invoke-WinarchyDoctor {
     foreach ($pinned in @(
         @{ Name = 'YASB'; Key = 'yasb'; Path = (Get-Command yasb -ErrorAction SilentlyContinue).Source },
         @{ Name = 'Flow Launcher'; Key = 'flow'; Path = "$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe" },
-        @{ Name = 'AutoHotkey v2'; Key = 'ahk'; Path = Get-WinarchyAhkExe }
+        @{ Name = 'AutoHotkey v2'; Key = 'ahk'; Path = Get-WinarchyAhkExe },
+        @{ Name = 'WezTerm'; Key = 'wezterm'; Path = Get-WinarchyWeztermExe }
     )) {
         $found = $pinned.Path -and (Test-Path $pinned.Path)
         $installed = if ($found) { (Get-Item $pinned.Path).VersionInfo.ProductVersion } else { $null }
@@ -180,6 +184,12 @@ function Invoke-WinarchyDoctor {
             $(if ($installed) { "installed=$installed lockfile=$($lock['core'][$pinned.Key])" } else { 'not found on disk' }) `
             'winarchy update --core  (or reinstall the pinned version)'
     }
+
+    # Sin el wezterm.lua generado, WezTerm arranca con sus defaults: ni theme ni keybinds.
+    $weztermConfig = Join-Path $root 'config\wezterm\wezterm.lua'
+    Add-Check 'wezterm.lua generated' (Test-Path $weztermConfig) `
+        $(if (Test-Path $weztermConfig) { $weztermConfig } else { 'missing: WezTerm would start with its own defaults' }) `
+        'winarchy theme set <name>  (regenerates every managed config)'
 
     # ShareX no se verificaba y de él dependen cinco hotkeys, `winarchy screenshot` y la
     # creación de webapps: sin él esos atajos fallan en silencio.

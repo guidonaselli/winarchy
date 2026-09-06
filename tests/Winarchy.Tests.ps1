@@ -623,13 +623,13 @@ Describe 'Coding agent' {
         }
     }
 
-    It 'launches the agent command through Windows Terminal' {
+    It 'launches the agent command through WezTerm' {
         InModuleScope Winarchy {
             Mock Get-WinarchyCodingAgents { @([pscustomobject]@{ Id = 'codex'; Label = 'C'; Command = 'codex'; Installed = $true }) }
             Mock Start-Process {}
             Start-WinarchyCodingAgent
             Should -Invoke Start-Process -Times 1 -ParameterFilter {
-                $FilePath -eq 'wt.exe' -and $ArgumentList -contains 'codex'
+                $FilePath -eq 'wezterm-gui.exe' -and $ArgumentList -contains 'codex'
             }
         }
     }
@@ -1076,11 +1076,116 @@ Describe 'Set-WinarchyTheme' {
     }
 }
 
+Describe 'WezTerm terminal' {
+    It 'registers the generated config as a render target validated as Lua' {
+        InModuleScope Winarchy {
+            $target = Get-WinarchyRenderTargets | Where-Object { $_.Template -eq 'wezterm.lua.tpl' }
+            $target | Should -Not -BeNullOrEmpty
+            $target.Output | Should -Be (Join-Path (Get-WinarchyRoot) 'config\wezterm\wezterm.lua')
+            $target.Validate | Should -Be 'lua'
+        }
+    }
+
+    It 'renders the palette with no leftover tokens' {
+        InModuleScope Winarchy {
+            $themeDir = Join-Path (Get-WinarchyThemesDir) 'tokyo-night'
+            $theme = Expand-WinarchyThemePalette -Theme (Import-WinarchyToml -Path (Join-Path $themeDir 'theme.toml'))
+            $ctx = Build-WinarchyThemeContext -Theme $theme -ThemeDir $themeDir
+            $rendered = Invoke-WinarchyTemplate -TemplatePath (Join-Path (Get-WinarchyRoot) 'templates\wezterm.lua.tpl') -Context $ctx
+
+            $rendered | Should -Not -Match '\{\{'
+            $rendered | Should -Match 'managed by winarchy'
+            $rendered | Should -Match ([regex]::Escape($theme['colors']['background']))
+            $rendered | Should -Match ([regex]::Escape($theme['colors']['color15']))
+            $rendered | Should -Match ([regex]::Escape($theme['borders']['focused']))
+        }
+    }
+
+    # La traslucidez sobre fondo claro degrada la legibilidad: solo los themes oscuros.
+    It 'derives the window opacity from the theme mode' {
+        InModuleScope Winarchy {
+            $themeDir = Join-Path (Get-WinarchyThemesDir) 'tokyo-night'
+            $dark = @{ name = 'x'; mode = 'dark'; colors = @{ accent = '#7aa2f7'; background = '#1a1b26' } }
+            $light = @{ name = 'x'; mode = 'light'; colors = @{ accent = '#7aa2f7'; background = '#1a1b26' } }
+            (Build-WinarchyThemeContext -Theme $dark -ThemeDir $themeDir)['computed.terminal_opacity'] | Should -Be '0.95'
+            (Build-WinarchyThemeContext -Theme $light -ThemeDir $themeDir)['computed.terminal_opacity'] | Should -Be '1.0'
+        }
+    }
+
+    # El override es del usuario: ningun render lo escribe, lo borra ni lo pisa.
+    It 'loads the user override without generating it' {
+        InModuleScope Winarchy {
+            $userLua = Join-Path (Get-WinarchyRoot) 'config\wezterm\user.lua'
+            $backup = if (Test-Path $userLua) { Get-Content $userLua -Raw } else { $null }
+            try {
+                Set-Content -Path $userLua -Value 'return { font_size = 42.0 }' -Encoding UTF8 -NoNewline
+                Set-WinarchyTheme -Name 'tokyo-night' -StageOnly
+                $staged = Get-Content (Join-Path (Get-WinarchyStateDir) 'staging\wezterm.lua') -Raw
+
+                $staged | Should -Match 'config/wezterm/user\.lua'
+                $staged | Should -Match 'pcall\(dofile'
+                (Get-Content $userLua -Raw) | Should -Be 'return { font_size = 42.0 }'
+            }
+            finally {
+                if ($null -ne $backup) { Set-Content -Path $userLua -Value $backup -NoNewline -Encoding UTF8 }
+                elseif (Test-Path $userLua) { Remove-Item $userLua -Force }
+            }
+        }
+    }
+
+    # Sin default_prog WezTerm levanta cmd.exe y todo el terminal profile del stack
+    # (starship, fzf, zoxide, eza, bat, fastfetch) no carga.
+    It 'defaults to PowerShell 7 and keeps its own updater off' {
+        $tpl = Get-Content (Join-Path $script:Root 'templates\wezterm.lua.tpl') -Raw
+        $tpl | Should -Match "config\.default_prog = \{ 'pwsh\.exe'"
+        # Winarchy es el unico canal de updates, como con YASB y Flow.
+        $tpl | Should -Match 'config\.check_for_updates = false'
+    }
+
+    # Un proceso del stack arrancado antes de instalar WezTerm no hereda
+    # WEZTERM_CONFIG_FILE y abriria ventanas con los defaults de fabrica.
+    It 'points every Winarchy launch at the managed config explicitly' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $ahk | Should -Match '--config-file'
+        @($ahk -split "`n" | Where-Object { $_ -match 'WeztermExe' -and $_ -match 'Run\(' -and $_ -notmatch '--config-file' }) |
+            Should -BeNullOrEmpty
+
+        InModuleScope Winarchy {
+            Mock Get-WinarchyCodingAgents { @([pscustomobject]@{ Id = 'codex'; Label = 'C'; Command = 'codex'; Installed = $true }) }
+            Mock Start-Process {}
+            Start-WinarchyCodingAgent
+            Should -Invoke Start-Process -Times 1 -ParameterFilter {
+                $ArgumentList -contains '--config-file' -and
+                $ArgumentList -contains (Join-Path (Get-WinarchyRoot) 'config\wezterm\wezterm.lua')
+            }
+        }
+    }
+
+    # AHK es el dueno unico de los hotkeys globales: los keybinds del terminal viven
+    # detras del leader y no pueden tomar un combo suelto que pise a uno global.
+    It 'keeps its keybinds out of the global AHK hotkey space' {
+        $tpl = Get-Content (Join-Path $script:Root 'templates\wezterm.lua.tpl') -Raw
+        $tpl | Should -Match "config\.leader = \{ key = 'a', mods = 'CTRL'"
+
+        $unprefixed = [regex]::Matches($tpl, "\{ key = '(?<key>[^']+)', mods = '(?<mods>[^']+)'") |
+            Where-Object { $_.Groups['mods'].Value -notmatch 'LEADER' } |
+            ForEach-Object { "$($_.Groups['mods'].Value)+$($_.Groups['key'].Value)" } |
+            Where-Object { $_ -ne 'CTRL+a' }   # el leader mismo, y su passthrough
+        $unprefixed -join ', ' | Should -BeNullOrEmpty
+
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk')
+        @($ahk | Where-Object { $_ -match '^\^a::' }) | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'versions.lock.toml' {
     It 'pins the core components' {
         InModuleScope Winarchy {
             $lock = Import-WinarchyToml -Path (Join-Path (Get-WinarchyRoot) 'versions.lock.toml')
             $lock['core'].Keys | Should -Contain 'komorebi'
+            # WezTerm es core: `winarchy update` no debe moverlo, solo `update --core`.
+            $lock['core'].Keys | Should -Contain 'wezterm'
+            $lock['winget'].Keys | Should -Contain 'wez.wezterm'
         }
     }
 }
@@ -1718,9 +1823,10 @@ Describe 'Config environment diagnostics' {
             $root = 'C:\Repo With Space\Winarchy'
             $expectedKomorebi = Join-Path $root 'config\komorebi'
             $expectedYasb = Join-Path $root 'config\yasb'
+            $expectedWezterm = Join-Path $root 'config\wezterm\wezterm.lua'
             $checks = @(Get-WinarchyConfigEnvironmentChecks -Root $root `
-                -ProcessKomorebi '' -ProcessYasb 'C:\stale' `
-                -UserKomorebi $expectedKomorebi -UserYasb $expectedYasb)
+                -ProcessKomorebi '' -ProcessYasb 'C:\stale' -ProcessWezterm '' `
+                -UserKomorebi $expectedKomorebi -UserYasb $expectedYasb -UserWezterm $expectedWezterm)
 
             ($checks | Where-Object Name -eq 'config env vars in current process').Ok | Should -BeFalse
             ($checks | Where-Object Name -eq 'config env vars in current process').Fix | Should -Match 'reopen'
@@ -1733,9 +1839,10 @@ Describe 'Config environment diagnostics' {
             $root = 'C:\Repo With Space\Winarchy'
             $expectedKomorebi = Join-Path $root 'config\komorebi'
             $expectedYasb = Join-Path $root 'config\yasb'
+            $expectedWezterm = Join-Path $root 'config\wezterm\wezterm.lua'
             $checks = @(Get-WinarchyConfigEnvironmentChecks -Root $root `
-                -ProcessKomorebi $expectedKomorebi -ProcessYasb $expectedYasb `
-                -UserKomorebi 'C:\old\komorebi' -UserYasb 'C:\old\yasb')
+                -ProcessKomorebi $expectedKomorebi -ProcessYasb $expectedYasb -ProcessWezterm $expectedWezterm `
+                -UserKomorebi 'C:\old\komorebi' -UserYasb 'C:\old\yasb' -UserWezterm 'C:\old\wezterm.lua')
 
             ($checks | Where-Object Name -eq 'config env vars in current process').Ok | Should -BeTrue
             ($checks | Where-Object Name -eq 'config env vars registered for user').Ok | Should -BeFalse

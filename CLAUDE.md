@@ -27,8 +27,12 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
   Capas, de menor a mayor: ASC -> template -> games.toml -> `config/komorebi/rules.toml`.
   Ubicacion (ignore/manage/floating) es excluyente y la capa alta reemplaza; los atributos
   se unen. `rules.toml` es del usuario y gitignored: ningun update lo toca.
+- WezTerm es el terminal por defecto (SUPER+Return, agentes, `winarchy menu`). Su config
+  se genera ENTERA en `config/wezterm/wezterm.lua`; la personalización del usuario va en
+  `config/wezterm/user.lua` (gitignored), que ningún theme set ni update toca. Windows
+  Terminal se conserva y se sigue tematizando, pero Winarchy no lo abre.
 - `settings.json` de Windows Terminal se modifica solo por merge quirúrgico del scheme "Winarchy".
-- Componentes core (komorebi, YASB) fijados en `versions.lock.toml`; solo `winarchy update --core` los toca.
+- Componentes core (komorebi, YASB, WezTerm) fijados en `versions.lock.toml`; solo `winarchy update --core` los toca.
 - Winarchy es el ÚNICO canal de updates: los auto-updaters de terceros (YASB `update_check`,
   Flow `AutoUpdates`) quedan apagados y no se reactivan. Tres ejes: `update` (terceros),
   `update --core` (komorebi/YASB pinneados), `update --self` (Winarchy mismo vía git rama

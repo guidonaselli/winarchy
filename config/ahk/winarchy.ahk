@@ -1,4 +1,4 @@
-﻿; ============================================================================
+; ============================================================================
 ; winarchy.ahk — único dueño de hotkeys globales de Winarchy (AHK v2)
 ; Esquema SUPER estilo Omarchy → despacha a komorebic / Flow / Terminal / winarchy
 ; Absorbe el viejo win-space-launcher.ahk (Win+Space → Flow Launcher).
@@ -37,6 +37,16 @@ KomorebicExe := FileExist(A_ProgramFiles "\komorebi\bin\komorebic.exe")
     ? A_ProgramFiles "\komorebi\bin\komorebic.exe"
     : "komorebic.exe"
 
+WeztermExe := FileExist(A_ProgramFiles "\WezTerm\wezterm-gui.exe")
+    ? A_ProgramFiles "\WezTerm\wezterm-gui.exe"
+    : "wezterm-gui.exe"
+; --config-file explicito: WEZTERM_CONFIG_FILE puede faltar en el entorno heredado (AHK
+; arrancado antes de instalar WezTerm) y ahi WezTerm cae a sus defaults, sin theme ni pwsh.
+Wezterm(args := '') {
+    global WeztermExe, RepoRoot
+    Run('"' WeztermExe '" --config-file "' RepoRoot '\config\wezterm\wezterm.lua"' (args ? ' ' args : ''))
+}
+
 Komorebic(cmd) {
     Run('"' KomorebicExe '" ' cmd, , 'Hide')
 }
@@ -46,7 +56,7 @@ Winarchy(args) {
 }
 
 WinarchyTerminal(args) {
-    Run('wt.exe pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "' WinarchyPs1 '" ' args)
+    Wezterm('start -- pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "' WinarchyPs1 '" ' args)
 }
 
 FlowWindow := 'Flow.Launcher ahk_exe Flow.Launcher.exe'
@@ -771,7 +781,7 @@ AccentWatch() {
 ; ============================================================================
 
 ; --- Apps ---------------------------------------------------------------------
-#Enter::Run('wt.exe')                            ; terminal
+#Enter::Wezterm()                                ; terminal
 #Space::ToggleFlow()                             ; Flow Launcher
 #b::Run(DefaultBrowser())                        ; browser
 #e::Run('explorer.exe')                          ; file explorer

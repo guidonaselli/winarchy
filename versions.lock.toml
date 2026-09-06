@@ -14,6 +14,12 @@ yasb = "2.0.6"
 # suyo no debe entrar por `winarchy update` sin que alguien lea el changelog.
 flow = "2.1.3"
 ahk = "2.0.26"
+# WezTerm es el terminal por defecto: su config la genera Winarchy entera, así que un
+# cambio de su API de config no debe entrar por `winarchy update`. Ojo con el pin: la
+# última release estable de WezTerm es de 2024-02-03 y upstream solo publica nightlies
+# desde entonces (verificado 2026-09-06), así que `update --core` no va a moverlo
+# mientras no vuelvan a taggear. No es un pin olvidado.
+wezterm = "20240203-110809-5046fc22"
 
 # Reglas por aplicacion de la comunidad de komorebi (vendorizado en vendor/asc/).
 # Se compila DENTRO del komorebi.json generado; no se usa app_specific_configuration_path
@@ -32,6 +38,8 @@ sha256 = "c4680fda08b7e188017ceabed65d2d7252e6a0c0a3e0933a00aa54638a3e4f50"
 "AutoHotkey.AutoHotkey" = true
 "Flow-Launcher.Flow-Launcher" = true
 "ShareX.ShareX" = true
+"wez.wezterm" = true
+# Windows Terminal se conserva: Winarchy no lo abre, pero le sigue aplicando el scheme.
 "Microsoft.WindowsTerminal" = true
 "DEVCOM.JetBrainsMonoNerdFont" = true
 # Herramientas del terminal profile (no core, sin pin: siguen su último release).

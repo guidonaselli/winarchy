@@ -1,0 +1,10 @@
+-- Copiá este archivo a config/wezterm/user.lua y editalo: es TUYO.
+-- Ningún `winarchy theme set` ni `winarchy update` lo pisa (está gitignored), y lo que
+-- devolvas acá tiene prioridad sobre el wezterm.lua generado.
+-- Referencia de opciones: https://wezterm.org/config/lua/config/index.html
+
+return {
+  font_size = 13.0,
+  window_background_opacity = 1.0,
+  -- Si la GPU da problemas (drivers viejos, RDP): front_end = 'Software',
+}

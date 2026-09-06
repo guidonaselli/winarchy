@@ -144,6 +144,8 @@ function Build-WinarchyThemeContext {
     $ctx['computed.game_ignore_rules'] = Get-WinarchyGameIgnoreRulesJson
     $ctx['computed.bar_position'] = Get-WinarchyBarPosition
     $ctx['computed.bar_background'] = Get-WinarchyBarBackground -Hex $Theme['colors']['background']
+    # La traslucidez sobre fondo claro degrada la legibilidad: solo los themes oscuros.
+    $ctx['computed.terminal_opacity'] = if ($Theme['mode'] -eq 'light') { '1.0' } else { '0.95' }
     # auto-accent puede traer un accent tan oscuro (o claro) como el background:
     # accent_ui es el accent corregido para usarse como texto/superficie dentro de
     # apps con fondo del theme, y on_accent el texto legible sobre ese accent_ui.
@@ -194,6 +196,7 @@ function Get-WinarchyRenderTargets {
         @{ Template = 'komorebi.json.tpl';                Output = Join-Path $root 'config\komorebi\komorebi.json';      Validate = 'json' }
         @{ Template = 'yasb-styles.css.tpl';              Output = Join-Path $root 'config\yasb\styles.css';             Validate = $null }
         @{ Template = 'yasb-config.yaml.tpl';             Output = Join-Path $root 'config\yasb\config.yaml';            Validate = $null }
+        @{ Template = 'wezterm.lua.tpl';                  Output = Join-Path $root 'config\wezterm\wezterm.lua';        Validate = 'lua' }
         @{ Template = 'windows-terminal-scheme.json.tpl'; Output = Join-Path $root 'config\terminal\winarchy-scheme.json'; Validate = 'json' }
         @{ Template = 'flow-theme.xaml.tpl';              Output = Join-Path $root 'config\flow\Winarchy.xaml';          Validate = 'xml' }
         @{ Template = 'btop.theme.tpl';                   Output = Join-Path $root 'config\btop\winarchy.theme';         Validate = $null }
@@ -204,6 +207,22 @@ function Get-WinarchyRenderTargets {
         @{ Template = 'fastfetch.jsonc.tpl';              Output = Join-Path $root 'config\fastfetch\config.jsonc';      Validate = 'json' }
         @{ Template = 'jetbrains.icls.tpl';               Output = Join-Path $root 'config\jetbrains\winarchy.icls';    Validate = 'xml' }
     )
+}
+
+function Assert-WinarchyWeztermConfig {
+    <#
+      Valida el wezterm.lua staged con el propio WezTerm. `ls-fonts` es el único
+      subcomando que reporta el error de Lua (show-keys cae en silencio a los defaults),
+      y su exit code no sirve para nada en la build pinneada: se mira la salida.
+      Sin WezTerm instalado no hay validación posible y no es motivo para abortar.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+    $exe = Get-Command 'wezterm' -ErrorAction SilentlyContinue
+    if (-not $exe) { return }
+    $out = & $exe.Source --config-file $Path ls-fonts 2>&1 | Out-String
+    if ($out -match 'syntax error|Error in lua') {
+        throw "wezterm.lua is invalid: $(($out -split "`n" | Where-Object { $_ -match 'error' } | Select-Object -First 1).Trim())"
+    }
 }
 
 function Get-WinarchyTerminalSettingsPath {
@@ -755,6 +774,7 @@ function Set-WinarchyTheme {
         switch ($t.Validate) {
             'json' { Get-Content $stagedFile -Raw | ConvertFrom-Json | Out-Null }
             'xml'  { [xml](Get-Content $stagedFile -Raw) | Out-Null }
+            'lua'  { Assert-WinarchyWeztermConfig -Path $stagedFile }
         }
         $t['Staged'] = $stagedFile
     }

@@ -7,7 +7,7 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 ## Apps
 | Keybinding | Action |
 |---|---|
-| `SUPER+Return` | Windows Terminal |
+| `SUPER+Return` | WezTerm (the default terminal) |
 | `SUPER+Space` | Flow Launcher — applications and Winarchy's own commands in one search |
 | `SUPER+B` | Default browser |
 | `SUPER+E` | File explorer |
@@ -126,6 +126,37 @@ control panels — `W` is `N` here because `SUPER+Ctrl+W` is stay awake.
 | `SUPER+Ctrl+F` | Switch between the tiling and floating layers |
 | `SUPER+Ctrl+W` | Keep the machine awake (toggle) |
 | `SUPER+Ctrl+1`–`9` | Send the window to workspace N without following it |
+
+## Terminal (WezTerm, internal — not global hotkeys)
+WezTerm registers **no** global hotkeys: AHK stays the sole owner of those. Everything
+below only works inside a WezTerm window and lives behind the leader key `CTRL+a`
+(press the leader, release it, then the key). `CTRL+a` twice sends a literal `CTRL+a`
+to the shell.
+
+| Keybinding | Action |
+|---|---|
+| `LEADER+\|` (or `LEADER+V`) | Split the pane left/right |
+| `LEADER+-` | Split the pane top/bottom |
+| `LEADER+H/J/K/L` | Move focus between panes (left/down/up/right) |
+| `LEADER+Z` | Zoom the focused pane (toggle) |
+| `LEADER+X` | Close the focused pane |
+| `LEADER+C` | New tab |
+| `LEADER+W` | Close the current tab |
+| `LEADER+N` / `LEADER+P` | Next / previous tab |
+| `LEADER+1`–`9` | Go to tab N |
+| `LEADER+F` | Search the scrollback |
+| `LEADER+[` | Copy mode (keyboard selection) |
+| `LEADER+S` | Quick select (grab a path, hash or URL on screen) |
+| `CTRL+a` `CTRL+a` | Send a literal `CTRL+a` |
+
+Selecting with the mouse already copies (WezTerm default), and so do WezTerm's own
+`CTRL+SHIFT+C` / `CTRL+SHIFT+V`. New tabs open PowerShell 7; right-clicking the new-tab
+button lists the other shells (Windows PowerShell, Command Prompt).
+
+Personalize it in `config\wezterm\user.lua` (gitignored, never touched by
+`winarchy theme set` or `winarchy update`); `config\wezterm\user.lua.example` is the
+starting point. The generated `config\wezterm\wezterm.lua` is managed by Winarchy and
+gets overwritten on every theme change.
 
 ## User overrides
 Create `config\ahk\user.ahk` (gitignored) to add your own hotkeys without touching

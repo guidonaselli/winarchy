@@ -27,9 +27,9 @@ function Show-WinarchyHelp {
     bar transparent [on|off]  See through the bar (no arg: toggle)
     agent list                Known coding agents (* = preferred, marks what is installed)
     agent set <id>            Pick the coding agent SUPER+Shift+Ctrl+A launches
-    agent launch              Open it in Windows Terminal
+    agent launch              Open it in WezTerm
     update [--core]           Update the packages Winarchy declares (+ scoop)
-                              --core: the pinned ones (komorebi/YASB/Flow/AHK)
+                              --core: the pinned ones (komorebi/YASB/Flow/AHK/WezTerm)
                               (único canal de updates: YASB/Flow tienen su auto-update off)
     update --self             Update Winarchy itself (git pull release + migration)
     menu                      Navigable menu (themes, screenshots, game-mode, ...)

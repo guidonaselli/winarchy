@@ -29,9 +29,13 @@ metadata:
 - **Generated configs carry a "managed by winarchy" header and are never edited
   by hand.** They are regenerated from `templates\*.tpl` via `winarchy theme set`.
   User customization goes in override files, not in generated ones.
-- Windows Terminal `settings.json` is touched only by the surgical merge of the
-  "Winarchy" scheme — never rewrite the whole file.
-- Core components (komorebi, YASB) are pinned in `versions.lock.toml`; only
+- **WezTerm is the default terminal** (`SUPER+Return`, coding agents, `winarchy menu`).
+  Its whole config is generated at `config\wezterm\wezterm.lua`; user customization
+  goes in `config\wezterm\user.lua` (gitignored, never touched by an update).
+- Windows Terminal stays installed and themed, but Winarchy never launches it. Its
+  `settings.json` is touched only by the surgical merge of the "Winarchy" scheme —
+  never rewrite the whole file.
+- Core components (komorebi, YASB, WezTerm) are pinned in `versions.lock.toml`; only
   `winarchy update --core` may bump them.
 - Before system changes (registry, autostart): snapshot in `backups\<timestamp>\`.
 - **Winarchy is the single update channel.** Third-party auto-updaters are off

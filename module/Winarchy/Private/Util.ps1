@@ -29,6 +29,16 @@ function Get-WinarchyAhkExe {
     $found
 }
 
+function Get-WinarchyWeztermExe {
+    <# wezterm-gui.exe (la GUI; wezterm.exe es el CLI y no abre ventana); $null si falta. #>
+    $found = @(
+        "$env:ProgramFiles\WezTerm\wezterm-gui.exe",
+        "$env:LOCALAPPDATA\Programs\WezTerm\wezterm-gui.exe"
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $found) { $found = (Get-Command wezterm-gui.exe -ErrorAction SilentlyContinue).Source }
+    $found
+}
+
 function Get-WinarchyKomorebiExe {
     <# komorebi.exe vía PATH o instalación estándar; $null si no está. #>
     $found = (Get-Command komorebi.exe -ErrorAction SilentlyContinue).Source

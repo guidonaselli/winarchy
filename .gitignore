@@ -16,12 +16,14 @@ config/ahk/theme.ini
 config/pwsh/starship.toml
 config/fastfetch/config.jsonc
 config/obsidian/winarchy-theme.css
+config/wezterm/wezterm.lua
 
 # Overrides del usuario (locales a cada máquina)
 config/ahk/user.ahk
 config/pwsh/user.ps1
 config/windows.toml
 config/komorebi/rules.toml
+config/wezterm/user.lua
 
 # Planning interno (specs/changes de OpenSpec y tooling de agentes) — no es parte del producto
 openspec/

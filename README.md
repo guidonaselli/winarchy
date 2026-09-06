@@ -87,7 +87,7 @@ That means Winarchy optimizes for:
   - Winarchy regenerates and applies coordinated theme outputs for:
     - komorebi
     - YASB
-    - Windows Terminal
+    - WezTerm (whole config) and Windows Terminal (color scheme)
     - Flow Launcher
     - Neovim
     - btop
@@ -330,7 +330,16 @@ winarchy accent status
 
 ## Terminal profile
 
-Winarchy ships an omarchy-style shell experience on PowerShell 7 + Windows Terminal:
+**WezTerm is the default terminal** — `SUPER+Return`, the coding-agent launcher and
+`winarchy menu` all open it. Its whole config is generated at
+`config\wezterm\wezterm.lua` from the active theme (colors, JetBrainsMono NF with
+ligatures, padding, opacity, 10k scrollback, tabs and panes behind the `CTRL+a`
+leader — see `docs/keybindings.md`). Your own settings go in `config\wezterm\user.lua`
+(gitignored, never touched by `theme set` or `update`; copy `user.lua.example` to start).
+Windows Terminal stays installed and keeps getting the "Winarchy" color scheme, but
+Winarchy no longer launches it.
+
+Winarchy ships an omarchy-style shell experience on PowerShell 7 + WezTerm:
 
 - **starship** prompt, themed by the theme engine (`config/pwsh/starship.toml` is regenerated on every `winarchy theme set`; the prompt recolors live, no restart needed)
 - **PSFzf + fzf** — fuzzy history (`Ctrl+R`) and file picker (`Ctrl+T`)

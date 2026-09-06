@@ -8,6 +8,7 @@ $script:CoreWingetIds = @{
     'AmN.yasb'                    = 'yasb'
     'Flow-Launcher.Flow-Launcher' = 'flow'
     'AutoHotkey.AutoHotkey'       = 'ahk'
+    'wez.wezterm'                 = 'wezterm'
 }
 
 function Get-WinarchyDeclaredWingetIds {
@@ -110,7 +111,8 @@ function Update-WinarchyLockfile {
     $versions = @{}
     foreach ($id in $script:CoreWingetIds.Keys) {
         $out = winget list --id $id --exact 2>$null | Out-String
-        if ($out -match '(\d+\.\d+\.\d+(\.\d+)?)') { $versions[$script:CoreWingetIds[$id]] = $Matches[1] }
+        # semver, o el versionado por fecha de WezTerm (20240203-110809-5046fc22)
+        if ($out -match '(\d{8}-\d{6}-[0-9a-f]+|\d+\.\d+\.\d+(\.\d+)?)') { $versions[$script:CoreWingetIds[$id]] = $Matches[1] }
     }
     if ($versions.Count -eq 0) { Write-WinarchyWarn 'Could not read installed versions; lockfile unchanged.'; return }
     $content = Get-Content $LockPath -Raw -Encoding UTF8
