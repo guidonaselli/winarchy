@@ -1779,10 +1779,11 @@ Describe 'Autostart' {
 
             $yasb = Get-WinarchyAutostartComponents | Where-Object Key -eq 'yasb'
             $yasb.Exe | Should -BeLike '*\WindowsPowerShell\v1.0\powershell.exe'
-            $yasb.Arguments | Should -Match ([regex]::Escape("`$env:YASB_CONFIG_HOME = 'C:\Repo With Space\Winarchy\config\yasb'"))
-            $yasb.Arguments | Should -Match ([regex]::Escape("& 'C:\Program Files\YASB\yasbc.exe' start"))
+            $yasb.Arguments | Should -Match ([regex]::Escape('scripts\Start-Yasb.ps1'))
+            $yasb.Arguments | Should -Match ([regex]::Escape('-YasbExe "C:\Program Files\YASB\yasbc.exe"'))
+            $yasb.Arguments | Should -Match ([regex]::Escape('-YasbConfigHome "C:\Repo With Space\Winarchy\config\yasb"'))
             ([xml](New-WinarchyTaskXml -Component $yasb -User 'DOMAIN\user')).Task.Actions.Exec.Arguments |
-                Should -Match 'YASB_CONFIG_HOME'
+                Should -Match 'YasbConfigHome'
         }
     }
 }

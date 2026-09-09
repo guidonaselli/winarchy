@@ -39,20 +39,17 @@ function Get-WinarchyAutostartComponents {
         })
     }
 
-    # YASB arranca con delay para que komorebi alcance a bindear su named pipe primero;
-    # de lo contrario el widget de workspaces queda en blanco hasta que reconecta. El
-    # delay es cosmético (YASB reconecta solo), solo achica la ventana de blank.
+    # YASB arranca vía el launcher scripts\Start-Yasb.ps1 (espera shell listo).
     $yasbc = (Get-Command yasbc -ErrorAction SilentlyContinue).Source
     if ($yasbc) {
         $ps = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $yasbHome = (Join-Path $root 'config\yasb').Replace("'", "''")
-        $yasbExe = $yasbc.Replace("'", "''")
-        $inner = "`$env:YASB_CONFIG_HOME = '$yasbHome'; & '$yasbExe' start"
+        $launcher = Join-Path $root 'scripts\Start-Yasb.ps1'
+        $yasbHome = Join-Path $root 'config\yasb'
         $items.Add([pscustomobject]@{
             Key = 'yasb'; TaskName = 'yasb'; LnkName = 'Winarchy YASB.lnk'
             Exe = $ps
-            Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"$inner`""
-            Delay = 'PT5S'
+            Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$launcher`" -YasbExe `"$yasbc`" -YasbConfigHome `"$yasbHome`""
+            Delay = 'PT0S'
         })
     }
 
@@ -73,11 +70,17 @@ function Get-WinarchyAutostartComponents {
         })
     }
 
+    # AHK arranca vía el launcher scripts\Start-Ahk.ps1 (espera shell listo).
     $ahkExe = Get-WinarchyAhkExe
     if ($ahkExe) {
+        $ps = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $launcher = Join-Path $root 'scripts\Start-Ahk.ps1'
+        $ahkScript = Join-Path $root 'config\ahk\winarchy.ahk'
         $items.Add([pscustomobject]@{
             Key = 'ahk'; TaskName = 'ahk'; LnkName = 'Winarchy hotkeys.lnk'
-            Exe = $ahkExe; Arguments = "`"$root\config\ahk\winarchy.ahk`""; Delay = 'PT0S'
+            Exe = $ps
+            Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$launcher`" -AhkExe `"$ahkExe`" -ScriptPath `"$ahkScript`""
+            Delay = 'PT0S'
         })
     }
 
