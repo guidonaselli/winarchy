@@ -1851,3 +1851,105 @@ Describe 'Config environment diagnostics' {
         }
     }
 }
+
+Describe 'WezTerm context menu' {
+    BeforeAll {
+        InModuleScope Winarchy {
+            $fakeExeDir = Join-Path $env:TEMP 'winarchy-tests-wezterm'
+            New-Item -ItemType Directory -Path $fakeExeDir -Force | Out-Null
+            $script:FakeWeztermGui = Join-Path $fakeExeDir 'wezterm-gui.exe'
+            $script:FakeWeztermCli = Join-Path $fakeExeDir 'wezterm.exe'
+            Set-Content -Path $script:FakeWeztermGui -Value 'fake' -Encoding UTF8
+            Set-Content -Path $script:FakeWeztermCli -Value 'fake' -Encoding UTF8
+
+            # Namespace de test dedicado: nunca tocar la subclave real de WinarchyWezTerm.
+            $script:WinarchyWeztermContextMenuKeys = @(
+                'Registry::HKEY_CURRENT_USER\Software\Winarchy\Tests\ContextMenuA',
+                'Registry::HKEY_CURRENT_USER\Software\Winarchy\Tests\ContextMenuB'
+            )
+        }
+    }
+
+    AfterAll {
+        InModuleScope Winarchy {
+            foreach ($k in $script:WinarchyWeztermContextMenuKeys) {
+                if (Test-Path $k) { Remove-Item -Path $k -Recurse -Force -ErrorAction SilentlyContinue }
+            }
+            Remove-Item -Path (Split-Path $script:FakeWeztermGui -Parent) -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    AfterEach {
+        InModuleScope Winarchy {
+            foreach ($k in $script:WinarchyWeztermContextMenuKeys) {
+                if (Test-Path $k) { Remove-Item -Path $k -Recurse -Force -ErrorAction SilentlyContinue }
+            }
+        }
+    }
+
+    It 'install is idempotent: running it twice does not fail or duplicate keys' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyWeztermExe { $script:FakeWeztermGui }
+            Mock Test-WinarchyWeztermNativeContextMenu { $false }
+            { Install-WinarchyWeztermContextMenu } | Should -Not -Throw
+            { Install-WinarchyWeztermContextMenu } | Should -Not -Throw
+
+            foreach ($k in $script:WinarchyWeztermContextMenuKeys) {
+                Test-Path $k | Should -BeTrue
+                $cmd = (Get-ItemProperty -Path (Join-Path $k 'command') -Name '(default)').'(default)'
+                $cmd | Should -Match ([regex]::Escape($script:FakeWeztermCli))
+                $cmd | Should -Match 'start --cwd'
+            }
+        }
+    }
+
+    It 'status reports installed with the resolved target after install' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyWeztermExe { $script:FakeWeztermGui }
+            Mock Test-WinarchyWeztermNativeContextMenu { $false }
+            Install-WinarchyWeztermContextMenu
+            $status = Test-WinarchyWeztermContextMenuInstalled
+            $status.Installed | Should -BeTrue
+            $status.Source | Should -Be 'winarchy'
+            $status.TargetExists | Should -BeTrue
+            $status.TargetPath | Should -Be $script:FakeWeztermCli
+        }
+    }
+
+    It 'remove on a not-installed state is a no-op without error' {
+        InModuleScope Winarchy {
+            Mock Test-WinarchyWeztermNativeContextMenu { $false }
+            (Test-WinarchyWeztermContextMenuInstalled).Installed | Should -BeFalse
+            { Remove-WinarchyWeztermContextMenu } | Should -Not -Throw
+            (Test-WinarchyWeztermContextMenuInstalled).Installed | Should -BeFalse
+        }
+    }
+
+    It 'remove after install clears the keys' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyWeztermExe { $script:FakeWeztermGui }
+            Mock Test-WinarchyWeztermNativeContextMenu { $false }
+            Install-WinarchyWeztermContextMenu
+            Remove-WinarchyWeztermContextMenu
+            foreach ($k in $script:WinarchyWeztermContextMenuKeys) { Test-Path $k | Should -BeFalse }
+        }
+    }
+
+    It 'install skips without creating keys when WezTerm''s own installer already added the verb' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyWeztermExe { $script:FakeWeztermGui }
+            Mock Test-WinarchyWeztermNativeContextMenu { $true }
+            Install-WinarchyWeztermContextMenu
+            foreach ($k in $script:WinarchyWeztermContextMenuKeys) { Test-Path $k | Should -BeFalse }
+        }
+    }
+
+    It 'status reports the native WezTerm installer entry without claiming ownership' {
+        InModuleScope Winarchy {
+            Mock Test-WinarchyWeztermNativeContextMenu { $true }
+            $status = Test-WinarchyWeztermContextMenuInstalled
+            $status.Installed | Should -BeTrue
+            $status.Source | Should -Be 'wezterm-installer'
+        }
+    }
+}
