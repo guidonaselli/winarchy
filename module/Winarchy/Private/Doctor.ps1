@@ -222,6 +222,15 @@ function Invoke-WinarchyDoctor {
         $(if ($seelen) { 'Seelen is still running (coexistence mode)' } else { 'migration complete or not installed' }) `
         '.\scripts\migrate-from-seelen.ps1'
 
+    # --- Integración de menú contextual de WezTerm (informativo, opt-in) --------------
+    $ctxMenu = Test-WinarchyWeztermContextMenuInstalled
+    $ctxDetail = if (-not $ctxMenu.Installed) { 'not installed (opt-in: winarchy wezterm context-menu install)' }
+                 elseif ($ctxMenu.Source -eq 'wezterm-installer') { "installed by WezTerm's own installer (Open WezTerm here)" }
+                 elseif (-not $ctxMenu.TargetExists) { "installed but target missing: $($ctxMenu.TargetPath)" }
+                 else { "installed -> $($ctxMenu.TargetPath)" }
+    Add-Check 'WezTerm context menu (informational)' $true $ctxDetail `
+        'winarchy wezterm context-menu install'
+
     # --- Versión de Winarchy mismo (informativo, best-effort) -------------------------
     $ver = Get-WinarchyVersion
     $verCheck = Test-WinarchyUpdateAvailable

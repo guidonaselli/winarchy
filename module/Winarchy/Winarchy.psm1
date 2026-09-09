@@ -28,6 +28,8 @@ function Show-WinarchyHelp {
     agent list                Known coding agents (* = preferred, marks what is installed)
     agent set <id>            Pick the coding agent SUPER+Shift+Ctrl+A launches
     agent launch              Open it in WezTerm
+    wezterm context-menu install|remove|status
+                              "Open in WezTerm" in Explorer's right-click menu (HKCU only)
     update [--core]           Update the packages Winarchy declares (+ scoop)
                               --core: the pinned ones (komorebi/YASB/Flow/AHK/WezTerm)
                               (único canal de updates: YASB/Flow tienen su auto-update off)
@@ -234,6 +236,17 @@ function Invoke-Winarchy {
                 }
                 'sync' { Sync-WinarchyAsc -Apply:($rest -contains '--apply' -or $rest -contains '-apply') }
                 default { throw "Unknown subcommand: rules $sub (add|explain|collisions|sync)" }
+            }
+        }
+        'wezterm' {
+            $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { '' }
+            if ($sub -ne 'context-menu') { throw "Unknown subcommand: wezterm $sub (context-menu)" }
+            $action = if ($rest.Count -ge 2) { $rest[1].ToLower() } else { 'status' }
+            switch ($action) {
+                'install' { Install-WinarchyWeztermContextMenu }
+                'remove' { Remove-WinarchyWeztermContextMenu }
+                'status' { Get-WinarchyWeztermContextMenuStatus }
+                default { throw "Unknown subcommand: wezterm context-menu $action (install|remove|status)" }
             }
         }
         'reload' { Invoke-WinarchyReload; Write-WinarchyOk 'Stack reloaded.' }
