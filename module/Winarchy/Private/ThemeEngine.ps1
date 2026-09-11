@@ -716,7 +716,12 @@ function Invoke-WinarchyReload {
     Start-WinarchyWindowSlots
     $ahk = Join-Path (Get-WinarchyRoot) 'config\ahk\winarchy.ahk'
     $ahkExe = Get-WinarchyAhkExe
-    if ($ahkExe) { Start-Process $ahkExe -ArgumentList "/restart `"$ahk`"" }
+    if ($ahkExe) {
+        [System.Environment]::GetEnvironmentVariables().Keys |
+            Where-Object { $_ -match '^(CLAUDE|GEMINI|CODEX)' } |
+            ForEach-Object { [System.Environment]::SetEnvironmentVariable($_, $null) }
+        Start-Process $ahkExe -ArgumentList "/restart `"$ahk`""
+    }
     if (Test-WinarchyProcess 'Flow.Launcher') {
         Stop-Process -Name 'Flow.Launcher' -Force -ErrorAction SilentlyContinue
         $flow = "$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe"

@@ -183,7 +183,12 @@ if ($Activate) {
     Write-WinarchyInfo 'Arrancando servicios...'
     if ($komorebic) { & $komorebic start }
     if ($yasb) { & $yasb start }
-    if ($ahkExe) { Start-Process $ahkExe -ArgumentList "`"$Root\config\ahk\winarchy.ahk`"" }
+    if ($ahkExe) {
+        [System.Environment]::GetEnvironmentVariables().Keys |
+            Where-Object { $_ -match '^(CLAUDE|GEMINI|CODEX)' } |
+            ForEach-Object { [System.Environment]::SetEnvironmentVariable($_, $null) }
+        Start-Process $ahkExe -ArgumentList "`"$Root\config\ahk\winarchy.ahk`""
+    }
 }
 else {
     # Migración / self-update (sin -Activate): si el autostart YA estaba activo, re-registrarlo

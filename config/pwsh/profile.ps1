@@ -4,6 +4,11 @@
 # Cada init va detrás de un guard: sin binario no hay error, solo se omite la pieza.
 # Este archivo NUNCA debe tirar excepción (un $PROFILE roto bloquea cada shell nueva).
 
+if ($env:NO_COLOR -eq '') {
+    Remove-Item env:NO_COLOR -ErrorAction SilentlyContinue
+    if ($PSStyle.OutputRendering -eq 'PlainText') { $PSStyle.OutputRendering = 'Host' }
+}
+
 # --- PSReadLine: predicciones estilo fish ---------------------------------------
 if (Get-Module PSReadLine) {
     try {
