@@ -416,8 +416,11 @@ ShowMainMenu(*) {
 
 RenderMenu(items, title) {
     global MainMenu, MenuRows, MenuItems, MenuSel, MenuTitle, MenuColors, MenuSelBar
-    if (MainMenu != '')
+    SetTimer(MainMenuWatch, 0)
+    if (MainMenu != '') {
         try MainMenu.Destroy()
+        MainMenu := ''
+    }
     MenuItems := items, MenuSel := 1, MenuRows := [], MenuTitle := title
 
     ; colores del theme (fallback al theme por defecto si todavía no se generó theme.ini)
@@ -536,14 +539,21 @@ MenuBack() {
 CloseMainMenu() {
     global MainMenu, MenuStack
     SetTimer(MainMenuWatch, 0)
-    try MainMenu.Destroy()
-    MainMenu := '', MenuStack := []
+    if (MainMenu != '') {
+        try MainMenu.Destroy()
+        MainMenu := ''
+    }
+    MenuStack := []
 }
 
 MainMenuWatch() {
     global MainMenu
-    if (MainMenu != '') && !WinActive('ahk_id ' MainMenu.Hwnd)
+    try {
+        if (MainMenu != '') && !WinActive('ahk_id ' MainMenu.Hwnd)
+            CloseMainMenu()
+    } catch {
         CloseMainMenu()
+    }
 }
 
 ; Navegación por teclado, solo mientras el menú está activo.
@@ -673,14 +683,20 @@ ToggleKeyOverlay() {
 CloseKeyOverlay() {
     global KeyOverlay
     SetTimer(KeyOverlayWatch, 0)
-    try KeyOverlay.Destroy()
-    KeyOverlay := ''
+    if (KeyOverlay != '') {
+        try KeyOverlay.Destroy()
+        KeyOverlay := ''
+    }
 }
 
 KeyOverlayWatch() {
     global KeyOverlay
-    if (KeyOverlay != '') && !WinActive('ahk_id ' KeyOverlay.Hwnd)
+    try {
+        if (KeyOverlay != '') && !WinActive('ahk_id ' KeyOverlay.Hwnd)
+            CloseKeyOverlay()
+    } catch {
         CloseKeyOverlay()
+    }
 }
 
 ; --- Lista de juegos (games.toml: exe = "...") --------------------------------
