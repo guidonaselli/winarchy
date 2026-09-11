@@ -33,7 +33,7 @@ config.colors = {
   },
 }
 
--- El terminal profile del stack (starship, fzf, zoxide, eza, bat, fastfetch) vive en
+-- El terminal profile del stack (starship, fzf, zoxide, eza, bat) vive en
 -- PowerShell 7: sin esto WezTerm levanta cmd.exe y no carga nada de eso.
 config.default_prog = { 'pwsh.exe', '-NoLogo' }
 config.default_cwd = wezterm.home_dir

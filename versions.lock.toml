@@ -3,7 +3,7 @@
 # los actualiza (y reescribe este archivo) tras revisar changelogs.
 # Fijado el 2026-06-09. Último repaso de dependencias: 2026-08-16
 # (komorebi 0.1.41 y Flow 2.1.3 ya estaban al día; YASB 2.0.2 -> 2.0.6, ShareX 20.2 -> 21.0,
-#  starship, zoxide y fastfetch al último. Changelogs de YASB y ShareX sin breaking changes
+#  starship y zoxide al último. Changelogs de YASB y ShareX sin breaking changes
 #  que nos afecten: el widget removido de YASB es AI Chat, que no usamos.)
 
 [core]
@@ -51,7 +51,6 @@ sha256 = "c4680fda08b7e188017ceabed65d2d7252e6a0c0a3e0933a00aa54638a3e4f50"
 "ajeetdsouza.zoxide" = true
 "eza-community.eza" = true
 "sharkdp.bat" = true
-"Fastfetch-cli.Fastfetch" = true
 # Backend de búsqueda de Flow Launcher (plugin Everything, instalado por Identity.ps1):
 # sin el índice de voidtools, Flow cae a su indexador propio, mucho más lento/limitado.
 "voidtools.Everything" = true
@@ -65,5 +64,4 @@ fzf = true
 zoxide = true
 eza = true
 bat = true
-fastfetch = true
 "JetBrainsMono-NF" = true

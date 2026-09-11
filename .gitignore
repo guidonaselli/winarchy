@@ -14,7 +14,6 @@ config/flow/Winarchy.xaml
 config/terminal/winarchy-scheme.json
 config/ahk/theme.ini
 config/pwsh/starship.toml
-config/fastfetch/config.jsonc
 config/obsidian/winarchy-theme.css
 config/wezterm/wezterm.lua
 

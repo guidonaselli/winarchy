@@ -1134,7 +1134,7 @@ Describe 'WezTerm terminal' {
     }
 
     # Sin default_prog WezTerm levanta cmd.exe y todo el terminal profile del stack
-    # (starship, fzf, zoxide, eza, bat, fastfetch) no carga.
+    # (starship, fzf, zoxide, eza, bat) no carga.
     It 'defaults to PowerShell 7 and keeps its own updater off' {
         $tpl = Get-Content (Join-Path $script:Root 'templates\wezterm.lua.tpl') -Raw
         $tpl | Should -Match "config\.default_prog = \{ 'pwsh\.exe'"

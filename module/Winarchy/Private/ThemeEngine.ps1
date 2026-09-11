@@ -204,7 +204,6 @@ function Get-WinarchyRenderTargets {
         @{ Template = 'ahk-theme.ini.tpl';                Output = Join-Path $root 'config\ahk\theme.ini';               Validate = $null }
         @{ Template = 'obsidian.css.tpl';                 Output = Join-Path $root 'config\obsidian\winarchy-theme.css'; Validate = $null }
         @{ Template = 'starship.toml.tpl';                Output = Join-Path $root 'config\pwsh\starship.toml';          Validate = $null }
-        @{ Template = 'fastfetch.jsonc.tpl';              Output = Join-Path $root 'config\fastfetch\config.jsonc';      Validate = 'json' }
         @{ Template = 'jetbrains.icls.tpl';               Output = Join-Path $root 'config\jetbrains\winarchy.icls';    Validate = 'xml' }
     )
 }
