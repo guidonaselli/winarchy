@@ -1127,7 +1127,7 @@ Describe 'WezTerm terminal' {
                 (Get-Content $userLua -Raw) | Should -Be 'return { font_size = 42.0 }'
             }
             finally {
-                if ($null -ne $backup) { Set-Content -Path $userLua -Value $backup -NoNewline -Encoding UTF8 }
+                if ($null -ne $backup -and $backup -ne 'return { font_size = 42.0 }') { Set-Content -Path $userLua -Value $backup -NoNewline -Encoding UTF8 }
                 elseif (Test-Path $userLua) { Remove-Item $userLua -Force }
             }
         }
