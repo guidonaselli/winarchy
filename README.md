@@ -311,7 +311,13 @@ Missing apps are skipped silently. Existing rollback snapshots cover these exter
 winarchy theme set auto-accent
 ```
 
-This mode uses **Windows' live accent color** for borders and accent surfaces, then keeps following it automatically.
+This mode reads **Windows' live accent color** for borders and accent surfaces at the moment you run it.
+
+**There is no background watcher.** Nothing re-applies the theme when the Windows
+accent changes on its own (auto accent color, a wallpaper rotation, a Wallpaper
+Engine playlist) — every surface (starship, YASB, komorebi borders, WezTerm, …)
+keeps showing the colors from the last `theme set`/`accent sync` until you run
+one again.
 
 Recommended if:
 
@@ -319,7 +325,7 @@ Recommended if:
 - you rotate wallpapers
 - you use Wallpaper Engine playlists
 
-Manual controls:
+Manual controls (run after the accent actually changes):
 
 ```powershell
 winarchy accent sync
