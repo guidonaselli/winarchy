@@ -62,19 +62,23 @@ WinarchyTerminal(args) {
 FlowWindow := 'Flow.Launcher ahk_exe Flow.Launcher.exe'
 
 ToggleFlow() {
-    ; Flow Launcher es single-instance: relanzarlo togglea la ventana de búsqueda. No
-    ; expone CLI ni IPC para togglear, así que relanzar el exe es la única vía.
-    ; Devuelve el hwnd con el foco puesto, o 0 si esta pulsación ocultó la ventana.
+    ; Reusa el hotkey nativo de Flow (Alt+Space) para mostrar/ocultar su ventana ya
+    ; existente, en vez de relanzar el exe.
     global FlowWindow
     flow := EnvGet('LOCALAPPDATA') '\FlowLauncher\Flow.Launcher.exe'
     if !FileExist(flow)
         return 0
-    ; Si la ventana ya está visible, esta pulsación la oculta: no hay nada que esperar
-    ; ni activar, y quedarnos en el WinWait bloquearía el hotkey el timeout entero.
-    closing := WinExist(FlowWindow)
+    if ProcessExist('Flow.Launcher.exe') {
+        wasVisible := WinExist(FlowWindow)
+        Send('!{Space}')
+        if wasVisible
+            return 0
+        hwnd := WinWait(FlowWindow, , 2)
+        return hwnd ? hwnd : 0
+    }
+    ; Cold start: todavía no hay proceso corriendo (recién logueado), así que tampoco
+    ; hay hotkey de Flow registrado — acá sí hace falta lanzar el exe.
     Run('"' flow '"')
-    if closing
-        return 0
     ; Tras el logon Flow sigue indexando programas y tarda bastante más que los 2 s que
     ; esperábamos antes: se vencía el WinWait, no se activaba nada y la primera pulsación
     ; del día se sentía muerta.
