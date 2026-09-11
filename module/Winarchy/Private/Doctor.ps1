@@ -199,6 +199,32 @@ function Invoke-WinarchyDoctor {
         $(if ($sharex) { "screenshots, screen recording and webapps — $((Get-Item $sharex).VersionInfo.ProductVersion)" } else { 'missing: SUPER+Shift+S/W/P/V/G and `winarchy screenshot` will fail' }) `
         'winget install ShareX.ShareX'
 
+    # Sin el plugin, Flow busca archivos con su indexer propio (mucho más lento/limitado
+    # que apoyarse en el índice NTFS de voidtools Everything).
+    $everythingInstalled = [bool](@("$env:ProgramFiles\Everything\Everything.exe", "${env:ProgramFiles(x86)}\Everything\Everything.exe") | Where-Object { Test-Path $_ })
+    Add-Check 'voidtools Everything installed' $everythingInstalled `
+        $(if ($everythingInstalled) { 'file search backend for Flow' } else { 'missing: Flow file search falls back to its slower built-in indexer' }) `
+        'winget install voidtools.Everything'
+    if ($everythingInstalled) {
+        $flowEverythingPlugin = Test-WinarchyFlowEverythingPluginInstalled
+        Add-Check 'Flow Everything plugin installed' ([bool]$flowEverythingPlugin) `
+            $(if ($flowEverythingPlugin) { 'Flow file search uses the Everything index' } else { 'missing: Flow file search is slow/limited without it' }) `
+            '.\install.ps1  (installs it automatically)'
+    }
+
+    # Defender escaneando en tiempo real cada captura de ShareX o el I/O de indexado de
+    # Everything es la causa más probable de lag esporádico que no se ve en ninguna config.
+    $defenderExclusions = $null
+    try { $defenderExclusions = @((Get-MpPreference -ErrorAction Stop).ExclusionPath) } catch { }
+    if ($null -ne $defenderExclusions) {
+        $wantExclusion = @($sharex, $(@("$env:ProgramFiles\Everything\Everything.exe", "${env:ProgramFiles(x86)}\Everything\Everything.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1)) |
+            Where-Object { $_ }
+        $missingExclusions = @($wantExclusion | Where-Object { $defenderExclusions -notcontains $_ })
+        Add-Check 'Defender exclusions applied' ($missingExclusions.Count -eq 0) `
+            $(if ($missingExclusions.Count -eq 0) { 'ShareX, Everything excluded from real-time scan' } else { "missing: $($missingExclusions -join ', ')" }) `
+            '.\install.ps1  (from an elevated shell)'
+    }
+
     # --- Dueños de hotkeys duplicados ----------------------------------------------
     $whkd = Test-WinarchyProcess 'whkd'
     Add-Check 'no duplicate hotkey owners (whkd)' (-not $whkd) `
@@ -230,6 +256,26 @@ function Invoke-WinarchyDoctor {
                  else { "installed -> $($ctxMenu.TargetPath)" }
     Add-Check 'WezTerm context menu (informational)' $true $ctxDetail `
         'winarchy wezterm context-menu install'
+
+    # --- Windhawk + mods recomendados (informativo, opt-in) ---------------------------
+    # No se le escribe nada a Windhawk: los mods leen SystemAccentColor* directo del
+    # registro que Set-WinarchyWindowsAppearance ya mantiene, así que alcanza con avisar.
+    $whRoot = "${env:ProgramFiles}\Windhawk"
+    $whInstalled = Test-Path (Join-Path $whRoot 'windhawk.exe')
+    if ($whInstalled) {
+        $whModsDir = Join-Path $env:LOCALAPPDATA 'Windhawk\Engine\Mods'
+        $recommended = @('classic-context-menu', 'windows-11-taskbar-styler', 'windows-11-start-menu-styler', 'windows-11-notification-center-styler')
+        $installedMods = if (Test-Path $whModsDir) { (Get-ChildItem $whModsDir -Filter '*.json' -ErrorAction SilentlyContinue).BaseName } else { @() }
+        $missingMods = @($recommended | Where-Object { $installedMods -notcontains $_ })
+        Add-Check 'Windhawk recommended mods (informational)' ($missingMods.Count -eq 0) `
+            $(if ($missingMods.Count -eq 0) { 'all recommended mods present' } else { "missing: $($missingMods -join ', ')" }) `
+            'install via the Windhawk app, then point their theme JSON at {ThemeResource SystemAccentColor*}'
+    }
+    else {
+        Add-Check 'Windhawk (informational)' $true `
+            'not installed — optional, only for win32 menu/taskbar styling' `
+            'https://windhawk.net (optional)'
+    }
 
     # --- Versión de Winarchy mismo (informativo, best-effort) -------------------------
     $ver = Get-WinarchyVersion

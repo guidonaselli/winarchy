@@ -52,6 +52,9 @@ sha256 = "c4680fda08b7e188017ceabed65d2d7252e6a0c0a3e0933a00aa54638a3e4f50"
 "eza-community.eza" = true
 "sharkdp.bat" = true
 "Fastfetch-cli.Fastfetch" = true
+# Backend de búsqueda de Flow Launcher (plugin Everything, instalado por Identity.ps1):
+# sin el índice de voidtools, Flow cae a su indexador propio, mucho más lento/limitado.
+"voidtools.Everything" = true
 
 [scoop]
 # Las mismas herramientas pueden venir de scoop en vez de winget. Se declaran por nombre

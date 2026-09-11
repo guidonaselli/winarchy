@@ -146,6 +146,8 @@ Set-WinarchyTheme -Name $initialTheme
 # update_check off); AHK hostea el tray del stack; komorebi no tiene tray.
 Set-WinarchyFlowIdentity
 Set-WinarchyFlowAppsKeyword
+Install-WinarchyFlowEverythingPlugin
+Set-WinarchyDefenderExclusions
 
 # --- 5. Autostart + taskbar (solo con -Activate) --------------------------------------
 if ($Activate) {
