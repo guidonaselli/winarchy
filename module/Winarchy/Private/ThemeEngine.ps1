@@ -632,17 +632,32 @@ function Set-WinarchyWindowsAppearance {
     # (incluso en themes dinámicos: el hue lo pone Windows, pero la barra igual reacciona).
     Set-ItemProperty -Path $personalize -Name 'ColorPrevalence' -Value 1 -Type DWord
     Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\DWM' -Name 'ColorPrevalence' -Value 1 -Type DWord
-    if ($SkipAccent) { return }
-    try {
-        $r = [Convert]::ToInt32($AccentHex.Substring(1, 2), 16)
-        $g = [Convert]::ToInt32($AccentHex.Substring(3, 2), 16)
-        $b = [Convert]::ToInt32($AccentHex.Substring(5, 2), 16)
-        $abgr = (0xFF -shl 24) -bor ($b -shl 16) -bor ($g -shl 8) -bor $r
-        # int32 negativo a propósito: DWord toma el patrón de bits; [uint32] valida rango y revienta
-        Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\DWM' -Name 'AccentColor' -Value $abgr -Type DWord
-        Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\DWM' -Name 'ColorizationColor' -Value $abgr -Type DWord
+    if (-not $SkipAccent) {
+        try {
+            $r = [Convert]::ToInt32($AccentHex.Substring(1, 2), 16)
+            $g = [Convert]::ToInt32($AccentHex.Substring(3, 2), 16)
+            $b = [Convert]::ToInt32($AccentHex.Substring(5, 2), 16)
+            $abgr = (0xFF -shl 24) -bor ($b -shl 16) -bor ($g -shl 8) -bor $r
+            # int32 negativo a propósito: DWord toma el patrón de bits; [uint32] valida rango y revienta
+            Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\DWM' -Name 'AccentColor' -Value $abgr -Type DWord
+            Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\DWM' -Name 'ColorizationColor' -Value $abgr -Type DWord
+        }
+        catch { Write-WinarchyWarn "Accent not applied: $($_.Exception.Message)" }
     }
-    catch { Write-WinarchyWarn "Accent not applied: $($_.Exception.Message)" }
+    Send-WinarchyColorSetChange
+}
+
+function Send-WinarchyColorSetChange {
+    <# WM_SETTINGCHANGE "ImmersiveColorSet": taskbar y apps releen modo/accent sin reiniciar explorer. #>
+    if (-not ('Winarchy.Native.SettingChange' -as [type])) {
+        Add-Type -Namespace Winarchy.Native -Name SettingChange -MemberDefinition @'
+[DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
+'@
+    }
+    $result = [UIntPtr]::Zero
+    # HWND_BROADCAST, WM_SETTINGCHANGE, SMTO_ABORTIFHUNG
+    [Winarchy.Native.SettingChange]::SendMessageTimeout([IntPtr]0xffff, 0x1A, [UIntPtr]::Zero, 'ImmersiveColorSet', 2, 1000, [ref]$result) | Out-Null
 }
 
 function Set-WinarchyWallpaper {
