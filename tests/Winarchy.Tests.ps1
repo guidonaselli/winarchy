@@ -1182,6 +1182,12 @@ Describe 'WezTerm terminal' {
         $ahk | Should -Match "EnvSet\('CLAUDE_CODE_CHILD_SESSION'\)"
         $ahk | Should -Match "EnvSet\('CLAUDECODE'\)"
     }
+
+    It 'activates and brings the terminal window to foreground on launch' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $ahk | Should -Match 'AllowSetForegroundWindow'
+        $ahk | Should -Match "WinActivate\('ahk_id ' hwnd\)"
+    }
 }
 
 Describe 'versions.lock.toml' {

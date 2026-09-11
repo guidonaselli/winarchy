@@ -48,7 +48,16 @@ WeztermExe := FileExist(A_ProgramFiles "\WezTerm\wezterm-gui.exe")
 ; arrancado antes de instalar WezTerm) y ahi WezTerm cae a sus defaults, sin theme ni pwsh.
 Wezterm(args := '') {
     global WeztermExe, RepoRoot
-    Run('"' WeztermExe '" --config-file "' RepoRoot '\config\wezterm\wezterm.lua"' (args ? ' ' args : ''))
+    DllCall('user32\AllowSetForegroundWindow', 'int', -1)
+    Run('"' WeztermExe '" --config-file "' RepoRoot '\config\wezterm\wezterm.lua"' (args ? ' ' args : ''), , , &pid)
+    if (pid && hwnd := WinWait('ahk_pid ' pid, , 2)) {
+        loop 10 {
+            if WinActive('ahk_id ' hwnd) || !WinExist('ahk_id ' hwnd)
+                break
+            try WinActivate('ahk_id ' hwnd)
+            Sleep(30)
+        }
+    }
 }
 
 Komorebic(cmd) {
@@ -56,6 +65,7 @@ Komorebic(cmd) {
 }
 
 Winarchy(args) {
+    DllCall('user32\AllowSetForegroundWindow', 'int', -1)
     Run('pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "' WinarchyPs1 '" ' args, , 'Hide')
 }
 
