@@ -7,24 +7,9 @@
 #SingleInstance Force
 ProcessSetPriority "High"   ; el dispatcher debe responder siempre, costo ~0
 
-; Limpia variables heredadas de agentes
-CleanEnvironment() {
-    pEnv := DllCall("kernel32\GetEnvironmentStringsW", "Ptr")
-    if (!pEnv)
-        return
-    offset := 0
-    while (str := StrGet(pEnv + offset, "UTF-16")) {
-        offset += (StrLen(str) + 1) * 2
-        eq := InStr(str, "=")
-        if (eq > 1) {
-            key := SubStr(str, 1, eq - 1)
-            if (key ~= "^(?i:CLAUDE|GEMINI|CODEX)")
-                DllCall("kernel32\SetEnvironmentVariableW", "Str", key, "Ptr", 0)
-        }
-    }
-    DllCall("kernel32\FreeEnvironmentStringsW", "Ptr", pEnv)
-}
-CleanEnvironment()
+; Limpia flags de sub-sesión de Claude Code heredados
+EnvSet('CLAUDE_CODE_CHILD_SESSION')
+EnvSet('CLAUDECODE')
 
 ; --- Rutas (el script vive en <repo>\config\ahk) -----------------------------
 RepoRoot := RegExReplace(A_ScriptDir, "\\config\\ahk$")

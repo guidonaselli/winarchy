@@ -1177,10 +1177,10 @@ Describe 'WezTerm terminal' {
         @($ahk | Where-Object { $_ -match '^\^a::' }) | Should -BeNullOrEmpty
     }
 
-    It 'cleans inherited agent environment variables on startup' {
+    It 'cleans inherited agent session variables on startup' {
         $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
-        $ahk | Should -Match 'GetEnvironmentStringsW'
-        $ahk | Should -Match 'CLAUDE\|GEMINI\|CODEX'
+        $ahk | Should -Match "EnvSet\('CLAUDE_CODE_CHILD_SESSION'\)"
+        $ahk | Should -Match "EnvSet\('CLAUDECODE'\)"
     }
 }
 
@@ -1823,12 +1823,11 @@ Describe 'Runtime configuration environment' {
         }
     }
 
-    It 'removes AI agent environment variables before reloading AHK' {
+    It 'removes Claude child session variables before reloading AHK' {
         InModuleScope Winarchy -Parameters @{ Root = $script:Root } {
             param($Root)
-            $env:CLAUDE_TEST_VAR = '1'
-            $env:GEMINI_TEST_VAR = '1'
-            $env:CODEX_TEST_VAR = '1'
+            $env:CLAUDE_CODE_CHILD_SESSION = '1'
+            $env:CLAUDECODE = '1'
             try {
                 Mock Get-WinarchyRoot { $Root }
                 Mock Test-WinarchyProcess { $false }
@@ -1839,14 +1838,11 @@ Describe 'Runtime configuration environment' {
                 Mock Start-Process {}
 
                 Invoke-WinarchyReload
-                $env:CLAUDE_TEST_VAR | Should -BeNullOrEmpty
-                $env:GEMINI_TEST_VAR | Should -BeNullOrEmpty
-                $env:CODEX_TEST_VAR | Should -BeNullOrEmpty
+                $env:CLAUDE_CODE_CHILD_SESSION | Should -BeNullOrEmpty
+                $env:CLAUDECODE | Should -BeNullOrEmpty
             }
             finally {
-                [System.Environment]::SetEnvironmentVariable('CLAUDE_TEST_VAR', $null)
-                [System.Environment]::SetEnvironmentVariable('GEMINI_TEST_VAR', $null)
-                [System.Environment]::SetEnvironmentVariable('CODEX_TEST_VAR', $null)
+                Remove-Item Env:CLAUDE_CODE_CHILD_SESSION, Env:CLAUDECODE -ErrorAction SilentlyContinue
             }
         }
     }

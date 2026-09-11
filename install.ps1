@@ -184,9 +184,7 @@ if ($Activate) {
     if ($komorebic) { & $komorebic start }
     if ($yasb) { & $yasb start }
     if ($ahkExe) {
-        [System.Environment]::GetEnvironmentVariables().Keys |
-            Where-Object { $_ -match '^(CLAUDE|GEMINI|CODEX)' } |
-            ForEach-Object { [System.Environment]::SetEnvironmentVariable($_, $null) }
+        Remove-Item Env:CLAUDE_CODE_CHILD_SESSION, Env:CLAUDECODE -ErrorAction SilentlyContinue
         Start-Process $ahkExe -ArgumentList "`"$Root\config\ahk\winarchy.ahk`""
     }
 }

@@ -717,9 +717,7 @@ function Invoke-WinarchyReload {
     $ahk = Join-Path (Get-WinarchyRoot) 'config\ahk\winarchy.ahk'
     $ahkExe = Get-WinarchyAhkExe
     if ($ahkExe) {
-        [System.Environment]::GetEnvironmentVariables().Keys |
-            Where-Object { $_ -match '^(CLAUDE|GEMINI|CODEX)' } |
-            ForEach-Object { [System.Environment]::SetEnvironmentVariable($_, $null) }
+        Remove-Item Env:CLAUDE_CODE_CHILD_SESSION, Env:CLAUDECODE -ErrorAction SilentlyContinue
         Start-Process $ahkExe -ArgumentList "/restart `"$ahk`""
     }
     if (Test-WinarchyProcess 'Flow.Launcher') {
