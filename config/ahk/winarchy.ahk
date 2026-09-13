@@ -764,14 +764,12 @@ GameWatch() {
     ; vivos durante el juego. game-mode NO pausa komorebi (solo flota la ventana del
     ; juego vía ignore-rule), así que el tiling y SUPER+1/2 siguen funcionando; los
     ; combos de geometría aplican al resto de ventanas tileadas. game-mode solo
-    ; trackea estado y refresca games.toml.
+    ; trackea estado y refresca games.toml. Animaciones ya apagadas siempre (config).
     if (active && !GameModeActive) {
         GameModeActive := true
         LoadGames()                              ; refresco para altas en caliente
-        Komorebic('animation disable')           ; nada de reflows animados mientras jugás
     } else if (!active && GameModeActive) {
         GameModeActive := false
-        Komorebic('animation enable')
     }
 }
 

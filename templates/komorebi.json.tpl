@@ -19,7 +19,7 @@
   "transparency": false,
   "transparency_alpha": 225,
   "animation": {
-    "enabled": true,
+    "enabled": false,
     "style": "EaseOutCubic",
     "duration": 200,
     "fps": 60
