@@ -135,23 +135,38 @@ function Install-WinarchyFlowEverythingPlugin {
     }
 }
 
+function Get-WinarchyDefenderExclusionPaths {
+    <# Paths a excluir del real-time scan de Defender: solo los presentes en la máquina.
+       Cubre dos causas de lag:
+       - I/O frecuente de apps del stack (ShareX en cada captura, Everything indexando).
+       - Procesos que Winarchy spawnea por hotkey (pwsh.exe vía `winarchy <cmd>`,
+         komorebic.exe vía los hotkeys de tiling): sin exclusión, Defender escanea el
+         binario y los .ps1 del repo la primera vez que se tocan en la sesión, que es
+         exactamente el lag "solo la primera vez" que se ve en captura/cierre de ventana.
+    #>
+    $komorebic = (Get-Command komorebic.exe -ErrorAction SilentlyContinue).Source
+    if (-not $komorebic) {
+        $komorebic = "$env:ProgramFiles\komorebi\bin\komorebic.exe"
+    }
+    @(
+        (Get-WinarchyShareXExe),
+        "$env:USERPROFILE\Documents\ShareX",
+        "$env:ProgramFiles\Everything\Everything.exe",
+        "${env:ProgramFiles(x86)}\Everything\Everything.exe",
+        (Get-Command pwsh.exe -ErrorAction SilentlyContinue).Source,
+        $komorebic,
+        (Get-WinarchyRoot)
+    ) | Where-Object { $_ -and (Test-Path $_) }
+}
+
 function Set-WinarchyDefenderExclusions {
-    <# Exclusiones de Windows Defender para procesos/carpetas del stack que escriben
-       archivos seguido (ShareX en cada captura, Everything indexando el volumen):
-       el escaneo en tiempo real de esos I/O es la causa más probable de lag esporádico
-       no reproducible por config. Requiere shell elevado; si no lo está, no falla,
-       solo avisa (mismo patrón que el resto de install.ps1 con operaciones de sistema). #>
+    <# Requiere shell elevado; si no lo está, no falla, solo avisa (mismo patrón que el
+       resto de install.ps1 con operaciones de sistema). #>
     if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         Write-WinarchyWarn 'Defender exclusions need an elevated shell; run "winarchy doctor" from an admin PowerShell to apply them.'
         return
     }
-    $paths = @(
-        "$env:ProgramFiles\ShareX\ShareX.exe",
-        "${env:ProgramFiles(x86)}\ShareX\ShareX.exe",
-        "$env:USERPROFILE\Documents\ShareX",
-        "$env:ProgramFiles\Everything\Everything.exe",
-        "${env:ProgramFiles(x86)}\Everything\Everything.exe"
-    ) | Where-Object { Test-Path $_ }
+    $paths = @(Get-WinarchyDefenderExclusionPaths)
     if ($paths.Count -eq 0) {
         Write-WinarchyOk 'No ShareX/Everything paths found to exclude yet'
         return

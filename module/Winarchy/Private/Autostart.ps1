@@ -70,6 +70,31 @@ function Get-WinarchyAutostartComponents {
         })
     }
 
+    # Watcher del ícono de red: escribe state\net-icon.flag en loop para que YASB lea con
+    # `cmd /c type` en vez de relanzar powershell.exe cada 15s (ver Start-NetIcon.ps1).
+    $netIconScript = Join-Path $root 'scripts\Start-NetIcon.ps1'
+    if (Test-Path $netIconScript) {
+        $ps = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $items.Add([pscustomobject]@{
+            Key = 'net-icon'; TaskName = 'net-icon'; LnkName = 'Winarchy net icon.lnk'
+            Exe = $ps
+            Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$netIconScript`""
+            Delay = 'PT0S'
+        })
+    }
+
+    # ShareX resident en tray (-silent: sin ventana principal) para que la primera
+    # captura del día no pague también el cold-start del exe, solo el hotkey → -Action.
+    $sharexExe = Get-WinarchyShareXExe
+    if ($sharexExe) {
+        $items.Add([pscustomobject]@{
+            Key = 'sharex'; TaskName = 'sharex'; LnkName = 'Winarchy ShareX.lnk'
+            Exe = $sharexExe
+            Arguments = '-silent'
+            Delay = 'PT0S'
+        })
+    }
+
     # AHK arranca vía el launcher scripts\Start-Ahk.ps1 (espera shell listo).
     $ahkExe = Get-WinarchyAhkExe
     if ($ahkExe) {
@@ -201,7 +226,7 @@ function Register-WinarchyAutostart {
             Remove-Item $xmlPath -Force -ErrorAction SilentlyContinue
         }
     }
-    Write-WinarchyOk 'Autostart registrado (Scheduled Tasks At-LogOn): komorebi, YASB, AHK'
+    Write-WinarchyOk 'Autostart registrado (Scheduled Tasks At-LogOn): komorebi, YASB, net-icon, ShareX, AHK'
 }
 
 function Unregister-WinarchyAutostart {

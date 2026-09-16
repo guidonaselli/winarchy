@@ -230,11 +230,11 @@ widgets:
   # un icono inicial (verificado en YASB 2.0.6, 2026-08-23: con ethernet_icon +
   # hide_if_ethernet:false el widget nativo igual pinta "{wifi_icon}" crudo sobre
   # Ethernet, asi que este workaround sigue haciendo falta).
-  # net-icon.ps1 decide el glifo de forma sincrónica con
-  # fallback a "desconectado", así la barra nunca muestra la plantilla cruda y
-  # se comporta como el resto de los iconos. Vive junto a este config
-  # (YASB_CONFIG_HOME). Tradeoff: sin selector de redes en la barra; el click
-  # abre la config de red de Windows.
+  # config\yasb\net-icon.ps1 decide el glifo de forma sincrónica con fallback a
+  # "desconectado", así la barra nunca muestra la plantilla cruda y se comporta
+  # como el resto de los iconos. Lo mantiene actualizado scripts\Start-NetIcon.ps1
+  # (watcher residente, ver ese script para el porqué). Tradeoff: sin selector de
+  # redes en la barra; el click abre la config de red de Windows.
   wifi:
     type: "yasb.custom.CustomWidget"
     options:
@@ -246,12 +246,11 @@ widgets:
       label: "{data}"
       label_alt: "{data}"
       exec_options:
-        # NO TOCAR el quoting sin testear: el entorno de exec de YASB no tiene
-        # System32 en PATH (por eso el path COMPLETO a powershell.exe, no "powershell"),
-        # y YASB re-cita los argumentos (list2cmdline), así que el path del script va
-        # SIN comillas —si se las ponés, quedan dobladas y powershell tira "Illegal
-        # characters in path". use_shell:true es lo que expande %SystemRoot%/%YASB_CONFIG_HOME%.
-        run_cmd: "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -ExecutionPolicy Bypass -File %YASB_CONFIG_HOME%\\net-icon.ps1"
+        # cmd, NO powershell: el glifo lo mantiene actualizado scripts\Start-NetIcon.ps1
+        # (watcher residente del autostart, ver Autostart.ps1) escribiendo a
+        # state\net-icon.flag; acá solo se lee, mismo patrón que game_mode/stay_awake.
+        # use_shell expande %KOMOREBI_CONFIG_HOME%.
+        run_cmd: 'cmd.exe /c if exist %KOMOREBI_CONFIG_HOME%\..\..\state\net-icon.flag type %KOMOREBI_CONFIG_HOME%\..\..\state\net-icon.flag'
         run_interval: 15000
         return_format: "string"
         use_shell: true

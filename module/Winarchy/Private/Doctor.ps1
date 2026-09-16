@@ -193,8 +193,7 @@ function Invoke-WinarchyDoctor {
 
     # ShareX no se verificaba y de él dependen cinco hotkeys, `winarchy screenshot` y la
     # creación de webapps: sin él esos atajos fallan en silencio.
-    $sharex = @("$env:ProgramFiles\ShareX\ShareX.exe", "${env:ProgramFiles(x86)}\ShareX\ShareX.exe") |
-        Where-Object { Test-Path $_ } | Select-Object -First 1
+    $sharex = Get-WinarchyShareXExe
     Add-Check 'ShareX installed' ([bool]$sharex) `
         $(if ($sharex) { "screenshots, screen recording and webapps — $((Get-Item $sharex).VersionInfo.ProductVersion)" } else { 'missing: SUPER+Shift+S/W/P/V/G and `winarchy screenshot` will fail' }) `
         'winget install ShareX.ShareX'
@@ -212,16 +211,16 @@ function Invoke-WinarchyDoctor {
             '.\install.ps1  (installs it automatically)'
     }
 
-    # Defender escaneando en tiempo real cada captura de ShareX o el I/O de indexado de
-    # Everything es la causa más probable de lag esporádico que no se ve en ninguna config.
+    # Defender escaneando en tiempo real cada captura de ShareX, el I/O de indexado de
+    # Everything, o cada spawn de pwsh.exe/komorebic.exe por hotkey, es la causa más
+    # probable del lag "solo la primera vez" que no se ve en ninguna config.
     $defenderExclusions = $null
     try { $defenderExclusions = @((Get-MpPreference -ErrorAction Stop).ExclusionPath) } catch { }
     if ($null -ne $defenderExclusions) {
-        $wantExclusion = @($sharex, $(@("$env:ProgramFiles\Everything\Everything.exe", "${env:ProgramFiles(x86)}\Everything\Everything.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1)) |
-            Where-Object { $_ }
+        $wantExclusion = @(Get-WinarchyDefenderExclusionPaths)
         $missingExclusions = @($wantExclusion | Where-Object { $defenderExclusions -notcontains $_ })
         Add-Check 'Defender exclusions applied' ($missingExclusions.Count -eq 0) `
-            $(if ($missingExclusions.Count -eq 0) { 'ShareX, Everything excluded from real-time scan' } else { "missing: $($missingExclusions -join ', ')" }) `
+            $(if ($missingExclusions.Count -eq 0) { 'ShareX, Everything, pwsh, komorebic, repo excluded from real-time scan' } else { "missing: $($missingExclusions -join ', ')" }) `
             '.\install.ps1  (from an elevated shell)'
     }
 

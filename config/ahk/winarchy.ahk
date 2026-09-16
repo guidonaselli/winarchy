@@ -64,6 +64,21 @@ Komorebic(cmd) {
     Run('"' KomorebicExe '" ' cmd, , 'Hide')
 }
 
+; ShareX directo: como Komorebic(), evita el spawn de pwsh + Import-Module completo del
+; módulo (24 archivos) que paga `winarchy screenshot` por cada hotkey de captura.
+ShareXExe := FileExist(A_ProgramFiles "\ShareX\ShareX.exe")
+    ? A_ProgramFiles "\ShareX\ShareX.exe"
+    : (FileExist(EnvGet('ProgramFiles(x86)') "\ShareX\ShareX.exe") ? EnvGet('ProgramFiles(x86)') "\ShareX\ShareX.exe" : "")
+
+Sharex(action) {
+    global ShareXExe
+    if !ShareXExe {
+        TrayTip('ShareX no está instalado (winget install ShareX.ShareX)', 'Winarchy')
+        return
+    }
+    Run('"' ShareXExe '" -' action, , 'Hide')
+}
+
 Winarchy(args) {
     DllCall('user32\AllowSetForegroundWindow', 'int', -1)
     Run('pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "' WinarchyPs1 '" ' args, , 'Hide')
@@ -928,14 +943,14 @@ AccentWatch() {
 #!+,::Komorebic('cycle-move-workspace-to-monitor previous')  ; move the whole workspace to the previous monitor
 #!+.::Komorebic('cycle-move-workspace-to-monitor next')      ; move the whole workspace to the next monitor
 
-; --- Captura (ShareX via `winarchy screenshot`) ----------------------------------------------
-#+s::Winarchy('screenshot region')                ; region capture
-#+w::Winarchy('screenshot window')                ; active window capture
-#+p::Winarchy('screenshot full')                  ; fullscreen capture
-#+v::Winarchy('screenshot record')                ; screen recording
-#^v::Winarchy('screenshot stop')                  ; stop recording
-#^q::Winarchy('screenshot qr')                    ; decode a QR on screen
-#^o::Winarchy('screenshot ocr')                   ; text from screen
+; --- Captura (ShareX directo, ver Sharex() arriba) -------------------------------------
+#+s::Sharex('RectangleRegion')                    ; region capture
+#+w::Sharex('ActiveWindow')                       ; active window capture
+#+p::Sharex('PrintScreen')                        ; fullscreen capture
+#+v::Sharex('ScreenRecorder')                     ; screen recording
+#^v::Sharex('StopScreenRecording')                ; stop recording
+#^q::Sharex('QRCodeScanRegion')                   ; decode a QR on screen
+#^o::Sharex('OCR')                                ; text from screen
 
 ; --- Themes / help --------------------------------------------------------------------
 #+t::Winarchy('theme next')                       ; next theme
@@ -946,7 +961,7 @@ AccentWatch() {
 #^n::Run('explorer.exe ms-settings:network')     ; network
 #^d::Run('explorer.exe ms-settings:display')     ; display
 #^p::Run('explorer.exe ms-settings:powersleep')  ; power
-#+g::Winarchy('screenshot record-gif')            ; GIF recording
+#+g::Sharex('ScreenRecorderGIF')                  ; GIF recording
 #^t::Winarchy('theme gallery')                    ; theme gallery
 #^Space::Winarchy('background next')              ; next background of the active theme
 #^+a::Winarchy('agent launch')                    ; preferred coding agent

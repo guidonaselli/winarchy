@@ -89,10 +89,7 @@ function Invoke-WinarchyScreenshot {
     if (-not $script:CaptureActions.Contains($Kind)) {
         throw "Unknown capture '$Kind'. Available: $($script:CaptureActions.Keys -join ', ')"
     }
-    $sharex = @(
-        "$env:ProgramFiles\ShareX\ShareX.exe",
-        "${env:ProgramFiles(x86)}\ShareX\ShareX.exe"
-    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    $sharex = Get-WinarchyShareXExe
     if (-not $sharex) { throw 'ShareX is not installed (winget install ShareX.ShareX).' }
     Start-Process $sharex -ArgumentList "-$($script:CaptureActions[$Kind])"
 }

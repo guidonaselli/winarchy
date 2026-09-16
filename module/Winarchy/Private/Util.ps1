@@ -49,6 +49,12 @@ function Get-WinarchyKomorebiExe {
     $found
 }
 
+function Get-WinarchyShareXExe {
+    <# ShareX.exe en su ubicación estándar (Program Files o x86); $null si no está. #>
+    @("$env:ProgramFiles\ShareX\ShareX.exe", "${env:ProgramFiles(x86)}\ShareX\ShareX.exe") |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+
 function Start-WinarchyKomorebi {
     <#
       Arranca komorebi de forma robusta e instantánea. `komorebic start` es flaky en
