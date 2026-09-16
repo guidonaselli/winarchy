@@ -1349,6 +1349,7 @@ Describe 'App rules (community ASC + user layer)' {
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
             Mock Update-WinarchyKomorebiRules { }
             Mock Test-WinarchyProcess { $true }
+            if (-not (Get-Command komorebic -ErrorAction SilentlyContinue)) { function komorebic { } }
             Mock komorebic { }
 
             Add-WinarchyUserRule -Category 'floating' -Field 'exe' -Value 'PicView.exe'
