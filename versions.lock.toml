@@ -8,7 +8,7 @@
 
 [core]
 komorebi = "0.1.41"
-yasb = "2.0.6"
+yasb = "2.0.7"
 # Flow y AHK también van pinneados: el stack depende de su comportamiento concreto
 # (ToggleFlow relanza el exe de Flow; AHK es el dueño único de hotkeys), así que un major
 # suyo no debe entrar por `winarchy update` sin que alguien lea el changelog.

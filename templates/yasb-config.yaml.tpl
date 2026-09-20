@@ -45,7 +45,7 @@ bars:
     widgets:
       left: ["home", "komorebi_workspaces", "komorebi_active_layout", "active_window", "extras"]
       center: ["clock"]
-      right: ["weather", "game_mode", "stay_awake", "media", "claude_usage", "system", "connections", "volume", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
+      right: ["weather", "game_mode", "stay_awake", "media", "ai", "system", "connections", "volume", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
     layouts:
       left:
         alignment: "left"
@@ -385,6 +385,18 @@ widgets:
         collapsed_label: "▸"
         expanded_label: "◂"
 
+  ai:
+    type: "yasb.grouper.GrouperWidget"
+    options:
+      class_name: "ai-grouper"
+      widgets: ["claude_usage", "codex_usage"]
+      hide_empty: false
+      collapse_options:
+        enabled: true
+        label_position: "left"
+        collapsed_label: "󰚩"
+        expanded_label: "◂"
+
   system:
     type: "yasb.grouper.GrouperWidget"
     options:
@@ -467,10 +479,44 @@ widgets:
       label_alt: "<span>󰧑</span> {seven_day}%"
       update_interval: 300
       cache_ttl: 300
+      token_history:
+        enabled: true
+        default_period: "today"
+        show_graph: false
+        show_models: true
       callbacks:
         on_left: "toggle_menu"
-        on_middle: "do_nothing"
+        on_middle: "refresh"
         on_right: "toggle_label"
+      menu:
+        blur: false
+        round_corners: true
+        alignment: "right"
+        direction: "down"
+        offset_top: 6
+
+  codex_usage:
+    type: "yasb.codex_usage.CodexUsageWidget"
+    options:
+      label: "<span>󰆍</span> {primary_used}%"
+      label_alt: "<span>󰆍</span> {secondary_used}%"
+      update_interval: 300
+      cache_ttl: 300
+      show_token_usage: true
+      callbacks:
+        on_left: "toggle_menu"
+        on_middle: "refresh"
+        on_right: "toggle_label"
+      menu:
+        blur: false
+        round_corners: true
+        alignment: "right"
+        direction: "down"
+        offset_top: 6
+        show_overview: true
+        show_models: true
+        show_activity: true
+        show_details: true
 
   # Click: centro de notificaciones de Windows. Click derecho: limpiar.
   notifications:

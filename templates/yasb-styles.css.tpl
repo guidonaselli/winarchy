@@ -147,12 +147,14 @@
 }
 
 .extras-grouper .widget,
+.ai-grouper .widget,
 .system-grouper .widget,
 .connections-grouper .widget {
     padding: 0 2px;
 }
 
 .extras-grouper .widget .icon,
+.ai-grouper .widget .icon,
 .system-grouper .widget .icon,
 .connections-grouper .widget .icon {
     padding: 0 4px;
@@ -167,6 +169,7 @@
 }
 
 .extras-grouper .grouper-button,
+.ai-grouper .grouper-button,
 .system-grouper .grouper-button,
 .connections-grouper .grouper-button {
     color: {{ui.net}};
@@ -178,6 +181,7 @@
 }
 
 .extras-grouper .grouper-button:hover,
+.ai-grouper .grouper-button:hover,
 .system-grouper .grouper-button:hover,
 .connections-grouper .grouper-button:hover {
     color: {{colors.foreground}};
@@ -189,7 +193,9 @@
 }
 
 .claude-usage .label,
-.claude-usage .icon {
+.claude-usage .icon,
+.codex-usage .label,
+.codex-usage .icon {
     color: {{ui.media}};
 }
 
@@ -313,4 +319,252 @@
 /* Estado de alerta / urgencia */
 .urgent, .alert {
     color: {{borders.urgent}};
+}
+
+/* Popups de uso de Claude y Codex */
+.claude-usage-menu,
+.codex-usage-menu {
+    background-color: {{colors.background}};
+    border: 1px solid {{colors.color8}};
+    font-family: 'Segoe UI', sans-serif;
+    min-width: 320px;
+}
+
+.claude-usage-menu .header,
+.codex-usage-menu .header {
+    padding: 12px 16px 10px 16px;
+    border-bottom: 1px solid {{colors.color8}};
+}
+
+.claude-usage-menu .header .text,
+.codex-usage-menu .header .text {
+    color: {{colors.foreground}};
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.claude-usage-menu .header .refresh,
+.claude-usage-menu .header .pin-btn,
+.codex-usage-menu .header .refresh {
+    color: {{colors.color8}};
+    font-size: 15px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background-color: transparent;
+    border: none;
+}
+
+.claude-usage-menu .header .refresh:hover,
+.claude-usage-menu .header .pin-btn:hover,
+.codex-usage-menu .header .refresh:hover {
+    color: {{colors.foreground}};
+    background-color: {{colors.color0}};
+}
+
+.claude-usage-menu .header .pin-btn {
+    font-family: 'Segoe Fluent Icons';
+}
+
+.claude-usage-menu .header .pin-btn.pinned {
+    color: {{colors.accent_ui}};
+}
+
+.codex-usage-menu .header .refresh {
+    font-family: 'Segoe Fluent Icons';
+}
+
+.codex-usage-menu .header .refresh-status {
+    color: {{colors.color8}};
+    font-size: 12px;
+    padding-right: 6px;
+}
+
+.codex-usage-menu .header .refresh-status.success {
+    color: {{colors.color2}};
+}
+
+.codex-usage-menu .header .refresh-status.error {
+    color: {{colors.color1}};
+}
+
+.claude-usage-menu .section,
+.codex-usage-menu .section {
+    padding: 12px 16px;
+    border-bottom: 1px solid {{colors.color0}};
+}
+
+.claude-usage-menu .section.tokens {
+    border-bottom: none;
+}
+
+.claude-usage-menu .section .title,
+.codex-usage-menu .section .title {
+    color: {{colors.color8}};
+    font-size: 12px;
+    font-weight: 600;
+    padding-bottom: 6px;
+}
+
+.claude-usage-menu .section .progress,
+.codex-usage-menu .section .progress,
+.claude-usage-menu .section.tokens .model-rows .progress,
+.codex-usage-menu .model-bar {
+    background-color: {{colors.color0}};
+    border-radius: 4px;
+    min-height: 8px;
+    max-height: 8px;
+}
+
+.claude-usage-menu .section .progress .fill,
+.codex-usage-menu .section .progress .fill {
+    border-radius: 4px;
+}
+
+.claude-usage-menu .section .progress.low .fill,
+.codex-usage-menu .section .progress .fill {
+    background-color: {{colors.color2}};
+}
+
+.claude-usage-menu .section .progress.medium .fill,
+.codex-usage-menu .section .progress.low .fill {
+    background-color: {{colors.color3}};
+}
+
+.claude-usage-menu .section .progress.high .fill,
+.codex-usage-menu .section .progress.critical .fill {
+    background-color: {{colors.color1}};
+}
+
+.claude-usage-menu .section .footer .percent,
+.codex-usage-menu .section .remaining {
+    color: {{colors.foreground}};
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.claude-usage-menu .section .footer .percent.low,
+.codex-usage-menu .section .remaining.good {
+    color: {{colors.color2}};
+}
+
+.claude-usage-menu .section .footer .percent.medium,
+.codex-usage-menu .section .remaining.low {
+    color: {{colors.color3}};
+}
+
+.claude-usage-menu .section .footer .percent.high,
+.codex-usage-menu .section .remaining.critical {
+    color: {{colors.color1}};
+}
+
+.claude-usage-menu .section .footer .reset,
+.codex-usage-menu .section .reset,
+.codex-usage-menu .section .used {
+    color: {{colors.color8}};
+    font-size: 12px;
+}
+
+.claude-usage-menu .section .date,
+.codex-usage-menu .section .date {
+    color: {{colors.color8}};
+    font-size: 11px;
+}
+
+.claude-usage-menu .section .period-btn,
+.codex-usage-menu .page-button,
+.codex-usage-menu .month-nav {
+    color: {{colors.color8}};
+    background-color: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 2px 8px;
+}
+
+.claude-usage-menu .section .period-btn.active,
+.claude-usage-menu .section .period-btn:hover,
+.codex-usage-menu .page-button:hover,
+.codex-usage-menu .month-nav:hover {
+    color: {{colors.foreground}};
+    background-color: {{colors.color0}};
+}
+
+.codex-usage-menu .page-button,
+.codex-usage-menu .month-nav {
+    font-family: 'Segoe Fluent Icons';
+}
+
+.codex-usage-menu .page-button:disabled,
+.codex-usage-menu .month-nav:disabled {
+    color: {{colors.color0}};
+}
+
+.claude-usage-menu .section .token-total,
+.codex-usage-menu .period-value {
+    color: {{colors.foreground}};
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.codex-usage-menu .period-name,
+.codex-usage-menu .section-title,
+.codex-usage-menu .activity-title,
+.codex-usage-menu .page-indicator,
+.codex-usage-menu .details .name,
+.codex-usage-menu .history-note,
+.codex-usage-menu .empty-state {
+    color: {{colors.color8}};
+    font-size: 12px;
+}
+
+.codex-usage-menu .page {
+    padding: 12px 16px;
+}
+
+.codex-usage-menu .details .value,
+.codex-usage-menu .model-name,
+.claude-usage-menu .section.tokens .model-name {
+    color: {{colors.foreground}};
+    font-size: 12px;
+}
+
+.codex-usage-menu .model-value,
+.claude-usage-menu .section.tokens .model-total {
+    color: {{colors.color8}};
+    font-size: 12px;
+}
+
+.codex-usage-menu .model-bar .fill,
+.claude-usage-menu .section.tokens .model-rows .progress .fill {
+    background-color: {{colors.accent_ui}};
+    border-radius: 3px;
+}
+
+.codex-usage-menu .details .status.live {
+    color: {{colors.color2}};
+}
+
+.codex-usage-menu .details .status.stale,
+.codex-usage-menu .details .error {
+    color: {{colors.color1}};
+}
+
+.codex-usage-menu .heatmap .cell {
+    background-color: {{colors.color0}};
+    border-radius: 3px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 20px;
+    max-height: 20px;
+}
+
+.codex-usage-menu .heatmap .cell.level-1,
+.codex-usage-menu .heatmap .cell.level-2,
+.codex-usage-menu .heatmap .cell.level-3,
+.codex-usage-menu .heatmap .cell.level-4 {
+    background-color: {{colors.accent_ui}};
+}
+
+.codex-usage-menu .heatmap .cell.future,
+.codex-usage-menu .heatmap .cell.outside {
+    background-color: transparent;
 }
