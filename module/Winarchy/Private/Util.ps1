@@ -95,6 +95,17 @@ function New-WinarchySnapshot {
     $dest
 }
 
+function Backup-WinarchyRegistryKey {
+    <# Exporta una clave del registro (formato `reg export`) a backups/<timestamp>-<label>/. #>
+    param([Parameter(Mandatory)][string]$Key, [string]$Label = 'registry')
+    $dest = Join-Path (Get-WinarchyBackupsDir) "$(Get-Date -Format 'yyyyMMdd-HHmmss')-$Label"
+    New-Item -ItemType Directory -Path $dest -Force | Out-Null
+    $file = Join-Path $dest (($Key -replace '[\\:]', '_') + '.reg')
+    $null = reg.exe export $Key $file /y 2>&1
+    if ($LASTEXITCODE -ne 0) { Remove-Item $dest -Recurse -Force -ErrorAction SilentlyContinue; return }
+    $dest
+}
+
 function ConvertTo-WinarchyFlatContext {
     <# Aplana hashtable anidada a claves "seccion.clave" para el renderer. #>
     param([Parameter(Mandatory)][hashtable]$Data, [string]$Prefix = '')

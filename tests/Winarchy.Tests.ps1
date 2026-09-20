@@ -1594,6 +1594,35 @@ Describe 'Window slots' {
         }
     }
 
+    It 'does not learn a slot for an app that has none' {
+        InModuleScope Winarchy -Parameters @{ State = $script:State; Monitor = $script:Monitor2 } {
+            param($State, $Monitor)
+            $prefs = @([pscustomobject]@{ Exe = 'Discord.exe'; Monitor = $Monitor; Workspace = 0; WorkspaceName = 'A'; Slot = $null; Pin = $false })
+            Get-WinarchyLearnedSlots -State $State -Pref $prefs | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'declares every hardening setting as a (path, name, value) triple' {
+        InModuleScope Winarchy {
+            $settings = @(Get-WinarchyHardeningSettings)
+            $settings.Count | Should -BeGreaterThan 20
+            foreach ($s in $settings) {
+                @($s).Count | Should -Be 3
+                $s[0] | Should -Match '^HKCU:\\'
+            }
+        }
+    }
+
+    It 'never captures explorer or terminals as placements' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyGames { @() }
+            $skip = @(Get-WinarchyUnplaceableExes)
+            $skip | Should -Contain 'explorer.exe'
+            $skip | Should -Contain 'WindowsTerminal.exe'
+            $skip | Should -Contain 'wezterm-gui.exe'
+        }
+    }
+
     It 'navigates by index, never by exe, to execute a move' {
         InModuleScope Winarchy {
             # foco en el container 0, hay que mover el container 2 hasta el 0

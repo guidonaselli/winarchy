@@ -51,12 +51,12 @@ Invoke-Step 'Eliminar el autostart (Scheduled Tasks + .lnk legacy)' { Unregister
     'Autostart eliminado'
 
 Invoke-Step 'Restaurar la taskbar nativa (quitar auto-hide)' {
-    $stuck = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3'
-    $val = (Get-ItemProperty -Path $stuck -Name Settings).Settings
-    $val[8] = $val[8] -band (-bnot 0x01)
-    Set-ItemProperty -Path $stuck -Name Settings -Value $val
-    Stop-Process -Name explorer -Force
+    $null = Set-WinarchyTaskbarAutoHide -Enabled $false
 } 'Taskbar nativa restaurada'
+
+Invoke-Step 'Revertir el hardening de Windows (Bing, sugerencias, publicidad)' {
+    $null = Set-WinarchyWindowsHardening -Revert
+} 'Hardening de Windows revertido'
 
 Invoke-Step 'Revertir el delay de Startup al default de Windows' {
     Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize' `

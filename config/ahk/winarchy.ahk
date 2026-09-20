@@ -830,6 +830,7 @@ AccentWatch() {
 ; --- Apps ---------------------------------------------------------------------
 #Enter::Wezterm()                                ; terminal
 #Space::ToggleFlow()                             ; Flow Launcher
+#s::ToggleFlow()                                 ; Win+S (search) → Flow + Everything
 #b::Run(DefaultBrowser())                        ; browser
 #e::Run('explorer.exe')                          ; file explorer
 ; Win+N queda libre para Windows (centro de notificaciones; la campanita de YASB lo simula)

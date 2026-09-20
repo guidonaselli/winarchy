@@ -29,11 +29,7 @@ Write-WinarchyOk 'Stack Winarchy detenido y sin autostart'
 
 # Taskbar nativa de vuelta (Seelen la maneja a su modo)
 try {
-    $stuck = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3'
-    $val = (Get-ItemProperty -Path $stuck -Name Settings).Settings
-    $val[8] = $val[8] -band (-bnot 0x01)
-    Set-ItemProperty -Path $stuck -Name Settings -Value $val
-    Stop-Process -Name explorer -Force
+    $null = Set-WinarchyTaskbarAutoHide -Enabled $false
 }
 catch { Write-WinarchyWarn "Taskbar: $($_.Exception.Message)" }
 

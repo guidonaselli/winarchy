@@ -161,14 +161,16 @@ if ($Activate) {
 
     # Taskbar nativa en auto-hide (no oculta del todo: ver design D6/riesgos)
     try {
-        $stuck = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3'
-        $val = (Get-ItemProperty -Path $stuck -Name Settings).Settings
-        $val[8] = $val[8] -bor 0x01
-        Set-ItemProperty -Path $stuck -Name Settings -Value $val
-        Stop-Process -Name explorer -Force
+        $null = Set-WinarchyTaskbarAutoHide -Enabled $true
         Write-WinarchyOk 'Taskbar nativa en auto-hide'
     }
     catch { Write-WinarchyWarn "No pude poner la taskbar en auto-hide: $($_.Exception.Message)" }
+
+    try {
+        $n = Set-WinarchyWindowsHardening
+        Write-WinarchyOk "Windows sin Bing/sugerencias/publicidad ($n ajuste(s))"
+    }
+    catch { Write-WinarchyWarn "No pude aplicar el hardening de Windows: $($_.Exception.Message)" }
 
     # Sin el delay artificial (~10 s) que Explorer impone a las apps de Startup,
     # komorebi/YASB/AHK levantan apenas inicia la sesión.

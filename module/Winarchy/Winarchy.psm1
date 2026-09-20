@@ -62,6 +62,8 @@ function Show-WinarchyHelp {
     rules collisions          ASC rules dropped because a higher layer decided otherwise
     rules sync [--apply]      Refresh the vendored community ASC (shows the diff first;
                               never touches your config/komorebi/rules.toml)
+    taskbar <autohide|show>   Native Windows taskbar mode
+    harden [--revert]         Turn off Bing search, ads, suggestions, widgets and tips (HKCU)
     reload                    Reload komorebi, YASB, AHK and Flow
     doctor                    Stack diagnostics (green/red + suggested fix)
 
@@ -248,6 +250,17 @@ function Invoke-Winarchy {
                 'status' { Get-WinarchyWeztermContextMenuStatus }
                 default { throw "Unknown subcommand: wezterm context-menu $action (install|remove|status)" }
             }
+        }
+        'taskbar' {
+            $mode = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { '' }
+            if ($mode -notin 'autohide', 'show') { throw 'Usage: winarchy taskbar <autohide|show>' }
+            $null = Set-WinarchyTaskbarAutoHide -Enabled ($mode -eq 'autohide')
+            Write-WinarchyOk "Taskbar: $mode"
+        }
+        'harden' {
+            $revert = $rest -contains '--revert'
+            $n = Set-WinarchyWindowsHardening -Revert:$revert
+            Write-WinarchyOk "$n Windows setting(s) $(if ($revert) { 'reverted' } else { 'applied' })."
         }
         'reload' { Invoke-WinarchyReload; Write-WinarchyOk 'Stack reloaded.' }
         'doctor' { exit (Invoke-WinarchyDoctor) }

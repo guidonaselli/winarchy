@@ -6,6 +6,7 @@
   "default_workspace_padding": 3,
   "default_container_padding": 2,
   "mouse_follows_focus": false,
+  "global_work_area_offset": { "left": 0, "top": 0, "right": 0, "bottom": 2 },
   "border": true,
   "border_style": "Rounded",
   "border_width": 1,
