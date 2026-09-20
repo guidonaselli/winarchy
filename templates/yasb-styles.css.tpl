@@ -146,11 +146,15 @@
     color: {{ui.system}};
 }
 
-.extras-grouper .widget {
+.extras-grouper .widget,
+.system-grouper .widget,
+.connections-grouper .widget {
     padding: 0 2px;
 }
 
-.extras-grouper .widget .icon {
+.extras-grouper .widget .icon,
+.system-grouper .widget .icon,
+.connections-grouper .widget .icon {
     padding: 0 4px;
 }
 
@@ -162,7 +166,9 @@
     color: {{colors.accent_ui}};
 }
 
-.extras-grouper .grouper-button {
+.extras-grouper .grouper-button,
+.system-grouper .grouper-button,
+.connections-grouper .grouper-button {
     color: {{ui.net}};
     font-size: 16px;
     background: transparent;
@@ -171,7 +177,9 @@
     min-width: 18px;
 }
 
-.extras-grouper .grouper-button:hover {
+.extras-grouper .grouper-button:hover,
+.system-grouper .grouper-button:hover,
+.connections-grouper .grouper-button:hover {
     color: {{colors.foreground}};
 }
 

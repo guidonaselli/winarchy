@@ -45,7 +45,7 @@ bars:
     widgets:
       left: ["home", "komorebi_workspaces", "komorebi_active_layout", "active_window", "extras"]
       center: ["clock"]
-      right: ["weather", "game_mode", "stay_awake", "media", "claude_usage", "gpu", "cpu", "memory", "wifi", "bluetooth", "microphone", "volume", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
+      right: ["weather", "game_mode", "stay_awake", "media", "claude_usage", "system", "connections", "volume", "battery", "winarchy_update", "notifications", "systray", "winarchy_menu"]
     layouts:
       left:
         alignment: "left"
@@ -383,6 +383,30 @@ widgets:
         enabled: true
         label_position: "left"
         collapsed_label: "▸"
+        expanded_label: "◂"
+
+  system:
+    type: "yasb.grouper.GrouperWidget"
+    options:
+      class_name: "system-grouper"
+      widgets: ["gpu", "cpu", "memory"]
+      hide_empty: false
+      collapse_options:
+        enabled: true
+        label_position: "left"
+        collapsed_label: "󰍛"
+        expanded_label: "◂"
+
+  connections:
+    type: "yasb.grouper.GrouperWidget"
+    options:
+      class_name: "connections-grouper"
+      widgets: ["wifi", "bluetooth", "microphone"]
+      hide_empty: false
+      collapse_options:
+        enabled: true
+        label_position: "left"
+        collapsed_label: "󰖩"
         expanded_label: "◂"
 
   # La ubicacion se elige en el popup y YASB la guarda en %LOCALAPPDATA%.
