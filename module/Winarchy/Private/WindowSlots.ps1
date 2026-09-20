@@ -324,6 +324,7 @@ function Get-WinarchyLearnedSlots {
     # `foreach ($pref in $Pref)` le asigna cada elemento al propio parámetro, y la restricción
     # [object[]] lo reenvuelve en un array de uno.
     foreach ($entry in $Pref) {
+        if ($null -eq $entry.Slot) { continue }
         $key = "$($entry.Exe)|$($entry.Monitor)|$($entry.Workspace)"
         if (-not $live.ContainsKey($key)) { continue }
         if ($live[$key] -eq $entry.Slot) { continue }

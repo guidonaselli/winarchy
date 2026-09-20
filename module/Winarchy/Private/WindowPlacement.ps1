@@ -34,13 +34,19 @@ function Add-WinarchyWindowRulesToKomorebiJson {
       cual y las reglas entran en la próxima regeneración.
     #>
     param([Parameter(Mandatory)][string]$Json)
-    $prefs = @(Import-WinarchyWindowPrefs)
-    if ($prefs.Count -eq 0) { return $Json }
     if (-not (Test-WinarchyProcess 'komorebi')) { return $Json }
     try { $map = Get-WinarchyMonitorIndexMap -State (Get-WinarchyKomorebiState) }
     catch { return $Json }
 
     $config = $Json | ConvertFrom-Json
+    # display_index_preferences con el orden vivo de los monitores
+    if ($map.Count -gt 1) {
+        $order = [ordered]@{}
+        foreach ($id in ($map.Keys | Sort-Object { $map[$_] })) { $order["$($map[$id])"] = $id }
+        $config | Add-Member -NotePropertyName display_index_preferences -NotePropertyValue ([pscustomobject]$order) -Force
+    }
+
+    $prefs = @(Import-WinarchyWindowPrefs)
     foreach ($pref in $prefs) {
         if (-not $map.ContainsKey($pref.Monitor)) { continue }
         $monitor = $config.monitors[$map[$pref.Monitor]]
@@ -109,6 +115,7 @@ function Get-WinarchyUnplaceableExes {
     <# Exes que no tiene sentido ubicar: juegos/launchers y lo que komorebi ya ignora.
        Son justamente los que no queremos capturar como preferencia. #>
     $exes = [System.Collections.Generic.List[string]]::new()
+    foreach ($exe in 'explorer.exe', 'WindowsTerminal.exe', 'wezterm-gui.exe', 'conhost.exe') { $exes.Add($exe) }
     foreach ($game in Get-WinarchyGames) { $exes.Add($game) }
     $komorebiJson = Join-Path (Get-WinarchyRoot) 'config\komorebi\komorebi.json'
     if (Test-Path $komorebiJson) {
@@ -149,7 +156,8 @@ function Export-WinarchyWindowPrefs {
     $lines.Add('# Se captura con `winarchy layout save` y se reproduce con `winarchy layout apply`.')
     $lines.Add('# El monitor va por device_id porque el índice cambia al reconectar pantallas.')
     $lines.Add('# `pin = true` fija la ventana permanentemente en vez de solo al abrirla.')
-    $lines.Add('# `slot` es la posición del tile dentro del workspace (0 = el primero).')
+    $lines.Add('# `slot` es la posición del tile dentro del workspace (0 = el primero); solo se guarda y')
+    $lines.Add('# se aplica en apps con `pin = true`. El resto se ubica al abrir y nadie las reordena.')
     foreach ($p in ($Pref | Sort-Object Exe)) {
         $lines.Add('')
         $lines.Add('[[windows]]')
@@ -197,6 +205,7 @@ function Save-WinarchyWindowLayout {
             $updated++
         }
         else { $added++ }
+        if (-not $placement.Pin) { $placement.Slot = $null }
         $prefs += $placement
     }
     $null = Resolve-WinarchySlotConflicts -Pref $prefs -Live (Get-WinarchyLiveSlotKeys -State $state)

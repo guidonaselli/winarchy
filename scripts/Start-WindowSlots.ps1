@@ -39,7 +39,7 @@ function Write-Log {
     "{0:yyyy-MM-dd HH:mm:ss} {1}" -f (Get-Date), $Message | Add-Content -Path $log -Encoding UTF8
 }
 
-$debounceMs = 250
+$debounceMs = 800
 $pipeName = 'winarchy-window-slots'
 
 # Una sola instancia: el pipe es el candado. Sin esto, la tarea del autostart y un arranque
