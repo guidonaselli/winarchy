@@ -10,6 +10,7 @@ ProcessSetPriority "High"   ; el dispatcher debe responder siempre, costo ~0
 ; Limpia flags de sub-sesión de Claude Code heredados
 EnvSet('CLAUDE_CODE_CHILD_SESSION')
 EnvSet('CLAUDECODE')
+EnvSet('NO_COLOR')
 
 ; --- Rutas (el script vive en <repo>\config\ahk) -----------------------------
 RepoRoot := RegExReplace(A_ScriptDir, "\\config\\ahk$")
