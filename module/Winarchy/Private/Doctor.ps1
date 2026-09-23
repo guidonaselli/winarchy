@@ -218,7 +218,12 @@ function Invoke-WinarchyDoctor {
     # probable del lag "solo la primera vez" que no se ve en ninguna config.
     $defenderExclusions = $null
     try { $defenderExclusions = @((Get-MpPreference -ErrorAction Stop).ExclusionPath) } catch { }
-    if ($null -ne $defenderExclusions) {
+    if ($defenderExclusions -match '^N/A:') {
+        Add-Check 'Defender exclusions (informational)' $true `
+            'Windows only shows them to an elevated shell: run winarchy doctor as admin to verify' `
+            '.\install.ps1  (from an elevated shell)'
+    }
+    elseif ($null -ne $defenderExclusions) {
         $wantExclusion = @(Get-WinarchyDefenderExclusionPaths)
         $missingExclusions = @($wantExclusion | Where-Object { $defenderExclusions -notcontains $_ })
         Add-Check 'Defender exclusions applied' ($missingExclusions.Count -eq 0) `
@@ -257,26 +262,6 @@ function Invoke-WinarchyDoctor {
                  else { "installed -> $($ctxMenu.TargetPath)" }
     Add-Check 'WezTerm context menu (informational)' $true $ctxDetail `
         'winarchy wezterm context-menu install'
-
-    # --- Windhawk + mods recomendados (informativo, opt-in) ---------------------------
-    # No se le escribe nada a Windhawk: los mods leen SystemAccentColor* directo del
-    # registro que Set-WinarchyWindowsAppearance ya mantiene, así que alcanza con avisar.
-    $whRoot = "${env:ProgramFiles}\Windhawk"
-    $whInstalled = Test-Path (Join-Path $whRoot 'windhawk.exe')
-    if ($whInstalled) {
-        $whModsDir = Join-Path $env:LOCALAPPDATA 'Windhawk\Engine\Mods'
-        $recommended = @('classic-context-menu', 'windows-11-taskbar-styler', 'windows-11-start-menu-styler', 'windows-11-notification-center-styler')
-        $installedMods = if (Test-Path $whModsDir) { (Get-ChildItem $whModsDir -Filter '*.json' -ErrorAction SilentlyContinue).BaseName } else { @() }
-        $missingMods = @($recommended | Where-Object { $installedMods -notcontains $_ })
-        Add-Check 'Windhawk recommended mods (informational)' ($missingMods.Count -eq 0) `
-            $(if ($missingMods.Count -eq 0) { 'all recommended mods present' } else { "missing: $($missingMods -join ', ')" }) `
-            'install via the Windhawk app, then point their theme JSON at {ThemeResource SystemAccentColor*}'
-    }
-    else {
-        Add-Check 'Windhawk (informational)' $true `
-            'not installed — optional, only for win32 menu/taskbar styling' `
-            'https://windhawk.net (optional)'
-    }
 
     # --- Versión de Winarchy mismo (informativo, best-effort) -------------------------
     $ver = Get-WinarchyVersion
