@@ -580,3 +580,6 @@ then Winarchy might feel familiar.
 ## License
 
 [MIT](LICENSE)
+
+The Winarchy name and logo are not covered by the MIT license. Forks are welcome; please
+give them a different name and logo.
