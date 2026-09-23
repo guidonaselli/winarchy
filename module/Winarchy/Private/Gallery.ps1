@@ -19,6 +19,8 @@ function Show-WinarchyThemeGallery {
     $window = [System.Windows.Window]::new()
     # Title doubles as komorebi ignore-rule match (floats instead of tiling)
     $window.Title = 'Winarchy — Themes'
+    $ico = Join-Path (Get-WinarchyRoot) 'assets\logo\winarchy.ico'
+    if (Test-Path $ico) { $window.Icon = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]::new($ico)) }
     $window.Width = 1180; $window.Height = 760
     $window.WindowStartupLocation = 'CenterScreen'
     $window.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString($bg)

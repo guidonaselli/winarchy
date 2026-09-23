@@ -36,6 +36,7 @@ function Sync-WinarchyPalette {
     <# Regenera los accesos directos de la paleta y borra los que sobran. #>
     $dir = Get-WinarchyPaletteDir
     $shim = Join-Path (Get-WinarchyRoot) 'bin\winarchy.ps1'
+    $icon = Join-Path (Get-WinarchyRoot) 'assets\logo\winarchy.ico'
     $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue)?.Source ?? (Get-Command powershell).Source
     $shell = New-Object -ComObject WScript.Shell
 
@@ -46,6 +47,7 @@ function Sync-WinarchyPalette {
         $lnk.Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$shim`" $($cmd.Args)"
         $lnk.Description = "winarchy $($cmd.Args)"
         $lnk.WindowStyle = 7
+        $lnk.IconLocation = "$icon,0"
         $lnk.Save()
         $file
     }
