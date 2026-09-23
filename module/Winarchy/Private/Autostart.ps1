@@ -147,7 +147,8 @@ function New-WinarchyTaskXml {
     <#
       XML de definición de tarea: trigger At-LogOn del usuario (delay por componente,
       ver Component.Delay), principal InteractiveToken + LeastPrivilege (sin elevar,
-      solo sesión interactiva), MultipleInstancesPolicy IgnoreNew, sin límite de ejecución.
+      solo sesión interactiva), MultipleInstancesPolicy IgnoreNew, sin límite de ejecución,
+      prioridad Normal (4).
     #>
     param([Parameter(Mandatory)][object]$Component, [Parameter(Mandatory)][string]$User)
     $u = [System.Security.SecurityElement]::Escape($User)
@@ -181,6 +182,7 @@ function New-WinarchyTaskXml {
     <AllowHardTerminate>false</AllowHardTerminate>
     <StartWhenAvailable>false</StartWhenAvailable>
     <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>4</Priority>
     <Enabled>true</Enabled>
   </Settings>
   <Actions Context="Author">
@@ -218,6 +220,10 @@ function Register-WinarchyAutostart {
             if ($LASTEXITCODE -ne 0) { throw "schtasks /Create salió con código $LASTEXITCODE" }
         }
         catch {
+            if (Test-WinarchyTask -TaskName $c.TaskName) {
+                Write-WinarchyWarn "Autostart $($c.Key): no pude actualizar la tarea existente ($($_.Exception.Message)); queda la anterior. Si fue creada elevada: schtasks /Delete /TN \$script:WinarchyTaskFolder\$($c.TaskName) /F (como admin) y reintentar."
+                continue
+            }
             Write-WinarchyWarn "Autostart $($c.Key): falló registrar la tarea ($($_.Exception.Message)). Fallback a Startup."
             try { New-WinarchyStartupShortcut -Component $c }
             catch { Write-WinarchyWarn "Autostart $($c.Key): fallback a Startup también falló: $($_.Exception.Message)" }
