@@ -1,156 +1,150 @@
 <#
 .SYNOPSIS
-  Genera los assets del logo de Winarchy a partir de config/fastfetch/logo.txt.
+  Genera los assets del logo de Winarchy a partir de los poligonos de la marca.
 .DESCRIPTION
-  Parsea la grilla ASCII (resolviendo los codigos de color $1/$2 de fastfetch) y
-  emite:
-    - assets/logo/winarchy-logo.svg          (vectorial, para el README)
+  Fuentes: assets/logo/winarchy-mark.svg (marca) y assets/logo/winarchy-icon.svg (icono).
+  Emite:
+    - assets/logo/winarchy-logo.svg          (copia de la marca, para el README)
+    - assets/logo/winarchy-logo.png          (512x512, el icono)
     - assets/logo/winarchy-social.png        (1280x640, social preview de GitHub)
-    - assets/logo/winarchy-logo.png          (512x512, asset cuadrado / favicon)
     - assets/logo/winarchy.ico               (16/32/48/256, tray icon del stack)
-  Dos tonos fijos: morado + verde, gaps en negro tokyo-night.
 #>
 [CmdletBinding()]
 param()
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$logoTxt = Join-Path $root 'config\fastfetch\logo.txt'
 $outDir = Join-Path $root 'assets\logo'
-if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
+$markSvg = Join-Path $outDir 'winarchy-mark.svg'
+$iconSvg = Join-Path $outDir 'winarchy-icon.svg'
 
-# --- Colores de marca (dos tonos fijos) ---
-$PURPLE = @(157, 124, 216)   # #9d7cd8
-$GREEN  = @(158, 206, 106)   # #9ece6a
-$BG     = @(26, 27, 38)      # #1a1b26 (tokyo-night)
-
-# --- Parseo de la grilla ---
-$lines = Get-Content $logoTxt -Encoding UTF8
-$grid = [System.Collections.Generic.List[char[]]]::new()
-foreach ($line in $lines) {
-    $row = [System.Collections.Generic.List[char]]::new()
-    $color = 'p'
-    $i = 0
-    while ($i -lt $line.Length) {
-        $ch = $line[$i]
-        if ($ch -eq '$' -and ($i + 1) -lt $line.Length) {
-            $n = $line[$i + 1]
-            if ($n -eq '1') { $color = 'p'; $i += 2; continue }
-            if ($n -eq '2') { $color = 'g'; $i += 2; continue }
-        }
-        if ([int][char]$ch -eq 0x2588) { $row.Add($color) } else { $row.Add('.') }
-        $i++
-    }
-    $grid.Add($row.ToArray())
-}
-$gw = ($grid | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
-$gh = $grid.Count
-# normalizar ancho
-$cells = for ($y = 0; $y -lt $gh; $y++) {
-    $r = $grid[$y]
-    , @(for ($x = 0; $x -lt $gw; $x++) { if ($x -lt $r.Length) { $r[$x] } else { '.' } })
-}
-Write-Host "Grilla: ${gw}x${gh}"
-
-# Las celdas del terminal son ~1:2 (ancho:alto): para replicar la proporcion del
-# logo tal como lo dibuja fastfetch, cada celda se renderiza al doble de alta.
-$YSCALE = 2
-
-# --- SVG (README) ---
-$svgH = $gh * $YSCALE
-$svg = [System.Text.StringBuilder]::new()
-[void]$svg.AppendLine("<svg xmlns=`"http://www.w3.org/2000/svg`" viewBox=`"0 0 $gw $svgH`" shape-rendering=`"crispEdges`">")
-[void]$svg.AppendLine("  <rect width=`"$gw`" height=`"$svgH`" fill=`"#1a1b26`"/>")
-for ($y = 0; $y -lt $gh; $y++) {
-    for ($x = 0; $x -lt $gw; $x++) {
-        $c = $cells[$y][$x]
-        if ($c -eq '.') { continue }
-        $fill = if ($c -eq 'p') { '#9d7cd8' } else { '#9ece6a' }
-        [void]$svg.AppendLine("  <rect x=`"$x`" y=`"$($y * $YSCALE)`" width=`"1`" height=`"$YSCALE`" fill=`"$fill`"/>")
-    }
-}
-[void]$svg.AppendLine('</svg>')
-$svgPath = Join-Path $outDir 'winarchy-logo.svg'
-Set-Content -Path $svgPath -Value $svg.ToString() -Encoding UTF8
-Write-Host "OK: $svgPath"
-
-# --- PNGs via System.Drawing ---
 Add-Type -AssemblyName System.Drawing
-function New-LogoPng {
-    param([int]$CanvasW, [int]$CanvasH, [double]$Fill, [string]$Path)
-    $bmp = New-Object System.Drawing.Bitmap($CanvasW, $CanvasH)
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::None
-    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
-    $bgBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb($BG[0], $BG[1], $BG[2]))
-    $g.FillRectangle($bgBrush, 0, 0, $CanvasW, $CanvasH)
-    # cell ancho; alto = cell * YSCALE (proporcion del terminal)
-    $cell = [Math]::Floor([Math]::Min(($CanvasW * $Fill) / $gw, ($CanvasH * $Fill) / ($gh * $YSCALE)))
-    $cellH = $cell * $YSCALE
-    $logoW = $cell * $gw; $logoH = $cellH * $gh
-    $offX = [int](($CanvasW - $logoW) / 2); $offY = [int](($CanvasH - $logoH) / 2)
-    $purpleBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb($PURPLE[0], $PURPLE[1], $PURPLE[2]))
-    $greenBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb($GREEN[0], $GREEN[1], $GREEN[2]))
-    for ($y = 0; $y -lt $gh; $y++) {
-        for ($x = 0; $x -lt $gw; $x++) {
-            $c = $cells[$y][$x]
-            if ($c -eq '.') { continue }
-            $brush = if ($c -eq 'p') { $purpleBrush } else { $greenBrush }
-            $g.FillRectangle($brush, $offX + $x * $cell, $offY + $y * $cellH, $cell, $cellH)
+
+# Poligonos (con fill heredado y translate acumulado) y rect de fondo de un SVG plano.
+function Read-SvgShapes {
+    param([string]$Path)
+    $svg = ([xml](Get-Content $Path -Raw)).DocumentElement
+    $vb = $svg.viewBox -split '[ ,]+' | ForEach-Object { [double]$_ }
+    $shapes = [System.Collections.Generic.List[object]]::new()
+    $walk = {
+        param($node, [string]$fill, [double]$dx, [double]$dy)
+        foreach ($n in $node.ChildNodes) {
+            if ($n.NodeType -ne 'Element') { continue }
+            $f = if ($n.fill) { $n.fill } else { $fill }
+            $x = $dx; $y = $dy
+            if ($n.transform -match 'translate\(\s*([-\d.]+)[ ,]+([-\d.]+)\s*\)') { $x += [double]$Matches[1]; $y += [double]$Matches[2] }
+            switch ($n.LocalName) {
+                'rect' { $shapes.Add([pscustomobject]@{ Kind = 'rect'; Fill = $f; W = [double]$n.width; H = [double]$n.height; Rx = [double]$n.rx }) }
+                'polygon' {
+                    $pts = foreach ($p in ($n.points.Trim() -split '\s+')) {
+                        $xy = $p -split ','
+                        [System.Drawing.PointF]::new([double]$xy[0] + $x, [double]$xy[1] + $y)
+                    }
+                    $shapes.Add([pscustomobject]@{ Kind = 'polygon'; Fill = $f; Points = $pts })
+                }
+                'g' { & $walk $n $f $x $y }
+            }
         }
     }
-    $g.Dispose()
-    $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
-    $bmp.Dispose()
-    Write-Host "OK: $Path"
+    & $walk $svg '#000000' 0 0
+    [pscustomobject]@{ Width = $vb[2]; Height = $vb[3]; Shapes = $shapes }
 }
-New-LogoPng -CanvasW 1280 -CanvasH 640 -Fill 0.9 -Path (Join-Path $outDir 'winarchy-social.png')
-New-LogoPng -CanvasW 512  -CanvasH 512 -Fill 0.85 -Path (Join-Path $outDir 'winarchy-logo.png')
 
-# --- ICO (tray icon de Winarchy) ---
-# Render del logo a un Bitmap cuadrado (misma logica de celdas que New-LogoPng),
-# devuelto en memoria para empaquetar varios tamanos en un .ico con frames PNG.
-function New-LogoBitmap {
-    param([int]$Size, [double]$Fill)
-    # El logo mide $gw celdas de ancho (36): a 16/32 px una celda cae a <1 px y el
-    # dibujo directo desbordaba el frame (se veia solo el centro recortado, leia "A").
-    # Solucion: rasterizar a tamano NATIVO (1 celda = 1 px, alto x YSCALE) sobre fondo
-    # transparente y luego escalar el conjunto para que entre completo en cada frame.
-    $natW = [int]$gw; $natH = [int]($gh * $YSCALE)
-    $native = New-Object System.Drawing.Bitmap($natW, $natH)
-    $gn = [System.Drawing.Graphics]::FromImage($native)
-    $gn.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::None
-    $gn.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
-    $purpleBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb($PURPLE[0], $PURPLE[1], $PURPLE[2]))
-    $greenBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb($GREEN[0], $GREEN[1], $GREEN[2]))
-    for ($y = 0; $y -lt $gh; $y++) {
-        for ($x = 0; $x -lt $gw; $x++) {
-            $c = $cells[$y][$x]
-            if ($c -eq '.') { continue }
-            $brush = if ($c -eq 'p') { $purpleBrush } else { $greenBrush }
-            $gn.FillRectangle($brush, $x, $y * $YSCALE, 1, $YSCALE)
+function Draw-Shapes {
+    param([System.Drawing.Graphics]$G, $Svg, [double]$Scale, [double]$OffX, [double]$OffY)
+    foreach ($s in $Svg.Shapes) {
+        $brush = [System.Drawing.SolidBrush]::new([System.Drawing.ColorTranslator]::FromHtml($s.Fill))
+        if ($s.Kind -eq 'rect') {
+            $w = $s.W * $Scale; $h = $s.H * $Scale; $d = 2 * $s.Rx * $Scale
+            $path = [System.Drawing.Drawing2D.GraphicsPath]::new()
+            $path.AddArc($OffX, $OffY, $d, $d, 180, 90)
+            $path.AddArc($OffX + $w - $d, $OffY, $d, $d, 270, 90)
+            $path.AddArc($OffX + $w - $d, $OffY + $h - $d, $d, $d, 0, 90)
+            $path.AddArc($OffX, $OffY + $h - $d, $d, $d, 90, 90)
+            $path.CloseFigure()
+            $G.FillPath($brush, $path)
+            $path.Dispose()
+        } else {
+            $pts = [System.Drawing.PointF[]]@($s.Points | ForEach-Object {
+                    [System.Drawing.PointF]::new($OffX + $_.X * $Scale, $OffY + $_.Y * $Scale) })
+            $G.FillPolygon($brush, $pts)
         }
+        $brush.Dispose()
     }
-    $gn.Dispose()
+}
 
-    # Escalar el logo nativo dentro del frame cuadrado, centrado y con margen ($Fill).
-    $bmp = New-Object System.Drawing.Bitmap($Size, $Size)   # nace transparente (ARGB 0,0,0,0)
+function New-Canvas {
+    param([int]$W, [int]$H)
+    $bmp = [System.Drawing.Bitmap]::new($W, $H)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
     $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-    $scale = [Math]::Min(($Size * $Fill) / $natW, ($Size * $Fill) / $natH)
-    $drawW = $natW * $scale; $drawH = $natH * $scale
-    $offX = ($Size - $drawW) / 2; $offY = ($Size - $drawH) / 2
-    $g.DrawImage($native, $offX, $offY, $drawW, $drawH)
+    $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+    $bmp, $g
+}
+
+function New-IconBitmap {
+    param([int]$Size)
+    $bmp, $g = New-Canvas $Size $Size
+    Draw-Shapes $g $icon ($Size / $icon.Width) 0 0
     $g.Dispose()
-    $native.Dispose()
     $bmp
 }
 
+$mark = Read-SvgShapes $markSvg
+$icon = Read-SvgShapes $iconSvg
+$ink = ($icon.Shapes | Where-Object Kind -EQ 'rect').Fill
+$paper = ($mark.Shapes | Select-Object -First 1).Fill
+
+# --- SVG (README) ---
+$svgPath = Join-Path $outDir 'winarchy-logo.svg'
+Copy-Item $markSvg $svgPath -Force
+Write-Host "OK: $svgPath"
+
+# --- PNG cuadrado ---
+$pngPath = Join-Path $outDir 'winarchy-logo.png'
+$bmp = New-IconBitmap 512
+$bmp.Save($pngPath, [System.Drawing.Imaging.ImageFormat]::Png)
+$bmp.Dispose()
+Write-Host "OK: $pngPath"
+
+# --- Social preview: marca a la izquierda + "winarchy" en mono bold ---
+$socialPath = Join-Path $outDir 'winarchy-social.png'
+$fontName = [System.Drawing.Text.InstalledFontCollection]::new().Families |
+    Where-Object { $_.Name -in 'JetBrains Mono', 'Cascadia Mono', 'Consolas' -and $_.IsStyleAvailable([System.Drawing.FontStyle]::Bold) } |
+    Sort-Object { @('JetBrains Mono', 'Cascadia Mono', 'Consolas').IndexOf($_.Name) } |
+    Select-Object -First 1 -ExpandProperty Name
+$bmp, $g = New-Canvas 1280 640
+$g.Clear([System.Drawing.ColorTranslator]::FromHtml($ink))
+$markH = 180.0
+$scale = $markH / $mark.Height
+$markW = $mark.Width * $scale
+if ($fontName) {
+    $font = [System.Drawing.Font]::new($fontName, 128, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+    $fmt = [System.Drawing.StringFormat]::GenericTypographic
+    $text = $g.MeasureString('winarchy', $font, [System.Drawing.PointF]::Empty, $fmt)
+    $gap = 72
+    $x = (1280 - ($markW + $gap + $text.Width)) / 2
+    Draw-Shapes $g $mark $scale $x ((640 - $markH) / 2)
+    # baseline de la palabra alineada con la base de la marca
+    $ascent = $font.Size * $font.FontFamily.GetCellAscent($font.Style) / $font.FontFamily.GetEmHeight($font.Style)
+    $textBrush = [System.Drawing.SolidBrush]::new([System.Drawing.ColorTranslator]::FromHtml($paper))
+    $g.DrawString('winarchy', $font, $textBrush, [float]($x + $markW + $gap), [float]((640 + $markH) / 2 - $ascent), $fmt)
+    $textBrush.Dispose(); $font.Dispose()
+    Write-Host "Fuente: $fontName"
+} else {
+    Draw-Shapes $g $mark $scale ((1280 - $markW) / 2) ((640 - $markH) / 2)
+    Write-Warning 'Sin fuente mono bold instalada: social preview solo con la marca.'
+}
+$g.Dispose()
+$bmp.Save($socialPath, [System.Drawing.Imaging.ImageFormat]::Png)
+$bmp.Dispose()
+Write-Host "OK: $socialPath"
+
+# --- ICO (tray icon de Winarchy), frames PNG ---
 function New-LogoIco {
     param([int[]]$Sizes, [string]$Path)
-    # Cada frame se guarda como PNG (los .ico modernos soportan frames PNG-comprimidos).
     $frames = foreach ($s in $Sizes) {
-        $bmp = New-LogoBitmap -Size $s -Fill 0.85
+        $bmp = New-IconBitmap $s
         $ms = New-Object System.IO.MemoryStream
         $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
         $bmp.Dispose()

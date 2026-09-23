@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="assets/logo/winarchy-logo.svg" alt="Winarchy" width="220">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/winarchy-mark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="assets/logo/winarchy-mark-ink.svg">
+    <img src="assets/logo/winarchy-mark.svg" alt="Winarchy" width="220">
+  </picture>
 </p>
 
 ```text
