@@ -254,3 +254,6 @@ exe = "isaac-ng.exe"
 # --- Cartas ------------------------------------------------------------------
 [[games]]
 exe = "Hearthstone.exe"
+
+[[games]]
+exe = "aLogin.exe"
