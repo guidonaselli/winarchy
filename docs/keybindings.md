@@ -14,7 +14,7 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 | `SUPER+N` | Notification center (Windows native — not intercepted, so YASB's bell works) |
 | `SUPER+M` | Music (Spotify, fallback YT Music webapp) |
 | `SUPER+O` | Obsidian |
-| `SUPER+K` | Keybindings overlay (auto-generated, themed, shown on the active monitor) |
+| `SUPER+K` | Keybindings list: searchable, auto-generated from winarchy.ahk, themed, on the active monitor |
 
 ## Menu (popup, Omarchy-style)
 | Keybinding | Action |
@@ -162,7 +162,7 @@ gets overwritten on every theme change.
 Create `config\ahk\user.ahk` (gitignored) to add your own hotkeys without touching
 the managed script. To redefine an existing binding, use the `Hotkey()` function
 (duplicate `::` definitions are a load error in AHK v2). Your hotkeys show up in
-the `SUPER+K` overlay under "Usuario", or under your own `; --- Section ---` headers.
+the `SUPER+K` overlay under "User", or under your own `; --- Section ---` headers.
 
 ## Reserved by Windows (not overridden)
 - `Win+L` — lock (not interceptable; design decision).

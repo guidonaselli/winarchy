@@ -17,6 +17,7 @@ RepoRoot := RegExReplace(A_ScriptDir, "\\config\\ahk$")
 StateDir := RepoRoot "\state"
 GameFlag := StateDir "\game-mode.flag"
 MenuFlag := StateDir "\show-menu.flag"
+AwakeFlag := StateDir "\stay-awake.flag"
 GamesToml := RepoRoot "\games.toml"
 WinarchyPs1 := RepoRoot "\bin\winarchy.ps1"
 DirCreate(StateDir)
@@ -63,6 +64,18 @@ Wezterm(args := '') {
 
 Komorebic(cmd) {
     Run('"' KomorebicExe '" ' cmd, , 'Hide')
+}
+
+; WM_CLOSE to the active window, never to the desktop or taskbar.
+CloseWindow() {
+    if !(hwnd := WinExist('A'))
+        return
+    try {
+        if WinGetClass(hwnd) ~= '^(Progman|WorkerW|Shell_TrayWnd|Shell_SecondaryTrayWnd)$'
+            || WinGetProcessName(hwnd) = 'yasb.exe'
+            return
+        PostMessage(0x0010, 0, 0, , hwnd)
+    }
 }
 
 ; ShareX directo: como Komorebic(), evita el spawn de pwsh + Import-Module completo del
@@ -172,11 +185,7 @@ LaunchObsidian() {
         TrayTip('Obsidian no está instalado', 'Winarchy')
 }
 
-; --- System / power menu (SUPER+Esc, estilo Omarchy) ---------------------------
-; Acciones directas vía shutdown.exe/rundll32, sin depender del menú de power
-; de YASB (ese sigue andando por click en el widget "home"; esto es el atajo
-; global). SysMenu se referencia tanto desde el hotkey como submenú del menú
-; principal (más abajo).
+; --- System / power actions (SUPER+Esc) --------------------------------------------
 LockWorkstation() {
     Run('rundll32.exe user32.dll,LockWorkStation', , 'Hide')
 }
@@ -209,67 +218,34 @@ LaunchScreensaver() {
     }
 }
 
-SysMenu := Menu()
-SysMenu.Add("Settings...", (*) => Run('explorer.exe ms-settings:'))
-SysMenu.Add()
-SysMenu.Add("Screensaver", (*) => LaunchScreensaver())
-SysMenu.Add("Lock", (*) => LockWorkstation())
-SysMenu.Add("Sleep", (*) => SleepSystem())
-SysMenu.Add("Hibernate", (*) => HibernateSystem())
-SysMenu.Add("Sign out", (*) => SignOutSystem())
-SysMenu.Add("Restart", (*) => RestartSystem())
-SysMenu.Add("Shut down", (*) => ShutdownSystem())
-
-; --- Tray único de Winarchy ---------------------------------------------------
-; AHK es el host del tray del stack: su icono ES la identidad de Winarchy. Los
-; demás componentes ocultan su tray propio (YASB, Flow); komorebi no tiene tray.
-; El tray ES el menú principal estilo Omarchy: mismo contenido vía right-click,
-; SUPER+Alt+Space (hotkey) o el botón a la derecha de la barra YASB (MenuWatch).
+; --- Tray ------------------------------------------------------------------------
+; Same items as the palette menu, rebuilt on every right-click.
+if FileExist(RepoRoot "\assets\logo\winarchy.ico")
+    try TraySetIcon(RepoRoot "\assets\logo\winarchy.ico")
+A_IconTip := "Winarchy"
 SetupTray()
+OnMessage(0x404, TrayNotify)
+
+TrayNotify(wParam, lParam, *) {
+    if (lParam = 0x205)                  ; WM_RBUTTONUP
+        SetupTray()
+}
 
 SetupTray() {
-    global RepoRoot, SysMenu
-    ico := RepoRoot "\assets\logo\winarchy.ico"
-    if FileExist(ico)
-        try TraySetIcon(ico)            ; si falla, queda el icono por defecto de AHK
-    A_IconTip := "Winarchy"
+    A_TrayMenu.Delete()
+    FillNativeMenu(A_TrayMenu, WinarchyMenuItemsWithUser())
+    A_TrayMenu.Default := '1&'
+}
 
-    tray := A_TrayMenu
-    tray.Delete()                        ; quita el menú por defecto de AHK (Pause/Suspend/Reload/Edit)
-
-    themes := Menu()
-    themes.Add("Next theme`tSUPER+Shift+T", (*) => Winarchy('theme next'))
-    themes.Add("Gallery`tSUPER+Ctrl+T", (*) => Winarchy('theme gallery'))
-    themes.Add("Next background`tSUPER+Ctrl+Space", (*) => Winarchy('background next'))
-
-    capture := Menu()
-    for item in WinarchyCaptureItems()
-        capture.Add(item.text (item.HasOwnProp('hint') ? "`t" item.hint : ""), item.action)
-
-    bar := Menu()
-    for item in WinarchyBarItems()
-        bar.Add(item.text (item.HasOwnProp('hint') ? "`t" item.hint : ""), item.action)
-
-    tray.Add("Apps", (*) => ToggleFlowApps())
-    tray.Default := "Apps"
-    tray.Add()
-    tray.Add("Themes", themes)
-    tiling := Menu()
-    for item in WinarchyTilingItems()
-        tiling.Add(item.text (item.HasOwnProp('hint') ? "`t" item.hint : ""), item.action)
-
-    tray.Add("Capture", capture)
-    tray.Add("Tiling", tiling)
-    tray.Add("Bar", bar)
-    tray.Add("Reload stack`tSUPER+Shift+R", (*) => Winarchy('reload'))
-    tray.Add("Game mode (toggle)", (*) => ToggleGameMode())
-    tray.Add("Stay awake (toggle)", (*) => ToggleStayAwake())
-    tray.Add("Doctor", (*) => WinarchyTerminal('doctor'))
-    tray.Add("Check for updates", (*) => WinarchyTerminal('update'))
-    tray.Add()
-    tray.Add("System`tSUPER+Esc", SysMenu)
-    tray.Add()
-    tray.Add("Quit Winarchy", (*) => QuitStack())
+FillNativeMenu(m, items) {
+    for it in items {
+        if it.HasOwnProp('sub') {
+            sub := Menu()
+            FillNativeMenu(sub, it.sub)
+            m.Add(it.text, sub)
+        } else
+            try m.Add(it.text (it.HasOwnProp('hint') ? "`t" it.hint : ''), it.action)
+    }
 }
 
 ; --- Menu watcher (puente para el botón de la barra YASB) ----------------------
@@ -293,8 +269,6 @@ ToggleGameMode() {
 }
 
 ; --- Stay awake ---------------------------------------------------------------
-AwakeFlag := StateDir "\stay-awake.flag"
-
 ToggleStayAwake() {
     global AwakeFlag
     if FileExist(AwakeFlag) {
@@ -317,367 +291,485 @@ QuitStack() {
     ExitApp()
 }
 
-; --- Menú principal estilo Omarchy/Walker (GUI propia, centrada y tematizada) ----
-; Reemplaza el menú nativo de Windows (A_TrayMenu) en el hotkey SUPER+Alt+Space y en
-; el botón de la barra YASB: lista vertical centrada en el monitor activo, con los
-; colores del theme actual (config\ahk\theme.ini), navegable con ↑/↓/Enter/Esc y
-; click, y drill-in a submenús (Themes, System). Mismo patrón que el overlay de
-; keybindings (SUPER+K). El right-click del tray sigue usando A_TrayMenu nativo: ese
-; menú lo dibuja Windows y no se puede tematizar (fallback igualmente funcional).
-MainMenu := ''        ; Gui activa, '' = cerrado
-MenuRows := []        ; [{label, hint, y}] controles Text por fila + su Y
-MenuItems := []       ; items del nivel actual
-MenuSel := 1          ; índice seleccionado (1-based)
-MenuTitle := ''       ; título del nivel actual
-MenuStack := []       ; pila para volver de submenús
-MenuSelBar := ''         ; barra de selección (un control que se mueve a la fila activa)
-MenuColors := {bg:'16121E', fg:'C8C0D8', ac:'9BE53E', mut:'4A4060'}
+; --- YASB watchdog --------------------------------------------------------------
+; Relaunches YASB after two missed checks; paused while winget runs; gives up after 3 relaunches in 5 min.
+YasbcExe := FileExist(A_ProgramFiles "\YASB\yasbc.exe") ? A_ProgramFiles "\YASB\yasbc.exe" : ""
+YasbMisses := 0
+YasbRelaunches := []
+if YasbcExe
+    SetTimer(YasbWatch, 5000)
+
+YasbWatch() {
+    global YasbMisses, YasbRelaunches
+    if ProcessExist('yasb.exe') || ProcessExist('winget.exe') {
+        YasbMisses := 0
+        return
+    }
+    if (++YasbMisses < 2)
+        return
+    YasbMisses := 0
+    while YasbRelaunches.Length && A_TickCount - YasbRelaunches[1] > 300000
+        YasbRelaunches.RemoveAt(1)
+    if (YasbRelaunches.Length >= 3) {
+        SetTimer(YasbWatch, 0)
+        TrayTip('The bar keeps crashing; stopped relaunching it. Run: winarchy doctor', 'Winarchy')
+        return
+    }
+    YasbRelaunches.Push(A_TickCount)
+    EnvSet('YASB_CONFIG_HOME', RepoRoot '\config\yasb')
+    Run('"' YasbcExe '" start', , 'Hide')
+}
+
+; --- Menu items (palette menu and tray share them) ---------------------------------
+OnOff(flag) => Chr(0xB7) ' ' (FileExist(flag) ? 'on' : 'off')
 
 WinarchyMenuItems() {
-    global GameFlag
+    global GameFlag, AwakeFlag
     return [
-        {text:'Apps',          hint:'SUPER+Space',   action:(*)=>ToggleFlowApps()},
-        {text:'Themes',        sub:[
-            {text:'Next theme', hint:'SUPER+Shift+T', action:(*)=>Winarchy('theme next')},
-            {text:'Gallery',    hint:'SUPER+Ctrl+T',  action:(*)=>Winarchy('theme gallery')},
-            {text:'Next background', hint:'SUPER+Ctrl+Space', action:(*)=>Winarchy('background next')} ]},
-        {text:'Capture',                             sub: WinarchyCaptureItems()},
-        {text:'Tiling',                              sub: WinarchyTilingItems()},
-        {text:'Bar',                                 sub: WinarchyBarItems()},
+        {text:'Apps',          hint:'SUPER+Space',        action:(*)=>ToggleFlowApps()},
+        {text:'Themes',                                   sub: WinarchyThemeItems()},
+        {text:'Capture',                                  sub: WinarchyCaptureItems()},
+        {text:'Tiling',                                   sub: WinarchyTilingItems()},
+        {text:'Bar',                                      sub: WinarchyBarItems()},
         {text:'Coding agent',  hint:'SUPER+Ctrl+Shift+A', action:(*)=>Winarchy('agent launch')},
-        {text:'Reload stack',  hint:'SUPER+Shift+R', action:(*)=>Winarchy('reload')},
-        {text:'Game mode',     hint:(FileExist(GameFlag) ? 'ON' : 'OFF'), action:(*)=>ToggleGameMode()},
-        {text:'Stay awake',    hint:'SUPER+Ctrl+W', action:(*)=>ToggleStayAwake()},
-        {text:'Doctor',                              action:(*)=>WinarchyTerminal('doctor')},
-        {text:'Check updates',                       action:(*)=>WinarchyTerminal('update')},
-        {text:'System',        hint:'SUPER+Esc',     sub: WinarchySysItems()},
-        {text:'Quit Winarchy',                       action:(*)=>QuitStack()} ]
+        {text:'Keybindings',   hint:'SUPER+K',            action:(*)=>ToggleKeyOverlay()},
+        {text:'Reload stack',  hint:'SUPER+Shift+R',      action:(*)=>Winarchy('reload')},
+        {text:'Game mode ' OnOff(GameFlag),               action:(*)=>ToggleGameMode()},
+        {text:'Stay awake ' OnOff(AwakeFlag), hint:'SUPER+Ctrl+W', action:(*)=>ToggleStayAwake()},
+        {text:'Doctor',                                   action:(*)=>WinarchyTerminal('doctor')},
+        {text:'Check for updates',                        action:(*)=>WinarchyTerminal('update')},
+        {text:'System',        hint:'SUPER+Esc',          sub: WinarchySysItems()},
+        {text:'Quit Winarchy',                            action:(*)=>QuitStack()} ]
 }
 
 WinarchyMenuItemsWithUser() {
     items := WinarchyMenuItems()
     if IsSet(WinarchyUserMenu) && WinarchyUserMenu is Array {
         for entry in WinarchyUserMenu
-            items.InsertAt(items.Length, entry)     ; antes de Quit, que cierra la lista
+            items.InsertAt(items.Length, entry)     ; before Quit, which closes the list
     }
     return items
 }
 
+WinarchyThemeItems() {
+    return [
+        {text:'Next theme',      hint:'SUPER+Shift+T',    action:(*)=>Winarchy('theme next')},
+        {text:'Theme gallery',   hint:'SUPER+Ctrl+T',     action:(*)=>Winarchy('theme gallery')},
+        {text:'Next background', hint:'SUPER+Ctrl+Space', action:(*)=>Winarchy('background next')} ]
+}
+
 WinarchyTilingItems() {
     return [
-        {text:'Manage this window',                    action:(*)=>Komorebic('manage')},
-        {text:'Unmanage this window',                  action:(*)=>Komorebic('unmanage')},
-        {text:'Stop tiling this workspace', hint:'SUPER+Shift+Z', action:(*)=>Komorebic('toggle-tiling')},
-        {text:'New windows: stack / tile',             action:(*)=>Komorebic('toggle-window-container-behaviour')},
-        {text:'Title bars',                            action:(*)=>Komorebic('toggle-title-bars')},
-        {text:'Mouse follows focus',                   action:(*)=>Komorebic('toggle-mouse-follows-focus')},
-        {text:'Restore hidden windows',                action:(*)=>Komorebic('restore-windows')} ]
+        {text:'Manage this window',                                action:(*)=>Komorebic('manage')},
+        {text:'Unmanage this window',                              action:(*)=>Komorebic('unmanage')},
+        {text:'Stop tiling this workspace', hint:'SUPER+Shift+Z',  action:(*)=>Komorebic('toggle-tiling')},
+        {text:'New windows: stack / tile',                         action:(*)=>Komorebic('toggle-window-container-behaviour')},
+        {text:'Title bars',                                        action:(*)=>Komorebic('toggle-title-bars')},
+        {text:'Mouse follows focus',                               action:(*)=>Komorebic('toggle-mouse-follows-focus')},
+        {text:'Restore hidden windows',                            action:(*)=>Komorebic('restore-windows')} ]
 }
 
 WinarchyCaptureItems() {
     return [
-        {text:'Region',          hint:'SUPER+Shift+S', action:(*)=>Winarchy('screenshot region')},
-        {text:'Window',          hint:'SUPER+Shift+W', action:(*)=>Winarchy('screenshot window')},
-        {text:'Full screen',     hint:'SUPER+Shift+P', action:(*)=>Winarchy('screenshot full')},
-        {text:'Repeat last region',                    action:(*)=>Winarchy('screenshot last')},
-        {text:'Scrolling',                             action:(*)=>Winarchy('screenshot scrolling')},
-        {text:'Record',          hint:'SUPER+Shift+V', action:(*)=>Winarchy('screenshot record')},
-        {text:'Record as GIF',                         action:(*)=>Winarchy('screenshot record-gif')},
-        {text:'Stop recording',  hint:'SUPER+Ctrl+V',  action:(*)=>Winarchy('screenshot stop')},
-        {text:'Text from screen (OCR)', hint:'SUPER+Ctrl+O', action:(*)=>Winarchy('screenshot ocr')},
-        {text:'Scan QR',         hint:'SUPER+Ctrl+Q',  action:(*)=>Winarchy('screenshot qr')},
-        {text:'Colour picker',                         action:(*)=>Winarchy('screenshot color')},
-        {text:'Pin to screen',                         action:(*)=>Winarchy('screenshot pin')},
-        {text:'Ruler',                                 action:(*)=>Winarchy('screenshot ruler')} ]
+        {text:'Region',                 hint:'SUPER+Shift+S', action:(*)=>Winarchy('screenshot region')},
+        {text:'Window',                 hint:'SUPER+Shift+W', action:(*)=>Winarchy('screenshot window')},
+        {text:'Full screen',            hint:'SUPER+Shift+P', action:(*)=>Winarchy('screenshot full')},
+        {text:'Repeat last region',                           action:(*)=>Winarchy('screenshot last')},
+        {text:'Scrolling capture',                            action:(*)=>Winarchy('screenshot scrolling')},
+        {text:'Record screen',          hint:'SUPER+Shift+V', action:(*)=>Winarchy('screenshot record')},
+        {text:'Record as GIF',          hint:'SUPER+Shift+G', action:(*)=>Winarchy('screenshot record-gif')},
+        {text:'Stop recording',         hint:'SUPER+Ctrl+V',  action:(*)=>Winarchy('screenshot stop')},
+        {text:'Text from screen (OCR)', hint:'SUPER+Ctrl+O',  action:(*)=>Winarchy('screenshot ocr')},
+        {text:'Scan QR code',           hint:'SUPER+Ctrl+Q',  action:(*)=>Winarchy('screenshot qr')},
+        {text:'Color picker',                                 action:(*)=>Winarchy('screenshot color')},
+        {text:'Pin to screen',                                action:(*)=>Winarchy('screenshot pin')},
+        {text:'Ruler',                                        action:(*)=>Winarchy('screenshot ruler')} ]
 }
 
 WinarchyBarItems() {
     return [
-        {text:'Move to top',                           action:(*)=>Winarchy('bar position top')},
-        {text:'Move to bottom',                        action:(*)=>Winarchy('bar position bottom')},
-        {text:'Transparent (toggle)',                  action:(*)=>Winarchy('bar transparent')} ]
+        {text:'Move to top',          action:(*)=>Winarchy('bar position top')},
+        {text:'Move to bottom',       action:(*)=>Winarchy('bar position bottom')},
+        {text:'Toggle transparency',  action:(*)=>Winarchy('bar transparent')} ]
 }
 
 WinarchySysItems() {
     return [
-        {text:'Settings…',                       action:(*)=>Run('explorer.exe ms-settings:')},
-        {text:'Screensaver',                     action:(*)=>LaunchScreensaver()},
-        {text:'Lock',                            action:(*)=>LockWorkstation()},
-        {text:'Sleep',                           action:(*)=>SleepSystem()},
-        {text:'Hibernate',                       action:(*)=>HibernateSystem()},
-        {text:'Sign out',                        action:(*)=>SignOutSystem()},
-        {text:'Restart',                         action:(*)=>RestartSystem()},
-        {text:'Shut down',                       action:(*)=>ShutdownSystem()} ]
-}
-
-ShowSystemMenu(*) {
-    global MainMenu, MenuStack
-    if (MainMenu != '') {          ; ya abierto → togglear cierra
-        CloseMainMenu()
-        return
-    }
-    MenuStack := []
-    RenderMenu(WinarchySysItems(), 'System')
+        {text:'Lock',            action:(*)=>LockWorkstation()},
+        {text:'Screensaver',     action:(*)=>LaunchScreensaver()},
+        {text:'Sleep',           action:(*)=>SleepSystem()},
+        {text:'Hibernate',       action:(*)=>HibernateSystem()},
+        {text:'Sign out',        action:(*)=>SignOutSystem()},
+        {text:'Restart',         action:(*)=>RestartSystem()},
+        {text:'Shut down',       action:(*)=>ShutdownSystem()},
+        {text:'Settings',        action:(*)=>Run('explorer.exe ms-settings:')} ]
 }
 
 ShowMainMenu(*) {
-    global MainMenu, MenuStack
-    if (MainMenu != '') {          ; ya abierto → togglear cierra
-        CloseMainMenu()
+    if !PalClosed('menu')
+        PalOpen('menu', WinarchyMenuItemsWithUser(), 'Winarchy')
+}
+
+ShowSystemMenu(*) {
+    if !PalClosed('system')
+        PalOpen('system', WinarchySysItems(), 'System')
+}
+
+ToggleKeyOverlay(*) {
+    if PalClosed('keys')
         return
-    }
-    MenuStack := []
-    RenderMenu(WinarchyMenuItemsWithUser(), 'Winarchy')
+    sections := ParseKeymap(A_ScriptFullPath, '', '; HOTKEYS')
+    if FileExist(A_ScriptDir '\user.ahk')
+        for s in ParseKeymap(A_ScriptDir '\user.ahk', 'User')
+            sections.Push(s)
+    PalOpen('keys', sections, 'Keybindings')
 }
 
-RenderMenu(items, title) {
-    global MainMenu, MenuRows, MenuItems, MenuSel, MenuTitle, MenuColors, MenuSelBar
-    SetTimer(MainMenuWatch, 0)
-    if (MainMenu != '') {
-        try MainMenu.Destroy()
-        MainMenu := ''
-    }
-    MenuItems := items, MenuSel := 1, MenuRows := [], MenuTitle := title
-
-    ; colores del theme (fallback al theme por defecto si todavía no se generó theme.ini)
-    bg := '16121E', fg := 'C8C0D8', ac := '9BE53E', mut := '4A4060'
-    ini := A_ScriptDir '\theme.ini'
-    if FileExist(ini) {
-        bg  := LTrim(IniRead(ini, 'colors', 'background', bg), '#')
-        fg  := LTrim(IniRead(ini, 'colors', 'foreground', fg), '#')
-        ac  := LTrim(IniRead(ini, 'colors', 'accent', ac), '#')
-        mut := LTrim(IniRead(ini, 'colors', 'muted', mut), '#')
-    }
-    MenuColors := {bg:bg, fg:fg, ac:ac, mut:mut}
-
-    g := Gui('-Caption +AlwaysOnTop +ToolWindow', 'WinarchyMenu')
-    g.BackColor := bg
-    g.MarginX := 0, g.MarginY := 0
-
-    pad := 16, rowH := 30, titleH := 32, labelW := 250, hintW := 170, gap := 16
-    w := pad * 2 + labelW + gap + hintW
-
-    g.SetFont('s12 bold', 'JetBrainsMono Nerd Font')
-    g.Add('Text', Format('x{} y{} w{} c{}', pad, pad, labelW + gap + hintW, ac), title)
-
-    g.SetFont('s11 norm', 'JetBrainsMono Nerd Font')
-    y0 := pad + titleH
-    ; barra de selección accent: se agrega PRIMERO (queda detrás de los textos, que son
-    ; BackgroundTrans) y se reposiciona sobre la fila activa con .Move() en SetMenuSel.
-    MenuSelBar := g.Add('Text', Format('x{} y{} w{} h{} Background{}', pad - 6, y0, labelW + gap + hintW + 12, rowH, ac), '')
-    for i, it in items {
-        y := y0 + (i - 1) * rowH
-        marker := (i = 1) ? Chr(0x25B8) ' ' : '   '
-        ; fila 1 preseleccionada: texto en color fondo para leerse sobre la barra accent
-        lbl := g.Add('Text', Format('x{} y{} w{} h{} c{} BackgroundTrans', pad, y + 4, labelW, rowH, (i = 1) ? bg : fg), marker it.text)
-        lbl.OnEvent('Click', MenuClick.Bind(i))
-        hintTxt := it.HasOwnProp('hint') ? it.hint : (it.HasOwnProp('sub') ? Chr(0x25B8) : '')
-        hnt := g.Add('Text', Format('x{} y{} w{} h{} c{} Right BackgroundTrans', pad + labelW + gap, y + 4, hintW, rowH, (i = 1) ? bg : mut), hintTxt)
-        hnt.OnEvent('Click', MenuClick.Bind(i))
-        MenuRows.Push({label: lbl, hint: hnt, y: y})
-    }
-    h := y0 + items.Length * rowH + pad
-
-    ; centrado en el monitor donde está el mouse (igual que el overlay de keybindings)
-    CoordMode('Mouse', 'Screen')
-    MouseGetPos(&mx, &my)
-    wl := 0, wt := 0, wr := A_ScreenWidth, wb := A_ScreenHeight
-    loop MonitorGetCount() {
-        MonitorGet(A_Index, &l, &t, &r, &b)
-        if (mx >= l && mx < r && my >= t && my < b) {
-            MonitorGetWorkArea(A_Index, &wl, &wt, &wr, &wb)
-            break
-        }
-    }
-    g.OnEvent('Escape', (*) => MenuBack())
-    g.OnEvent('Close', (*) => CloseMainMenu())
-    MainMenu := g
-    g.Show(Format('x{} y{} w{} h{}', wl + (wr - wl - w) // 2, wt + (wb - wt - h) // 2, w, h))
-    DllCall('dwmapi\DwmSetWindowAttribute', 'ptr', g.Hwnd, 'int', 33, 'int*', 2, 'int', 4)  ; esquinas redondeadas
-    SetTimer(MainMenuWatch, 250)               ; cierra al perder el foco
-}
-
-SetMenuSel(n) {
-    global MenuRows, MenuItems, MenuSel, MenuColors, MenuSelBar
-    n := Mod(n - 1 + MenuItems.Length, MenuItems.Length) + 1   ; wrap circular, 1-based
-    ; fila vieja → colores normales
-    old := MenuRows[MenuSel]
-    old.label.Text := '   ' MenuItems[MenuSel].text
-    old.label.SetFont('c' MenuColors.fg)
-    old.hint.SetFont('c' MenuColors.mut)
-    ; fila nueva → texto en color fondo (sobre la barra accent) + mover la barra
-    cur := MenuRows[n]
-    cur.label.Text := Chr(0x25B8) ' ' MenuItems[n].text
-    cur.label.SetFont('c' MenuColors.bg)
-    cur.hint.SetFont('c' MenuColors.bg)
-    try MenuSelBar.Move(, cur.y)
-    MenuSel := n
-}
-
-MenuNav(dir) {
-    global MenuSel
-    SetMenuSel(MenuSel + dir)
-}
-
-MenuActivate() {
-    global MenuItems, MenuSel
-    InvokeMenuItem(MenuItems[MenuSel])
-}
-
-MenuClick(i, *) {
-    global MenuItems
-    SetMenuSel(i)
-    InvokeMenuItem(MenuItems[i])
-}
-
-InvokeMenuItem(it) {
-    global MenuStack, MenuItems, MenuTitle, MenuSel
-    if it.HasOwnProp('sub') {
-        MenuStack.Push({items: MenuItems, title: MenuTitle, sel: MenuSel})
-        RenderMenu(it.sub, it.text)
-        return
-    }
-    CloseMainMenu()
-    it.action.Call()
-}
-
-MenuBack() {
-    global MenuStack
-    if MenuStack.Length {
-        prev := MenuStack.Pop()
-        RenderMenu(prev.items, prev.title)
-        SetMenuSel(prev.sel)
-        return
-    }
-    CloseMainMenu()
-}
-
-CloseMainMenu() {
-    global MainMenu, MenuStack
-    SetTimer(MainMenuWatch, 0)
-    if (MainMenu != '') {
-        try MainMenu.Destroy()
-        MainMenu := ''
-    }
-    MenuStack := []
-}
-
-MainMenuWatch() {
-    global MainMenu
-    try {
-        if (MainMenu != '') && !WinActive('ahk_id ' MainMenu.Hwnd)
-            CloseMainMenu()
-    } catch {
-        CloseMainMenu()
-    }
-}
-
-; Navegación por teclado, solo mientras el menú está activo.
-#HotIf WinActive('WinarchyMenu ahk_class AutoHotkeyGUI')
-Up::MenuNav(-1)
-Down::MenuNav(1)
-Enter::MenuActivate()
-Backspace::MenuBack()
-#HotIf
-
-; --- Overlay de keybindings (SUPER+K, estilo Omarchy) ----------------------------
-; El contenido se parsea del propio script (+ user.ahk): hotkey + comentario inline.
-; Colores del theme actual vía config\ahk\theme.ini (generado por el theme engine).
-KeyOverlay := ''
-
-ParseKeymap(path, defaultTitle := '') {
-    sections := []
-    cur := ''
+; Sections come from the "; --- Title ---" headers; descriptions from the inline comment.
+ParseKeymap(path, defaultTitle := '', startAt := '') {
+    sections := [], cur := '', on := (startAt = '')
     if (defaultTitle != '') {
         cur := {title: defaultTitle, items: []}
         sections.Push(cur)
     }
     for line in StrSplit(FileRead(path, 'UTF-8'), '`n') {
         line := RTrim(line, '`r')
+        if !on {
+            on := InStr(line, startAt) = 1
+            continue
+        }
         if RegExMatch(line, '^; --- (.+?) -{2,}', &m) {
-            cur := {title: Trim(m[1]), items: []}
+            cur := {title: RegExReplace(Trim(m[1]), '\s*\(.*\)$'), items: []}
             sections.Push(cur)
             continue
         }
-        if !IsObject(cur) || !RegExMatch(line, '^#([+^!]*)(.+?)::(.*)$', &m)
+        if !IsObject(cur) || !RegExMatch(line, '^#([+^!]*)([^:\s]+)::(.*)$', &m)
             continue
         mods := m[1], key := m[2], rest := m[3]
-        ; rangos repetitivos colapsados a una entrada (workspaces 1..9, flechas)
+        ; 1..9 and the four arrows are listed once
         if RegExMatch(key, '^[2-9]$') || key = 'Right' || key = 'Up' || key = 'Down'
             continue
         if (key = '1')
-            key := '1..9'
+            key := '1' Chr(0x2026) '9'
         else if (key = 'Left')
-            key := Chr(0x2190) '/' Chr(0x2192) '/' Chr(0x2191) '/' Chr(0x2193)
+            key := Chr(0x2190) ' ' Chr(0x2191) ' ' Chr(0x2192) ' ' Chr(0x2193)
+        else if (key = 'Enter')
+            key := 'Return'
+        else
+            key := StrUpper(SubStr(key, 1, 1)) SubStr(key, 2)
         desc := RegExMatch(rest, ';\s*(.+)$', &md) ? Trim(md[1]) : Trim(rest)
-        disp := 'SUPER+' (InStr(mods, '+') ? 'Shift+' : '') (InStr(mods, '^') ? 'Ctrl+' : '') (InStr(mods, '!') ? 'Alt+' : '') key
-        cur.items.Push({keys: disp, desc: desc})
+        cur.items.Push({
+            keys: 'SUPER' (InStr(mods, '!') ? '+Alt' : '') (InStr(mods, '^') ? '+Ctrl' : '') (InStr(mods, '+') ? '+Shift' : '') '+' key,
+            desc: StrUpper(SubStr(desc, 1, 1)) SubStr(desc, 2)})
     }
     return sections
 }
 
-ToggleKeyOverlay() {
-    global KeyOverlay
-    if (KeyOverlay != '') {
-        CloseKeyOverlay()
-        return
-    }
-    ; colores del theme (fallback Tokyo Night si todavía no se generó theme.ini)
-    bg := '1a1b26', fg := 'c0caf5', ac := '7aa2f7', mut := '565f89'
+; --- Palette: themed, searchable popup list (menu, system menu, SUPER+K) -----------
+Pal := ''
+
+ThemeColors() {
+    c := {bg:'1a1b26', fg:'c0caf5', ac:'7aa2f7', mut:'565f89'}
     ini := A_ScriptDir '\theme.ini'
     if FileExist(ini) {
-        bg := LTrim(IniRead(ini, 'colors', 'background', bg), '#')
-        fg := LTrim(IniRead(ini, 'colors', 'foreground', fg), '#')
-        ac := LTrim(IniRead(ini, 'colors', 'accent', ac), '#')
-        mut := LTrim(IniRead(ini, 'colors', 'muted', mut), '#')
+        c.bg  := LTrim(IniRead(ini, 'colors', 'background', c.bg), '#')
+        c.fg  := LTrim(IniRead(ini, 'colors', 'foreground', c.fg), '#')
+        c.ac  := LTrim(IniRead(ini, 'colors', 'accent', c.ac), '#')
+        c.mut := LTrim(IniRead(ini, 'colors', 'muted', c.mut), '#')
     }
-    sections := ParseKeymap(A_ScriptFullPath)
-    if FileExist(A_ScriptDir '\user.ahk')
-        for s in ParseKeymap(A_ScriptDir '\user.ahk', 'User')
-            sections.Push(s)
-    visible := []
-    total := 0
-    for s in sections {
-        if !s.items.Length
-            continue
-        visible.Push(s)
-        total += s.items.Length + 2          ; header + fila de aire
-    }
-    if !visible.Length
-        return
+    return c
+}
 
-    g := Gui('-Caption +AlwaysOnTop +ToolWindow', 'Winarchy Keybindings')
-    g.BackColor := bg
+; Closes any open palette; true when it was showing `mode` (the hotkey toggles it).
+PalClosed(mode) {
+    global Pal
+    if !IsObject(Pal)
+        return false
+    same := (Pal.mode = mode)
+    PalClose()
+    return same
+}
+
+PalOpen(mode, items, title) {
+    global Pal
+    c := ThemeColors()
+    keys := (mode = 'keys')
+    pad := 20, rowH := keys ? 28 : 32
+    labelW := keys ? 250 : 330, hintW := keys ? 470 : 190
+    w := pad * 2 + labelW + hintW
+    n := keys ? 18 : Min(Max(items.Length, 8), 14)
+
+    g := Gui('-Caption +AlwaysOnTop +ToolWindow', 'WinarchyPalette')
+    g.BackColor := c.bg
     g.MarginX := 0, g.MarginY := 0
 
-    rowH := 24, keyW := 170, descW := 230, gap := 12, pad := 30
-    colW := keyW + gap + descW + 28
-    cols := total > 34 ? 3 : 2
-    maxRows := Ceil(total / cols)
-    col := 0, row := 0, usedRows := 0
-    for s in visible {
-        blk := s.items.Length + 2
-        if (col < cols - 1 && row > 0 && row + blk > maxRows + 1)
-            col += 1, row := 0
-        x := pad + col * colW
-        g.SetFont('s10 bold', 'JetBrainsMono Nerd Font')
-        g.Add('Text', Format('x{} y{} w{} c{}', x, pad + row * rowH, keyW + gap + descW, ac), StrUpper(s.title))
-        row += 1
-        g.SetFont('s10 norm', 'JetBrainsMono Nerd Font')
-        for it in s.items {
-            y := pad + row * rowH
-            g.Add('Text', Format('x{} y{} w{} c{}', x, y, keyW, fg), it.keys)
-            g.Add('Text', Format('x{} y{} w{} c{}', x + keyW + gap, y, descW, mut), it.desc)
-            row += 1
-        }
-        row += 1
-        if (row > usedRows)
-            usedRows := row
-    }
-    w := pad * 2 + cols * colW - 28
-    h := pad * 2 + (usedRows - 1) * rowH
+    PalSetFont(g, 's10 bold')
+    crumb := g.Add('Text', Format('x{} y{} w{} h20 c{} 0x4200', pad, pad, w - pad * 2, c.ac), '')
+    PalSetFont(g, 's12 norm')
+    g.Add('Text', Format('x{} y{} w24 h30 c{} 0x200', pad, pad + 30, c.mut), Chr(0xF002))
+    ed := g.Add('Edit', Format('x{} y{} w{} h30 -E0x200 -Multi Background{} c{}', pad + 28, pad + 34, w - pad * 2 - 28, c.bg, c.fg))
+    SendMessage(0x1501, 1, StrPtr(keys ? 'Filter by key or action' : 'Search'), ed)   ; EM_SETCUEBANNER
+    g.Add('Text', Format('x{} y{} w{} h1 Background{}', pad, pad + 68, w - pad * 2, c.mut))
 
-    ; centrado en el monitor donde está el mouse
+    y0 := pad + 80
+    PalSetFont(g, 's11 norm')
+    rows := []
+    loop n {
+        y := y0 + (A_Index - 1) * rowH
+        lbl := g.Add('Text', Format('x{} y{} w{} h{} c{} Background{} 0x4200', pad - 8, y, labelW + 8, rowH, c.fg, c.bg), '')
+        hnt := g.Add('Text', Format('x{} y{} w{} h{} c{} Background{} 0x4200 {}', pad + labelW, y, hintW + 8, rowH, c.mut, c.bg, keys ? '' : 'Right'), '')
+        rows.Push({label: lbl, hint: hnt, y: y, on: false})
+    }
+    fy := y0 + n * rowH + 10
+    PalSetFont(g, 's9 norm')
+    arrows := Chr(0x2191) Chr(0x2193)
+    help := keys ? arrows ' scroll    esc close' : arrows ' move    ' Chr(0x21B5) ' select    esc back'
+    g.Add('Text', Format('x{} y{} w{} h20 c{}', pad, fy, labelW, c.mut), help)
+    count := g.Add('Text', Format('x{} y{} w{} h20 c{} Right', pad + labelW, fy, hintW, c.mut), '')
+    h := fy + 20 + pad - 4
+
+    Pal := {gui: g, mode: mode, colors: c, items: items, title: title, stack: [], list: [],
+        sel: 0, top: 1, rows: rows, rowH: rowH, y0: y0, x0: pad - 8, x1: pad + labelW + hintW + 8,
+        edit: ed, crumb: crumb, count: count, mouse: ''}
+    ed.OnEvent('Change', (*) => PalRefresh())
+    g.OnEvent('Close', (*) => PalClose())
+    PalRefresh()
+
+    WorkAreaUnderMouse(&wl, &wt, &wr, &wb)
+    g.Show(Format('x{} y{} w{} h{}', wl + (wr - wl - w) // 2, wt + (wb - wt - h) // 2, w, h))
+    DllCall('dwmapi\DwmSetWindowAttribute', 'ptr', g.Hwnd, 'int', 33, 'int*', 2, 'int', 4)  ; rounded corners
+    ed.Focus()
+    OnMessage(0x200, PalMouseMove)       ; WM_MOUSEMOVE
+    OnMessage(0x202, PalClick)           ; WM_LBUTTONUP
+    OnMessage(0x20A, PalWheel)           ; WM_MOUSEWHEEL
+    SetTimer(PalWatch, 250)              ; closes when it loses focus
+}
+
+; JetBrainsMono under its Nerd Fonts v2 or v3 family name.
+PalSetFont(g, opts) {
+    g.SetFont(opts, 'JetBrainsMono Nerd Font')
+    g.SetFont(opts, 'JetBrainsMono NF')
+}
+
+PalClose() {
+    global Pal
+    SetTimer(PalWatch, 0)
+    OnMessage(0x200, PalMouseMove, 0)
+    OnMessage(0x202, PalClick, 0)
+    OnMessage(0x20A, PalWheel, 0)
+    if IsObject(Pal)
+        try Pal.gui.Destroy()
+    Pal := ''
+}
+
+PalWatch() {
+    try {
+        if IsObject(Pal) && !WinActive('ahk_id ' Pal.gui.Hwnd)
+            PalClose()
+    } catch
+        PalClose()
+}
+
+PalActive() => IsObject(Pal) && WinActive('ahk_id ' Pal.gui.Hwnd)
+
+PalMatch(q, hay) {
+    for word in StrSplit(q, ' ')
+        if (word != '' && !InStr(hay, word))
+            return false
+    return true
+}
+
+PalHint(it) => it.HasOwnProp('sub') ? Chr(0x203A) : (it.HasOwnProp('hint') ? it.hint : '')
+
+; Leaves of the tree whose path matches, e.g. "Capture › Region".
+PalFlatten(items, path, q, list) {
+    for it in items {
+        name := (path = '') ? it.text : path ' ' Chr(0x203A) ' ' it.text
+        if it.HasOwnProp('sub')
+            PalFlatten(it.sub, name, q, list)
+        else if PalMatch(q, name ' ' PalHint(it))
+            list.Push({text: name, hint: PalHint(it), item: it})
+    }
+}
+
+PalRefresh(sel := 0) {
+    q := Trim(Pal.edit.Value)
+    list := []
+    if (Pal.mode = 'keys') {
+        for s in Pal.items {
+            hits := []
+            for it in s.items
+                if PalMatch(q, it.keys ' ' it.desc ' ' s.title)
+                    hits.Push({text: it.keys, hint: it.desc})
+            if hits.Length {
+                list.Push({text: StrUpper(s.title), hint: '', header: true})
+                for e in hits
+                    list.Push(e)
+            }
+        }
+    } else if (q = '') {
+        for it in Pal.items
+            list.Push({text: it.text, hint: PalHint(it), item: it})
+    } else
+        PalFlatten(Pal.items, '', q, list)
+    Pal.list := list
+    Pal.top := 1
+    Pal.sel := 0
+    for i, e in list
+        if !e.HasOwnProp('header') && (!Pal.sel || i = sel) {
+            Pal.sel := i
+            if !sel
+                break
+        }
+    crumb := StrUpper(Pal.title)
+    for lvl in Pal.stack
+        crumb := StrUpper(lvl.title) ' ' Chr(0x203A) ' ' crumb
+    Pal.crumb.Text := crumb
+    found := 0
+    for e in list
+        found += !e.HasOwnProp('header')
+    Pal.count.Text := (Pal.mode = 'keys') ? found ' bindings' : (q = '' ? '' : found ' results')
+    PalDraw()
+}
+
+PalDraw() {
+    c := Pal.colors, n := Pal.rows.Length, len := Pal.list.Length
+    if Pal.sel {
+        if (Pal.sel < Pal.top)
+            Pal.top := Pal.sel
+        else if (Pal.sel > Pal.top + n - 1)
+            Pal.top := Pal.sel - n + 1
+        if (Pal.top = Pal.sel && Pal.sel > 1 && Pal.list[Pal.sel - 1].HasOwnProp('header'))
+            Pal.top -= 1                 ; keep the section title above its first row
+    }
+    Pal.top := Max(1, Min(Pal.top, len - n + 1))
+    for k, r in Pal.rows {
+        i := Pal.top + k - 1
+        e := (i <= len) ? Pal.list[i] : {text: (k = 1 && !len) ? 'No matches' : '', hint: '', empty: true}
+        head := e.HasOwnProp('header'), on := (i = Pal.sel)
+        if (on != r.on) {
+            r.on := on
+            r.label.Opt('Background' (on ? c.ac : c.bg))
+            r.hint.Opt('Background' (on ? c.ac : c.bg))
+        }
+        r.label.SetFont((head ? 'bold' : 'norm') ' c' (on ? c.bg : head ? c.ac : e.HasOwnProp('empty') ? c.mut : c.fg))
+        r.hint.SetFont('c' (on ? c.bg : Pal.mode = 'keys' ? c.fg : c.mut))
+        r.label.Text := ' ' e.text
+        r.hint.Text := e.hint ' '
+    }
+}
+
+PalMove(d) {
+    if !Pal.sel
+        return
+    len := Pal.list.Length, i := Pal.sel, step := (d > 0) ? 1 : -1
+    loop Abs(d) {
+        j := i
+        loop {
+            j += step
+            if (j < 1 || j > len) {
+                if (Abs(d) > 1)          ; page / wheel: stop at the ends
+                    break 2
+                j := (j < 1) ? len : 1
+            }
+            if !Pal.list[j].HasOwnProp('header')
+                break
+        }
+        i := j
+    }
+    Pal.sel := i
+    PalDraw()
+}
+
+PalEnter() {
+    if !Pal.sel || !Pal.list[Pal.sel].HasOwnProp('item')
+        return
+    it := Pal.list[Pal.sel].item
+    if it.HasOwnProp('sub') {
+        Pal.stack.Push({items: Pal.items, title: Pal.title, sel: Pal.sel})
+        Pal.items := it.sub, Pal.title := it.text
+        Pal.edit.Value := ''
+        PalRefresh()
+        return
+    }
+    PalClose()
+    it.action.Call()
+}
+
+PalBack() {
+    if !Pal.stack.Length
+        return
+    prev := Pal.stack.Pop()
+    Pal.items := prev.items, Pal.title := prev.title
+    PalRefresh(prev.sel)
+}
+
+PalEscape() {
+    if (Pal.edit.Value != '') {
+        Pal.edit.Value := ''
+        PalRefresh()
+    } else if Pal.stack.Length
+        PalBack()
+    else
+        PalClose()
+}
+
+; List index under the cursor, or 0.
+PalIndexAtCursor(hwnd) {
+    if !IsObject(Pal) || DllCall('GetAncestor', 'ptr', hwnd, 'uint', 2, 'ptr') != Pal.gui.Hwnd
+        return 0
+    pt := Buffer(8)
+    DllCall('GetCursorPos', 'ptr', pt)
+    DllCall('ScreenToClient', 'ptr', Pal.gui.Hwnd, 'ptr', pt)
+    x := NumGet(pt, 0, 'int') * 96 / A_ScreenDPI, y := NumGet(pt, 4, 'int') * 96 / A_ScreenDPI
+    k := Floor((y - Pal.y0) / Pal.rowH) + 1
+    if (x < Pal.x0 || x > Pal.x1 || k < 1 || k > Pal.rows.Length)
+        return 0
+    i := Pal.top + k - 1
+    return (i <= Pal.list.Length && !Pal.list[i].HasOwnProp('header')) ? i : 0
+}
+
+PalMouseMove(wParam, lParam, msg, hwnd) {
+    if !IsObject(Pal) || (lParam = Pal.mouse)    ; ignore synthetic moves after a redraw
+        return
+    Pal.mouse := lParam
+    if (i := PalIndexAtCursor(hwnd)) && (i != Pal.sel) {
+        Pal.sel := i
+        PalDraw()
+    }
+}
+
+PalClick(wParam, lParam, msg, hwnd) {
+    if (i := PalIndexAtCursor(hwnd)) {
+        Pal.sel := i
+        PalDraw()
+        PalEnter()
+    }
+}
+
+PalWheel(wParam, lParam, msg, hwnd) {
+    if !IsObject(Pal) || DllCall('GetAncestor', 'ptr', hwnd, 'uint', 2, 'ptr') != Pal.gui.Hwnd
+        return
+    delta := (wParam >> 16) & 0xFFFF
+    PalMove(delta > 0x7FFF ? 3 : -3)
+    return 0
+}
+
+#HotIf PalActive()
+Up::PalMove(-1)
+Down::PalMove(1)
+Tab::PalMove(1)
++Tab::PalMove(-1)
+PgUp::PalMove(-Pal.rows.Length)
+PgDn::PalMove(Pal.rows.Length)
+Enter::PalEnter()
+NumpadEnter::PalEnter()
+Esc::PalEscape()
+#HotIf PalActive() && Pal.edit.Value = ''
+Backspace::PalBack()
+#HotIf
+
+WorkAreaUnderMouse(&wl, &wt, &wr, &wb) {
     CoordMode('Mouse', 'Screen')
     MouseGetPos(&mx, &my)
     wl := 0, wt := 0, wr := A_ScreenWidth, wb := A_ScreenHeight
@@ -685,33 +777,8 @@ ToggleKeyOverlay() {
         MonitorGet(A_Index, &l, &t, &r, &b)
         if (mx >= l && mx < r && my >= t && my < b) {
             MonitorGetWorkArea(A_Index, &wl, &wt, &wr, &wb)
-            break
+            return
         }
-    }
-    g.OnEvent('Escape', (*) => CloseKeyOverlay())
-    g.OnEvent('Close', (*) => CloseKeyOverlay())
-    KeyOverlay := g
-    g.Show(Format('x{} y{} w{} h{}', wl + (wr - wl - w) // 2, wt + (wb - wt - h) // 2, w, h))
-    DllCall('dwmapi\DwmSetWindowAttribute', 'ptr', g.Hwnd, 'int', 33, 'int*', 2, 'int', 4)  ; esquinas redondeadas
-    SetTimer(KeyOverlayWatch, 300)               ; cierra al perder el foco
-}
-
-CloseKeyOverlay() {
-    global KeyOverlay
-    SetTimer(KeyOverlayWatch, 0)
-    if (KeyOverlay != '') {
-        try KeyOverlay.Destroy()
-        KeyOverlay := ''
-    }
-}
-
-KeyOverlayWatch() {
-    global KeyOverlay
-    try {
-        if (KeyOverlay != '') && !WinActive('ahk_id ' KeyOverlay.Hwnd)
-            CloseKeyOverlay()
-    } catch {
-        CloseKeyOverlay()
     }
 }
 
@@ -825,22 +892,25 @@ AccentWatch() {
 }
 
 ; ============================================================================
-; HOTKEYS — esquema SUPER (siguen vivos en game-mode, como la tecla Windows)
+; HOTKEYS — SUPER scheme (still live in game mode, like the Windows key).
+; SUPER+K lists them: "; --- Title ---" is a section, the inline comment the action.
 ; ============================================================================
 
 ; --- Apps ---------------------------------------------------------------------
 #Enter::Wezterm()                                ; terminal
-#Space::ToggleFlow()                             ; Flow Launcher
-#s::ToggleFlow()                                 ; Win+S (search) → Flow + Everything
+#Space::ToggleFlow()                             ; launcher (Flow)
+#s::ToggleFlow()                                 ; search (Flow + Everything)
 #b::Run(DefaultBrowser())                        ; browser
 #e::Run('explorer.exe')                          ; file explorer
-; Win+N queda libre para Windows (centro de notificaciones; la campanita de YASB lo simula)
+; Win+N stays with Windows (notification center; the YASB bell mirrors it)
 #m::LaunchMusic()                                ; music (Spotify / YT Music)
 #o::LaunchObsidian()                             ; Obsidian
+#^+a::Winarchy('agent launch')                   ; coding agent
 
-; --- Menu (popup estilo Omarchy) ------------------------------------------------
-#!Space::ShowMainMenu()                          ; winarchy menu (Apps/Themes/System/...)
-#Esc::ShowSystemMenu()                           ; system / power menu (themed)
+; --- Menus ----------------------------------------------------------------------
+#!Space::ShowMainMenu()                          ; Winarchy menu
+#Esc::ShowSystemMenu()                           ; system / power menu
+#k::ToggleKeyOverlay()                           ; this keybindings list
 
 ; --- Webapps --------------------------------------------------------------------
 #a::WebApp('https://chatgpt.com')                ; ChatGPT
@@ -848,64 +918,63 @@ AccentWatch() {
 #y::WebApp('https://youtube.com')                ; YouTube
 #x::WebApp('https://x.com')                      ; X
 #c::WebApp('https://calendar.google.com')        ; Google Calendar
-#g::WebApp('https://web.whatsapp.com')           ; WhatsApp (in-game Win+G = Game Bar)
+#g::WebApp('https://web.whatsapp.com')           ; WhatsApp
 
 ; --- Windows -------------------------------------------------------------------
-#w::Komorebic('close')                           ; close window
-#f::Komorebic('toggle-monocle')                  ; monocle (logical fullscreen)
-#+f::Komorebic('toggle-maximize')                ; real maximize
-#t::Komorebic('toggle-float')                    ; float/tile
+#w::CloseWindow()                                ; close window
+#f::Komorebic('toggle-monocle')                  ; monocle (fill the workspace)
+#+f::Komorebic('toggle-maximize')                ; maximize
+#t::Komorebic('toggle-float')                    ; float / tile
 #p::Komorebic('toggle-pause')                    ; pause tiling
-#r::Komorebic('retile')                          ; force retile
-#+r::Winarchy('reload')                          ; reload whole stack
-#+Enter::Komorebic('promote')                    ; promote window to the largest tile
-#+l::Komorebic('cycle-layout next')              ; next layout (bsp, columns, rows, grid, ...)
-#Tab::Komorebic('focus-last-workspace')          ; back to the previous workspace
-#+Tab::Komorebic('move-to-last-workspace')       ; send the window to the previous workspace
-#^Enter::Komorebic('promote-focus')              ; focus the window at the top of the tree
-#+h::Komorebic('flip-layout horizontal')         ; mirror the layout left/right
-#+j::Komorebic('flip-layout vertical')           ; mirror the layout up/down
+#r::Komorebic('retile')                          ; retile
+#+r::Winarchy('reload')                          ; reload the whole stack
+#+Enter::Komorebic('promote')                    ; promote to the largest tile
+#+l::Komorebic('cycle-layout next')              ; next layout
+#Tab::Komorebic('focus-last-workspace')          ; previous workspace
+#+Tab::Komorebic('move-to-last-workspace')       ; move window to the previous workspace
+#^Enter::Komorebic('promote-focus')              ; focus the largest tile
+#+h::Komorebic('flip-layout horizontal')         ; mirror layout left / right
+#+j::Komorebic('flip-layout vertical')           ; mirror layout up / down
 #+z::Komorebic('toggle-tiling')                  ; stop tiling this workspace
-#!Home::Komorebic('quick-save-resize')           ; remember the current tile sizes
-#Home::Komorebic('quick-load-resize')            ; restore them
+#!Home::Komorebic('quick-save-resize')           ; save tile sizes
+#Home::Komorebic('quick-load-resize')            ; restore tile sizes
 #+d::Komorebic('toggle-transparency')            ; dim unfocused windows
-#^w::ToggleStayAwake()                           ; keep the machine awake
-#^m::Komorebic('minimize')                       ; minimize the focused window
-#^f::Komorebic('toggle-workspace-layer')         ; switch between the tiling and floating layers
-#^l::Komorebic('toggle-lock')                    ; pin the container so new windows do not displace it
+#^w::ToggleStayAwake()                           ; stay awake
+#^m::Komorebic('minimize')                       ; minimize
+#^f::Komorebic('toggle-workspace-layer')         ; switch tiling / floating layer
+#^l::Komorebic('toggle-lock')                    ; lock the tile in place
 
-; --- Focus -----------------------------------------------------------
+; --- Focus ---------------------------------------------------------------------
 #Left::Komorebic('focus left')                   ; move focus
 #Right::Komorebic('focus right')
 #Up::Komorebic('focus up')
 #Down::Komorebic('focus down')
 
-; --- Move window ---------------------------------------------------
+; --- Move window ---------------------------------------------------------------
 #+Left::Komorebic('move left')                   ; move window
 #+Right::Komorebic('move right')
 #+Up::Komorebic('move up')
 #+Down::Komorebic('move down')
 
-; --- Stacks (komorebi los dibuja como pestanas en la stackbar) --------------------
-#!Left::Komorebic('stack left')                  ; apilar con la ventana vecina
+; --- Stacks (tabs in komorebi's stackbar) ---------------------------------------
+#!Left::Komorebic('stack left')                  ; stack with the neighbour
 #!Right::Komorebic('stack right')
 #!Up::Komorebic('stack up')
 #!Down::Komorebic('stack down')
-#!u::Komorebic('unstack')                        ; sacar la ventana del stack
-#^s::Komorebic('stack-all')                      ; apilar todo el workspace
-#^u::Komorebic('unstack-all')                    ; desapilar el contenedor entero
-#!,::Komorebic('cycle-stack previous')           ; pestana anterior del stack
-#!.::Komorebic('cycle-stack next')               ; pestana siguiente del stack
+#!u::Komorebic('unstack')                        ; take the window out of the stack
+#^s::Komorebic('stack-all')                      ; stack the whole workspace
+#^u::Komorebic('unstack-all')                    ; unstack the whole container
+#!,::Komorebic('cycle-stack previous')           ; previous tab
+#!.::Komorebic('cycle-stack next')               ; next tab
 
-; --- Resize -----------------------------------------------------------------------
-#=::Komorebic('resize-axis horizontal increase') ; width +
-#-::Komorebic('resize-axis horizontal decrease') ; width -
-#+=::Komorebic('resize-axis vertical increase')  ; height +
-#+-::Komorebic('resize-axis vertical decrease')  ; height -
+; --- Resize --------------------------------------------------------------------
+#=::Komorebic('resize-axis horizontal increase') ; wider
+#-::Komorebic('resize-axis horizontal decrease') ; narrower
+#+=::Komorebic('resize-axis vertical increase')  ; taller
+#+-::Komorebic('resize-axis vertical decrease')  ; shorter
 
-; --- Workspaces ---------------------------------------------------------------
-; 1-9 (komorebi, no virtual desktops nativos)
-#1::Komorebic('focus-workspace 0')               ; go to workspace N
+; --- Workspaces (komorebi, not Windows virtual desktops) -------------------------
+#1::Komorebic('focus-workspace 0')               ; go to workspace
 #2::Komorebic('focus-workspace 1')
 #3::Komorebic('focus-workspace 2')
 #4::Komorebic('focus-workspace 3')
@@ -915,7 +984,7 @@ AccentWatch() {
 #8::Komorebic('focus-workspace 7')
 #9::Komorebic('focus-workspace 8')
 
-#+1::Komorebic('move-to-workspace 0')            ; move window to workspace N
+#+1::Komorebic('move-to-workspace 0')            ; move window to workspace
 #+2::Komorebic('move-to-workspace 1')
 #+3::Komorebic('move-to-workspace 2')
 #+4::Komorebic('move-to-workspace 3')
@@ -925,7 +994,7 @@ AccentWatch() {
 #+8::Komorebic('move-to-workspace 7')
 #+9::Komorebic('move-to-workspace 8')
 
-#^1::Komorebic('send-to-workspace 0')               ; send window to workspace N (focus stays)
+#^1::Komorebic('send-to-workspace 0')            ; send window to workspace, stay here
 #^2::Komorebic('send-to-workspace 1')
 #^3::Komorebic('send-to-workspace 2')
 #^4::Komorebic('send-to-workspace 3')
@@ -935,41 +1004,39 @@ AccentWatch() {
 #^8::Komorebic('send-to-workspace 7')
 #^9::Komorebic('send-to-workspace 8')
 
-; --- Monitors ------------------------------------------------------------------------
+; --- Monitors ------------------------------------------------------------------
 #,::Komorebic('cycle-focus-monitor previous')    ; focus previous monitor
 #.::Komorebic('cycle-focus-monitor next')        ; focus next monitor
-#+,::Komorebic('cycle-move-monitor previous')    ; move to previous monitor
-#+.::Komorebic('cycle-move-monitor next')        ; move to next monitor
-#^,::Komorebic('cycle-send-to-monitor previous') ; send to previous monitor (focus stays)
-#^.::Komorebic('cycle-send-to-monitor next')     ; send to next monitor (focus stays)
-#!+,::Komorebic('cycle-move-workspace-to-monitor previous')  ; move the whole workspace to the previous monitor
-#!+.::Komorebic('cycle-move-workspace-to-monitor next')      ; move the whole workspace to the next monitor
+#+,::Komorebic('cycle-move-monitor previous')    ; move window to previous monitor
+#+.::Komorebic('cycle-move-monitor next')        ; move window to next monitor
+#^,::Komorebic('cycle-send-to-monitor previous') ; send window to previous monitor, stay here
+#^.::Komorebic('cycle-send-to-monitor next')     ; send window to next monitor, stay here
+#!+,::Komorebic('cycle-move-workspace-to-monitor previous')  ; move workspace to previous monitor
+#!+.::Komorebic('cycle-move-workspace-to-monitor next')      ; move workspace to next monitor
 
-; --- Captura (ShareX directo, ver Sharex() arriba) -------------------------------------
-#+s::Sharex('RectangleRegion')                    ; region capture
-#+w::Sharex('ActiveWindow')                       ; active window capture
-#+p::Sharex('PrintScreen')                        ; fullscreen capture
-#+v::Sharex('ScreenRecorder')                     ; screen recording
-#^v::Sharex('StopScreenRecording')                ; stop recording
-#^q::Sharex('QRCodeScanRegion')                   ; decode a QR on screen
-#^o::Sharex('OCR')                                ; text from screen
+; --- Capture (ShareX) ------------------------------------------------------------
+#+s::Sharex('RectangleRegion')                   ; region
+#+w::Sharex('ActiveWindow')                      ; active window
+#+p::Sharex('PrintScreen')                       ; full screen
+#+v::Sharex('ScreenRecorder')                    ; record screen
+#+g::Sharex('ScreenRecorderGIF')                 ; record as GIF
+#^v::Sharex('StopScreenRecording')               ; stop recording
+#^o::Sharex('OCR')                               ; text from screen (OCR)
+#^q::Sharex('QRCodeScanRegion')                  ; scan QR code
 
-; --- Themes / help --------------------------------------------------------------------
-#+t::Winarchy('theme next')                       ; next theme
+; --- Themes --------------------------------------------------------------------
+#+t::Winarchy('theme next')                      ; next theme
+#^t::Winarchy('theme gallery')                   ; theme gallery
+#^Space::Winarchy('background next')             ; next background
 
-; --- Paneles del sistema --------------------------------------------------------
-#^a::Run('explorer.exe ms-settings:sound')       ; audio
+; --- System settings -------------------------------------------------------------
+#^a::Run('explorer.exe ms-settings:sound')       ; sound
 #^b::Run('explorer.exe ms-settings:bluetooth')   ; bluetooth
 #^n::Run('explorer.exe ms-settings:network')     ; network
 #^d::Run('explorer.exe ms-settings:display')     ; display
-#^p::Run('explorer.exe ms-settings:powersleep')  ; power
-#+g::Sharex('ScreenRecorderGIF')                  ; GIF recording
-#^t::Winarchy('theme gallery')                    ; theme gallery
-#^Space::Winarchy('background next')              ; next background of the active theme
-#^+a::Winarchy('agent launch')                    ; preferred coding agent
-#k::ToggleKeyOverlay()                            ; this keybindings overlay
+#^p::Run('explorer.exe ms-settings:powersleep')  ; power & sleep
 
-; --- Override de usuario (config\ahk\user.ahk, no versionado; sus hotkeys
-;     aparecen en el overlay bajo "Usuario" o sus propios headers "; --- X ---")
+; User overrides: config\ahk\user.ahk (untracked). Its hotkeys show in SUPER+K under
+; "User", or under their own "; --- Title ---" headers.
 #HotIf
 #Include *i %A_ScriptDir%\user.ahk
