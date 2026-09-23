@@ -44,95 +44,97 @@ function Set-WinarchyFlowIdentity {
 
     New-WinarchySnapshot -Label 'flow-settings' -Path @($settingsPath) | Out-Null
     foreach ($k in $desired.Keys) { $settings[$k] = $desired[$k] }
-    $settings | ConvertTo-Json -Depth 50 | Set-Content -Path $settingsPath -Encoding UTF8
+    Save-WinarchyFlowSettings -Files @{ $settingsPath = $settings }
     Write-WinarchyOk "Flow identity applied (tray + auto-update off): $settingsPath"
 }
 
-function Set-WinarchyFlowAppsKeyword {
-    <# Agrega "app" como ActionKeyword extra del plugin Program (additivo: no
-       reemplaza "*", la búsqueda global de Flow sigue igual). Permite que el
-       popup "Apps" (paridad con Walker de Omarchy) precargue "app " en el query
-       box y quede scoped a solo programas instalados — sin curar una lista a
-       mano, Flow ya los indexa. Idempotente y con snapshot previo. #>
+function Save-WinarchyFlowSettings {
+    <# Escribe archivos de settings de Flow con Flow detenido (sin dejarlo guardar su estado
+       en memoria) y lo relanza si estaba corriendo. $Files: path -> hashtable. #>
+    param([hashtable]$Files = @{}, [scriptblock]$WhileStopped)
+    $flow = Get-Process -Name 'Flow.Launcher' -ErrorAction SilentlyContinue
+    if ($flow) {
+        $flow | Stop-Process -Force
+        $flow | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue
+    }
+    foreach ($path in $Files.Keys) {
+        $Files[$path] | ConvertTo-Json -Depth 50 | Set-Content -Path $path -Encoding UTF8
+    }
+    if ($WhileStopped) { & $WhileStopped }
+    $exe = "$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe"
+    if ($flow -and (Test-Path $exe)) { Start-Process $exe }
+}
+
+$script:WinarchyFlowProgramPluginId = '791FC278BA414111B8D1886DFE447410'
+$script:WinarchyFlowExplorerPluginId = '572be03c74c642baae319fc283e561a8'
+# Plugin Everything standalone (archivado, incompatible con Flow 2.x): lo reemplaza Explorer.
+$script:WinarchyFlowLegacyEverythingPluginId = 'D2D2C23B084D411DB66FE0C79D6C2A6E'
+
+function Add-WinarchyFlowKeyword {
+    <# Agrega $Keyword a los ActionKeywords del plugin; true si cambió. #>
+    param([hashtable]$Plugins, [string]$PluginId, [string]$Keyword)
+    if (-not $Plugins -or -not $Plugins.ContainsKey($PluginId)) { return $false }
+    $keywords = @($Plugins[$PluginId]['ActionKeywords'] | Where-Object { $_ })
+    if ($keywords -contains $Keyword) { return $false }
+    $Plugins[$PluginId]['ActionKeywords'] = @($keywords) + $Keyword
+    $true
+}
+
+function Set-WinarchyFlowKeywords {
+    <# Keywords scoped de winarchy.ahk, aditivos ("*" sigue siendo la búsqueda global):
+       "app " → plugin Program, "f " → búsqueda de archivos de Explorer sobre Everything.
+       Quita el plugin Everything legacy. Idempotente y con snapshot previo. #>
     $settingsPath = Get-WinarchyFlowSettingsPath
+    $explorerPath = Join-Path "$env:APPDATA\FlowLauncher" 'Settings\Plugins\Flow.Launcher.Plugin.Explorer\Settings.json'
     if (-not (Test-Path $settingsPath)) {
-        Write-WinarchyWarn 'Flow Launcher Settings.json not found; Apps keyword not applied.'
+        Write-WinarchyWarn 'Flow Launcher Settings.json not found; scoped keywords not applied.'
         return
     }
-
-    # ID fijo del plugin built-in "Program" (Flow.Launcher.Plugin.Program/plugin.json).
-    $programPluginId = '791FC278BA414111B8D1886DFE447410'
 
     $settings = Get-Content $settingsPath -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable
     $plugins = $settings['PluginSettings']['Plugins']
-    if (-not $plugins -or -not $plugins.ContainsKey($programPluginId)) {
-        Write-WinarchyWarn 'Flow Program plugin settings not found (¿corriste Flow al menos una vez?); Apps keyword not applied.'
-        return
+    $files = @{}
+    $changes = @()
+    if (Add-WinarchyFlowKeyword $plugins $script:WinarchyFlowProgramPluginId 'app') { $changes += "Program 'app'" }
+    if (Add-WinarchyFlowKeyword $plugins $script:WinarchyFlowExplorerPluginId 'f') { $changes += "Explorer 'f'" }
+    if ($plugins -and $plugins.ContainsKey($script:WinarchyFlowLegacyEverythingPluginId)) {
+        $plugins.Remove($script:WinarchyFlowLegacyEverythingPluginId)
+        $changes += 'legacy Everything plugin removed'
+    }
+    if ($changes) { $files[$settingsPath] = $settings }
+
+    if (Test-Path $explorerPath) {
+        $explorer = Get-Content $explorerPath -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable
+        $desired = @{ FileSearchActionKeyword = 'f'; FileSearchKeywordEnabled = $true }
+        if (Test-Path "$env:ProgramFiles\Everything\Everything.exe") { $desired['IndexSearchEngine'] = 1 }
+        $explorerChanged = $false
+        foreach ($k in $desired.Keys) {
+            if ($explorer[$k] -ne $desired[$k]) { $explorer[$k] = $desired[$k]; $explorerChanged = $true }
+        }
+        if ($explorerChanged) {
+            $files[$explorerPath] = $explorer
+            $changes += 'Explorer file search'
+        }
+    }
+    else {
+        Write-WinarchyWarn 'Flow Explorer plugin settings not found (¿corriste Flow al menos una vez?); file search keyword not applied.'
     }
 
-    $program = $plugins[$programPluginId]
-    $keywords = if ($null -eq $program['ActionKeywords']) { @() } else { @($program['ActionKeywords']) }
-    if ($keywords -contains 'app') {
-        Write-WinarchyOk "Flow Apps keyword already applied: $settingsPath"
-        return
-    }
-
-    New-WinarchySnapshot -Label 'flow-settings' -Path @($settingsPath) | Out-Null
-    $program['ActionKeywords'] = $keywords + 'app'
-    $settings | ConvertTo-Json -Depth 50 | Set-Content -Path $settingsPath -Encoding UTF8
-    Write-WinarchyOk "Flow Apps keyword applied (additive, 'app '): $settingsPath"
-}
-
-# Plugin oficial Flow-Launcher/Flow.Launcher.Plugin.Everything: sin él, Flow busca
-# archivos con su propio indexer (plugin "Explorer"), notablemente más lento y limitado
-# a rutas configuradas manualmente en vez del índice NTFS/MFT de voidtools Everything.
-$script:WinarchyFlowEverythingPluginId = 'D2D2C23B084D411DB66FE0C79D6C2A6E'
-$script:WinarchyFlowEverythingPluginVersion = '1.7.7'
-$script:WinarchyFlowEverythingPluginUrl = "https://github.com/Flow-Launcher/Flow.Launcher.Plugin.Everything/releases/download/v$script:WinarchyFlowEverythingPluginVersion/Flow.Launcher.Plugin.Everything.zip"
-
-function Test-WinarchyFlowEverythingPluginInstalled {
-    $pluginsDir = Join-Path "$env:APPDATA\FlowLauncher" 'Plugins'
-    if (-not (Test-Path $pluginsDir)) { return $false }
-    Get-ChildItem $pluginsDir -Directory -ErrorAction SilentlyContinue | Where-Object {
+    $legacyDirs = @(Get-ChildItem (Join-Path "$env:APPDATA\FlowLauncher" 'Plugins') -Directory -ErrorAction SilentlyContinue | Where-Object {
         $manifest = Join-Path $_.FullName 'plugin.json'
-        (Test-Path $manifest) -and ((Get-Content $manifest -Raw | ConvertFrom-Json).ID -eq $script:WinarchyFlowEverythingPluginId)
-    } | Select-Object -First 1 | ForEach-Object { $true }
-}
+        (Test-Path $manifest) -and ((Get-Content $manifest -Raw | ConvertFrom-Json).ID -eq $script:WinarchyFlowLegacyEverythingPluginId)
+    })
+    if (-not $files.Count -and -not $legacyDirs) {
+        Write-WinarchyOk "Flow scoped keywords already applied: $settingsPath"
+        return
+    }
 
-function Install-WinarchyFlowEverythingPlugin {
-    <# Descarga e instala el plugin Everything de Flow (release oficial de GitHub) si
-       falta. Requiere que voidtools Everything esté instalado (lo trae install.ps1 vía
-       winget); si no está, el plugin queda inerte, así que no vale la pena bajarlo.
-       Idempotente: no reinstala si ya está presente. Flow lo detecta en su próximo
-       arranque (escanea Plugins\ al iniciar; no requiere editar Settings.json). #>
-    $everythingExe = @("$env:ProgramFiles\Everything\Everything.exe", "${env:ProgramFiles(x86)}\Everything\Everything.exe") |
-        Where-Object { Test-Path $_ } | Select-Object -First 1
-    if (-not $everythingExe) {
-        Write-WinarchyWarn 'voidtools Everything not installed; Flow Everything plugin not installed (winget install voidtools.Everything).'
-        return
+    $snapshot = New-WinarchySnapshot -Label 'flow-settings' -Path @($files.Keys)
+    Save-WinarchyFlowSettings -Files $files -WhileStopped {
+        foreach ($d in $legacyDirs) { Move-Item $d.FullName (Join-Path $snapshot $d.Name) -Force }
     }
-    if (Test-WinarchyFlowEverythingPluginInstalled) {
-        Write-WinarchyOk 'Flow Everything plugin already installed'
-        return
-    }
-    $pluginsDir = Join-Path "$env:APPDATA\FlowLauncher" 'Plugins'
-    if (-not (Test-Path $pluginsDir)) {
-        Write-WinarchyWarn 'Flow Launcher Plugins dir not found (¿corriste Flow al menos una vez?); Everything plugin not installed.'
-        return
-    }
-    $zipPath = Join-Path ([System.IO.Path]::GetTempPath()) 'Flow.Launcher.Plugin.Everything.zip'
-    $destDir = Join-Path $pluginsDir "Everything-$script:WinarchyFlowEverythingPluginVersion"
-    try {
-        Invoke-WebRequest -Uri $script:WinarchyFlowEverythingPluginUrl -OutFile $zipPath -UseBasicParsing
-        Expand-Archive -Path $zipPath -DestinationPath $destDir -Force
-        Write-WinarchyOk "Flow Everything plugin installed: $destDir (restart Flow to load it)"
-    }
-    catch {
-        Write-WinarchyWarn "No pude instalar el plugin Everything de Flow: $($_.Exception.Message)"
-    }
-    finally {
-        Remove-Item $zipPath -ErrorAction SilentlyContinue
-    }
+    if ($legacyDirs) { $changes += "legacy Everything plugin moved to $snapshot" }
+    Write-WinarchyOk "Flow scoped keywords applied ($($changes -join ', '))"
 }
 
 function Get-WinarchyDefenderExclusionPaths {

@@ -2019,3 +2019,151 @@ Describe 'WezTerm context menu' {
         }
     }
 }
+
+Describe 'Add-WinarchyFlowKeyword' {
+    It 'appends to a single-element array instead of concatenating it as a string' {
+        InModuleScope Winarchy {
+            # ConvertFrom-Json -AsHashtable turns ["*"] into a one-element array, not a string.
+            $plugins = @{ 'p1' = @{ ActionKeywords = @('*') } }
+            $changed = Add-WinarchyFlowKeyword $plugins 'p1' 'app'
+            $changed | Should -BeTrue
+            $plugins['p1']['ActionKeywords'] | Should -Be @('*', 'app')
+        }
+    }
+
+    It 'is idempotent when the keyword is already present' {
+        InModuleScope Winarchy {
+            $plugins = @{ 'p1' = @{ ActionKeywords = @('*', 'app') } }
+            Add-WinarchyFlowKeyword $plugins 'p1' 'app' | Should -BeFalse
+            $plugins['p1']['ActionKeywords'] | Should -Be @('*', 'app')
+        }
+    }
+
+    It 'returns false when the plugin id is not present' {
+        InModuleScope Winarchy {
+            $plugins = @{ 'p1' = @{ ActionKeywords = @('*') } }
+            Add-WinarchyFlowKeyword $plugins 'nope' 'app' | Should -BeFalse
+        }
+    }
+}
+
+Describe 'Set-WinarchyFlowKeywords' {
+    BeforeAll {
+        $script:FlowProgramId = '791FC278BA414111B8D1886DFE447410'
+        $script:FlowExplorerId = '572be03c74c642baae319fc283e561a8'
+        $script:FlowLegacyEverythingId = 'D2D2C23B084D411DB66FE0C79D6C2A6E'
+    }
+
+    It 'sets scoped keywords, drops the legacy Everything plugin, and is idempotent' {
+        InModuleScope Winarchy -Parameters @{
+            ProgramId  = $script:FlowProgramId
+            ExplorerId = $script:FlowExplorerId
+            LegacyId   = $script:FlowLegacyEverythingId
+        } {
+            param($ProgramId, $ExplorerId, $LegacyId)
+
+            $oldAppData = $env:APPDATA
+            $appData = Join-Path $TestDrive 'appdata'
+            $env:APPDATA = $appData
+            try {
+                $settingsDir = Join-Path $appData 'FlowLauncher\Settings'
+                $explorerDir = Join-Path $settingsDir 'Plugins\Flow.Launcher.Plugin.Explorer'
+                $pluginsDir = Join-Path $appData 'FlowLauncher\Plugins'
+                $legacyDir = Join-Path $pluginsDir 'Everything-1.7.7'
+                New-Item -ItemType Directory -Path $settingsDir, $explorerDir, $legacyDir -Force | Out-Null
+
+                $settings = @{
+                    PluginSettings = @{
+                        Plugins = @{
+                            $ProgramId  = @{ ActionKeywords = @('*') }
+                            $ExplorerId = @{ ActionKeywords = @('*', 'doc:') }
+                            $LegacyId   = @{ ActionKeywords = @('*') }
+                        }
+                    }
+                }
+                $settingsPath = Join-Path $settingsDir 'Settings.json'
+                $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $settingsPath -Encoding UTF8
+
+                $explorerSettings = @{ FileSearchActionKeyword = '*'; FileSearchKeywordEnabled = $false; IndexSearchEngine = 0 }
+                $explorerPath = Join-Path $explorerDir 'Settings.json'
+                $explorerSettings | ConvertTo-Json | Set-Content -Path $explorerPath -Encoding UTF8
+
+                $legacyManifestPath = Join-Path $legacyDir 'plugin.json'
+                @{ ID = $LegacyId; Name = 'Everything'; Version = '1.7.7' } | ConvertTo-Json |
+                    Set-Content -Path $legacyManifestPath -Encoding UTF8
+
+                Mock Get-Process { }
+                Mock Start-Process { }
+                $snapshotDir = Join-Path $TestDrive 'snapshot'
+                New-Item -ItemType Directory -Path $snapshotDir -Force | Out-Null
+                Mock New-WinarchySnapshot { $snapshotDir }
+
+                Set-WinarchyFlowKeywords
+
+                $result = Get-Content $settingsPath -Raw | ConvertFrom-Json -AsHashtable
+                $plugins = $result['PluginSettings']['Plugins']
+                @($plugins[$ProgramId]['ActionKeywords']) | Should -Be @('*', 'app')
+                @($plugins[$ExplorerId]['ActionKeywords']) | Should -Contain 'f'
+                $plugins.ContainsKey($LegacyId) | Should -BeFalse
+
+                Test-Path $legacyDir | Should -BeFalse
+                Test-Path (Join-Path $snapshotDir 'Everything-1.7.7') | Should -BeTrue
+
+                $resultExplorer = Get-Content $explorerPath -Raw | ConvertFrom-Json -AsHashtable
+                $resultExplorer['FileSearchActionKeyword'] | Should -Be 'f'
+                $resultExplorer['FileSearchKeywordEnabled'] | Should -BeTrue
+
+                Should -Invoke New-WinarchySnapshot -Times 1
+
+                Set-WinarchyFlowKeywords
+
+                Should -Invoke New-WinarchySnapshot -Times 1
+            }
+            finally {
+                $env:APPDATA = $oldAppData
+            }
+        }
+    }
+}
+
+Describe 'Get-WinarchyFlowPluginUpdates' {
+    It 'returns only plugins with a strictly newer manifest version' {
+        InModuleScope Winarchy {
+            $installed = @(
+                [pscustomobject]@{ ID = 'a'; Name = 'Newer'; Version = '1.0.0'; Dir = 'C:\a' }
+                [pscustomobject]@{ ID = 'b'; Name = 'Same'; Version = '2.0.0'; Dir = 'C:\b' }
+                [pscustomobject]@{ ID = 'c'; Name = 'Older'; Version = '3.0.0'; Dir = 'C:\c' }
+                [pscustomobject]@{ ID = 'd'; Name = 'Unknown'; Version = '1.0.0'; Dir = 'C:\d' }
+                [pscustomobject]@{ ID = 'e'; Name = 'Bad'; Version = 'not-a-version'; Dir = 'C:\e' }
+            )
+            $manifest = @(
+                [pscustomobject]@{ ID = 'a'; Version = '1.1.0'; UrlDownload = 'https://example.test/a.zip' }
+                [pscustomobject]@{ ID = 'b'; Version = '2.0.0'; UrlDownload = 'https://example.test/b.zip' }
+                [pscustomobject]@{ ID = 'c'; Version = '2.9.0'; UrlDownload = 'https://example.test/c.zip' }
+                [pscustomobject]@{ ID = 'e'; Version = '1.0.0'; UrlDownload = 'https://example.test/e.zip' }
+            )
+            $updates = @(Get-WinarchyFlowPluginUpdates -Installed $installed -Manifest $manifest)
+            $updates.Count | Should -Be 1
+            $updates[0].ID | Should -Be 'a'
+            $updates[0].From | Should -Be '1.0.0'
+            $updates[0].To | Should -Be '1.1.0'
+        }
+    }
+
+    It 'accepts a plain array manifest (as parsed from plugins.json)' {
+        InModuleScope Winarchy {
+            $installed = @([pscustomobject]@{ ID = 'x'; Name = 'X'; Version = '0.1.0'; Dir = 'C:\x' })
+            $manifest = ,([pscustomobject]@{ ID = 'x'; Version = '0.2.0'; UrlDownload = 'https://example.test/x.zip' })
+            $updates = @(Get-WinarchyFlowPluginUpdates -Installed $installed -Manifest $manifest)
+            $updates.Count | Should -Be 1
+            $updates[0].To | Should -Be '0.2.0'
+        }
+    }
+
+    It 'returns nothing when nothing is installed' {
+        InModuleScope Winarchy {
+            @(Get-WinarchyFlowPluginUpdates -Installed @() -Manifest @([pscustomobject]@{ ID = 'a'; Version = '1.0.0' })) |
+                Should -BeNullOrEmpty
+        }
+    }
+}

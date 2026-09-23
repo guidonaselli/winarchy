@@ -9,6 +9,7 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 |---|---|
 | `SUPER+Return` | WezTerm (the default terminal) |
 | `SUPER+Space` | Flow Launcher — applications and Winarchy's own commands in one search |
+| `SUPER+S` | File search — Flow scoped to Everything (`f ` prefix), replaces Windows Search |
 | `SUPER+B` | Default browser |
 | `SUPER+E` | File explorer |
 | `SUPER+N` | Notification center (Windows native — not intercepted, so YASB's bell works) |
@@ -23,9 +24,10 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 | `SUPER+Esc` | System / power submenu directly (Screensaver/Lock/Sleep/Hibernate/Sign out/Restart/Shut down) |
 
 The menu's **Apps** entry opens Flow Launcher pre-scoped to the `Program` plugin
-(action keyword `app`, added additively by `Set-WinarchyFlowAppsKeyword` — it
-does not replace the default `*`, so plain `SUPER+Space` keeps searching
-everything). This mirrors Omarchy's Walker-based Apps list without curating a
+(action keyword `app`), and `SUPER+S` pre-scoped to the `Explorer` plugin's
+file search on the Everything engine (action keyword `f`, files only). `Set-WinarchyFlowKeywords` adds both
+additively — the default `*` stays, so plain `SUPER+Space` keeps searching
+everything. This mirrors Omarchy's Walker-based Apps list without curating a
 manual app list: Flow already indexes installed programs.
 
 ## Webapps (browser `--app=` windows, tileable)

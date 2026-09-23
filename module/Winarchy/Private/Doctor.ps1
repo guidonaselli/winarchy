@@ -174,7 +174,8 @@ function Invoke-WinarchyDoctor {
         @{ Name = 'YASB'; Key = 'yasb'; Path = (Get-Command yasb -ErrorAction SilentlyContinue).Source },
         @{ Name = 'Flow Launcher'; Key = 'flow'; Path = "$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe" },
         @{ Name = 'AutoHotkey v2'; Key = 'ahk'; Path = Get-WinarchyAhkExe },
-        @{ Name = 'WezTerm'; Key = 'wezterm'; Path = Get-WinarchyWeztermExe }
+        @{ Name = 'WezTerm'; Key = 'wezterm'; Path = Get-WinarchyWeztermExe },
+        @{ Name = 'Everything'; Key = 'everything'; Path = "$env:ProgramFiles\Everything\Everything.exe" }
     )) {
         $found = $pinned.Path -and (Test-Path $pinned.Path)
         $installed = if ($found) { (Get-Item $pinned.Path).VersionInfo.ProductVersion } else { $null }
@@ -198,17 +199,18 @@ function Invoke-WinarchyDoctor {
         $(if ($sharex) { "screenshots, screen recording and webapps — $((Get-Item $sharex).VersionInfo.ProductVersion)" } else { 'missing: SUPER+Shift+S/W/P/V/G and `winarchy screenshot` will fail' }) `
         'winget install ShareX.ShareX'
 
-    # Sin el plugin, Flow busca archivos con su indexer propio (mucho más lento/limitado
-    # que apoyarse en el índice NTFS de voidtools Everything).
     $everythingInstalled = [bool](@("$env:ProgramFiles\Everything\Everything.exe", "${env:ProgramFiles(x86)}\Everything\Everything.exe") | Where-Object { Test-Path $_ })
     Add-Check 'voidtools Everything installed' $everythingInstalled `
         $(if ($everythingInstalled) { 'file search backend for Flow' } else { 'missing: Flow file search falls back to its slower built-in indexer' }) `
         'winget install voidtools.Everything'
     if ($everythingInstalled) {
-        $flowEverythingPlugin = Test-WinarchyFlowEverythingPluginInstalled
-        Add-Check 'Flow Everything plugin installed' ([bool]$flowEverythingPlugin) `
-            $(if ($flowEverythingPlugin) { 'Flow file search uses the Everything index' } else { 'missing: Flow file search is slow/limited without it' }) `
-            '.\install.ps1  (installs it automatically)'
+        $explorerSettings = Join-Path "$env:APPDATA\FlowLauncher" 'Settings\Plugins\Flow.Launcher.Plugin.Explorer\Settings.json'
+        $explorer = if (Test-Path $explorerSettings) { Get-Content $explorerSettings -Raw | ConvertFrom-Json }
+        $legacyPlugin = @(Get-ChildItem (Join-Path "$env:APPDATA\FlowLauncher" 'Plugins') -Directory -Filter 'Everything-*' -ErrorAction SilentlyContinue)
+        $flowOnEverything = $explorer -and $explorer.IndexSearchEngine -eq 1 -and $explorer.FileSearchKeywordEnabled -and -not $legacyPlugin
+        Add-Check 'Flow file search on Everything' $flowOnEverything `
+            $(if ($flowOnEverything) { "Explorer plugin on the Everything index (SUPER+S → '$($explorer.FileSearchActionKeyword) ')" } elseif ($legacyPlugin) { 'legacy standalone Everything plugin still installed (archived upstream, fails on Flow 2.x)' } else { 'Explorer plugin not on the Everything engine / SUPER+S keyword off' }) `
+            'winarchy update --self  (or .\install.ps1)'
     }
 
     # Defender escaneando en tiempo real cada captura de ShareX, el I/O de indexado de

@@ -141,16 +141,13 @@ ToggleFlow() {
     return 0
 }
 
-ToggleFlowApps() {
-    ; Como ToggleFlow(), pero precarga "app " en el query box: Set-WinarchyFlowAppsKeyword
-    ; (Identity.ps1) agrega "app" como ActionKeyword extra del plugin Program de Flow, así
-    ; que esto queda scoped a solo programas instalados — paridad con el Apps de Walker en
-    ; Omarchy, sin curar una lista a mano.
+; Flow with a plugin keyword preloaded ("app " programs, "f " files; Set-WinarchyFlowKeywords).
+ToggleFlowScoped(prefix) {
     if !ToggleFlow()
         return
     Sleep(50)
     Send('^a')
-    SendText('app ')
+    SendText(prefix)
 }
 
 DefaultBrowser() {
@@ -326,7 +323,7 @@ OnOff(flag) => Chr(0xB7) ' ' (FileExist(flag) ? 'on' : 'off')
 WinarchyMenuItems() {
     global GameFlag, AwakeFlag
     return [
-        {text:'Apps',          hint:'SUPER+Space',        action:(*)=>ToggleFlowApps()},
+        {text:'Apps',          hint:'SUPER+Space',        action:(*)=>ToggleFlowScoped('app ')},
         {text:'Themes',                                   sub: WinarchyThemeItems()},
         {text:'Capture',                                  sub: WinarchyCaptureItems()},
         {text:'Tiling',                                   sub: WinarchyTilingItems()},
@@ -899,7 +896,7 @@ AccentWatch() {
 ; --- Apps ---------------------------------------------------------------------
 #Enter::Wezterm()                                ; terminal
 #Space::ToggleFlow()                             ; launcher (Flow)
-#s::ToggleFlow()                                 ; search (Flow + Everything)
+#s::ToggleFlowScoped('f ')                       ; search files (Everything)
 #b::Run(DefaultBrowser())                        ; browser
 #e::Run('explorer.exe')                          ; file explorer
 ; Win+N stays with Windows (notification center; the YASB bell mirrors it)

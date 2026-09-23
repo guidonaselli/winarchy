@@ -20,6 +20,8 @@ ahk = "2.0.26"
 # desde entonces (verificado 2026-09-06), así que `update --core` no va a moverlo
 # mientras no vuelvan a taggear. No es un pin olvidado.
 wezterm = "20240203-110809-5046fc22"
+# Backend de la búsqueda de archivos de Flow (SUPER+S: plugin Explorer sobre su índice).
+everything = "1.4.1.1032"
 
 # Reglas por aplicacion de la comunidad de komorebi (vendorizado en vendor/asc/).
 # Se compila DENTRO del komorebi.json generado; no se usa app_specific_configuration_path
@@ -51,8 +53,6 @@ sha256 = "c4680fda08b7e188017ceabed65d2d7252e6a0c0a3e0933a00aa54638a3e4f50"
 "ajeetdsouza.zoxide" = true
 "eza-community.eza" = true
 "sharkdp.bat" = true
-# Backend de búsqueda de Flow Launcher (plugin Everything, instalado por Identity.ps1):
-# sin el índice de voidtools, Flow cae a su indexador propio, mucho más lento/limitado.
 "voidtools.Everything" = true
 
 [scoop]

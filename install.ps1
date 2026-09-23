@@ -56,6 +56,7 @@ $coreVersions = @{
     'LGUG2Z.komorebi' = $lock['core']['komorebi']
     'AmN.yasb'        = $lock['core']['yasb']
     'wez.wezterm'     = $lock['core']['wezterm']
+    'voidtools.Everything' = $lock['core']['everything']
 }
 # -SkipPackages (la migración de `winarchy update --self`) igual tiene que traer los
 # componentes core que falten: si no, un core nuevo nunca llega a quien ya tenía Winarchy
@@ -145,8 +146,7 @@ Set-WinarchyTheme -Name $initialTheme
 # su tray/auto-update. YASB ya queda configurado por su config.yaml (show_systray/
 # update_check off); AHK hostea el tray del stack; komorebi no tiene tray.
 Set-WinarchyFlowIdentity
-Set-WinarchyFlowAppsKeyword
-Install-WinarchyFlowEverythingPlugin
+Set-WinarchyFlowKeywords
 Set-WinarchyDefenderExclusions
 
 # --- 5. Autostart + taskbar (solo con -Activate) --------------------------------------
