@@ -13,7 +13,7 @@ yasb = "2.0.7"
 # (ToggleFlow relanza el exe de Flow; AHK es el dueño único de hotkeys), así que un major
 # suyo no debe entrar por `winarchy update` sin que alguien lea el changelog.
 flow = "2.1.3"
-ahk = "2.0.26"
+ahk = "2.0.28"
 # WezTerm es el terminal por defecto: su config la genera Winarchy entera, así que un
 # cambio de su API de config no debe entrar por `winarchy update`. Ojo con el pin: la
 # última release estable de WezTerm es de 2024-02-03 y upstream solo publica nightlies
