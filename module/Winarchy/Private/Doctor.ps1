@@ -171,7 +171,7 @@ function Invoke-WinarchyDoctor {
     # Todo lo pinneado se verifica. Antes solo se miraba komorebi, así que YASB se quedó
     # cuatro versiones atrás sin que nada lo dijera (winget oculta los paquetes pinneados).
     foreach ($pinned in @(
-        @{ Name = 'YASB'; Key = 'yasb'; Path = (Get-Command yasb -ErrorAction SilentlyContinue).Source },
+        @{ Name = 'YASB'; Key = 'yasb'; Path = (Get-Command yasb -ErrorAction SilentlyContinue)?.Source },
         @{ Name = 'Flow Launcher'; Key = 'flow'; Path = "$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe" },
         @{ Name = 'AutoHotkey v2'; Key = 'ahk'; Path = Get-WinarchyAhkExe },
         @{ Name = 'WezTerm'; Key = 'wezterm'; Path = Get-WinarchyWeztermExe },

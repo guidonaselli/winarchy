@@ -40,7 +40,7 @@ function Get-WinarchyAutostartComponents {
     }
 
     # YASB arranca vía el launcher scripts\Start-Yasb.ps1 (espera shell listo).
-    $yasbc = (Get-Command yasbc -ErrorAction SilentlyContinue).Source
+    $yasbc = (Get-Command yasbc -ErrorAction SilentlyContinue)?.Source
     if ($yasbc) {
         $ps = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $launcher = Join-Path $root 'scripts\Start-Yasb.ps1'
@@ -57,7 +57,7 @@ function Get-WinarchyAutostartComponents {
     # corriendo el launcher, que espera a komorebi y se re-suscribe cuando vuelve. A
     # diferencia de Start-Komorebi.ps1 necesita pwsh: carga el módulo, que usa sintaxis de
     # PowerShell 7 y no parsea en Windows PowerShell 5.1.
-    $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+    $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue)?.Source
     if ($komorebiExe -and $pwsh) {
         $slots = Join-Path $root 'scripts\Start-WindowSlots.ps1'
         $ps = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'

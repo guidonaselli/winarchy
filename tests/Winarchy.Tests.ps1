@@ -2167,3 +2167,35 @@ Describe 'Get-WinarchyFlowPluginUpdates' {
         }
     }
 }
+
+Describe 'First install on a clean machine' {
+    It 'takes a snapshot when none of the paths exist yet' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyBackupsDir { $TestDrive }
+            $dir = New-WinarchySnapshot -Path @() -Label 'empty'
+            Test-Path $dir | Should -BeTrue
+            @(Get-ChildItem $dir).Count | Should -Be 0
+        }
+    }
+
+    It 'falls back when a component is not on PATH yet' {
+        InModuleScope Winarchy {
+            Mock Get-Command { }
+            Mock Test-Path { $false }
+            Get-WinarchyKomorebiExe | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'never reads .Source off a Get-Command that may find nothing' {
+        $files = git -C $script:Root ls-files '*.ps1' '*.psm1' ':!tests' | ForEach-Object { Join-Path $script:Root $_ }
+        $hits = Select-String -Path $files -Pattern '\(Get-Command[^)]*SilentlyContinue\)\.Source'
+        $hits | ForEach-Object { "$($_.Path):$($_.LineNumber)" } | Should -BeNullOrEmpty
+    }
+
+    It 'installs every [core] version pinned' {
+        $lock = Import-WinarchyToml -Path (Join-Path $script:Root 'versions.lock.toml')
+        $pinned = Get-WinarchyCoreVersions -Lock $lock
+        @($pinned.Values | Sort-Object) | Should -Be @($lock['core'].Values | Sort-Object)
+        foreach ($id in $pinned.Keys) { $lock['winget'][$id] | Should -BeTrue -Because $id }
+    }
+}

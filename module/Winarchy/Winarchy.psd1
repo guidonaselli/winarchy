@@ -31,7 +31,7 @@
         # helpers usados por install.ps1 y scripts\*.ps1
         'Sync-WinarchyPalette', 'Remove-WinarchyPalette',
         'Install-WinarchySkill', 'Uninstall-WinarchySkill',
-        'New-WinarchySnapshot', 'Import-WinarchyToml', 'Get-WinarchyAhkExe', 'Get-WinarchyStateDir',
+        'New-WinarchySnapshot', 'Import-WinarchyToml', 'Get-WinarchyCoreVersions', 'Get-WinarchyAhkExe', 'Get-WinarchyStateDir',
         'Disable-WinarchyXMouse',
         'Register-WinarchyAutostart', 'Unregister-WinarchyAutostart', 'Get-WinarchyAutostartStatus',
         'Write-WinarchyInfo', 'Write-WinarchyOk', 'Write-WinarchyWarn', 'Write-WinarchyErr'

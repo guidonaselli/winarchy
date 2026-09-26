@@ -409,7 +409,7 @@ function Start-WinarchyWindowSlots {
     if (Test-WinarchyWindowSlots) { return }
     $launcher = Join-Path (Get-WinarchyRoot) 'scripts\Start-WindowSlots.ps1'
     if (-not (Test-Path $launcher)) { return }
-    $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+    $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue)?.Source
     if (-not $pwsh) { return }
     Start-Process $pwsh -WindowStyle Hidden -ArgumentList `
         '-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', "`"$launcher`""

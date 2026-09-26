@@ -25,7 +25,7 @@ function Get-WinarchyAhkExe {
         "$env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe",
         "$env:LOCALAPPDATA\Programs\AutoHotkey\v2\AutoHotkey64.exe"
     ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-    if (-not $found) { $found = (Get-Command AutoHotkey64.exe -ErrorAction SilentlyContinue).Source }
+    if (-not $found) { $found = (Get-Command AutoHotkey64.exe -ErrorAction SilentlyContinue)?.Source }
     $found
 }
 
@@ -35,13 +35,13 @@ function Get-WinarchyWeztermExe {
         "$env:ProgramFiles\WezTerm\wezterm-gui.exe",
         "$env:LOCALAPPDATA\Programs\WezTerm\wezterm-gui.exe"
     ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-    if (-not $found) { $found = (Get-Command wezterm-gui.exe -ErrorAction SilentlyContinue).Source }
+    if (-not $found) { $found = (Get-Command wezterm-gui.exe -ErrorAction SilentlyContinue)?.Source }
     $found
 }
 
 function Get-WinarchyKomorebiExe {
     <# komorebi.exe vía PATH o instalación estándar; $null si no está. #>
-    $found = (Get-Command komorebi.exe -ErrorAction SilentlyContinue).Source
+    $found = (Get-Command komorebi.exe -ErrorAction SilentlyContinue)?.Source
     if (-not $found) {
         $found = @("$env:ProgramFiles\komorebi\bin\komorebi.exe") |
             Where-Object { Test-Path $_ } | Select-Object -First 1
@@ -75,7 +75,7 @@ function Write-WinarchyErr  { param([string]$Message) Write-Host "  [XX] $Messag
 
 function New-WinarchySnapshot {
     <# Copia los paths dados a backups/<timestamp>/ antes de tocar nada. Devuelve el dir del snapshot. #>
-    param([Parameter(Mandatory)][string[]]$Path, [string]$Label = 'snapshot')
+    param([string[]]$Path = @(), [string]$Label = 'snapshot')
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $dest = Join-Path (Get-WinarchyBackupsDir) "$stamp-$Label"
     New-Item -ItemType Directory -Path $dest -Force | Out-Null
@@ -199,7 +199,7 @@ function Invoke-WinarchyKomorebic {
       CreateNoWindow y stdout redirigido.
     #>
     param([Parameter(Mandatory, ValueFromRemainingArguments)][string[]]$Arguments)
-    $exe = (Get-Command komorebic -ErrorAction SilentlyContinue).Source
+    $exe = (Get-Command komorebic -ErrorAction SilentlyContinue)?.Source
     if (-not $exe) { throw 'komorebic not found in PATH.' }
     $info = [System.Diagnostics.ProcessStartInfo]::new()
     $info.FileName = $exe

@@ -12,6 +12,14 @@ $script:CoreWingetIds = @{
     'voidtools.Everything'        = 'everything'
 }
 
+function Get-WinarchyCoreVersions {
+    <# id de winget -> versión fijada en [core] de versions.lock.toml. #>
+    param([Parameter(Mandatory)][hashtable]$Lock)
+    $versions = @{}
+    foreach ($id in $script:CoreWingetIds.Keys) { $versions[$id] = $Lock['core'][$script:CoreWingetIds[$id]] }
+    $versions
+}
+
 function Get-WinarchyDeclaredWingetIds {
     <# IDs de winget que Winarchy declara en versions.lock.toml. #>
     param([Parameter(Mandatory)][hashtable]$Lock)

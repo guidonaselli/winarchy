@@ -146,7 +146,7 @@ function Get-WinarchyDefenderExclusionPaths {
          binario y los .ps1 del repo la primera vez que se tocan en la sesión, que es
          exactamente el lag "solo la primera vez" que se ve en captura/cierre de ventana.
     #>
-    $komorebic = (Get-Command komorebic.exe -ErrorAction SilentlyContinue).Source
+    $komorebic = (Get-Command komorebic.exe -ErrorAction SilentlyContinue)?.Source
     if (-not $komorebic) {
         $komorebic = "$env:ProgramFiles\komorebi\bin\komorebic.exe"
     }
@@ -155,7 +155,7 @@ function Get-WinarchyDefenderExclusionPaths {
         "$env:USERPROFILE\Documents\ShareX",
         "$env:ProgramFiles\Everything\Everything.exe",
         "${env:ProgramFiles(x86)}\Everything\Everything.exe",
-        (Get-Command pwsh.exe -ErrorAction SilentlyContinue).Source,
+        (Get-Command pwsh.exe -ErrorAction SilentlyContinue)?.Source,
         $komorebic,
         (Get-WinarchyRoot)
     ) | Where-Object { $_ -and (Test-Path $_) }

@@ -52,12 +52,7 @@ catch { Write-WinarchyWarn "No pude exportar tareas previas al snapshot: $($_.Ex
 
 # --- 1. Paquetes (winget, versiones core fijadas) -------------------------------
 $lock = Import-WinarchyToml -Path (Join-Path $Root 'versions.lock.toml')
-$coreVersions = @{
-    'LGUG2Z.komorebi' = $lock['core']['komorebi']
-    'AmN.yasb'        = $lock['core']['yasb']
-    'wez.wezterm'     = $lock['core']['wezterm']
-    'voidtools.Everything' = $lock['core']['everything']
-}
+$coreVersions = Get-WinarchyCoreVersions -Lock $lock
 # -SkipPackages (la migración de `winarchy update --self`) igual tiene que traer los
 # componentes core que falten: si no, un core nuevo nunca llega a quien ya tenía Winarchy
 # y el stack queda apuntando a un exe inexistente.
@@ -65,7 +60,7 @@ $packageIds = if ($SkipPackages) { @($coreVersions.Keys) } else { @($lock['winge
 if ($SkipPackages) { Write-WinarchyInfo 'Verificando que los componentes core estén presentes...' }
 foreach ($id in $packageIds) {
     if (-not $lock['winget'][$id]) { continue }
-    $installed = winget list --id $id 2>$null | Out-String
+    $installed = winget list --id $id --accept-source-agreements 2>$null | Out-String
     if ($installed -match [regex]::Escape($id)) {
         if (-not $SkipPackages) { Write-WinarchyOk "$id ya instalado" }
     }
@@ -74,11 +69,14 @@ foreach ($id in $packageIds) {
         $args = @('install', '--id', $id, '--silent', '--accept-package-agreements', '--accept-source-agreements')
         if ($coreVersions.ContainsKey($id)) { $args += @('--version', $coreVersions[$id]) }
         winget @args
+        if ($LASTEXITCODE -ne 0) { Write-WinarchyWarn "winget no pudo instalar $id (código $LASTEXITCODE)" }
     }
     if ($coreVersions.ContainsKey($id)) {
-        winget pin add --id $id 2>$null | Out-Null   # update general nunca toca el core
+        winget pin add --id $id --accept-source-agreements 2>$null | Out-Null   # update general nunca toca el core
     }
 }
+# PATH del proceso con lo que acaba de instalar winget.
+$env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
 
 # --- 2. Env vars de config → repo (fuente de verdad, estilo Omarchy) -------------
 @('KOMOREBI_CONFIG_HOME', 'YASB_CONFIG_HOME', 'WEZTERM_CONFIG_FILE') |
@@ -151,8 +149,8 @@ Set-WinarchyDefenderExclusions
 
 # --- 5. Autostart + taskbar (solo con -Activate) --------------------------------------
 if ($Activate) {
-    $komorebic = (Get-Command komorebic -ErrorAction SilentlyContinue).Source
-    $yasb = (Get-Command yasbc -ErrorAction SilentlyContinue).Source
+    $komorebic = (Get-Command komorebic -ErrorAction SilentlyContinue)?.Source
+    $yasb = (Get-Command yasbc -ErrorAction SilentlyContinue)?.Source
     $ahkExe = Get-WinarchyAhkExe
 
     # Scheduled Tasks At-LogOn (disparo más temprano que la carpeta Startup). Migra

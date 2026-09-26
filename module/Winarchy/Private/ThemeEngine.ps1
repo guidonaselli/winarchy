@@ -803,7 +803,7 @@ function Set-WinarchyTheme {
     # 3. Snapshot para rollback (archivos generados + settings externos + registry)
     $terminalSettings = Get-WinarchyTerminalSettingsPath
     $flowSettings = "$env:APPDATA\FlowLauncher\Settings\Settings.json"
-    $snapshotPaths = @($targets.Output) | Where-Object { $_ -and (Test-Path $_) }
+    $snapshotPaths = @($targets.Output | Where-Object { $_ -and (Test-Path $_) })
     if ($LightRefresh) {
         # respaldo fijo y pisable: la rotación de wallpapers no debe engordar backups\
         $snapshot = Join-Path (Get-WinarchyStateDir) 'accent-prev'
