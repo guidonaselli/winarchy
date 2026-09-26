@@ -2201,10 +2201,13 @@ Describe 'First install on a clean machine' {
 }
 
 Describe 'boot.ps1' {
+    BeforeDiscovery {
+        $elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+            [Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+
     BeforeAll {
         $script:Boot = Join-Path $script:Root 'boot.ps1'
-        $script:Elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-            [Security.Principal.WindowsBuiltInRole]::Administrator)
         $script:Harness = Join-Path $TestDrive 'harness.ps1'
         Set-Content -Path $script:Harness -Encoding ASCII -Value @'
 param($Boot, $Dir, $Log, [string]$Strip, $WingetExit, $Activate, $Branch, $SchtasksExit)
@@ -2245,7 +2248,7 @@ try { Invoke-Expression (Get-Content $Boot -Raw) } catch { Add-Content $global:L
         $errors | Should -BeNullOrEmpty
     }
 
-    Context 'run with fake winget, git and pwsh' -Skip:$script:Elevated {
+    Context 'run with fake winget, git and pwsh' -Skip:$elevated {
         It 'installs git when missing, then clones release' {
             $r = Invoke-Boot -Strip git
             ($r.Log -match '^winget install --id Git\.Git --exact --source winget').Count | Should -Be 1
