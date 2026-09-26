@@ -2192,6 +2192,58 @@ Describe 'First install on a clean machine' {
         $hits | ForEach-Object { "$($_.Path):$($_.LineNumber)" } | Should -BeNullOrEmpty
     }
 
+    Context 'Flow profile' {
+        BeforeEach {
+            $script:SavedEnv = @{ APPDATA = $env:APPDATA; LOCALAPPDATA = $env:LOCALAPPDATA }
+            $env:APPDATA = Join-Path $TestDrive "appdata-$([guid]::NewGuid())"
+            $env:LOCALAPPDATA = Join-Path $TestDrive "local-$([guid]::NewGuid())"
+            New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\FlowLauncher" | Out-Null
+            Set-Content "$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe" ''
+        }
+        AfterEach {
+            $env:APPDATA = $script:SavedEnv.APPDATA
+            $env:LOCALAPPDATA = $script:SavedEnv.LOCALAPPDATA
+        }
+
+        It 'starts Flow once when its profile does not exist yet, then stops it' {
+            InModuleScope Winarchy {
+                Mock Start-Process {
+                    foreach ($p in 'Settings\Settings.json', 'Settings\Plugins\Flow.Launcher.Plugin.Explorer\Settings.json') {
+                        New-Item -ItemType File -Force -Path (Join-Path "$env:APPDATA\FlowLauncher" $p) | Out-Null
+                    }
+                    [pscustomobject]@{}
+                }
+                Mock Start-Sleep { }
+                Mock Get-Process { [pscustomobject]@{ Name = 'Flow.Launcher' } } -ParameterFilter { $Name -eq 'Flow.Launcher' }
+                Mock Stop-Process { }
+                Mock Wait-Process { }
+                Initialize-WinarchyFlow
+                Should -Invoke Start-Process -Times 1
+                Should -Invoke Stop-Process -Times 1
+            }
+        }
+
+        It 'leaves an existing profile alone' {
+            InModuleScope Winarchy {
+                foreach ($p in 'Settings\Settings.json', 'Settings\Plugins\Flow.Launcher.Plugin.Explorer\Settings.json') {
+                    New-Item -ItemType File -Force -Path (Join-Path "$env:APPDATA\FlowLauncher" $p) | Out-Null
+                }
+                Mock Start-Process { }
+                Initialize-WinarchyFlow
+                Should -Invoke Start-Process -Times 0
+            }
+        }
+
+        It 'does nothing when Flow is not installed' {
+            InModuleScope Winarchy {
+                Remove-Item "$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe"
+                Mock Start-Process { }
+                Initialize-WinarchyFlow
+                Should -Invoke Start-Process -Times 0
+            }
+        }
+    }
+
     It 'queries winget only through its own source' {
         $files = git -C $script:Root ls-files '*.ps1' '*.psm1' ':!tests' | ForEach-Object { Join-Path $script:Root $_ }
         $hits = Select-String -Path $files -Pattern '^[^''"#]*\bwinget (install|upgrade|show|list|search|pin add)\b' |

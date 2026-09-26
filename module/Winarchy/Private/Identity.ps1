@@ -10,6 +10,28 @@ function Get-WinarchyFlowSettingsPath {
     Join-Path "$env:APPDATA\FlowLauncher" 'Settings\Settings.json'
 }
 
+function Initialize-WinarchyFlow {
+    <# Primer arranque de Flow para que cree su perfil (Settings.json y los de sus plugins). #>
+    param([int]$TimeoutSeconds = 30)
+    $exe = "$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe"
+    $required = @(
+        (Get-WinarchyFlowSettingsPath),
+        (Join-Path "$env:APPDATA\FlowLauncher" 'Settings\Plugins\Flow.Launcher.Plugin.Explorer\Settings.json')
+    )
+    if (-not (Test-Path $exe) -or -not @($required | Where-Object { -not (Test-Path $_) })) { return }
+
+    Write-WinarchyInfo 'Inicializando el perfil de Flow Launcher...'
+    $flow = Start-Process $exe -PassThru
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while (@($required | Where-Object { -not (Test-Path $_) }) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+    Start-Sleep -Seconds 2
+    Get-Process -Name 'Flow.Launcher' -ErrorAction SilentlyContinue | Stop-Process -Force
+    $flow | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue
+    if (@($required | Where-Object { -not (Test-Path $_) })) {
+        Write-WinarchyWarn 'Flow Launcher no creó su perfil a tiempo; abrilo una vez y corré de nuevo el instalador.'
+    }
+}
+
 function Set-WinarchyFlowIdentity {
     <# Merge quirúrgico en Settings.json de Flow: oculta su tray icon y desactiva
        sus auto-updates/notificaciones. Solo toca las claves necesarias, preserva

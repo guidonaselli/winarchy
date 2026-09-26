@@ -130,6 +130,9 @@ Install-WinarchySkill
 # --- 3d. Comandos de Winarchy visibles desde el lanzador ------------------------------
 Sync-WinarchyPalette
 
+# --- 3e. Perfil de Flow (primer arranque) ----------------------------------------------
+Initialize-WinarchyFlow
+
 # --- 4. Theme (genera todos los configs) --------------------------------------------
 # Siempre re-renderiza, no solo en la primera instalacion: install.ps1 es tambien la
 # migracion de `winarchy update --self`, y sin esto un cambio en templates/ nunca
