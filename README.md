@@ -118,8 +118,21 @@ That means Winarchy optimizes for:
 
 ## Installation
 
+From a normal (non-admin) PowerShell window on Windows 11:
+
 ```powershell
-git clone <repo> C:\winarchy
+irm https://raw.githubusercontent.com/guidonaselli/winarchy/release/boot.ps1 | iex
+```
+
+It installs Git and PowerShell 7 with winget if they are missing, clones Winarchy into
+`C:\winarchy` and runs `install.ps1` in coexistence mode. Running it again updates the
+checkout. Set `$env:WINARCHY_DIR` for another folder, or `$env:WINARCHY_ACTIVATE = '1'` to
+activate right away.
+
+Manual install (needs Git and PowerShell 7):
+
+```powershell
+git clone --branch release https://github.com/guidonaselli/winarchy.git C:\winarchy
 cd C:\winarchy
 
 .\install.ps1

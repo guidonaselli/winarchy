@@ -2199,3 +2199,96 @@ Describe 'First install on a clean machine' {
         foreach ($id in $pinned.Keys) { $lock['winget'][$id] | Should -BeTrue -Because $id }
     }
 }
+
+Describe 'boot.ps1' {
+    BeforeAll {
+        $script:Boot = Join-Path $script:Root 'boot.ps1'
+        $script:Elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+            [Security.Principal.WindowsBuiltInRole]::Administrator)
+        $script:Harness = Join-Path $TestDrive 'harness.ps1'
+        Set-Content -Path $script:Harness -Encoding ASCII -Value @'
+param($Boot, $Dir, $Log, [string]$Strip, $WingetExit, $Activate, $Branch, $SchtasksExit)
+$global:Log = $Log; $global:WingetExit = [int]$WingetExit; $global:Branch = $Branch; $global:SchtasksExit = [int]$SchtasksExit
+$env:WINARCHY_DIR = $Dir
+$env:WINARCHY_ACTIVATE = $Activate
+$env:Path = ($env:Path -split ';' | Where-Object { $_ -and -not ($Strip -and (Test-Path (Join-Path $_ "$Strip.exe"))) }) -join ';'
+function global:winget { Add-Content $global:Log "winget $args"; $global:LASTEXITCODE = 0; if ($args[0] -eq 'install') { $global:LASTEXITCODE = $global:WingetExit } }
+function global:git {
+    Add-Content $global:Log "git $args"
+    if ($args[0] -eq 'clone') { New-Item -ItemType Directory -Force -Path (Join-Path $args[-1] '.git') | Out-Null }
+    if ($args -contains 'rev-parse') { $global:Branch }
+    $global:LASTEXITCODE = 0
+}
+function global:pwsh { Add-Content $global:Log "pwsh $args"; $global:LASTEXITCODE = 0 }
+function global:schtasks { $global:LASTEXITCODE = $global:SchtasksExit }
+try { Invoke-Expression (Get-Content $Boot -Raw) } catch { Add-Content $global:Log "ERROR $($_.Exception.Message)" }
+'@
+
+        function Invoke-Boot {
+            param([string]$Strip = '', [int]$WingetExit = 0, [string]$Activate = '', [string]$Branch = 'release',
+                [int]$SchtasksExit = 1, [scriptblock]$Arrange)
+            $dir = Join-Path $TestDrive ([guid]::NewGuid())
+            $log = "$dir.log"
+            if ($Arrange) { & $Arrange $dir }
+            $null = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:Harness -Boot $script:Boot -Dir $dir `
+                -Log $log -Strip $Strip -WingetExit $WingetExit -Activate $Activate -Branch $Branch -SchtasksExit $SchtasksExit
+            [pscustomobject]@{ Dir = $dir; Log = @(if (Test-Path $log) { Get-Content $log }) }
+        }
+    }
+
+    It 'is plain ASCII without a BOM' {
+        [IO.File]::ReadAllBytes($script:Boot) | Where-Object { $_ -ge 0x80 } | Should -BeNullOrEmpty
+    }
+
+    It 'parses in Windows PowerShell 5.1' {
+        $errors = powershell.exe -NoProfile -Command "`$e = `$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$script:Boot', [ref]`$null, [ref]`$e); `$e | ForEach-Object Message"
+        $errors | Should -BeNullOrEmpty
+    }
+
+    Context 'run with fake winget, git and pwsh' -Skip:$script:Elevated {
+        It 'installs git when missing, then clones release' {
+            $r = Invoke-Boot -Strip git
+            ($r.Log -match '^winget install --id Git\.Git --exact --source winget').Count | Should -Be 1
+            $r.Log | Should -Contain "git clone --branch release https://github.com/guidonaselli/winarchy.git $($r.Dir)"
+            $r.Log | Should -Contain "pwsh -NoProfile -ExecutionPolicy Bypass -File $($r.Dir)\install.ps1"
+            $r.Log -match '^ERROR' | Should -BeNullOrEmpty
+        }
+
+        It 'installs only pwsh when git is present' {
+            $r = Invoke-Boot -Strip pwsh
+            ($r.Log -match '^winget install').Count | Should -Be 1
+            ($r.Log -match '^winget install --id Microsoft\.PowerShell --exact').Count | Should -Be 1
+        }
+
+        It 'stops without cloning when winget fails' {
+            $r = Invoke-Boot -Strip git -WingetExit 1603
+            $r.Log -match '^ERROR .*Git\.Git.*1603' | Should -Not -BeNullOrEmpty
+            $r.Log -match '^(git|pwsh) ' | Should -BeNullOrEmpty
+        }
+
+        It 'pulls when the folder is already a release checkout' {
+            $r = Invoke-Boot -Arrange { param($d) New-Item -ItemType Directory -Force -Path "$d\.git" | Out-Null }
+            $r.Log | Should -Contain "git -C $($r.Dir) pull --ff-only origin release"
+            $r.Log -match '^git clone' | Should -BeNullOrEmpty
+            $r.Log -match '^pwsh ' | Should -Not -BeNullOrEmpty
+        }
+
+        It 'refuses a checkout on another branch' {
+            $r = Invoke-Boot -Branch main -Arrange { param($d) New-Item -ItemType Directory -Force -Path "$d\.git" | Out-Null }
+            $r.Log -match "^ERROR .*on 'main'" | Should -Not -BeNullOrEmpty
+            $r.Log -match '^(git -C \S+ pull|pwsh )' | Should -BeNullOrEmpty
+        }
+
+        It 'passes -Activate with WINARCHY_ACTIVATE=1' {
+            $r = Invoke-Boot -Activate '1' -SchtasksExit 0
+            $r.Log | Should -Contain "pwsh -NoProfile -ExecutionPolicy Bypass -File $($r.Dir)\install.ps1 -Activate"
+        }
+
+        It 'leaves an occupied folder untouched' {
+            $r = Invoke-Boot -Arrange { param($d) New-Item -ItemType Directory -Force -Path $d | Out-Null; Set-Content "$d\keep.txt" 'x' }
+            $r.Log -match '^ERROR .*not a Winarchy checkout' | Should -Not -BeNullOrEmpty
+            $r.Log -match '^(git|pwsh) ' | Should -BeNullOrEmpty
+            @(Get-ChildItem $r.Dir).Name | Should -Be @('keep.txt')
+        }
+    }
+}
