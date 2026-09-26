@@ -34,7 +34,7 @@ function Update-WinarchyWingetPackage {
       instalador no puede reemplazar sus archivos), así que hay que mirar la salida.
     #>
     param([Parameter(Mandatory)][string]$Id)
-    $out = winget upgrade --id $Id --exact --silent `
+    $out = winget upgrade --id $Id --exact --source winget --silent `
         --accept-package-agreements --accept-source-agreements 2>&1 | Out-String
     $status =
         if ($out -match 'Successfully installed|se instaló correctamente') { 'updated' }
@@ -59,7 +59,7 @@ function Invoke-WinarchyUpdate {
     $results = foreach ($id in $ids) {
         if ($Core) { winget pin remove --id $id 2>$null | Out-Null }
         $result = Update-WinarchyWingetPackage -Id $id
-        if ($Core) { winget pin add --id $id 2>$null | Out-Null }
+        if ($Core) { winget pin add --id $id --exact --source winget 2>$null | Out-Null }
         Write-Host ("  {0,-12} {1}" -f $result.Status, $id)
         $result
     }
@@ -104,7 +104,7 @@ function Invoke-WinarchyUpdate {
     # Aviso de updates core disponibles, sin aplicarlos. `winget upgrade` oculta los
     # paquetes pinneados, por eso se consulta cada uno con `winget show`.
     foreach ($id in ($script:CoreWingetIds.Keys | Sort-Object)) {
-        $latest = if ((winget show --id $id --exact 2>$null | Out-String) -match '(?m)^Version:\s*(.+)$') { $Matches[1].Trim() } else { $null }
+        $latest = if ((winget show --id $id --exact --source winget 2>$null | Out-String) -match '(?m)^Version:\s*(.+)$') { $Matches[1].Trim() } else { $null }
         $pinned = $lock['core'][$script:CoreWingetIds[$id]]
         if ($latest -and $pinned -and $latest -ne $pinned) {
             Write-WinarchyWarn "Core update available for ${id}: $pinned -> $latest. Apply it with: winarchy update --core"
@@ -121,7 +121,7 @@ function Update-WinarchyLockfile {
     param([Parameter(Mandatory)][string]$LockPath)
     $versions = @{}
     foreach ($id in $script:CoreWingetIds.Keys) {
-        $out = winget list --id $id --exact 2>$null | Out-String
+        $out = winget list --id $id --exact --source winget 2>$null | Out-String
         # semver, o el versionado por fecha de WezTerm (20240203-110809-5046fc22)
         if ($out -match '(\d{8}-\d{6}-[0-9a-f]+|\d+\.\d+\.\d+(\.\d+)?)') { $versions[$script:CoreWingetIds[$id]] = $Matches[1] }
     }

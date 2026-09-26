@@ -58,21 +58,25 @@ $coreVersions = Get-WinarchyCoreVersions -Lock $lock
 # y el stack queda apuntando a un exe inexistente.
 $packageIds = if ($SkipPackages) { @($coreVersions.Keys) } else { @($lock['winget'].Keys) }
 if ($SkipPackages) { Write-WinarchyInfo 'Verificando que los componentes core estén presentes...' }
+$failedPackages = @()
 foreach ($id in $packageIds) {
     if (-not $lock['winget'][$id]) { continue }
-    $installed = winget list --id $id --accept-source-agreements 2>$null | Out-String
+    $installed = winget list --id $id --exact --source winget --accept-source-agreements 2>$null | Out-String
     if ($installed -match [regex]::Escape($id)) {
         if (-not $SkipPackages) { Write-WinarchyOk "$id ya instalado" }
     }
     else {
         Write-WinarchyInfo "Instalando $id ..."
-        $args = @('install', '--id', $id, '--silent', '--accept-package-agreements', '--accept-source-agreements')
+        $args = @('install', '--id', $id, '--exact', '--source', 'winget', '--silent', '--accept-package-agreements', '--accept-source-agreements')
         if ($coreVersions.ContainsKey($id)) { $args += @('--version', $coreVersions[$id]) }
         winget @args
-        if ($LASTEXITCODE -ne 0) { Write-WinarchyWarn "winget no pudo instalar $id (código $LASTEXITCODE)" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-WinarchyWarn "winget no pudo instalar $id (código $LASTEXITCODE)"
+            $failedPackages += $id
+        }
     }
     if ($coreVersions.ContainsKey($id)) {
-        winget pin add --id $id --accept-source-agreements 2>$null | Out-Null   # update general nunca toca el core
+        winget pin add --id $id --exact --source winget --accept-source-agreements 2>$null | Out-Null   # update general nunca toca el core
     }
 }
 # PATH del proceso con lo que acaba de instalar winget.
@@ -205,4 +209,10 @@ else {
 }
 
 Write-Host ''
+$failedCore = @($failedPackages | Where-Object { $coreVersions.ContainsKey($_) })
+if ($failedCore) {
+    Write-WinarchyErr "No se instalaron componentes core: $($failedCore -join ', '). Revisá la salida de winget y corré de nuevo el instalador."
+    exit 1
+}
+if ($failedPackages) { Write-WinarchyWarn "No se instalaron: $($failedPackages -join ', '). El resto del stack funciona; winarchy doctor muestra qué falta." }
 Write-WinarchyOk 'Instalación completa. Verificá con: winarchy doctor'

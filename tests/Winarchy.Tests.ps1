@@ -2192,6 +2192,14 @@ Describe 'First install on a clean machine' {
         $hits | ForEach-Object { "$($_.Path):$($_.LineNumber)" } | Should -BeNullOrEmpty
     }
 
+    It 'queries winget only through its own source' {
+        $files = git -C $script:Root ls-files '*.ps1' '*.psm1' ':!tests' | ForEach-Object { Join-Path $script:Root $_ }
+        $hits = Select-String -Path $files -Pattern '^[^''"#]*\bwinget (install|upgrade|show|list|search|pin add)\b' |
+            Where-Object { $_.Line -notmatch '--source winget' }
+        $hits | ForEach-Object { "$($_.Path):$($_.LineNumber)" } | Should -BeNullOrEmpty
+        Get-Content (Join-Path $script:Root 'install.ps1') -Raw | Should -Match "'install', '--id', \`$id, '--exact', '--source', 'winget'"
+    }
+
     It 'installs every [core] version pinned' {
         $lock = Import-WinarchyToml -Path (Join-Path $script:Root 'versions.lock.toml')
         $pinned = Get-WinarchyCoreVersions -Lock $lock
