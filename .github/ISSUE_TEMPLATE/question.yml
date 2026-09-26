@@ -1,0 +1,14 @@
+name: Question
+description: How do I ...? Check the README and docs/ first.
+labels: ["type: question", "status: needs triage"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you tried

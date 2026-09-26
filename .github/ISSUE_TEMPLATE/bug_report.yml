@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in Winarchy doesn't work as documented.
+labels: ["type: bug", "status: needs triage"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what you got instead. Paste errors as text, not screenshots.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `winarchy theme set nord`
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Coexistence (installed without -Activate)
+        - Active (installed with -Activate)
+        - Not installed yet / install failed
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `winarchy doctor`
+      description: It includes the Winarchy version and the component versions. Skip it only if the install itself failed.
+      render: text
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Run `winver`.
+      placeholder: Windows 11 24H2 (26100.4061)
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Monitor setup and scaling, other shell tools running (Seelen, Windhawk, PowerToys), changes in user.ahk or rules.toml.
