@@ -2203,6 +2203,150 @@ Describe 'Windhawk extras manifest' {
     }
 }
 
+Describe 'Windhawk extras' {
+    BeforeEach {
+        $script:WhReg = "HKCU:\Software\WinarchyTest-$([guid]::NewGuid())"
+        $script:WhData = Join-Path $TestDrive "windhawk-$([guid]::NewGuid())"
+        New-Item -Path "$script:WhReg\Engine\Mods" -Force | Out-Null
+        New-Item -ItemType Directory -Path $script:WhData -Force | Out-Null
+    }
+    AfterEach { Remove-Item $script:WhReg -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'installs a pinned mod with its settings, like the Windhawk UI does' {
+        InModuleScope Winarchy -Parameters @{ Reg = $script:WhReg; Data = $script:WhData } {
+            param($Reg, $Data)
+            $source = "// ==WindhawkMod==`n// @id demo`n// @version 1.2`n// @include explorer.exe`n// @exclude a.exe`n// @exclude b.exe`n// ==/WindhawkMod==`n"
+            Mock Invoke-RestMethod { @([pscustomobject]@{ version = '1.1' }, [pscustomobject]@{ version = '1.2' }) }
+            Mock Invoke-WebRequest {
+                if ($OutFile) { Set-Content -Path $OutFile -Value $Uri; return }
+                [pscustomobject]@{ RawContentStream = [IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes($source)) }
+            }
+            New-Item -ItemType Directory -Path "$Data\Engine\Mods\64" -Force | Out-Null
+            Set-Content "$Data\Engine\Mods\64\demo_1.1_123456.dll" 'old'
+            Set-Content "$Data\Engine\Mods\64\demo-other_1.0_123456.dll" 'other mod'
+            $mod = [pscustomobject]@{ id = 'demo'; version = '1.2'; settings = [pscustomobject]@{ theme = 'Glass'; size = 3 } }
+
+            Install-WinarchyWindhawkMod -Mod $mod -WindhawkVersion '1.7.3' -RegistryRoot $Reg -DataRoot $Data
+
+            $config = Get-ItemProperty "$Reg\Engine\Mods\demo"
+            $config.Version | Should -Be '1.2'
+            $config.Disabled | Should -Be 0
+            $config.Include | Should -Be 'explorer.exe'
+            $config.Exclude | Should -Be 'a.exe|b.exe'
+            $config.LibraryFileName | Should -Match '^demo_1\.2_\d{6}\.dll$'
+            (Get-Item "$Reg\Engine\Mods\demo\Settings").GetValueKind('size') | Should -Be 'DWord'
+            (Get-ItemProperty "$Reg\Engine\Mods\demo\Settings").theme | Should -Be 'Glass'
+            foreach ($folder in '32', '64') { Test-Path "$Data\Engine\Mods\$folder\$($config.LibraryFileName)" | Should -BeTrue }
+            Test-Path "$Data\Engine\Mods\64\demo_1.1_123456.dll" | Should -BeFalse
+            Test-Path "$Data\Engine\Mods\64\demo-other_1.0_123456.dll" | Should -BeTrue
+            Get-Content "$Data\ModsSource\demo.wh.cpp" -Raw | Should -Match "@id demo`r`n"
+            (Get-Content "$Data\userprofile.json" -Raw | ConvertFrom-Json).mods.demo.version | Should -Be '1.2'
+            Test-WinarchyWindhawkModCurrent -Mod $mod -RegistryRoot $Reg | Should -BeTrue
+        }
+    }
+
+    It 'leaves no DLL nor registry key when a download fails' {
+        InModuleScope Winarchy -Parameters @{ Reg = $script:WhReg; Data = $script:WhData } {
+            param($Reg, $Data)
+            $source = "// ==WindhawkMod==`n// @id demo`n// @version 1.2`n// ==/WindhawkMod==`n"
+            Mock Invoke-RestMethod { @([pscustomobject]@{ version = '1.2' }) }
+            Mock Invoke-WebRequest {
+                if ($Uri -like '*_64.dll') { throw 'network down' }
+                if ($OutFile) { Set-Content -Path $OutFile -Value 'dll'; return }
+                [pscustomobject]@{ RawContentStream = [IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes($source)) }
+            }
+            $mod = [pscustomobject]@{ id = 'demo'; version = '1.2'; settings = [pscustomobject]@{} }
+
+            { Install-WinarchyWindhawkMod -Mod $mod -WindhawkVersion '1.7.3' -RegistryRoot $Reg -DataRoot $Data } |
+                Should -Throw '*network down*'
+
+            Test-Path "$Reg\Engine\Mods\demo" | Should -BeFalse
+            @(Get-ChildItem "$Data\Engine\Mods" -Recurse -File -ErrorAction SilentlyContinue).Count | Should -Be 0
+        }
+    }
+
+    It 'refuses a mod that needs a newer Windhawk before writing anything' {
+        InModuleScope Winarchy -Parameters @{ Reg = $script:WhReg; Data = $script:WhData } {
+            param($Reg, $Data)
+            Mock Invoke-RestMethod { @([pscustomobject]@{ version = '1.2'; minWindhawkVersion = '1.8' }) }
+            Mock Invoke-WebRequest { }
+            $mod = [pscustomobject]@{ id = 'demo'; version = '1.2'; settings = [pscustomobject]@{} }
+
+            { Install-WinarchyWindhawkMod -Mod $mod -WindhawkVersion '1.7.3' -RegistryRoot $Reg -DataRoot $Data } |
+                Should -Throw '*1.8 or later*'
+
+            Should -Invoke Invoke-WebRequest -Times 0
+            Test-Path "$Reg\Engine\Mods\demo" | Should -BeFalse
+        }
+    }
+
+    It 'hides the Windhawk tray and update check once' {
+        InModuleScope Winarchy -Parameters @{ Reg = $script:WhReg } {
+            param($Reg)
+            Mock Get-ScheduledTask { }
+            Mock Start-Process { }
+            Mock Get-WinarchyWindhawkExe { $PSCommandPath }
+
+            Set-WinarchyWindhawkIdentity -RegistryRoot $Reg
+            Set-WinarchyWindhawkIdentity -RegistryRoot $Reg
+
+            $settings = Get-ItemProperty "$Reg\Settings"
+            $settings.HideTrayIcon | Should -Be 1
+            $settings.DisableUpdateCheck | Should -Be 1
+            Should -Invoke Start-Process -Times 1
+        }
+    }
+
+    It 'changes nothing without elevation or confirmation' {
+        InModuleScope Winarchy {
+            Mock Install-WinarchyWindhawkMod { }
+            Mock Set-WinarchyWindhawkIdentity { }
+            Mock Read-Host { 'n' }
+            Mock winget { }
+
+            Mock Test-WinarchyElevated { $false }
+            { Add-WinarchyExtra -Name windhawk -Yes } | Should -Throw '*elevated*'
+
+            Mock Test-WinarchyElevated { $true }
+            try { Add-WinarchyExtra -Name windhawk } catch { $_.Exception.Message | Should -Match 'Confirmation needed' }
+
+            Should -Invoke winget -Times 0
+            Should -Invoke Install-WinarchyWindhawkMod -Times 0
+            Should -Invoke Set-WinarchyWindhawkIdentity -Times 0
+        }
+    }
+
+    It 'removes only the curated mods and keeps Windhawk while other mods remain' {
+        InModuleScope Winarchy -Parameters @{ Reg = $script:WhReg; Data = $script:WhData } {
+            param($Reg, $Data)
+            $script:WindhawkRegistryRoot = $Reg
+            $script:WindhawkDataRoot = $Data
+            try {
+                $curated = (Get-WinarchyWindhawkManifest).mods.id
+                foreach ($id in @($curated) + 'my-own-mod') { New-Item -Path "$Reg\Engine\Mods\$id" -Force | Out-Null }
+                Mock Test-WinarchyElevated { $true }
+                Mock Get-WinarchyWindhawkExe { $PSCommandPath }
+                Mock Backup-WinarchyRegistryKey { }
+                Mock winget { }
+
+                Remove-WinarchyExtra -Name windhawk
+
+                Test-Path "$Reg\Engine\Mods\my-own-mod" | Should -BeTrue
+                foreach ($id in $curated) { Test-Path "$Reg\Engine\Mods\$id" | Should -BeFalse }
+                Should -Invoke winget -Times 0
+
+                Remove-Item "$Reg\Engine\Mods\my-own-mod"
+                Remove-WinarchyExtra -Name windhawk
+                Should -Invoke winget -Times 1
+            }
+            finally {
+                $script:WindhawkRegistryRoot = 'HKLM:\SOFTWARE\Windhawk'
+                $script:WindhawkDataRoot = "$env:ProgramData\Windhawk"
+            }
+        }
+    }
+}
+
 Describe 'Get-WinarchyFlowPluginUpdates' {
     It 'returns only plugins with a strictly newer manifest version' {
         InModuleScope Winarchy {
