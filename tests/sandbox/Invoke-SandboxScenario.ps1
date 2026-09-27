@@ -146,7 +146,6 @@ switch ($Scenario) {
         Test-WindhawkExtra C:\winarchy
     }
     'selfupdate' {
-        Install-AhkV1
         Install-Prerequisites
         Invoke-WinarchyScript install.ps1
         Invoke-WinarchyScript install.ps1

@@ -10,13 +10,14 @@
     paths       boot.ps1 into a folder with a space, an accent and an apostrophe, activated, then the
                 windhawk checks from that folder, Assert-Install -Mode active
     ahkv1       AutoHotkey 1.1 already installed, then install.ps1: it must end on the pinned v2
+                (the AutoHotkey 1.1 installer can hang in the sandbox; it is stopped after 10 min)
     windhawk    install, `extras add windhawk` elevated (every curated mod enabled at its pinned
                 version and loaded in explorer, tray + update check off), `extras remove windhawk`
                 (mods and Windhawk gone), Assert-Install
     published   the real one-liner against GitHub (irm .../release/boot.ps1 | iex), Assert-Install
-    selfupdate  AutoHotkey 1.1 already installed, install.ps1 twice, then roll the checkout back to
-                v1.6.0 (AHK/Flow unpinned, as 1.6.0 left them) and run that version's
-                `winarchy update --self`, Assert-Install (covers install and ahkv1)
+    selfupdate  install.ps1 twice, then roll the checkout back to v1.6.0 (AHK/Flow unpinned, as
+                1.6.0 left them) and run that version's `winarchy update --self`, Assert-Install
+                (covers install)
     boot        boot.ps1 refuses an elevated session; then, as the user (clone URL -> local bare
                 repo), a clean install and a re-run with WINARCHY_ACTIVATE=1; Assert-Install -Mode active
   The sandbox runs with vGPU disabled (its DWM crashes on some host GPU drivers), UAC on with
