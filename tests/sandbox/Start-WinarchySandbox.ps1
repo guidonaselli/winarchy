@@ -5,10 +5,11 @@
   Tests what is committed (HEAD), not the working tree: the sandbox clones a bare copy of the
   repo whose `release` branch points at HEAD.
     install     winget -> git + pwsh, clone, install.ps1 twice, Assert-Install
+    published   the real one-liner against GitHub (irm .../release/boot.ps1 | iex), Assert-Install
     selfupdate  install, then roll the checkout back to v1.6.0 (AHK/Flow unpinned, as 1.6.0
                 left them) and run that version's `winarchy update --self`, Assert-Install
-    boot     boot.ps1 refuses an elevated session; then, as the user (clone URL -> local bare
-             repo), a clean install and a re-run with WINARCHY_ACTIVATE=1; Assert-Install -Mode active
+    boot        boot.ps1 refuses an elevated session; then, as the user (clone URL -> local bare
+                repo), a clean install and a re-run with WINARCHY_ACTIVATE=1; Assert-Install -Mode active
   The sandbox runs with vGPU disabled (its DWM crashes on some host GPU drivers), UAC on with
   automatic approval and winget installed. Results land in <Out>\<timestamp>-<scenario>\.
   Needs the Windows Sandbox feature (Containers-DisposableClientVM) and its `wsb` CLI.
@@ -17,7 +18,7 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate')][string]$Scenario,
+    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published')][string]$Scenario,
     [switch]$Keep,
     [string]$Out = (Join-Path $env:TEMP 'winarchy-sandbox')
 )

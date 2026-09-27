@@ -1,5 +1,5 @@
 # Runs in the sandbox (Windows PowerShell 5.1). `elevated` runs as SYSTEM, the rest as the non-elevated user.
-param([Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'elevated')][string]$Scenario)
+param([Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'elevated')][string]$Scenario)
 $ProgressPreference = 'SilentlyContinue'
 $out = 'C:\sandbox'
 $bare = Join-Path $out 'winarchy.git'
@@ -38,6 +38,10 @@ switch ($Scenario) {
             try { Invoke-Expression $boot }
             catch { $failed = $true; "boot (WINARCHY_ACTIVATE='$activate') failed: $($_.Exception.Message)" }
         }
+    }
+    'published' {
+        try { Invoke-RestMethod https://raw.githubusercontent.com/guidonaselli/winarchy/release/boot.ps1 | Invoke-Expression }
+        catch { $failed = $true; "one-liner failed: $($_.Exception.Message)" }
     }
     'selfupdate' {
         Install-FromClone 1
