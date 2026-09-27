@@ -63,6 +63,12 @@ if ($Mode -eq 'active') {
             $elevated -eq 0
         }
     }
+    Test-Check 'taskbar set to auto-hide' {
+        (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3').Settings[8] -band 1
+    }
+    Test-Check 'Windows hardening applied' {
+        (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search' -Name BingSearchEnabled).BingSearchEnabled -eq 0
+    }
     foreach ($task in 'komorebi', 'yasb', 'ahk') {
         Test-Check "logon task \Winarchy\$task" { schtasks /Query /TN "\Winarchy\$task" *> $null; $LASTEXITCODE -eq 0 }
     }

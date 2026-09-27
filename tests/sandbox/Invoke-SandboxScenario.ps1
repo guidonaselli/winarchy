@@ -40,6 +40,8 @@ function Test-Uninstalled {
     }
     $profilePath = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\profile.ps1'
     if ((Test-Path $profilePath) -and (Select-String -Path $profilePath -SimpleMatch 'managed by winarchy' -Quiet)) { $script:failed = $true; 'profile hook still present' }
+    if ((Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3').Settings[8] -band 1) { $script:failed = $true; 'taskbar still on auto-hide' }
+    if ($null -ne (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search' -Name BingSearchEnabled -ErrorAction SilentlyContinue)) { $script:failed = $true; 'Windows hardening not reverted' }
     $palette = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs\Winarchy'
     if (Get-ChildItem $palette -Filter '*.lnk' -ErrorAction SilentlyContinue) { $script:failed = $true; 'Start menu commands still present' }
 }
@@ -86,6 +88,7 @@ switch ($Scenario) {
         Invoke-WinarchyScript install.ps1 -Arguments '-Activate'
         schtasks /Query /TN '\Winarchy\komorebi' 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) { $failed = $true; 'logon task missing before uninstall' }
+        if (-not ((Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3').Settings[8] -band 1)) { $failed = $true; 'taskbar not on auto-hide before uninstall' }
         Invoke-WinarchyScript uninstall.ps1
         Test-Uninstalled
         Invoke-WinarchyScript uninstall.ps1
