@@ -4,7 +4,9 @@
 .DESCRIPTION
   Tests what is committed (HEAD), not the working tree: the sandbox clones a bare copy of the
   repo whose `release` branch points at HEAD.
-    install  winget -> git + pwsh, clone, install.ps1 twice, Assert-Install
+    install     winget -> git + pwsh, clone, install.ps1 twice, Assert-Install
+    selfupdate  install, then roll the checkout back to v1.6.0 (AHK/Flow unpinned, as 1.6.0
+                left them) and run that version's `winarchy update --self`, Assert-Install
     boot     boot.ps1 refuses an elevated session; then, as the user (clone URL -> local bare
              repo), a clean install and a re-run with WINARCHY_ACTIVATE=1; Assert-Install -Mode active
   The sandbox runs with vGPU disabled (its DWM crashes on some host GPU drivers), UAC on with
@@ -15,7 +17,7 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('install', 'boot')][string]$Scenario,
+    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate')][string]$Scenario,
     [switch]$Keep,
     [string]$Out = (Join-Path $env:TEMP 'winarchy-sandbox')
 )

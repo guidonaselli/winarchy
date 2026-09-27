@@ -1,5 +1,5 @@
 # Runs in the sandbox (Windows PowerShell 5.1). `elevated` runs as SYSTEM, the rest as the non-elevated user.
-param([Parameter(Mandatory)][ValidateSet('install', 'boot', 'elevated')][string]$Scenario)
+param([Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'elevated')][string]$Scenario)
 $ProgressPreference = 'SilentlyContinue'
 $out = 'C:\sandbox'
 $bare = Join-Path $out 'winarchy.git'
@@ -7,6 +7,20 @@ Start-Transcript -Path (Join-Path $out "$Scenario.txt")
 
 function Update-SessionPath {
     $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+}
+
+function Install-FromClone([int]$Passes) {
+    foreach ($id in 'Git.Git', 'Microsoft.PowerShell') {
+        winget install --id $id --exact --source winget --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { $script:failed = $true; "winget install $id exited $LASTEXITCODE" }
+    }
+    Update-SessionPath
+    git clone --quiet --branch release $bare C:\winarchy
+    if ($LASTEXITCODE -ne 0) { $script:failed = $true; "git clone exited $LASTEXITCODE" }
+    foreach ($pass in 1..$Passes) {
+        pwsh -NoProfile -ExecutionPolicy Bypass -File C:\winarchy\install.ps1 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { $script:failed = $true; "install.ps1 pass $pass exited $LASTEXITCODE" }
+    }
 }
 
 $boot = (Get-Content (Join-Path $out 'boot.ps1') -Raw).Replace('https://github.com/guidonaselli/winarchy.git', $bare)
@@ -17,25 +31,24 @@ switch ($Scenario) {
         catch { "refused: $($_.Exception.Message)" }
         if (Test-Path C:\winarchy) { $failed = $true; 'C:\winarchy was created' }
     }
-    'install' {
-        foreach ($id in 'Git.Git', 'Microsoft.PowerShell') {
-            winget install --id $id --exact --source winget --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Host
-            if ($LASTEXITCODE -ne 0) { $failed = $true; "winget install $id exited $LASTEXITCODE" }
-        }
-        Update-SessionPath
-        git clone --quiet $bare C:\winarchy
-        if ($LASTEXITCODE -ne 0) { $failed = $true; "git clone exited $LASTEXITCODE" }
-        foreach ($pass in 1, 2) {
-            pwsh -NoProfile -ExecutionPolicy Bypass -File C:\winarchy\install.ps1 2>&1 | Out-Host
-            if ($LASTEXITCODE -ne 0) { $failed = $true; "install.ps1 pass $pass exited $LASTEXITCODE" }
-        }
-    }
+    'install' { Install-FromClone 2 }
     'boot' {
         foreach ($activate in '', '1') {
             $env:WINARCHY_ACTIVATE = $activate
             try { Invoke-Expression $boot }
             catch { $failed = $true; "boot (WINARCHY_ACTIVATE='$activate') failed: $($_.Exception.Message)" }
         }
+    }
+    'selfupdate' {
+        Install-FromClone 1
+        git -C C:\winarchy reset --quiet --hard v1.6.0
+        foreach ($id in 'AutoHotkey.AutoHotkey', 'Flow-Launcher.Flow-Launcher') { winget pin remove --id $id 2>&1 | Out-Host }
+        $update = cmd /c 'C:\winarchy\bin\winarchy.cmd update --self 2>&1' | Out-String
+        $update
+        if ($update -notmatch 'Winarchy updated') { $failed = $true; 'update --self did not report an update' }
+        $version = (Import-PowerShellDataFile C:\winarchy\module\Winarchy\Winarchy.psd1).ModuleVersion
+        "version after update: $version"
+        if ($version -eq '1.6.0') { $failed = $true; 'still on 1.6.0' }
     }
 }
 Stop-Transcript
