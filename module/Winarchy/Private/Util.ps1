@@ -64,7 +64,7 @@ function Start-WinarchyKomorebi {
     #>
     if (Test-WinarchyProcess 'komorebi') { return }
     $exe = Get-WinarchyKomorebiExe
-    if (-not $exe) { Write-WinarchyWarn 'komorebi.exe no encontrado; no puedo arrancar el tiling.'; return }
+    if (-not $exe) { Write-WinarchyWarn 'komorebi.exe not found; tiling not started.'; return }
     Start-Process $exe -WindowStyle Hidden
 }
 

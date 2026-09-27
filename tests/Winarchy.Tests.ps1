@@ -2244,6 +2244,12 @@ Describe 'First install on a clean machine' {
         }
     }
 
+    It 'talks to the user in English' {
+        $files = git -C $script:Root ls-files '*.ps1' '*.psm1' ':!tests' ':!scripts/*seelen*' | ForEach-Object { Join-Path $script:Root $_ }
+        $hits = Select-String -Path $files -Pattern '(Write-Winarchy(Ok|Info|Warn|Err)|Invoke-Step|throw)\b.*[áéíóúñ¿¡]'
+        $hits | ForEach-Object { "$($_.Path):$($_.LineNumber)" } | Should -BeNullOrEmpty
+    }
+
     It 'queries winget only through its own source' {
         $files = git -C $script:Root ls-files '*.ps1' '*.psm1' ':!tests' | ForEach-Object { Join-Path $script:Root $_ }
         $hits = Select-String -Path $files -Pattern '^[^''"#]*\bwinget (install|upgrade|show|list|search|pin add)\b' |

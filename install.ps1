@@ -36,7 +36,7 @@ $snapshot = New-WinarchySnapshot -Label 'pre-install' -Path @(
     (Join-Path $Root 'config\pwsh\user.ps1'),
     (Join-Path $Root 'config\wezterm\user.lua')
 )
-Write-WinarchyOk "Snapshot previo: $snapshot"
+Write-WinarchyOk "Pre-install snapshot: $snapshot"
 
 # Export de las Scheduled Tasks de Winarchy (si existieran) al snapshot, para rollback.
 # Vía schtasks.exe (no usa CIM/MI, que está roto en algunas máquinas).
@@ -48,7 +48,7 @@ try {
         }
     }
 }
-catch { Write-WinarchyWarn "No pude exportar tareas previas al snapshot: $($_.Exception.Message)" }
+catch { Write-WinarchyWarn "Could not export the existing tasks to the snapshot: $($_.Exception.Message)" }
 
 # --- 1. Paquetes (winget, versiones core fijadas) -------------------------------
 $lock = Import-WinarchyToml -Path (Join-Path $Root 'versions.lock.toml')
@@ -57,21 +57,21 @@ $coreVersions = Get-WinarchyCoreVersions -Lock $lock
 # componentes core que falten: si no, un core nuevo nunca llega a quien ya tenía Winarchy
 # y el stack queda apuntando a un exe inexistente.
 $packageIds = if ($SkipPackages) { @($coreVersions.Keys) } else { @($lock['winget'].Keys) }
-if ($SkipPackages) { Write-WinarchyInfo 'Verificando que los componentes core estén presentes...' }
+if ($SkipPackages) { Write-WinarchyInfo 'Checking that the core components are present...' }
 $failedPackages = @()
 foreach ($id in $packageIds) {
     if (-not $lock['winget'][$id]) { continue }
     $installed = winget list --id $id --exact --source winget --accept-source-agreements 2>$null | Out-String
     if ($installed -match [regex]::Escape($id)) {
-        if (-not $SkipPackages) { Write-WinarchyOk "$id ya instalado" }
+        if (-not $SkipPackages) { Write-WinarchyOk "$id already installed" }
     }
     else {
-        Write-WinarchyInfo "Instalando $id ..."
+        Write-WinarchyInfo "Installing $id ..."
         $args = @('install', '--id', $id, '--exact', '--source', 'winget', '--silent', '--accept-package-agreements', '--accept-source-agreements')
         if ($coreVersions.ContainsKey($id)) { $args += @('--version', $coreVersions[$id]) }
         winget @args
         if ($LASTEXITCODE -ne 0) {
-            Write-WinarchyWarn "winget no pudo instalar $id (código $LASTEXITCODE)"
+            Write-WinarchyWarn "winget could not install $id (exit code $LASTEXITCODE)"
             $failedPackages += $id
         }
     }
@@ -94,13 +94,13 @@ $weztermConfig = Join-Path $Root 'config\wezterm\wezterm.lua'
 $env:KOMOREBI_CONFIG_HOME = Join-Path $Root 'config\komorebi'
 $env:YASB_CONFIG_HOME = Join-Path $Root 'config\yasb'
 $env:WEZTERM_CONFIG_FILE = $weztermConfig
-Write-WinarchyOk 'KOMOREBI_CONFIG_HOME / YASB_CONFIG_HOME / WEZTERM_CONFIG_FILE registradas (User)'
+Write-WinarchyOk 'KOMOREBI_CONFIG_HOME / YASB_CONFIG_HOME / WEZTERM_CONFIG_FILE set (User)'
 
 # WEZTERM_CONFIG_FILE gana sobre el descubrimiento por home: si el usuario ya tenía su
 # propio wezterm.lua, queda huérfano en silencio. Avisar dónde está y dónde va ahora.
 foreach ($orphan in @("$env:USERPROFILE\.wezterm.lua", "$env:USERPROFILE\.config\wezterm\wezterm.lua")) {
     if (Test-Path $orphan) {
-        Write-WinarchyWarn "Tu config previa de WezTerm ($orphan) ya no se carga: ahora manda $weztermConfig. Portá lo tuyo a config\wezterm\user.lua."
+        Write-WinarchyWarn "Your previous WezTerm config ($orphan) is no longer loaded: $weztermConfig is now. Move your settings to config\wezterm\user.lua."
     }
 }
 
@@ -109,18 +109,18 @@ $binDir = Join-Path $Root 'bin'
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if ($userPath -notlike "*$binDir*") {
     [Environment]::SetEnvironmentVariable('Path', "$userPath;$binDir", 'User')
-    Write-WinarchyOk "bin\ agregado al PATH de usuario (reabrir terminal para usar `winarchy`)"
+    Write-WinarchyOk 'bin\ added to the user PATH (open a new terminal to use winarchy)'
 }
-else { Write-WinarchyOk 'bin\ ya estaba en PATH' }
+else { Write-WinarchyOk 'bin\ already on PATH' }
 
 # --- 3b. Terminal profile: PSFzf + hook en $PROFILE de pwsh --------------------------
 if (-not $SkipPackages) {
     if (-not (Get-Module -ListAvailable PSFzf)) {
-        Write-WinarchyInfo 'Instalando PSFzf (PSGallery)...'
+        Write-WinarchyInfo 'Installing PSFzf (PSGallery)...'
         try { Install-Module PSFzf -Scope CurrentUser -Force -ErrorAction Stop }
-        catch { Write-WinarchyWarn "No pude instalar PSFzf: $($_.Exception.Message)" }
+        catch { Write-WinarchyWarn "Could not install PSFzf: $($_.Exception.Message)" }
     }
-    else { Write-WinarchyOk 'PSFzf ya instalado' }
+    else { Write-WinarchyOk 'PSFzf already installed' }
 }
 Install-WinarchyShellProfile
 
@@ -139,10 +139,10 @@ Initialize-WinarchyFlow
 # llegaba a los configs de quien ya tenia un theme seteado.
 $initialTheme = Get-WinarchyCurrentTheme
 if ($initialTheme) {
-    Write-WinarchyInfo "Regenerando configs desde los templates (theme: $initialTheme)..."
+    Write-WinarchyInfo "Regenerating configs from the templates (theme: $initialTheme)..."
 } else {
     $initialTheme = 'tokyo-night'
-    Write-WinarchyInfo 'Generando configs con el theme inicial (tokyo-night)...'
+    Write-WinarchyInfo 'Generating configs with the initial theme (tokyo-night)...'
 }
 Set-WinarchyTheme -Name $initialTheme
 
@@ -167,15 +167,15 @@ if ($Activate) {
     # Taskbar nativa en auto-hide (no oculta del todo: ver design D6/riesgos)
     try {
         $null = Set-WinarchyTaskbarAutoHide -Enabled $true
-        Write-WinarchyOk 'Taskbar nativa en auto-hide'
+        Write-WinarchyOk 'Windows taskbar set to auto-hide'
     }
-    catch { Write-WinarchyWarn "No pude poner la taskbar en auto-hide: $($_.Exception.Message)" }
+    catch { Write-WinarchyWarn "Could not set the taskbar to auto-hide: $($_.Exception.Message)" }
 
     try {
         $n = Set-WinarchyWindowsHardening
-        Write-WinarchyOk "Windows sin Bing/sugerencias/publicidad ($n ajuste(s))"
+        Write-WinarchyOk "Windows without Bing, suggestions and ads ($n setting(s))"
     }
-    catch { Write-WinarchyWarn "No pude aplicar el hardening de Windows: $($_.Exception.Message)" }
+    catch { Write-WinarchyWarn "Could not apply the Windows hardening: $($_.Exception.Message)" }
 
     # Sin el delay artificial (~10 s) que Explorer impone a las apps de Startup,
     # komorebi/YASB/AHK levantan apenas inicia la sesión.
@@ -183,11 +183,11 @@ if ($Activate) {
         $serialize = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize'
         if (-not (Test-Path $serialize)) { New-Item $serialize -Force | Out-Null }
         Set-ItemProperty -Path $serialize -Name 'StartupDelayInMSec' -Value 0 -Type DWord
-        Write-WinarchyOk 'Delay de apps de Startup eliminado (StartupDelayInMSec=0)'
+        Write-WinarchyOk 'Startup app delay removed (StartupDelayInMSec=0)'
     }
-    catch { Write-WinarchyWarn "No pude quitar el delay de Startup: $($_.Exception.Message)" }
+    catch { Write-WinarchyWarn "Could not remove the Startup delay: $($_.Exception.Message)" }
 
-    Write-WinarchyInfo 'Arrancando servicios...'
+    Write-WinarchyInfo 'Starting the stack...'
     if ($komorebic) { & $komorebic start }
     if ($yasb) { & $yasb start }
     if ($ahkExe) {
@@ -202,20 +202,19 @@ else {
     # activo (convivencia pura), no se toca nada.
     $autostart = Get-WinarchyAutostartStatus
     if (@($autostart.Values | Where-Object { $_ }).Count -gt 0) {
-        Write-WinarchyInfo 'Autostart activo: re-registrando para aplicar cambios de arranque...'
+        Write-WinarchyInfo 'Autostart is on: registering it again to pick up startup changes...'
         Register-WinarchyAutostart
     }
     else {
-        Write-WinarchyInfo 'Modo CONVIVENCIA: sin autostart. Para activar el stack: .\install.ps1 -Activate'
-        Write-WinarchyInfo 'Para migrar desde Seelen: .\scripts\migrate-from-seelen.ps1'
+        Write-WinarchyInfo 'Coexistence mode: nothing starts at logon. To activate: .\install.ps1 -Activate'
     }
 }
 
 Write-Host ''
 $failedCore = @($failedPackages | Where-Object { $coreVersions.ContainsKey($_) })
 if ($failedCore) {
-    Write-WinarchyErr "No se instalaron componentes core: $($failedCore -join ', '). Revisá la salida de winget y corré de nuevo el instalador."
+    Write-WinarchyErr "Core components not installed: $($failedCore -join ', '). Check the winget output above and run the installer again."
     exit 1
 }
-if ($failedPackages) { Write-WinarchyWarn "No se instalaron: $($failedPackages -join ', '). El resto del stack funciona; winarchy doctor muestra qué falta." }
-Write-WinarchyOk 'Instalación completa. Verificá con: winarchy doctor'
+if ($failedPackages) { Write-WinarchyWarn "Not installed: $($failedPackages -join ', '). The rest of the stack works; winarchy doctor shows what is missing." }
+Write-WinarchyOk 'Install complete. Check it with: winarchy doctor'

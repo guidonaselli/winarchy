@@ -20,7 +20,7 @@ function Initialize-WinarchyFlow {
     )
     if (-not (Test-Path $exe) -or -not @($required | Where-Object { -not (Test-Path $_) })) { return }
 
-    Write-WinarchyInfo 'Inicializando el perfil de Flow Launcher...'
+    Write-WinarchyInfo 'Creating the Flow Launcher profile (first start)...'
     $flow = Start-Process $exe -PassThru
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while (@($required | Where-Object { -not (Test-Path $_) }) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
@@ -28,7 +28,7 @@ function Initialize-WinarchyFlow {
     Get-Process -Name 'Flow.Launcher' -ErrorAction SilentlyContinue | Stop-Process -Force
     $flow | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue
     if (@($required | Where-Object { -not (Test-Path $_) })) {
-        Write-WinarchyWarn 'Flow Launcher no creó su perfil a tiempo; abrilo una vez y corré de nuevo el instalador.'
+        Write-WinarchyWarn 'Flow Launcher did not create its profile in time; open it once and run the installer again.'
     }
 }
 
@@ -139,7 +139,7 @@ function Set-WinarchyFlowKeywords {
         }
     }
     else {
-        Write-WinarchyWarn 'Flow Explorer plugin settings not found (¿corriste Flow al menos una vez?); file search keyword not applied.'
+        Write-WinarchyWarn 'Flow Explorer plugin settings not found (open Flow once, then run the installer again); file search keyword not applied.'
     }
 
     $legacyDirs = @(Get-ChildItem (Join-Path "$env:APPDATA\FlowLauncher" 'Plugins') -Directory -ErrorAction SilentlyContinue | Where-Object {
@@ -206,6 +206,6 @@ function Set-WinarchyDefenderExclusions {
         Write-WinarchyOk "Defender exclusions added: $($missing -join ', ')"
     }
     catch {
-        Write-WinarchyWarn "No pude agregar exclusiones de Defender: $($_.Exception.Message)"
+        Write-WinarchyWarn "Could not add the Defender exclusions: $($_.Exception.Message)"
     }
 }

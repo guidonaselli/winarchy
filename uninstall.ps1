@@ -21,10 +21,10 @@ Import-Module (Join-Path $Root 'module\Winarchy\Winarchy.psd1') -Force
 
 # Pins que pone `winarchy update --core`: hay que sacarlos todos o el usuario queda con
 # paquetes pinneados en winget después de desinstalar Winarchy.
-$CorePinIds = @('LGUG2Z.komorebi', 'AmN.yasb', 'Flow-Launcher.Flow-Launcher', 'AutoHotkey.AutoHotkey', 'wez.wezterm')
+$CorePinIds = @((Get-WinarchyCoreVersions -Lock (Import-WinarchyToml -Path (Join-Path $Root 'versions.lock.toml'))).Keys | Sort-Object)
 
 Write-Host "`n== Winarchy uninstall ==" -ForegroundColor Cyan
-if ($DryRun) { Write-WinarchyInfo 'DRY RUN: no se modifica nada.' }
+if ($DryRun) { Write-WinarchyInfo 'DRY RUN: nothing is changed.' }
 
 function Invoke-Step {
     <# Ejecuta el paso, o solo lo describe si es dry-run. #>
@@ -34,64 +34,63 @@ function Invoke-Step {
     catch { Write-WinarchyWarn "$($Describe): $($_.Exception.Message)" }
 }
 
-Invoke-Step 'Detener komorebi, YASB y el AHK de Winarchy' {
+Invoke-Step 'Stop komorebi, YASB and the Winarchy AHK script' {
     Stop-WinarchyWindowSlots
     if (Get-Process -Name komorebi -ErrorAction SilentlyContinue) { komorebic stop 2>$null | Out-Null }
     Stop-Process -Name yasb -Force -ErrorAction SilentlyContinue
     Get-Process -Name 'AutoHotkey*' -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -like '*winarchy.ahk*' } |
         Stop-Process -Force -ErrorAction SilentlyContinue
-} 'Servicios detenidos'
+} 'Stack stopped'
 
 # El focus-follows-mouse modo "Windows" es un flag del SO que sobrevive a komorebi
-Invoke-Step 'Desactivar el focus-follows-mouse del SO' { Disable-WinarchyXMouse } `
-    'Focus-follows-mouse del SO desactivado'
+Invoke-Step 'Turn off the Windows focus-follows-mouse' { Disable-WinarchyXMouse } `
+    'Windows focus-follows-mouse off'
 
-Invoke-Step 'Eliminar el autostart (Scheduled Tasks + .lnk legacy)' { Unregister-WinarchyAutostart } `
-    'Autostart eliminado'
+Invoke-Step 'Remove the autostart (scheduled tasks + legacy .lnk)' { Unregister-WinarchyAutostart } `
+    'Autostart removed'
 
-Invoke-Step 'Restaurar la taskbar nativa (quitar auto-hide)' {
+Invoke-Step 'Restore the Windows taskbar (turn off auto-hide)' {
     $null = Set-WinarchyTaskbarAutoHide -Enabled $false
-} 'Taskbar nativa restaurada'
+} 'Windows taskbar restored'
 
-Invoke-Step 'Revertir el hardening de Windows (Bing, sugerencias, publicidad)' {
+Invoke-Step 'Revert the Windows hardening (Bing, suggestions, ads)' {
     $null = Set-WinarchyWindowsHardening -Revert
-} 'Hardening de Windows revertido'
+} 'Windows hardening reverted'
 
-Invoke-Step 'Revertir el delay de Startup al default de Windows' {
+Invoke-Step 'Restore the default Startup app delay' {
     Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize' `
         -Name 'StartupDelayInMSec' -ErrorAction SilentlyContinue
-} 'Delay de Startup restaurado al default'
+} 'Startup app delay restored'
 
-Invoke-Step 'Quitar la skill "winarchy" de los agentes de IA' { Uninstall-WinarchySkill } `
-    'Skill desinstalada'
+Invoke-Step 'Remove the "winarchy" skill from AI coding agents' { Uninstall-WinarchySkill } `
+    'Skill removed'
 
-Invoke-Step 'Quitar los comandos de Winarchy del menu de inicio' { Remove-WinarchyPalette } `
-    'Paleta de comandos quitada'
+Invoke-Step 'Remove the Winarchy commands from the Start menu' { Remove-WinarchyPalette } `
+    'Command palette removed'
 
-Invoke-Step 'Revertir env vars (KOMOREBI_CONFIG_HOME, YASB_CONFIG_HOME, WEZTERM_CONFIG_FILE) y sacar bin\ del PATH' {
+Invoke-Step 'Remove the env vars (KOMOREBI_CONFIG_HOME, YASB_CONFIG_HOME, WEZTERM_CONFIG_FILE) and bin\ from PATH' {
     [Environment]::SetEnvironmentVariable('KOMOREBI_CONFIG_HOME', $null, 'User')
     [Environment]::SetEnvironmentVariable('YASB_CONFIG_HOME', $null, 'User')
     [Environment]::SetEnvironmentVariable('WEZTERM_CONFIG_FILE', $null, 'User')
     $binDir = Join-Path $Root 'bin'
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     [Environment]::SetEnvironmentVariable('Path', (($userPath -split ';' | Where-Object { $_ -and $_ -ne $binDir }) -join ';'), 'User')
-} 'Env vars y PATH revertidos'
+} 'Env vars and PATH reverted'
 
-Invoke-Step "Quitar los pins de winget ($($CorePinIds -join ', '))" {
-    foreach ($id in $CorePinIds) { winget pin remove --id $id 2>$null | Out-Null }
-} 'Pins de winget eliminados'
+Invoke-Step "Remove the winget pins ($($CorePinIds -join ', '))" {
+    foreach ($id in $CorePinIds) { winget pin remove --id $id --exact 2>$null | Out-Null }
+} 'winget pins removed'
 
 if ($RemovePackages) {
-    Invoke-Step 'Desinstalar komorebi y YASB vía winget' {
-        foreach ($id in @('LGUG2Z.komorebi', 'AmN.yasb')) { winget uninstall --id $id --silent }
-    } 'komorebi y YASB desinstalados'
+    Invoke-Step 'Uninstall komorebi and YASB with winget' {
+        foreach ($id in @('LGUG2Z.komorebi', 'AmN.yasb')) { winget uninstall --id $id --exact --silent }
+    } 'komorebi and YASB uninstalled'
 }
 
 Write-Host ''
 if ($DryRun) {
-    Write-WinarchyInfo 'DRY RUN terminado: no se modificó nada. Corré sin -DryRun para aplicarlo.'
+    Write-WinarchyInfo 'DRY RUN done: nothing was changed. Run it without -DryRun to apply it.'
     return
 }
-Write-WinarchyOk 'Winarchy desinstalado. Backups conservados en backups\.'
-Write-WinarchyInfo 'Si venías de Seelen: .\scripts\rollback-to-seelen.ps1 lo reactiva.'
+Write-WinarchyOk 'Winarchy uninstalled. Backups kept in backups\.'

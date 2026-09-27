@@ -207,7 +207,7 @@ function Register-WinarchyAutostart {
     $user = "$env:USERDOMAIN\$env:USERNAME"
     $components = Get-WinarchyAutostartComponents
     if ($components.Count -eq 0) {
-        Write-WinarchyWarn 'Autostart: ningún componente instalado.'
+        Write-WinarchyWarn 'Autostart: no component is installed.'
         return
     }
 
@@ -217,16 +217,16 @@ function Register-WinarchyAutostart {
             Set-Content -Path $xmlPath -Value (New-WinarchyTaskXml -Component $c -User $user) -Encoding Unicode
             $full = Get-WinarchyTaskFullName -TaskName $c.TaskName
             & schtasks.exe /Create /TN $full /XML $xmlPath /F *> $null
-            if ($LASTEXITCODE -ne 0) { throw "schtasks /Create salió con código $LASTEXITCODE" }
+            if ($LASTEXITCODE -ne 0) { throw "schtasks /Create exited with code $LASTEXITCODE" }
         }
         catch {
             if (Test-WinarchyTask -TaskName $c.TaskName) {
-                Write-WinarchyWarn "Autostart $($c.Key): no pude actualizar la tarea existente ($($_.Exception.Message)); queda la anterior. Si fue creada elevada: schtasks /Delete /TN \$script:WinarchyTaskFolder\$($c.TaskName) /F (como admin) y reintentar."
+                Write-WinarchyWarn "Autostart $($c.Key): could not update the existing task ($($_.Exception.Message)); the previous one stays. If it was created elevated: schtasks /Delete /TN \$script:WinarchyTaskFolder\$($c.TaskName) /F (as admin) and retry."
                 continue
             }
-            Write-WinarchyWarn "Autostart $($c.Key): falló registrar la tarea ($($_.Exception.Message)). Fallback a Startup."
+            Write-WinarchyWarn "Autostart $($c.Key): could not register the task ($($_.Exception.Message)); falling back to the Startup folder."
             try { New-WinarchyStartupShortcut -Component $c }
-            catch { Write-WinarchyWarn "Autostart $($c.Key): fallback a Startup también falló: $($_.Exception.Message)" }
+            catch { Write-WinarchyWarn "Autostart $($c.Key): the Startup folder fallback failed too: $($_.Exception.Message)" }
         }
         finally {
             Remove-Item $xmlPath -Force -ErrorAction SilentlyContinue

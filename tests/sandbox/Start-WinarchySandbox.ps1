@@ -5,6 +5,7 @@
   Tests what is committed (HEAD), not the working tree: the sandbox clones a bare copy of the
   repo whose `release` branch points at HEAD.
     install     winget -> git + pwsh, clone, install.ps1 twice, Assert-Install
+    uninstall   install, then uninstall.ps1: no pins, env vars, PATH entry or logon task left
     published   the real one-liner against GitHub (irm .../release/boot.ps1 | iex), Assert-Install
     selfupdate  install, then roll the checkout back to v1.6.0 (AHK/Flow unpinned, as 1.6.0
                 left them) and run that version's `winarchy update --self`, Assert-Install
@@ -18,7 +19,7 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published')][string]$Scenario,
+    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall')][string]$Scenario,
     [switch]$Keep,
     [string]$Out = (Join-Path $env:TEMP 'winarchy-sandbox')
 )
@@ -78,10 +79,12 @@ try {
         if ($code -ne 0) { throw "elevated check exited with $code; see $run" }
     }
     Invoke-GuestScript ExistingLogin 'Invoke-SandboxScenario.ps1' "-Scenario $Scenario"
-    $mode = if ($Scenario -eq 'boot') { 'active' } else { 'coexistence' }
-    $code = Invoke-Guest ExistingLogin "pwsh.exe -NoProfile -ExecutionPolicy Bypass -File C:\sandbox\scripts\Assert-Install.ps1 -Mode $mode"
-    Get-Content (Join-Path $run 'assert.txt')
-    if ($code -ne 0) { throw "Assert-Install failed; see $run" }
+    if ($Scenario -ne 'uninstall') {
+        $mode = if ($Scenario -eq 'boot') { 'active' } else { 'coexistence' }
+        $code = Invoke-Guest ExistingLogin "pwsh.exe -NoProfile -ExecutionPolicy Bypass -File C:\sandbox\scripts\Assert-Install.ps1 -Mode $mode"
+        Get-Content (Join-Path $run 'assert.txt')
+        if ($code -ne 0) { throw "Assert-Install failed; see $run" }
+    }
     Write-Host "PASS: $Scenario" -ForegroundColor Green
 }
 finally {

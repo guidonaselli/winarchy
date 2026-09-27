@@ -31,13 +31,13 @@ function Install-WinarchySkill {
        Idempotente: re-ejecutable sin daño (sobreescribe la copia gestionada). #>
     $src = Join-Path (Get-WinarchyRoot) 'assets\skills\winarchy'
     if (-not (Test-Path (Join-Path $src 'SKILL.md'))) {
-        Write-WinarchyWarn "No encontré la skill fuente en $src; salteo instalación de skill."
+        Write-WinarchyWarn "Skill source not found in $src; skipping the skill."
         return
     }
 
     $roots = @(Get-WinarchyAgentSkillRoots)
     if (-not $roots.Count) {
-        Write-WinarchyInfo 'No detecté agentes de IA (~/.claude, ~/.codex, ~/.gemini); salteo skill.'
+        Write-WinarchyInfo 'No AI coding agent found (~/.claude, ~/.codex, ~/.gemini); skipping the skill.'
         return
     }
 
@@ -46,9 +46,9 @@ function Install-WinarchySkill {
             $dest = Join-Path $skillsRoot 'winarchy'
             if (-not (Test-Path $skillsRoot)) { New-Item -ItemType Directory -Path $skillsRoot -Force | Out-Null }
             Copy-Item -Path $src -Destination $skillsRoot -Recurse -Force
-            Write-WinarchyOk "Skill 'winarchy' instalada en $dest"
+            Write-WinarchyOk "Skill 'winarchy' installed in $dest"
         }
-        catch { Write-WinarchyWarn "No pude instalar la skill en $skillsRoot : $($_.Exception.Message)" }
+        catch { Write-WinarchyWarn "Could not install the skill in $skillsRoot : $($_.Exception.Message)" }
     }
 }
 
@@ -59,9 +59,9 @@ function Uninstall-WinarchySkill {
         if (Test-Path $dest) {
             try {
                 Remove-Item -Path $dest -Recurse -Force
-                Write-WinarchyOk "Skill 'winarchy' removida de $dest"
+                Write-WinarchyOk "Skill 'winarchy' removed from $dest"
             }
-            catch { Write-WinarchyWarn "No pude remover la skill en $dest : $($_.Exception.Message)" }
+            catch { Write-WinarchyWarn "Could not remove the skill in $dest : $($_.Exception.Message)" }
         }
     }
 }

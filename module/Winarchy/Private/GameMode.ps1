@@ -16,7 +16,7 @@ function Enable-WinarchyGameMode {
     $games = @(Get-WinarchyGames)
     $isGame = $fgExe -and ($games | Where-Object { $_ -ieq $fgExe })
     if (-not $isGame) {
-        Write-WinarchyWarn "Game-mode NO activado: la ventana en primer plano ('$fgExe') no está en games.toml. Activá game-mode con el juego en foco, o registralo con ``winarchy game-mode add $fgExe``."
+        Write-WinarchyWarn "Game mode NOT enabled: the foreground window ('$fgExe') is not in games.toml. Enable game mode with the game focused, or register it with ``winarchy game-mode add $fgExe``."
         return
     }
 
@@ -48,7 +48,7 @@ function Disable-WinarchyGameMode {
         }
         Remove-Item $marker -Force
     }
-    Write-WinarchyOk 'Game-mode OFF: floteo de sesión limpiado y re-tilado; el tiling nunca se pausó.'
+    Write-WinarchyOk 'Game mode OFF: session float rules cleared and windows retiled; tiling was never paused.'
 }
 
 function Get-WinarchyGameModeStatus {
@@ -126,7 +126,7 @@ function Restart-WinarchyPowerToys {
         Start-Process $exe
     }
     else {
-        Write-WinarchyWarn 'No encontré PowerToys.exe para reiniciarlo; reinicialo a mano para aplicar las exclusiones.'
+        Write-WinarchyWarn 'PowerToys.exe not found to restart it; restart PowerToys yourself to apply the exclusions.'
     }
 }
 
