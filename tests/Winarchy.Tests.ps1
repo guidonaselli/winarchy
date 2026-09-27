@@ -2298,6 +2298,22 @@ Describe 'First install on a clean machine' {
         Test-WinarchyVersionBelow -Installed 'Unknown' -Pinned '2.0.28' | Should -BeFalse
     }
 
+    It 'exports every module function the scripts call' {
+        $exported = @((Get-Module Winarchy).ExportedFunctions.Keys)
+        $scripts = git -C $script:Root ls-files '*.ps1' ':!tests' ':!module' |
+            ForEach-Object { Join-Path $script:Root $_ } |
+            Where-Object { Select-String -Path $_ -SimpleMatch 'Winarchy.psd1' -Quiet }
+        $missing = foreach ($file in $scripts) {
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$null, [ref]$null)
+            $defined = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true).Name)
+            $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true) |
+                ForEach-Object { $_.GetCommandName() } |
+                Where-Object { $_ -match '^\w+-Winarchy' -and $_ -notin $exported -and $_ -notin $defined } |
+                ForEach-Object { "$(Split-Path $file -Leaf): $_" }
+        }
+        $missing | Sort-Object -Unique | Should -BeNullOrEmpty
+    }
+
     It 'talks to the user in English' {
         $files = git -C $script:Root ls-files '*.ps1' '*.psm1' ':!tests' ':!scripts/*seelen*' | ForEach-Object { Join-Path $script:Root $_ }
         $hits = Select-String -Path $files -Pattern '(Write-Winarchy(Ok|Info|Warn|Err)|Invoke-Step|throw)\b.*[áéíóúñ¿¡]'
@@ -2306,7 +2322,7 @@ Describe 'First install on a clean machine' {
 
     It 'queries winget only through its own source' {
         $files = git -C $script:Root ls-files '*.ps1' '*.psm1' ':!tests' | ForEach-Object { Join-Path $script:Root $_ }
-        $hits = Select-String -Path $files -Pattern '^[^''"#]*\bwinget (install|upgrade|show|list|search|pin add)\b' |
+        $hits = Select-String -Path $files -Pattern '^[^''"#]*\bwinget (install|upgrade|uninstall|show|list|search|pin add|pin remove)\b' |
             Where-Object { $_.Line -notmatch '--source winget' }
         $hits | ForEach-Object { "$($_.Path):$($_.LineNumber)" } | Should -BeNullOrEmpty
         Get-Content (Join-Path $script:Root 'install.ps1') -Raw | Should -Match "'install', '--id', \`$id, '--exact', '--source', 'winget'"

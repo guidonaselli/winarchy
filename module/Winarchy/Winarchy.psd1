@@ -32,7 +32,7 @@
         'Sync-WinarchyPalette', 'Remove-WinarchyPalette',
         'Install-WinarchySkill', 'Uninstall-WinarchySkill',
         'New-WinarchySnapshot', 'Import-WinarchyToml', 'Get-WinarchyCoreVersions', 'Get-WinarchyInstalledVersion', 'Test-WinarchyVersionBelow', 'Get-WinarchyAhkExe', 'Get-WinarchyStateDir',
-        'Disable-WinarchyXMouse',
+        'Disable-WinarchyXMouse', 'Set-WinarchyTaskbarAutoHide', 'Set-WinarchyWindowsHardening', 'Stop-WinarchyWindowSlots',
         'Register-WinarchyAutostart', 'Unregister-WinarchyAutostart', 'Get-WinarchyAutostartStatus',
         'Write-WinarchyInfo', 'Write-WinarchyOk', 'Write-WinarchyWarn', 'Write-WinarchyErr'
     )

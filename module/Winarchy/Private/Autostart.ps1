@@ -232,7 +232,7 @@ function Register-WinarchyAutostart {
             Remove-Item $xmlPath -Force -ErrorAction SilentlyContinue
         }
     }
-    Write-WinarchyOk 'Autostart registrado (Scheduled Tasks At-LogOn): komorebi, YASB, net-icon, ShareX, AHK'
+    Write-WinarchyOk 'Autostart registered (scheduled tasks at logon): komorebi, YASB, net-icon, ShareX, AHK'
 }
 
 function Unregister-WinarchyAutostart {

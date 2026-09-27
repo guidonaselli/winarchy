@@ -96,7 +96,7 @@ switch ($Scenario) {
         Install-Prerequisites
         Invoke-WinarchyScript install.ps1
         git -C C:\winarchy reset --quiet --hard v1.6.0
-        foreach ($id in 'AutoHotkey.AutoHotkey', 'Flow-Launcher.Flow-Launcher') { winget pin remove --id $id 2>&1 | Out-Host }
+        foreach ($id in 'AutoHotkey.AutoHotkey', 'Flow-Launcher.Flow-Launcher') { winget pin remove --id $id --exact --source winget 2>&1 | Out-Host }
         $update = cmd /c 'C:\winarchy\bin\winarchy.cmd update --self 2>&1' | Out-String
         $update
         if ($update -notmatch 'Winarchy updated') { $failed = $true; 'update --self did not report an update' }

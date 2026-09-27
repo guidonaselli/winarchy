@@ -71,7 +71,7 @@ foreach ($id in $packageIds) {
     else {
         if ($outdated) {
             Write-WinarchyInfo "Updating $id $installed -> $($coreVersions[$id]) (the version Winarchy is tested with)..."
-            winget pin remove --id $id --exact 2>$null | Out-Null
+            winget pin remove --id $id --exact --source winget 2>$null | Out-Null
         }
         else { Write-WinarchyInfo "Installing $id ..." }
         $args = @('install', '--id', $id, '--exact', '--source', 'winget', '--silent', '--accept-package-agreements', '--accept-source-agreements')

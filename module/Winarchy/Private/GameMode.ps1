@@ -159,7 +159,7 @@ function Update-WinarchyQuickAccentExclusion {
         # guardado: hay que reiniciarlo para que recargue del disco lo que acabamos de escribir.
         Restart-WinarchyPowerToys
         $verb = if ($Remove) { 'removed from' } else { 'added to' }
-        Write-WinarchyInfo "Quick Accent: '$Exe' $verb exclusions (PowerToys reiniciado para recargar)."
+        Write-WinarchyInfo "Quick Accent: '$Exe' $verb exclusions (PowerToys restarted to reload them)."
     }
     catch {
         Write-WinarchyWarn "Could not update Quick Accent exclusions: $_"

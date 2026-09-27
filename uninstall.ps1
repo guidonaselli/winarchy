@@ -86,12 +86,12 @@ Invoke-Step 'Remove the env vars (KOMOREBI_CONFIG_HOME, YASB_CONFIG_HOME, WEZTER
 } 'Env vars and PATH reverted'
 
 Invoke-Step "Remove the winget pins ($($CorePinIds -join ', '))" {
-    foreach ($id in $CorePinIds) { winget pin remove --id $id --exact 2>$null | Out-Null }
+    foreach ($id in $CorePinIds) { winget pin remove --id $id --exact --source winget 2>$null | Out-Null }
 } 'winget pins removed'
 
 if ($RemovePackages) {
     Invoke-Step 'Uninstall komorebi and YASB with winget' {
-        foreach ($id in @('LGUG2Z.komorebi', 'AmN.yasb')) { winget uninstall --id $id --exact --silent }
+        foreach ($id in @('LGUG2Z.komorebi', 'AmN.yasb')) { winget uninstall --id $id --exact --source winget --silent }
     } 'komorebi and YASB uninstalled'
 }
 

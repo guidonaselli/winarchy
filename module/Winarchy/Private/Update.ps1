@@ -70,7 +70,7 @@ function Invoke-WinarchyUpdate {
     else { Write-WinarchyInfo 'Updating the packages Winarchy declares (core excluded)...' }
 
     $results = foreach ($id in $ids) {
-        if ($Core) { winget pin remove --id $id 2>$null | Out-Null }
+        if ($Core) { winget pin remove --id $id --exact --source winget 2>$null | Out-Null }
         $result = Update-WinarchyWingetPackage -Id $id
         if ($Core) { winget pin add --id $id --exact --source winget 2>$null | Out-Null }
         Write-Host ("  {0,-12} {1}" -f $result.Status, $id)
