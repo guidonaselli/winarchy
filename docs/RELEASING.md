@@ -17,6 +17,10 @@ sync con el tag.
 
 0. **Checks en verde**: `.\tests\Invoke-WinarchyChecks.ps1` (parseo + Pester). Es lo mismo
    que corre CI; una release no sale con el gate en rojo.
+   Si la release toca `install.ps1`, `boot.ps1` o `versions.lock.toml`, además la instalación
+   limpia en Windows Sandbox (feature `Containers-DisposableClientVM`), sobre lo commiteado:
+   `.\tests\sandbox\Start-WinarchySandbox.ps1 -Scenario install` y `-Scenario boot`. Cada uno
+   tarda ~15 min y termina en `PASS`; los resultados quedan en `%TEMP%\winarchy-sandbox\`.
 1. **Bump** de `ModuleVersion` en `Winarchy.psd1` (semver: MAJOR.MINOR.PATCH).
 2. Commit en `main` con el changelog del cambio.
 3. **Tag**: `git tag -a vX.Y.Z -m "winarchy vX.Y.Z"` y `git push origin vX.Y.Z`.
