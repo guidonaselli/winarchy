@@ -19,6 +19,8 @@ $ErrorActionPreference = 'Stop'
 $Root = $PSScriptRoot
 
 Import-Module (Join-Path $Root 'module\Winarchy\Winarchy.psd1') -Force
+# PATH del proceso desde el registro.
+$env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
 
 # Pins que pone `winarchy update --core`: hay que sacarlos todos o el usuario queda con
 # paquetes pinneados en winget después de desinstalar Winarchy.
@@ -37,7 +39,12 @@ function Invoke-Step {
 
 Invoke-Step 'Stop komorebi, YASB and the Winarchy AHK script' {
     Stop-WinarchyWindowSlots
-    if (Get-Process -Name komorebi -ErrorAction SilentlyContinue) { komorebic stop 2>$null | Out-Null }
+    $komorebi = Get-Process -Name komorebi -ErrorAction SilentlyContinue
+    if ($komorebi) {
+        $komorebic = Join-Path (Split-Path (Get-WinarchyKomorebiExe)) 'komorebic.exe'
+        & $komorebic stop 2>$null | Out-Null
+        $komorebi | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+    }
     Stop-Process -Name yasb -Force -ErrorAction SilentlyContinue
     Get-Process -Name 'AutoHotkey*' -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -like '*winarchy.ahk*' } |

@@ -47,6 +47,7 @@ function Set-WinarchyWindowsHardening {
        reinicia Explorer solo si hubo cambios. #>
     param([switch]$Revert)
     $changed = 0
+    $blocked = 0
     if (-not $Revert) {
         foreach ($key in 'Explorer\Advanced', 'ContentDeliveryManager', 'Search', 'SearchSettings') {
             $null = Backup-WinarchyRegistryKey -Key "HKCU\Software\Microsoft\Windows\CurrentVersion\$key" -Label 'hardening'
@@ -68,8 +69,10 @@ function Set-WinarchyWindowsHardening {
             }
             $changed++
         }
+        catch [System.UnauthorizedAccessException], [System.Security.SecurityException] { $blocked++ }
         catch { Write-WinarchyWarn "${name}: $($_.Exception.Message)" }
     }
+    if ($blocked) { Write-WinarchyInfo "$blocked Windows setting(s) are locked for non-admin users; skipped." }
     if ($changed -gt 0) { Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue }
     $changed
 }
