@@ -53,7 +53,7 @@ function Invoke-WinarchyElevated([string]$Log, [string[]]$Arguments) {
     if ($process.ExitCode -ne 0) { $script:failed = $true; "winarchy $Arguments exited $($process.ExitCode)" }
 }
 
-$boot = (Get-Content (Join-Path $out 'boot.ps1') -Raw).Replace('https://github.com/guidonaselli/winarchy.git', $bare)
+$boot = (Get-Content (Join-Path $out 'boot.ps1') -Raw).Replace('https://github.com/guidonaselli/winarchy.git', $bare).Replace('pwsh @installArgs', '& { $ErrorActionPreference = ''Continue''; pwsh @installArgs 2>&1 | Out-Host }')
 $failed = $false
 switch ($Scenario) {
     'elevated' {
