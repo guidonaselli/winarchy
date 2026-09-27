@@ -2314,6 +2314,22 @@ Describe 'First install on a clean machine' {
         $missing | Sort-Object -Unique | Should -BeNullOrEmpty
     }
 
+    It 'keeps the line endings of games.toml when a game is added' {
+        InModuleScope Winarchy {
+            $root = Join-Path $TestDrive 'games-root'
+            New-Item -ItemType Directory -Force $root | Out-Null
+            [IO.File]::WriteAllText((Join-Path $root 'games.toml'), "[[games]]`nexe = `"a.exe`"`n")
+            Mock Get-WinarchyRoot { $root }
+            Mock Update-WinarchyKomorebiRules { }
+            Mock Test-WinarchyProcess { $false }
+            Mock Update-WinarchyQuickAccentExclusion { }
+            Add-WinarchyGame -Exe 'b.exe'
+            $raw = [IO.File]::ReadAllText((Join-Path $root 'games.toml'))
+            $raw | Should -Not -Match "`r"
+            $raw | Should -Match "exe = `"b.exe`"`n$"
+        }
+    }
+
     It 'talks to the user in English' {
         $files = git -C $script:Root ls-files '*.ps1' '*.psm1' ':!tests' ':!scripts/*seelen*' | ForEach-Object { Join-Path $script:Root $_ }
         $hits = Select-String -Path $files -Pattern '(Write-Winarchy(Ok|Info|Warn|Err)|Invoke-Step|throw)\b.*[áéíóúñ¿¡]'

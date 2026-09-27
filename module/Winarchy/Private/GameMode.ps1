@@ -173,7 +173,10 @@ function Add-WinarchyGame {
     $existing = @(Get-WinarchyGames)
     $alreadyRegistered = $existing -contains $Exe
     if (-not $alreadyRegistered) {
-        Add-Content -Path $gamesToml -Value @('', '[[games]]', "exe = `"$Exe`"") -Encoding UTF8
+        $raw = if (Test-Path $gamesToml) { Get-Content $gamesToml -Raw -Encoding UTF8 } else { '' }
+        $nl = if ($raw -match "`r`n") { "`r`n" } else { "`n" }
+        $lead = if ($raw -and -not $raw.EndsWith("`n")) { $nl } else { '' }
+        Add-Content -Path $gamesToml -Value "$lead$nl[[games]]$($nl)exe = `"$Exe`"$nl" -Encoding UTF8 -NoNewline
     }
     Update-WinarchyKomorebiRules
     if (Test-WinarchyProcess 'komorebi') {
