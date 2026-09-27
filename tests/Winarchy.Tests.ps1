@@ -2331,7 +2331,7 @@ try { Invoke-Expression (Get-Content $Boot -Raw) } catch { Add-Content $global:L
             $dir = Join-Path $TestDrive ([guid]::NewGuid())
             $log = "$dir.log"
             if ($Arrange) { & $Arrange $dir }
-            $null = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:Harness -Boot $script:Boot -Dir $dir `
+            $null = & $script:Shell -NoProfile -ExecutionPolicy Bypass -File $script:Harness -Boot $script:Boot -Dir $dir `
                 -Log $log -Strip $Strip -WingetExit $WingetExit -Activate $Activate -Branch $Branch -SchtasksExit $SchtasksExit
             [pscustomobject]@{ Dir = $dir; Log = @(if (Test-Path $log) { Get-Content $log }) }
         }
@@ -2346,7 +2346,9 @@ try { Invoke-Expression (Get-Content $Boot -Raw) } catch { Add-Content $global:L
         $errors | Should -BeNullOrEmpty
     }
 
-    Context 'run with fake winget, git and pwsh' -Skip:$elevated {
+    Context 'run in <_> with fake winget, git and pwsh' -ForEach 'powershell.exe', 'pwsh' -Skip:$elevated {
+        BeforeAll { $script:Shell = $_ }
+
         It 'installs git when missing, then clones release' {
             $r = Invoke-Boot -Strip git
             ($r.Log -match '^winget install --id Git\.Git --exact --source winget').Count | Should -Be 1
