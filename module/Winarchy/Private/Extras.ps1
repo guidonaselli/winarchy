@@ -292,9 +292,10 @@ function Remove-WinarchyExtra {
     }
     $exe = Get-WinarchyWindhawkExe
     Start-Process $exe -ArgumentList '-exit', '-wait' -Wait
+    Get-Service -Name Windhawk -ErrorAction SilentlyContinue | Stop-Service -Force
     winget uninstall --id RamenSoftware.Windhawk -e --source winget --silent | Out-Host
     $code = $LASTEXITCODE
-    $deadline = (Get-Date).AddSeconds(60)
+    $deadline = (Get-Date).AddSeconds(120)
     while ((Test-Path $exe) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
     if (Test-Path $exe) { throw "Windhawk uninstall failed (winget exit code $code)." }
     Write-WinarchyOk 'Windhawk removed'

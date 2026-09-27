@@ -2374,6 +2374,8 @@ Describe 'Windhawk extras' {
                 Mock Get-WinarchyWindhawkExe { $script:WhExe }
                 Mock Backup-WinarchyRegistryKey { }
                 Mock Start-Process { }
+                Mock Get-Service { [pscustomobject]@{ Name = 'Windhawk' } }
+                Mock Stop-Service { }
                 Mock winget { Remove-Item $script:WhExe; $global:LASTEXITCODE = 0 }
 
                 Remove-WinarchyExtra -Name windhawk
@@ -2386,6 +2388,7 @@ Describe 'Windhawk extras' {
                 Remove-WinarchyExtra -Name windhawk
                 Should -Invoke winget -Times 1
                 Should -Invoke Start-Process -Times 1 -ParameterFilter { $ArgumentList -contains '-exit' }
+                Should -Invoke Stop-Service -Times 1
             }
             finally {
                 $script:WindhawkRegistryRoot = 'HKLM:\SOFTWARE\Windhawk'
