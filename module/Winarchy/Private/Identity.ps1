@@ -183,6 +183,22 @@ function Get-WinarchyDefenderExclusionPaths {
     ) | Where-Object { $_ -and (Test-Path $_) }
 }
 
+function Remove-WinarchyDefenderExclusions {
+    <# Quita las exclusiones de Defender que agrega Set-WinarchyDefenderExclusions. #>
+    if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        Write-WinarchyWarn 'Defender exclusions can only be removed from an elevated shell. If you applied them (winarchy doctor as admin), run uninstall.ps1 again as admin.'
+        return
+    }
+    $current = @((Get-MpPreference).ExclusionPath)
+    $ours = @(Get-WinarchyDefenderExclusionPaths | Where-Object { $current -contains $_ })
+    if (-not $ours) {
+        Write-WinarchyOk 'No Winarchy Defender exclusions to remove'
+        return
+    }
+    Remove-MpPreference -ExclusionPath $ours
+    Write-WinarchyOk "Defender exclusions removed: $($ours -join ', ')"
+}
+
 function Set-WinarchyDefenderExclusions {
     <# Requiere shell elevado; si no lo está, no falla, solo avisa (mismo patrón que el
        resto de install.ps1 con operaciones de sistema). #>

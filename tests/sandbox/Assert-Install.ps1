@@ -1,6 +1,8 @@
 # Checks a finished Winarchy install and writes results.json + doctor.txt to the output folder.
 param([ValidateSet('coexistence', 'active')][string]$Mode = 'coexistence', [string]$Root = 'C:\winarchy', [string]$Out = 'C:\sandbox')
 Start-Transcript -Path (Join-Path $Out 'assert.txt')
+$rootFile = Join-Path $Out 'root.txt'
+if (Test-Path $rootFile) { $Root = (Get-Content $rootFile -Encoding UTF8 -TotalCount 1).Trim() }
 Import-Module (Join-Path $Root 'module\Winarchy\Winarchy.psd1') -Force
 Import-Module Microsoft.WinGet.Client
 $results = [System.Collections.Generic.List[object]]::new()
@@ -29,6 +31,10 @@ Test-Check 'KOMOREBI_CONFIG_HOME' { [Environment]::GetEnvironmentVariable('KOMOR
 Test-Check 'YASB_CONFIG_HOME' { [Environment]::GetEnvironmentVariable('YASB_CONFIG_HOME', 'User') -eq (Join-Path $Root 'config\yasb') }
 Test-Check 'WEZTERM_CONFIG_FILE' { [Environment]::GetEnvironmentVariable('WEZTERM_CONFIG_FILE', 'User') -eq (Join-Path $Root 'config\wezterm\wezterm.lua') }
 Test-Check 'bin on user PATH' { [Environment]::GetEnvironmentVariable('Path', 'User') -split ';' -contains (Join-Path $Root 'bin') }
+
+$profileErrors = pwsh -NoLogo -Command '$Error | ForEach-Object { $_.ToString() }' 2>&1 | Out-String
+Test-Check 'pwsh profile loads without errors' { -not $profileErrors.Trim() }
+if ($profileErrors.Trim()) { "profile errors: $profileErrors" }
 
 $doctor = & (Join-Path $Root 'bin\winarchy.cmd') doctor *>&1 | Out-String
 $doctor | Set-Content (Join-Path $Out 'doctor.txt')

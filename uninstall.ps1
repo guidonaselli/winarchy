@@ -69,6 +69,12 @@ Invoke-Step 'Remove the "winarchy" skill from AI coding agents' { Uninstall-Wina
 Invoke-Step 'Remove the Winarchy commands from the Start menu' { Remove-WinarchyPalette } `
     'Command palette removed'
 
+Invoke-Step 'Remove the Winarchy hook from the pwsh $PROFILE' { Remove-WinarchyShellProfile } `
+    'Shell profile checked'
+
+Invoke-Step 'Remove the Winarchy Defender exclusions' { Remove-WinarchyDefenderExclusions } `
+    'Defender exclusions checked'
+
 Invoke-Step 'Remove the env vars (KOMOREBI_CONFIG_HOME, YASB_CONFIG_HOME, WEZTERM_CONFIG_FILE) and bin\ from PATH' {
     [Environment]::SetEnvironmentVariable('KOMOREBI_CONFIG_HOME', $null, 'User')
     [Environment]::SetEnvironmentVariable('YASB_CONFIG_HOME', $null, 'User')
@@ -93,4 +99,4 @@ if ($DryRun) {
     Write-WinarchyInfo 'DRY RUN done: nothing was changed. Run it without -DryRun to apply it.'
     return
 }
-Write-WinarchyOk 'Winarchy uninstalled. Backups kept in backups\.'
+Write-WinarchyOk "Winarchy uninstalled. Backups are kept in $Root\backups; delete $Root when you no longer need them."

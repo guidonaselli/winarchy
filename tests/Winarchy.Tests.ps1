@@ -2244,6 +2244,23 @@ Describe 'First install on a clean machine' {
         }
     }
 
+    It 'writes a profile hook that survives an apostrophe in the install path' {
+        InModuleScope Winarchy {
+            $root = Join-Path $TestDrive "d'Test"
+            $profilePath = Join-Path $TestDrive 'profile.ps1'
+            Mock Get-WinarchyRoot { $root }
+            Mock Get-WinarchyShellProfilePath { $profilePath }
+            Install-WinarchyShellProfile
+            $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($profilePath, [ref]$null, [ref]$errors)
+            $errors | Should -BeNullOrEmpty
+            $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.StringConstantExpressionAst] }, $true).Value |
+                Should -Contain (Join-Path $root 'config\pwsh\profile.ps1')
+            Remove-WinarchyShellProfile
+            Test-Path $profilePath | Should -BeFalse
+        }
+    }
+
     It 'talks to the user in English' {
         $files = git -C $script:Root ls-files '*.ps1' '*.psm1' ':!tests' ':!scripts/*seelen*' | ForEach-Object { Join-Path $script:Root $_ }
         $hits = Select-String -Path $files -Pattern '(Write-Winarchy(Ok|Info|Warn|Err)|Invoke-Step|throw)\b.*[áéíóúñ¿¡]'

@@ -19,7 +19,7 @@ function Install-WinarchyShellProfile {
 
     $block = @(
         $script:WinarchyProfileMarkerStart
-        ". '$managed'"
+        ". '$($managed.Replace("'", "''"))'"
         $script:WinarchyProfileMarkerEnd
     ) -join "`r`n"
 
