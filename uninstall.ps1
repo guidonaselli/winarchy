@@ -12,6 +12,7 @@
   puede probar de verdad destruyendo el setup en uso: sin dry-run quedaba permanentemente
   sin verificar.
 #>
+#Requires -Version 7.0
 [CmdletBinding()]
 param([switch]$RemovePackages, [switch]$DryRun)
 $ErrorActionPreference = 'Stop'

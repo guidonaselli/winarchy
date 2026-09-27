@@ -129,7 +129,7 @@ It installs Git and PowerShell 7 with winget if they are missing, clones Winarch
 checkout. Set `$env:WINARCHY_DIR` for another folder, or `$env:WINARCHY_ACTIVATE = '1'` to
 activate right away.
 
-Manual install (needs Git and PowerShell 7):
+Manual install (needs Git and PowerShell 7; run it from `pwsh`):
 
 ```powershell
 git clone --branch release https://github.com/guidonaselli/winarchy.git C:\winarchy
@@ -156,6 +156,21 @@ Rollback:
 ```powershell
 .\scripts\rollback-to-seelen.ps1
 ```
+
+### Uninstall
+
+From `pwsh`, in the Winarchy folder:
+
+```powershell
+.\uninstall.ps1 -DryRun   # lists what it would do, changes nothing
+.\uninstall.ps1
+```
+
+It stops the stack and removes the autostart, the taskbar and Windows tweaks, the environment
+variables and PATH entry, the pwsh profile hook, the Start menu commands, the AI agent skill
+and the winget pins. Run it from an admin PowerShell to also remove the Defender exclusions.
+`-RemovePackages` also uninstalls komorebi and YASB; the other apps stay. Your backups stay in
+`backups\`; delete the folder when you no longer need them.
 
 ---
 

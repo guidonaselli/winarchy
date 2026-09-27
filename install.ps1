@@ -12,6 +12,7 @@
   .\install.ps1            # convivencia: instala todo, no toca autostart
   .\install.ps1 -Activate  # activa Winarchy como shell experience
 #>
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [switch]$Activate,
