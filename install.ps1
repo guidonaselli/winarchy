@@ -70,7 +70,8 @@ foreach ($id in $packageIds) {
         $args = @('install', '--id', $id, '--exact', '--source', 'winget', '--silent', '--accept-package-agreements', '--accept-source-agreements')
         if ($coreVersions.ContainsKey($id)) { $args += @('--version', $coreVersions[$id]) }
         winget @args
-        if ($LASTEXITCODE -ne 0) {
+        if ($LASTEXITCODE -eq -1978334967) { Write-WinarchyWarn "$id installed; restart Windows to finish its setup." }
+        elseif ($LASTEXITCODE -notin 0, -1978335135, -1978335189) {
             Write-WinarchyWarn "winget could not install $id (exit code $LASTEXITCODE)"
             $failedPackages += $id
         }

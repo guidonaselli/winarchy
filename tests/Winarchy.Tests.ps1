@@ -2265,9 +2265,10 @@ Describe 'First install on a clean machine' {
         InModuleScope Winarchy {
             foreach ($case in @(
                     @{ Code = 0; Status = 'updated' },
+                    @{ Code = -1978334967; Status = 'updated' },
                     @{ Code = -1978335189; Status = 'current' },
                     @{ Code = -1978335212; Status = 'missing' },
-                    @{ Code = -1978334967; Status = 'failed' })) {
+                    @{ Code = -1978335226; Status = 'failed' })) {
                 $script:WingetCode = $case.Code
                 function winget { 'Keine anwendbaren Upgrades gefunden.'; $global:LASTEXITCODE = $script:WingetCode }
                 (Update-WinarchyWingetPackage -Id 'x.y').Status | Should -Be $case.Status
@@ -2352,6 +2353,12 @@ try { Invoke-Expression (Get-Content $Boot -Raw) } catch { Add-Content $global:L
             $r.Log | Should -Contain "git clone --branch release https://github.com/guidonaselli/winarchy.git $($r.Dir)"
             $r.Log | Should -Contain "pwsh -NoProfile -ExecutionPolicy Bypass -File $($r.Dir)\install.ps1"
             $r.Log -match '^ERROR' | Should -BeNullOrEmpty
+        }
+
+        It 'goes on when winget asks for a restart to finish the install' {
+            $r = Invoke-Boot -Strip git -WingetExit -1978334967
+            $r.Log -match '^ERROR' | Should -BeNullOrEmpty
+            $r.Log -match '^git clone' | Should -Not -BeNullOrEmpty
         }
 
         It 'installs only pwsh when git is present' {

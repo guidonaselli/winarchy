@@ -31,7 +31,9 @@
         if (Test-App $tool.Command) { continue }
         Write-Host "Installing $($tool.Id)..."
         winget install --id $tool.Id --exact --source winget --silent --accept-package-agreements --accept-source-agreements
-        if ($LASTEXITCODE -ne 0) { throw "winget could not install $($tool.Id) (exit code $LASTEXITCODE)." }
+        if ($LASTEXITCODE -notin 0, -1978334967, -1978335135, -1978335189) {
+            throw "winget could not install $($tool.Id) (exit code $LASTEXITCODE)."
+        }
         $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
         if (-not (Test-App $tool.Command)) {
             throw "$($tool.Id) was installed but '$($tool.Command)' is not on PATH yet. Open a new terminal and run this again."

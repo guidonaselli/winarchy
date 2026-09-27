@@ -33,7 +33,7 @@ function Update-WinarchyWingetPackage {
     $out = winget upgrade --id $Id --exact --source winget --silent `
         --accept-package-agreements --accept-source-agreements 2>&1 | Out-String
     $status = switch ($LASTEXITCODE) {
-        0 { 'updated' }
+        { $_ -in 0, -1978334967 } { 'updated' }
         -1978335189 { 'current' }
         -1978335212 { 'missing' }
         default { 'failed' }
