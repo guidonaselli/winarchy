@@ -72,7 +72,7 @@ $config = @"
 $script:id = ((& $wsb start --raw -c $config | Out-String) | ConvertFrom-Json).Id
 Write-Host "Sandbox $id, results in $run"
 try {
-    Start-Process $wsb -ArgumentList 'connect', '--id', $id
+    Start-Process $wsb -ArgumentList 'connect', '--id', $id -WindowStyle Minimized
     Wait-UserSession
     Invoke-GuestScript ExistingLogin 'Initialize-Sandbox.ps1'
     $null = Invoke-Guest System 'shutdown /r /t 0'
