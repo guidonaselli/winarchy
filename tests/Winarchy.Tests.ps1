@@ -2189,6 +2189,20 @@ Describe 'Set-WinarchyEverythingIdentity' {
     }
 }
 
+Describe 'Windhawk extras manifest' {
+    It 'pins every curated mod with its full settings and leaves the taskbar styler out' {
+        $manifest = Get-Content (Join-Path $script:Root 'extras\windhawk\mods.json') -Raw | ConvertFrom-Json
+        $manifest.windhawk | Should -Match '^\d+\.\d+'
+        $manifest.mods.Count | Should -BeGreaterThan 0
+        foreach ($mod in $manifest.mods) {
+            $mod.id | Should -Match '^[a-z0-9-]+$'
+            $mod.version | Should -Match '^\d+(\.\d+)*$'
+            $mod.PSObject.Properties.Name | Should -Contain 'settings'
+        }
+        $manifest.mods.id | Should -Not -Contain 'windows-11-taskbar-styler'
+    }
+}
+
 Describe 'Get-WinarchyFlowPluginUpdates' {
     It 'returns only plugins with a strictly newer manifest version' {
         InModuleScope Winarchy {

@@ -1,0 +1,109 @@
+{
+  "windhawk": "1.7.3",
+  "mods": [
+    {
+      "id": "dark-menus",
+      "version": "1.4.2",
+      "settings": {
+        "AppMode": "ForceDark",
+        "TranslucentFlyoutsFix": 1
+      }
+    },
+    {
+      "id": "winui-context-menu-animation",
+      "version": "1.0.1",
+      "settings": {
+        "animationDuration": 320,
+        "fadeDuration": 80,
+        "timerInterval": 6,
+        "translucentWindowsCompat": 1
+      }
+    },
+    {
+      "id": "modernize-folder-picker-dialog",
+      "version": "1.0.0",
+      "settings": {}
+    },
+    {
+      "id": "explorer-details-better-file-sizes",
+      "version": "1.5.1",
+      "settings": {
+        "calculateFolderSizes": "everything",
+        "disableKbOnlySizes": 1,
+        "sortSizesMixFolders": 1,
+        "useIecTerms": 0
+      }
+    },
+    {
+      "id": "windows-11-file-explorer-styler",
+      "version": "1.7",
+      "settings": {
+        "backgroundTranslucentEffect": "",
+        "backgroundTranslucentEffectRegion": "",
+        "controlStyles[0].styles[0]": "",
+        "controlStyles[0].target": "",
+        "explorerFrameContainerHeight": 0,
+        "styleConstants[0]": "",
+        "theme": "Translucent Explorer11",
+        "themeResourceVariables[0]": "",
+        "xamlDiagnosticsHandling": "alert"
+      }
+    },
+    {
+      "id": "windows-11-start-menu-styler",
+      "version": "1.7",
+      "settings": {
+        "controlStyles[0].styles[0]": "",
+        "controlStyles[0].target": "",
+        "disableNewStartMenuLayout": "",
+        "styleConstants[0]": "",
+        "theme": "TranslucentStartMenu",
+        "themeResourceVariables[0]": "",
+        "webContentCustomJs": "",
+        "webContentStyles[0].styles[0]": "",
+        "webContentStyles[0].target": ""
+      }
+    },
+    {
+      "id": "windows-11-notification-center-styler",
+      "version": "1.7",
+      "settings": {
+        "controlStyles[0].styles[0]": "",
+        "controlStyles[0].target": "",
+        "styleConstants[0]": "",
+        "theme": "TranslucentShell",
+        "themeResourceVariables[0]": ""
+      }
+    },
+    {
+      "id": "windows-11-settings-styler",
+      "version": "1.1",
+      "settings": {
+        "controlStyles[0].styles[0]": "",
+        "controlStyles[0].target": "",
+        "styleConstants[0]": "",
+        "theme": "WindowGlass",
+        "themeResourceVariables[0]": ""
+      }
+    },
+    {
+      "id": "translucent-windows",
+      "version": "1.8.2",
+      "settings": {
+        "BackgroundEffects.AccentBlurBehind": "3A232323",
+        "BackgroundEffects.type": "acrylicblur",
+        "FlyoutsEffects": 1,
+        "RenderingMod.AccentColorControls": 1,
+        "RenderingMod.SysColors": 1,
+        "RenderingMod.ThemeBackground": 1
+      }
+    },
+    {
+      "id": "invisible-borders",
+      "version": "1.0.0",
+      "settings": {
+        "SpecialWindows": 1
+      }
+    }
+  ]
+}
