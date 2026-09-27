@@ -61,7 +61,7 @@ function Get-WinarchyAutostartComponents {
     if ($komorebiExe -and $pwsh) {
         $slots = Join-Path $root 'scripts\Start-WindowSlots.ps1'
         $ps = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $inner = "Start-Process -FilePath '$pwsh' -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','$slots'"
+        $inner = "Start-Process -FilePath '$($pwsh.Replace("'", "''"))' -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','$($slots.Replace("'", "''"))'"
         $items.Add([pscustomobject]@{
             Key = 'window-slots'; TaskName = 'window-slots'; LnkName = 'Winarchy window slots.lnk'
             Exe = $ps

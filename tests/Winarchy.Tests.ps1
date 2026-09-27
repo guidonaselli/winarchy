@@ -1133,6 +1133,11 @@ Describe 'WezTerm terminal' {
         }
     }
 
+    It 'embeds the install folder in a Lua long string, safe for apostrophes' {
+        $tpl = Get-Content (Join-Path $script:Root 'templates\wezterm.lua.tpl') -Raw
+        $tpl | Should -Match ([regex]::Escape('[==[{{computed.root}}/config/wezterm/user.lua]==]'))
+    }
+
     # Sin default_prog WezTerm levanta cmd.exe y todo el terminal profile del stack
     # (starship, fzf, zoxide, eza, bat) no carga.
     It 'defaults to PowerShell 7 and keeps its own updater off' {
@@ -1787,6 +1792,24 @@ Describe 'Autostart' {
             $slots.Exe       | Should -BeLike '*\WindowsPowerShell\v1.0\powershell.exe'
             $slots.Arguments | Should -BeLike "*Start-Process -FilePath '$Pwsh' -WindowStyle Hidden*"
             $slots.Arguments | Should -BeLike '*Start-WindowSlots.ps1*'
+        }
+    }
+
+    It 'keeps the slots command valid when the install folder has an apostrophe' {
+        InModuleScope Winarchy -Parameters @{ Pwsh = $script:MockPwsh } {
+            param($Pwsh)
+            Mock Get-WinarchyRoot { "C:\Users\O'Brien\winarchy" }
+            Mock Get-WinarchyKomorebiExe { 'C:\Program Files\komorebi\bin\komorebi.exe' }
+            Mock Get-Command { [pscustomobject]@{ Source = $null } }
+            Mock Get-Command { [pscustomobject]@{ Source = $Pwsh } } -ParameterFilter { $Name -eq 'pwsh' }
+
+            $slots = Get-WinarchyAutostartComponents | Where-Object Key -eq 'window-slots'
+            $inner = [regex]::Match($slots.Arguments, '-Command "(.*)"$').Groups[1].Value
+            $errors = $null
+            $ast = [Management.Automation.Language.Parser]::ParseInput($inner, [ref]$null, [ref]$errors)
+            $errors | Should -BeNullOrEmpty
+            $ast.FindAll({ $args[0] -is [Management.Automation.Language.StringConstantExpressionAst] }, $true).Value |
+                Should -Contain "C:\Users\O'Brien\winarchy\scripts\Start-WindowSlots.ps1"
         }
     }
 

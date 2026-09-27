@@ -114,7 +114,7 @@ end)
 
 -- Override del usuario: gitignored, ningún update lo toca. Devuelve una tabla y sus
 -- claves pisan a las de acá. Un error de sintaxis se loguea y no impide arrancar.
-local user_config = '{{computed.root}}/config/wezterm/user.lua'
+local user_config = [==[{{computed.root}}/config/wezterm/user.lua]==]
 local ok, user = pcall(dofile, user_config)
 if ok and type(user) == 'table' then
   for k, v in pairs(user) do config[k] = v end
