@@ -7,15 +7,16 @@
     install     winget -> git + pwsh, clone, install.ps1 twice, Assert-Install
     uninstall   install -Activate, uninstall.ps1 twice (no pins, env vars, PATH entry, logon task,
                 running stack, profile hook or Start menu command left), reinstall, Assert-Install
-    paths       boot.ps1 into a folder with a space, an accent and an apostrophe, activated,
-                Assert-Install -Mode active
+    paths       boot.ps1 into a folder with a space, an accent and an apostrophe, activated, then the
+                windhawk checks from that folder, Assert-Install -Mode active
     ahkv1       AutoHotkey 1.1 already installed, then install.ps1: it must end on the pinned v2
     windhawk    install, `extras add windhawk` elevated (every curated mod enabled at its pinned
                 version and loaded in explorer, tray + update check off), `extras remove windhawk`
                 (mods and Windhawk gone), Assert-Install
     published   the real one-liner against GitHub (irm .../release/boot.ps1 | iex), Assert-Install
-    selfupdate  install, then roll the checkout back to v1.6.0 (AHK/Flow unpinned, as 1.6.0
-                left them) and run that version's `winarchy update --self`, Assert-Install
+    selfupdate  AutoHotkey 1.1 already installed, install.ps1 twice, then roll the checkout back to
+                v1.6.0 (AHK/Flow unpinned, as 1.6.0 left them) and run that version's
+                `winarchy update --self`, Assert-Install (covers install and ahkv1)
     boot        boot.ps1 refuses an elevated session; then, as the user (clone URL -> local bare
                 repo), a clean install and a re-run with WINARCHY_ACTIVATE=1; Assert-Install -Mode active
   The sandbox runs with vGPU disabled (its DWM crashes on some host GPU drivers), UAC on with
@@ -66,7 +67,7 @@ function Wait-UserSession {
 $config = @"
 <Configuration>
   <vGPU>Disable</vGPU>
-  <MemoryInMB>8192</MemoryInMB>
+  <MemoryInMB>4096</MemoryInMB>
   <MappedFolders>
     <MappedFolder><HostFolder>$run</HostFolder><SandboxFolder>C:\sandbox</SandboxFolder><ReadOnly>false</ReadOnly></MappedFolder>
   </MappedFolders>

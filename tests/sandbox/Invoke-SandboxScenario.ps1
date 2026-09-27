@@ -19,9 +19,53 @@ function Install-Prerequisites {
     if ($LASTEXITCODE -ne 0) { $script:failed = $true; "git clone exited $LASTEXITCODE" }
 }
 
+function Install-AhkV1 {
+    $process = Start-Process winget -Verb RunAs -PassThru -ArgumentList 'install', '--id', 'AutoHotkey.AutoHotkey', '--exact', '--source', 'winget', '--version', '1.1.37.02', '--silent', '--accept-package-agreements', '--accept-source-agreements'
+    if (-not $process.WaitForExit(600000)) {
+        $process | Stop-Process -Force
+        Get-Process setup, AutoHotkey_* -ErrorAction SilentlyContinue | Stop-Process -Force
+        $script:failed = $true; 'AutoHotkey 1.1 install hung'
+    }
+}
+
 function Invoke-WinarchyScript([string]$Script, [string[]]$Arguments = @()) {
     pwsh -NoProfile -ExecutionPolicy Bypass -File "C:\winarchy\$Script" @Arguments 2>&1 | Out-Host
     if ($LASTEXITCODE -ne 0) { $script:failed = $true; "$Script $Arguments exited $LASTEXITCODE" }
+}
+
+function Invoke-WinarchyElevated([string]$Root, [string]$Log, [string[]]$Arguments) {
+    $command = "& '$($Root.Replace("'", "''"))\bin\winarchy.ps1' $Arguments *>&1 | Out-File C:\sandbox\$Log.txt; exit [int]`$LASTEXITCODE"
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    $process = Start-Process pwsh -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded
+    Get-Content "C:\sandbox\$Log.txt" -ErrorAction SilentlyContinue | Out-Host
+    if ($process.ExitCode -ne 0) { $script:failed = $true; "winarchy $Arguments exited $($process.ExitCode)" }
+}
+
+function Test-WindhawkExtra([string]$Root) {
+    $mods = (Get-Content (Join-Path $Root 'extras\windhawk\mods.json') -Raw | ConvertFrom-Json).mods
+    $modsDir = "$env:ProgramData\Windhawk\Engine\Mods\64"
+    Invoke-WinarchyElevated $Root windhawk-add 'extras', 'add', 'windhawk', '--yes'
+    foreach ($mod in $mods) {
+        $key = Get-ItemProperty "HKLM:\SOFTWARE\Windhawk\Engine\Mods\$($mod.id)" -ErrorAction SilentlyContinue
+        if (-not $key -or $key.Version -ne $mod.version -or $key.Disabled -ne 0) { $script:failed = $true; "mod not enabled at $($mod.version): $($mod.id)"; continue }
+        if (-not (Test-Path (Join-Path $modsDir $key.LibraryFileName))) { $script:failed = $true; "mod dll missing: $($key.LibraryFileName)" }
+    }
+    foreach ($lib in 'libc++.whl', 'libunwind.whl', 'windhawk-mod-shim.dll') {
+        if (-not (Test-Path (Join-Path $modsDir $lib))) { $script:failed = $true; "runtime lib missing: $lib" }
+    }
+    $settings = Get-ItemProperty HKLM:\SOFTWARE\Windhawk\Settings -ErrorAction SilentlyContinue
+    if ($settings.HideTrayIcon -ne 1 -or $settings.DisableUpdateCheck -ne 1) { $script:failed = $true; 'Windhawk tray or update check still on' }
+    $loaded = $null
+    foreach ($i in 1..30) {
+        $loaded = (Get-Process explorer).Modules.ModuleName | Where-Object { $_ -like 'dark-menus_*' }
+        if ($loaded) { break }
+        Start-Sleep -Seconds 2
+    }
+    if ($loaded) { "explorer loaded $loaded" } else { $script:failed = $true; 'dark-menus not loaded in explorer' }
+    Invoke-WinarchyElevated $Root windhawk-add-again 'extras', 'add', 'windhawk', '--yes'
+    Invoke-WinarchyElevated $Root windhawk-remove 'extras', 'remove', 'windhawk'
+    if (Get-ChildItem HKLM:\SOFTWARE\Windhawk\Engine\Mods -ErrorAction SilentlyContinue) { $script:failed = $true; 'mod registry keys left' }
+    if (Test-Path "$env:ProgramFiles\Windhawk\windhawk.exe") { $script:failed = $true; 'Windhawk still installed' }
 }
 
 function Test-Uninstalled {
@@ -46,13 +90,6 @@ function Test-Uninstalled {
     if (Get-ChildItem $palette -Filter '*.lnk' -ErrorAction SilentlyContinue) { $script:failed = $true; 'Start menu commands still present' }
 }
 
-function Invoke-WinarchyElevated([string]$Log, [string[]]$Arguments) {
-    $command = "& C:\winarchy\bin\winarchy.ps1 $Arguments *>&1 | Out-File C:\sandbox\$Log.txt; exit [int]`$LASTEXITCODE"
-    $process = Start-Process pwsh -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $command
-    Get-Content "C:\sandbox\$Log.txt" -ErrorAction SilentlyContinue | Out-Host
-    if ($process.ExitCode -ne 0) { $script:failed = $true; "winarchy $Arguments exited $($process.ExitCode)" }
-}
-
 $boot = (Get-Content (Join-Path $out 'boot.ps1') -Raw).Replace('https://github.com/guidonaselli/winarchy.git', $bare).Replace('pwsh @installArgs', '& { $ErrorActionPreference = ''Continue''; pwsh @installArgs 2>&1 | Out-Host }')
 $failed = $false
 switch ($Scenario) {
@@ -67,7 +104,7 @@ switch ($Scenario) {
         Invoke-WinarchyScript install.ps1
     }
     'ahkv1' {
-        winget install --id AutoHotkey.AutoHotkey --exact --source winget --version 1.1.37.02 --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Host
+        Install-AhkV1
         Install-Prerequisites
         Invoke-WinarchyScript install.ps1
     }
@@ -85,6 +122,7 @@ switch ($Scenario) {
         $env:WINARCHY_ACTIVATE = '1'
         try { Invoke-Expression $boot }
         catch { $failed = $true; "boot failed: $($_.Exception.Message)" }
+        Test-WindhawkExtra $dir
     }
     'published' {
         try { Invoke-RestMethod https://raw.githubusercontent.com/guidonaselli/winarchy/release/boot.ps1 | Invoke-Expression }
@@ -105,33 +143,12 @@ switch ($Scenario) {
     'windhawk' {
         Install-Prerequisites
         Invoke-WinarchyScript install.ps1
-        $mods = (Get-Content C:\winarchy\extras\windhawk\mods.json -Raw | ConvertFrom-Json).mods
-        $modsDir = "$env:ProgramData\Windhawk\Engine\Mods\64"
-        Invoke-WinarchyElevated windhawk-add 'extras', 'add', 'windhawk', '--yes'
-        foreach ($mod in $mods) {
-            $key = Get-ItemProperty "HKLM:\SOFTWARE\Windhawk\Engine\Mods\$($mod.id)" -ErrorAction SilentlyContinue
-            if (-not $key -or $key.Version -ne $mod.version -or $key.Disabled -ne 0) { $failed = $true; "mod not enabled at $($mod.version): $($mod.id)"; continue }
-            if (-not (Test-Path (Join-Path $modsDir $key.LibraryFileName))) { $failed = $true; "mod dll missing: $($key.LibraryFileName)" }
-        }
-        foreach ($lib in 'libc++.whl', 'libunwind.whl', 'windhawk-mod-shim.dll') {
-            if (-not (Test-Path (Join-Path $modsDir $lib))) { $failed = $true; "runtime lib missing: $lib" }
-        }
-        $settings = Get-ItemProperty HKLM:\SOFTWARE\Windhawk\Settings -ErrorAction SilentlyContinue
-        if ($settings.HideTrayIcon -ne 1 -or $settings.DisableUpdateCheck -ne 1) { $failed = $true; 'Windhawk tray or update check still on' }
-        $loaded = $null
-        foreach ($i in 1..30) {
-            $loaded = (Get-Process explorer).Modules.ModuleName | Where-Object { $_ -like 'dark-menus_*' }
-            if ($loaded) { break }
-            Start-Sleep -Seconds 2
-        }
-        if ($loaded) { "explorer loaded $loaded" } else { $failed = $true; 'dark-menus not loaded in explorer' }
-        Invoke-WinarchyElevated windhawk-add-again 'extras', 'add', 'windhawk', '--yes'
-        Invoke-WinarchyElevated windhawk-remove 'extras', 'remove', 'windhawk'
-        if (Get-ChildItem HKLM:\SOFTWARE\Windhawk\Engine\Mods -ErrorAction SilentlyContinue) { $failed = $true; 'mod registry keys left' }
-        if (Test-Path "$env:ProgramFiles\Windhawk\windhawk.exe") { $failed = $true; 'Windhawk still installed' }
+        Test-WindhawkExtra C:\winarchy
     }
     'selfupdate' {
+        Install-AhkV1
         Install-Prerequisites
+        Invoke-WinarchyScript install.ps1
         Invoke-WinarchyScript install.ps1
         git -C C:\winarchy reset --quiet --hard v1.6.0
         foreach ($id in 'AutoHotkey.AutoHotkey', 'Flow-Launcher.Flow-Launcher') { winget pin remove --id $id --exact --source winget 2>&1 | Out-Host }
