@@ -2126,6 +2126,69 @@ Describe 'Set-WinarchyFlowKeywords' {
     }
 }
 
+Describe 'Set-WinarchyShareXIdentity' {
+    It 'turns off the tray icon and the update check, keeps the rest, and is idempotent' {
+        InModuleScope Winarchy {
+            $configPath = Join-Path $TestDrive 'ShareX\ApplicationConfig.json'
+            New-Item -ItemType Directory -Path (Split-Path $configPath) -Force | Out-Null
+            @{ ShowTray = $true; AutoCheckUpdate = $true; TrayLeftClickAction = 'RectangleRegion' } |
+                ConvertTo-Json | Set-Content -Path $configPath -Encoding UTF8
+            Mock Get-WinarchyShareXExe { 'ShareX.exe' }
+            Mock Get-Process { }
+            Mock Start-Process { }
+            Mock New-WinarchySnapshot { }
+            Mock Join-Path { $configPath } -ParameterFilter { $ChildPath -eq 'ShareX\ApplicationConfig.json' }
+
+            Set-WinarchyShareXIdentity
+
+            $result = Get-Content $configPath -Raw | ConvertFrom-Json -AsHashtable
+            $result['ShowTray'] | Should -BeFalse
+            $result['AutoCheckUpdate'] | Should -BeFalse
+            $result['TrayLeftClickAction'] | Should -Be 'RectangleRegion'
+
+            Set-WinarchyShareXIdentity
+            Should -Invoke New-WinarchySnapshot -Times 1
+        }
+    }
+}
+
+Describe 'Set-WinarchyEverythingIdentity' {
+    It 'turns off the tray icon and the update check, keeps the rest, and is idempotent' {
+        InModuleScope Winarchy {
+            $oldAppData = $env:APPDATA
+            $oldProgramFiles = $env:ProgramFiles
+            $env:APPDATA = Join-Path $TestDrive 'appdata'
+            $env:ProgramFiles = Join-Path $TestDrive 'programfiles'
+            try {
+                New-Item -ItemType File -Path (Join-Path $env:ProgramFiles 'Everything\Everything.exe') -Force | Out-Null
+                $iniPath = Join-Path $env:APPDATA 'Everything\Everything.ini'
+                New-Item -ItemType Directory -Path (Split-Path $iniPath) -Force | Out-Null
+                "; comment`r`n[Everything]`r`nwindow_x=10`r`nshow_tray_icon=1`r`n" |
+                    Set-Content -Path $iniPath -NoNewline -Encoding UTF8
+                Mock Get-Process { [pscustomobject]@{ SessionId = 1 } }
+                Mock Get-Process { } -ParameterFilter { $Name -eq 'Everything' }
+                Mock Start-Process { }
+                Mock New-WinarchySnapshot { }
+
+                Set-WinarchyEverythingIdentity
+
+                $result = Get-Content $iniPath -Raw
+                $result | Should -Match '(?m)^show_tray_icon=0\r$'
+                $result | Should -Match '(?m)^check_for_updates_on_startup=0\r$'
+                $result | Should -Match '(?m)^window_x=10\r$'
+                $result | Should -Match '^; comment'
+
+                Set-WinarchyEverythingIdentity
+                Should -Invoke New-WinarchySnapshot -Times 1
+            }
+            finally {
+                $env:APPDATA = $oldAppData
+                $env:ProgramFiles = $oldProgramFiles
+            }
+        }
+    }
+}
+
 Describe 'Get-WinarchyFlowPluginUpdates' {
     It 'returns only plugins with a strictly newer manifest version' {
         InModuleScope Winarchy {

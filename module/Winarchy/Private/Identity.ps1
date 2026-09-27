@@ -2,7 +2,7 @@
 # producto". Apaga el tray icon propio y el auto-update de los componentes de
 # terceros para que la única bandeja/canal de updates sea el de Winarchy.
 #   - YASB: se configura por su config.yaml (generado desde templates/), fuera de este archivo.
-#   - Flow Launcher: merge quirúrgico de Settings.json (acá abajo).
+#   - Flow Launcher, ShareX, Everything: merge quirúrgico de sus settings (acá abajo).
 #   - AHK: su tray ES el de Winarchy (winarchy.ahk). komorebi no tiene tray.
 
 function Get-WinarchyFlowSettingsPath {
@@ -85,6 +85,85 @@ function Save-WinarchyFlowSettings {
     if ($WhileStopped) { & $WhileStopped }
     $exe = "$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe"
     if ($flow -and (Test-Path $exe)) { Start-Process $exe }
+}
+
+function Set-WinarchyShareXIdentity {
+    <# Merge en ApplicationConfig.json de ShareX: sin tray icon propio ni auto-update.
+       Si ShareX nunca corrió, crea el archivo solo con esas claves (el resto toma sus
+       defaults). Idempotente y con snapshot previo. #>
+    $exe = Get-WinarchyShareXExe
+    if (-not $exe) {
+        Write-WinarchyWarn 'ShareX not installed; identity toggles not applied.'
+        return
+    }
+    $configPath = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'ShareX\ApplicationConfig.json'
+    $desired = [ordered]@{ ShowTray = $false; AutoCheckUpdate = $false }
+
+    $config = if (Test-Path $configPath) { Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable } else { [ordered]@{} }
+    if (-not @($desired.Keys | Where-Object { $config[$_] -ne $desired[$_] })) {
+        Write-WinarchyOk "ShareX identity already applied: $configPath"
+        return
+    }
+
+    New-WinarchySnapshot -Label 'sharex-settings' -Path @($configPath) | Out-Null
+    foreach ($k in $desired.Keys) { $config[$k] = $desired[$k] }
+    # ShareX guarda su config al salir: se escribe con ShareX detenido.
+    $sharex = Get-Process -Name 'ShareX' -ErrorAction SilentlyContinue
+    if ($sharex) {
+        $sharex | Stop-Process -Force
+        $sharex | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Path (Split-Path $configPath) -Force | Out-Null
+    $config | ConvertTo-Json -Depth 50 | Set-Content -Path $configPath -Encoding UTF8
+    if ($sharex) { Start-Process $exe -ArgumentList '-silent' }
+    Write-WinarchyOk "ShareX identity applied (tray + auto-update off): $configPath"
+}
+
+function Set-WinarchyEverythingIdentity {
+    <# Merge en Everything.ini (%APPDATA%, el default del instalador): sin tray icon
+       propio ni chequeo de updates. Idempotente y con snapshot previo. #>
+    $exe = @("$env:ProgramFiles\Everything\Everything.exe", "${env:ProgramFiles(x86)}\Everything\Everything.exe") |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $exe) {
+        Write-WinarchyWarn 'Everything not installed; identity toggles not applied.'
+        return
+    }
+    $iniPath = "$env:APPDATA\Everything\Everything.ini"
+    $desired = [ordered]@{ show_tray_icon = '0'; check_for_updates_on_startup = '0' }
+
+    $ini = if (Test-Path $iniPath) { Get-Content $iniPath -Raw -Encoding UTF8 } else { "[Everything]`r`n" }
+    $updated = $ini
+    foreach ($k in $desired.Keys) {
+        $line = "$k=$($desired[$k])"
+        $pattern = "(?m)^$k=[^\r\n]*"
+        $updated = if ($updated -match $pattern) { $updated -replace $pattern, $line }
+                   elseif ($updated -match '(?m)^\[Everything\]\r?\n') { $updated -replace '(?m)^(\[Everything\]\r?\n)', "`${1}$line`r`n" }
+                   else { "[Everything]`r`n$line`r`n$updated" }
+    }
+    if ($updated -eq $ini -and (Test-Path $iniPath)) {
+        Write-WinarchyOk "Everything identity already applied: $iniPath"
+        return
+    }
+
+    New-WinarchySnapshot -Label 'everything-settings' -Path @($iniPath) | Out-Null
+    # Everything guarda el ini al salir y su cliente puede correr elevado (run_as_admin): se
+    # lo cierra con su propio -exit. El servicio (sesión 0) no guarda el ini y sigue corriendo.
+    $session = (Get-Process -Id $PID).SessionId
+    $client = { @(Get-Process -Name 'Everything' -ErrorAction SilentlyContinue | Where-Object SessionId -eq $session) }
+    $running = [bool](& $client)
+    if ($running) {
+        & $exe -exit
+        $deadline = (Get-Date).AddSeconds(10)
+        while ((& $client) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
+        if (& $client) {
+            Write-WinarchyWarn 'Everything did not exit in time; identity toggles not applied.'
+            return
+        }
+    }
+    New-Item -ItemType Directory -Path (Split-Path $iniPath) -Force | Out-Null
+    Set-Content -Path $iniPath -Value $updated -NoNewline -Encoding UTF8
+    if ($running) { Start-Process $exe -ArgumentList '-startup' }
+    Write-WinarchyOk "Everything identity applied (tray + update check off): $iniPath"
 }
 
 $script:WinarchyFlowProgramPluginId = '791FC278BA414111B8D1886DFE447410'

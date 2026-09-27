@@ -27,6 +27,7 @@
         'Invoke-WinarchyScreenshot', 'Show-WinarchyMenu',
         'Install-WinarchyShellProfile', 'Remove-WinarchyShellProfile',
         'Initialize-WinarchyFlow', 'Set-WinarchyFlowIdentity', 'Set-WinarchyFlowKeywords',
+        'Set-WinarchyShareXIdentity', 'Set-WinarchyEverythingIdentity',
         'Set-WinarchyDefenderExclusions', 'Remove-WinarchyDefenderExclusions',
         # helpers usados por install.ps1 y scripts\*.ps1
         'Sync-WinarchyPalette', 'Remove-WinarchyPalette',

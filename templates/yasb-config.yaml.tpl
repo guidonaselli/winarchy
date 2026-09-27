@@ -541,11 +541,6 @@ widgets:
       label_expanded: "▾"
       pin_click_modifier: "alt"
       show_unpinned: false
-      # Componentes del stack (los instala Winarchy vía versions.lock.toml): su
-      # identidad va unificada, sin tray propio, se ocultan del systray de la barra.
-      # Solo apps que Winarchy instala van acá (Windhawk/Twinkle Tray/etc. NO: son
-      # personales de la máquina, fuera de alcance).
-      hide_icons: ["Flow.Launcher", "ShareX"]
 
   # Esquina derecha, estilo Omarchy: abre el menu principal de winarchy.ahk
   # (Apps/Themes/System/...), el mismo que SUPER+Alt+Space y el right-click del

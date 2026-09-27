@@ -155,10 +155,12 @@ if ($initialTheme) {
 Set-WinarchyTheme -Name $initialTheme
 
 # --- 4b. Identidad unificada: tray único + auto-updates de terceros off ---------------
-# Idempotente: se reaplica en cada install/repair, así un update de Flow no reintroduce
-# su tray/auto-update. YASB ya queda configurado por su config.yaml (show_systray/
-# update_check off); AHK hostea el tray del stack; komorebi no tiene tray.
+# Idempotente: se reaplica en cada install/repair, así un update de Flow/ShareX/Everything
+# no reintroduce su tray/auto-update. YASB ya queda configurado por su config.yaml
+# (show_systray/update_check off); AHK hostea el tray del stack; komorebi no tiene tray.
 Set-WinarchyFlowIdentity
+Set-WinarchyShareXIdentity
+Set-WinarchyEverythingIdentity
 Set-WinarchyFlowKeywords
 Set-WinarchyDefenderExclusions
 
