@@ -2127,11 +2127,11 @@ Describe 'Set-WinarchyFlowKeywords' {
 }
 
 Describe 'Set-WinarchyShareXIdentity' {
-    It 'turns off the tray icon and the update check, keeps the rest, and is idempotent' {
+    It 'keeps the tray icon (silent start needs it), turns off the update check, keeps the rest, and is idempotent' {
         InModuleScope Winarchy {
             $configPath = Join-Path $TestDrive 'ShareX\ApplicationConfig.json'
             New-Item -ItemType Directory -Path (Split-Path $configPath) -Force | Out-Null
-            @{ ShowTray = $true; AutoCheckUpdate = $true; TrayLeftClickAction = 'RectangleRegion' } |
+            @{ ShowTray = $false; AutoCheckUpdate = $true; TrayLeftClickAction = 'RectangleRegion' } |
                 ConvertTo-Json | Set-Content -Path $configPath -Encoding UTF8
             Mock Get-WinarchyShareXExe { 'ShareX.exe' }
             Mock Get-Process { }
@@ -2142,7 +2142,7 @@ Describe 'Set-WinarchyShareXIdentity' {
             Set-WinarchyShareXIdentity
 
             $result = Get-Content $configPath -Raw | ConvertFrom-Json -AsHashtable
-            $result['ShowTray'] | Should -BeFalse
+            $result['ShowTray'] | Should -BeTrue
             $result['AutoCheckUpdate'] | Should -BeFalse
             $result['TrayLeftClickAction'] | Should -Be 'RectangleRegion'
 

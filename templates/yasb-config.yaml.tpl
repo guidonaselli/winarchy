@@ -541,6 +541,8 @@ widgets:
       label_expanded: "▾"
       pin_click_modifier: "alt"
       show_unpinned: false
+      # Tray propio de ShareX, oculto en la barra.
+      hide_icons: ["ShareX"]
 
   # Esquina derecha, estilo Omarchy: abre el menu principal de winarchy.ahk
   # (Apps/Themes/System/...), el mismo que SUPER+Alt+Space y el right-click del

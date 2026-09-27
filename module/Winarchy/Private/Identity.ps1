@@ -88,16 +88,15 @@ function Save-WinarchyFlowSettings {
 }
 
 function Set-WinarchyShareXIdentity {
-    <# Merge en ApplicationConfig.json de ShareX: sin tray icon propio ni auto-update.
-       Si ShareX nunca corrió, crea el archivo solo con esas claves (el resto toma sus
-       defaults). Idempotente y con snapshot previo. #>
+    <# Merge en ApplicationConfig.json de ShareX: tray on (lo oculta el systray de YASB)
+       y auto-update off. Idempotente y con snapshot previo. #>
     $exe = Get-WinarchyShareXExe
     if (-not $exe) {
         Write-WinarchyWarn 'ShareX not installed; identity toggles not applied.'
         return
     }
     $configPath = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'ShareX\ApplicationConfig.json'
-    $desired = [ordered]@{ ShowTray = $false; AutoCheckUpdate = $false }
+    $desired = [ordered]@{ ShowTray = $true; AutoCheckUpdate = $false }
 
     $config = if (Test-Path $configPath) { Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable } else { [ordered]@{} }
     if (-not @($desired.Keys | Where-Object { $config[$_] -ne $desired[$_] })) {
@@ -116,7 +115,7 @@ function Set-WinarchyShareXIdentity {
     New-Item -ItemType Directory -Path (Split-Path $configPath) -Force | Out-Null
     $config | ConvertTo-Json -Depth 50 | Set-Content -Path $configPath -Encoding UTF8
     if ($sharex) { Start-Process $exe -ArgumentList '-silent' }
-    Write-WinarchyOk "ShareX identity applied (tray + auto-update off): $configPath"
+    Write-WinarchyOk "ShareX identity applied (starts hidden, auto-update off): $configPath"
 }
 
 function Set-WinarchyEverythingIdentity {
