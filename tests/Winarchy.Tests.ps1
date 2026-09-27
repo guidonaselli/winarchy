@@ -2261,6 +2261,20 @@ Describe 'First install on a clean machine' {
         }
     }
 
+    It 'reads the winget upgrade result from its exit code, whatever the Windows language' {
+        InModuleScope Winarchy {
+            foreach ($case in @(
+                    @{ Code = 0; Status = 'updated' },
+                    @{ Code = -1978335189; Status = 'current' },
+                    @{ Code = -1978335212; Status = 'missing' },
+                    @{ Code = -1978334967; Status = 'failed' })) {
+                $script:WingetCode = $case.Code
+                function winget { 'Keine anwendbaren Upgrades gefunden.'; $global:LASTEXITCODE = $script:WingetCode }
+                (Update-WinarchyWingetPackage -Id 'x.y').Status | Should -Be $case.Status
+            }
+        }
+    }
+
     It 'talks to the user in English' {
         $files = git -C $script:Root ls-files '*.ps1' '*.psm1' ':!tests' ':!scripts/*seelen*' | ForEach-Object { Join-Path $script:Root $_ }
         $hits = Select-String -Path $files -Pattern '(Write-Winarchy(Ok|Info|Warn|Err)|Invoke-Step|throw)\b.*[áéíóúñ¿¡]'

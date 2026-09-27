@@ -28,19 +28,16 @@ function Get-WinarchyDeclaredWingetIds {
 }
 
 function Update-WinarchyWingetPackage {
-    <#
-      Actualiza un paquete y devuelve el resultado. winget devuelve != 0 tanto por "no hay
-      update" como por un fallo real (el más común en Windows: la app está corriendo y el
-      instalador no puede reemplazar sus archivos), así que hay que mirar la salida.
-    #>
+    <# Actualiza un paquete; estado según el código de salida de winget. #>
     param([Parameter(Mandatory)][string]$Id)
     $out = winget upgrade --id $Id --exact --source winget --silent `
         --accept-package-agreements --accept-source-agreements 2>&1 | Out-String
-    $status =
-        if ($out -match 'Successfully installed|se instaló correctamente') { 'updated' }
-        elseif ($out -match 'No available upgrade|No hay ninguna actualización') { 'current' }
-        elseif ($out -match 'No installed package|No se encontró') { 'missing' }
-        else { 'failed' }
+    $status = switch ($LASTEXITCODE) {
+        0 { 'updated' }
+        -1978335189 { 'current' }
+        -1978335212 { 'missing' }
+        default { 'failed' }
+    }
     [pscustomobject]@{ Id = $Id; Status = $status; Output = $out.Trim() }
 }
 
