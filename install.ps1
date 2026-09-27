@@ -146,6 +146,7 @@ Initialize-WinarchyFlow
 # migracion de `winarchy update --self`, y sin esto un cambio en templates/ nunca
 # llegaba a los configs de quien ya tenia un theme seteado.
 $initialTheme = Get-WinarchyCurrentTheme
+$firstInstall = -not $initialTheme
 if ($initialTheme) {
     Write-WinarchyInfo "Regenerating configs from the templates (theme: $initialTheme)..."
 } else {
@@ -228,3 +229,5 @@ if ($failedCore) {
 }
 if ($failedPackages) { Write-WinarchyWarn "Not installed: $($failedPackages -join ', '). The rest of the stack works; winarchy doctor shows what is missing." }
 Write-WinarchyOk 'Install complete. Check it with: winarchy doctor'
+# Solo en la primera instalación: install.ps1 también corre desatendido en `update --self`.
+if ($firstInstall) { Write-WinarchyInfo 'Optional extras outside the core (e.g. Windhawk mods): winarchy extras' }

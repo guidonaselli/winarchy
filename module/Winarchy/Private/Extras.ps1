@@ -224,7 +224,7 @@ Windhawk injects code into explorer.exe and other processes to apply its mods.
     $exe = Get-WinarchyWindhawkExe
     if (-not (Test-Path $exe)) {
         Write-WinarchyInfo 'Installing Windhawk (winget)...'
-        winget install --id RamenSoftware.Windhawk -e --silent --accept-package-agreements --accept-source-agreements | Out-Host
+        winget install --id RamenSoftware.Windhawk -e --source winget --silent --accept-package-agreements --accept-source-agreements | Out-Host
         if (-not (Test-Path $exe)) { throw 'Windhawk installation failed (winget install RamenSoftware.Windhawk).' }
     }
     $manifest = Get-WinarchyWindhawkManifest
@@ -265,6 +265,6 @@ function Remove-WinarchyExtra {
         Write-WinarchyWarn "Curated mods removed; Windhawk kept because other mods are installed: $($others -join ', ')"
         return
     }
-    winget uninstall --id RamenSoftware.Windhawk -e --silent | Out-Host
+    winget uninstall --id RamenSoftware.Windhawk -e --source winget --silent | Out-Host
     Write-WinarchyOk 'Windhawk removed'
 }

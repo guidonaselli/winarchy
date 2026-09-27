@@ -39,8 +39,12 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
   `release` + migración `install.ps1`). Versión = `ModuleVersion` del `.psd1`, en sync con el
   tag/Release (ver `docs/RELEASING.md`).
 - Identidad unificada: un solo tray icon (host `winarchy.ahk`, `assets/logo/winarchy.ico`);
-  los tray propios de YASB/Flow quedan ocultos. No reintroducir un segundo tray.
-- Fuera de alcance: novideo_srgb, Twinkle Tray, Windhawk (stack personal de la máquina, no del producto).
+  los tray propios de YASB/Flow/ShareX/Everything (y Windhawk si se agrega) quedan ocultos.
+  No reintroducir un segundo tray.
+- Windhawk es un extra opcional FUERA del core (`winarchy extras`): solo se instala a pedido
+  explícito; ni `install.ps1` ni `update` lo tocan. Su set curado vive en
+  `extras/windhawk/mods.json` (se regenera con `scripts/Export-WindhawkMods.ps1`).
+- Fuera de alcance: novideo_srgb, Twinkle Tray (dependen del hardware de la máquina).
 - Antes de cambios de sistema (registry, autostart): snapshot en `backups/<timestamp>/`.
 
 ## Estructura

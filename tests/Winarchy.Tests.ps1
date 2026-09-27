@@ -2347,6 +2347,34 @@ Describe 'Windhawk extras' {
     }
 }
 
+Describe 'Extras suggestions' {
+    It 'doctor lists the extras as an informational check that never fails' {
+        $src = Get-Content (Join-Path $script:Root 'module\Winarchy\Private\Doctor.ps1') -Raw
+        $src | Should -Match "Add-Check 'Extras \(informational\)' \`$true"
+    }
+
+    It 'install suggests the extras only on the first install' {
+        $src = Get-Content (Join-Path $script:Root 'install.ps1') -Raw
+        $src | Should -Match '\$firstInstall = -not \$initialTheme'
+        $src.IndexOf('$firstInstall = -not $initialTheme') | Should -BeLessThan $src.IndexOf('Set-WinarchyTheme -Name $initialTheme')
+        $src | Should -Match "if \(\`$firstInstall\) \{ Write-WinarchyInfo '[^']*winarchy extras'"
+    }
+
+    It 'the CLI routes extras list/add/remove' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyExtras { }
+            Mock Add-WinarchyExtra { }
+            Mock Remove-WinarchyExtra { }
+            Invoke-Winarchy extras
+            Invoke-Winarchy extras add windhawk --yes
+            Invoke-Winarchy extras remove windhawk
+            Should -Invoke Get-WinarchyExtras -Times 1
+            Should -Invoke Add-WinarchyExtra -Times 1 -ParameterFilter { $Name -eq 'windhawk' -and $Yes }
+            Should -Invoke Remove-WinarchyExtra -Times 1 -ParameterFilter { $Name -eq 'windhawk' }
+        }
+    }
+}
+
 Describe 'Get-WinarchyFlowPluginUpdates' {
     It 'returns only plugins with a strictly newer manifest version' {
         InModuleScope Winarchy {

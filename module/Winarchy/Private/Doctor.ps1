@@ -263,6 +263,16 @@ function Invoke-WinarchyDoctor {
     Add-Check 'WezTerm context menu (informational)' $true $ctxDetail `
         'winarchy wezterm context-menu install'
 
+    # --- Extras opcionales (informativo, opt-in) ---------------------------------------
+    $extras = Get-WinarchyExtras
+    $extrasDetail = if (-not $extras.Installed) { 'Windhawk not installed (opt-in, invasive: winarchy extras add windhawk)' }
+                    else {
+                        $tested = (Get-WinarchyWindhawkManifest).windhawk
+                        $installed = (Get-Item (Get-WinarchyWindhawkExe)).VersionInfo.ProductVersion
+                        "Windhawk $installed, $($extras.Detail)$(if ($installed -ne $tested) { " — curated mods tested with $tested" })"
+                    }
+    Add-Check 'Extras (informational)' $true $extrasDetail 'winarchy extras add windhawk'
+
     # --- Versión de Winarchy mismo (informativo, best-effort) -------------------------
     $ver = Get-WinarchyVersion
     $verCheck = Test-WinarchyUpdateAvailable

@@ -108,3 +108,6 @@ if ($DryRun) {
     return
 }
 Write-WinarchyOk "Winarchy uninstalled. Backups are kept in $Root\backups; delete $Root when you no longer need them."
+if (Test-Path "$env:ProgramFiles\Windhawk\windhawk.exe") {
+    Write-WinarchyInfo "Windhawk (extra) is kept: remove it with `"$Root\bin\winarchy.cmd extras remove windhawk`" before deleting the repo."
+}
