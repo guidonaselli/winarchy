@@ -2276,6 +2276,28 @@ Describe 'First install on a clean machine' {
         }
     }
 
+    It 'reads the installed version of a winget package' {
+        InModuleScope Winarchy {
+            function winget {
+                'Name              Id                    Version  Available Source'
+                '------------------------------------------------------------------'
+                'AutoHotkey 1.1.37 AutoHotkey.AutoHotkey 1.1.37.02 2.0.28   winget'
+            }
+            Get-WinarchyInstalledVersion -Id 'AutoHotkey.AutoHotkey' | Should -Be '1.1.37.02'
+            function winget { 'No installed package found matching input criteria.' }
+            Get-WinarchyInstalledVersion -Id 'AutoHotkey.AutoHotkey' | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'compares an installed version with the pin' {
+        Test-WinarchyVersionBelow -Installed '1.1.37.02' -Pinned '2.0.28' | Should -BeTrue
+        Test-WinarchyVersionBelow -Installed '2.0.26' -Pinned '2.0.28' | Should -BeTrue
+        Test-WinarchyVersionBelow -Installed '2.0.28' -Pinned '2.0.28' | Should -BeFalse
+        Test-WinarchyVersionBelow -Installed '2.0.30' -Pinned '2.0.28' | Should -BeFalse
+        Test-WinarchyVersionBelow -Installed '20240203-110809-5046fc22' -Pinned '20240203-110809-5046fc22' | Should -BeFalse
+        Test-WinarchyVersionBelow -Installed 'Unknown' -Pinned '2.0.28' | Should -BeFalse
+    }
+
     It 'talks to the user in English' {
         $files = git -C $script:Root ls-files '*.ps1' '*.psm1' ':!tests' ':!scripts/*seelen*' | ForEach-Object { Join-Path $script:Root $_ }
         $hits = Select-String -Path $files -Pattern '(Write-Winarchy(Ok|Info|Warn|Err)|Invoke-Step|throw)\b.*[áéíóúñ¿¡]'

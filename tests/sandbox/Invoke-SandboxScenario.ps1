@@ -1,5 +1,5 @@
 # Runs in the sandbox (Windows PowerShell 5.1). `elevated` runs as SYSTEM, the rest as the non-elevated user.
-param([Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'elevated')][string]$Scenario)
+param([Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'elevated')][string]$Scenario)
 $ProgressPreference = 'SilentlyContinue'
 $out = 'C:\sandbox'
 $bare = Join-Path $out 'winarchy.git'
@@ -55,6 +55,11 @@ switch ($Scenario) {
     'install' {
         Install-Prerequisites
         Invoke-WinarchyScript install.ps1
+        Invoke-WinarchyScript install.ps1
+    }
+    'ahkv1' {
+        winget install --id AutoHotkey.AutoHotkey --exact --source winget --version 1.1.37.02 --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Host
+        Install-Prerequisites
         Invoke-WinarchyScript install.ps1
     }
     'boot' {

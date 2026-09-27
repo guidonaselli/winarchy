@@ -20,6 +20,22 @@ function Get-WinarchyCoreVersions {
     $versions
 }
 
+function Get-WinarchyInstalledVersion {
+    <# Versión instalada de un paquete de winget; $null si no está instalado. #>
+    param([Parameter(Mandatory)][string]$Id)
+    foreach ($line in (winget list --id $Id --exact --source winget --accept-source-agreements 2>$null)) {
+        if ("$line" -match "(^|\s)$([regex]::Escape($Id))\s+(\S+)") { return $Matches[2] }
+    }
+}
+
+function Test-WinarchyVersionBelow {
+    <# True si $Installed es una versión numérica menor que $Pinned. #>
+    param([string]$Installed, [string]$Pinned)
+    $a = $null; $b = $null
+    [version]::TryParse(($Installed -replace '[^\d.].*$'), [ref]$a) -and
+        [version]::TryParse(($Pinned -replace '[^\d.].*$'), [ref]$b) -and $a -lt $b
+}
+
 function Get-WinarchyDeclaredWingetIds {
     <# IDs de winget que Winarchy declara en versions.lock.toml. #>
     param([Parameter(Mandatory)][hashtable]$Lock)

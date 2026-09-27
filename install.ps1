@@ -62,12 +62,18 @@ if ($SkipPackages) { Write-WinarchyInfo 'Checking that the core components are p
 $failedPackages = @()
 foreach ($id in $packageIds) {
     if (-not $lock['winget'][$id]) { continue }
-    $installed = winget list --id $id --exact --source winget --accept-source-agreements 2>$null | Out-String
-    if ($installed -match [regex]::Escape($id)) {
+    $installed = Get-WinarchyInstalledVersion -Id $id
+    $outdated = $installed -and -not $SkipPackages -and $coreVersions.ContainsKey($id) -and
+        (Test-WinarchyVersionBelow -Installed $installed -Pinned $coreVersions[$id])
+    if ($installed -and -not $outdated) {
         if (-not $SkipPackages) { Write-WinarchyOk "$id already installed" }
     }
     else {
-        Write-WinarchyInfo "Installing $id ..."
+        if ($outdated) {
+            Write-WinarchyInfo "Updating $id $installed -> $($coreVersions[$id]) (the version Winarchy is tested with)..."
+            winget pin remove --id $id --exact 2>$null | Out-Null
+        }
+        else { Write-WinarchyInfo "Installing $id ..." }
         $args = @('install', '--id', $id, '--exact', '--source', 'winget', '--silent', '--accept-package-agreements', '--accept-source-agreements')
         if ($coreVersions.ContainsKey($id)) { $args += @('--version', $coreVersions[$id]) }
         winget @args
