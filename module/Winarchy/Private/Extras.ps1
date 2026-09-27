@@ -50,6 +50,29 @@ function Get-WinarchyWindhawkSubfolders {
     @($folders | Select-Object -Unique)
 }
 
+function Copy-WinarchyWindhawkRuntimeLibs {
+    <# Runtime que las DLL de mods necesitan en Engine\Mods\<arch>; la UI lo copia al abrirse,
+       y tras una instalación silenciosa puede no haberse abierto nunca. #>
+    param(
+        [string]$InstallRoot = "$env:ProgramFiles\Windhawk",
+        [string]$DataRoot = $script:WindhawkDataRoot
+    )
+    $targets = [ordered]@{ 'i686-w64-mingw32' = '32'; 'x86_64-w64-mingw32' = '64' }
+    if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { $targets['aarch64-w64-mingw32'] = 'arm64' }
+    $libs = [ordered]@{ 'libc++.dll' = 'libc++.whl'; 'libunwind.dll' = 'libunwind.whl'; 'windhawk-mod-shim.dll' = 'windhawk-mod-shim.dll' }
+    foreach ($target in $targets.Keys) {
+        $destDir = Join-Path $DataRoot "Engine\Mods\$($targets[$target])"
+        New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+        foreach ($lib in $libs.Keys) {
+            $src = Get-Item (Join-Path $InstallRoot "Compiler\$target\bin\$lib")
+            $dest = Join-Path $destDir $libs[$lib]
+            if (-not (Test-Path $dest) -or (Get-Item $dest).LastWriteTimeUtc -ne $src.LastWriteTimeUtc) {
+                Copy-Item $src.FullName $dest -Force
+            }
+        }
+    }
+}
+
 function Test-WinarchyWindhawkModCurrent {
     <# True si el mod ya está en la versión del manifiesto, habilitado y con sus settings. #>
     param([Parameter(Mandatory)]$Mod, [string]$RegistryRoot = $script:WindhawkRegistryRoot)
@@ -238,6 +261,7 @@ Windhawk injects code into explorer.exe and other processes to apply its mods.
         (Join-Path $script:WindhawkDataRoot 'userprofile.json')
         $manifest.mods | ForEach-Object { Join-Path $script:WindhawkDataRoot "ModsSource\$($_.id).wh.cpp" }
     )
+    Copy-WinarchyWindhawkRuntimeLibs
     foreach ($mod in $manifest.mods) {
         if (Test-WinarchyWindhawkModCurrent -Mod $mod) { continue }
         Install-WinarchyWindhawkMod -Mod $mod -WindhawkVersion $version

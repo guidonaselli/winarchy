@@ -2280,6 +2280,27 @@ Describe 'Windhawk extras' {
         }
     }
 
+    It 'copies the mod runtime libs the Windhawk UI would copy on its first start' {
+        InModuleScope Winarchy -Parameters @{ Data = $script:WhData } {
+            param($Data)
+            $install = Join-Path $TestDrive "wh-install-$([guid]::NewGuid())"
+            foreach ($target in 'i686-w64-mingw32', 'x86_64-w64-mingw32') {
+                foreach ($lib in 'libc++.dll', 'libunwind.dll', 'windhawk-mod-shim.dll') {
+                    New-Item -ItemType File -Path "$install\Compiler\$target\bin\$lib" -Value $target -Force | Out-Null
+                }
+            }
+
+            Copy-WinarchyWindhawkRuntimeLibs -InstallRoot $install -DataRoot $Data
+
+            foreach ($folder in '32', '64') {
+                foreach ($name in 'libc++.whl', 'libunwind.whl', 'windhawk-mod-shim.dll') {
+                    Test-Path "$Data\Engine\Mods\$folder\$name" | Should -BeTrue
+                }
+            }
+            Get-Content "$Data\Engine\Mods\64\libc++.whl" | Should -Be 'x86_64-w64-mingw32'
+        }
+    }
+
     It 'hides the Windhawk tray and update check once' {
         InModuleScope Winarchy -Parameters @{ Reg = $script:WhReg } {
             param($Reg)
