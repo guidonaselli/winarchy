@@ -99,7 +99,8 @@ function Install-WinarchyWindhawkMod {
     $id, $version = $Mod.id, $Mod.version
     $base = "$script:WindhawkModsUrl$id/"
 
-    $published = @(Invoke-RestMethod -Uri "${base}versions.json") | Where-Object version -eq $version
+    $versions = Invoke-RestMethod -Uri "${base}versions.json"
+    $published = $versions | Where-Object version -eq $version
     if (-not $published) { throw "Windhawk mod $id $version is not published." }
     $minWindhawk = $published.PSObject.Properties['minWindhawkVersion']?.Value
     if ($minWindhawk -and [version]$WindhawkVersion -lt [version]$minWindhawk) {
@@ -289,6 +290,12 @@ function Remove-WinarchyExtra {
         Write-WinarchyWarn "Curated mods removed; Windhawk kept because other mods are installed: $($others -join ', ')"
         return
     }
+    $exe = Get-WinarchyWindhawkExe
+    Start-Process $exe -ArgumentList '-exit', '-wait' -Wait
     winget uninstall --id RamenSoftware.Windhawk -e --source winget --silent | Out-Host
+    $code = $LASTEXITCODE
+    $deadline = (Get-Date).AddSeconds(60)
+    while ((Test-Path $exe) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+    if (Test-Path $exe) { throw "Windhawk uninstall failed (winget exit code $code)." }
     Write-WinarchyOk 'Windhawk removed'
 }

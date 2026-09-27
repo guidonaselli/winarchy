@@ -2216,7 +2216,7 @@ Describe 'Windhawk extras' {
         InModuleScope Winarchy -Parameters @{ Reg = $script:WhReg; Data = $script:WhData } {
             param($Reg, $Data)
             $source = "// ==WindhawkMod==`n// @id demo`n// @version 1.2`n// @include explorer.exe`n// @exclude a.exe`n// @exclude b.exe`n// ==/WindhawkMod==`n"
-            Mock Invoke-RestMethod { @([pscustomobject]@{ version = '1.1' }, [pscustomobject]@{ version = '1.2' }) }
+            Mock Invoke-RestMethod { ,@([pscustomobject]@{ version = '1.1' }, [pscustomobject]@{ version = '1.2' }) }
             Mock Invoke-WebRequest {
                 if ($OutFile) { Set-Content -Path $OutFile -Value $Uri; return }
                 [pscustomobject]@{ RawContentStream = [IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes($source)) }
@@ -2249,7 +2249,7 @@ Describe 'Windhawk extras' {
         InModuleScope Winarchy -Parameters @{ Reg = $script:WhReg; Data = $script:WhData } {
             param($Reg, $Data)
             $source = "// ==WindhawkMod==`n// @id demo`n// @version 1.2`n// ==/WindhawkMod==`n"
-            Mock Invoke-RestMethod { @([pscustomobject]@{ version = '1.2' }) }
+            Mock Invoke-RestMethod { ,@([pscustomobject]@{ version = '1.2' }) }
             Mock Invoke-WebRequest {
                 if ($Uri -like '*_64.dll') { throw 'network down' }
                 if ($OutFile) { Set-Content -Path $OutFile -Value 'dll'; return }
@@ -2268,7 +2268,7 @@ Describe 'Windhawk extras' {
     It 'refuses a mod that needs a newer Windhawk before writing anything' {
         InModuleScope Winarchy -Parameters @{ Reg = $script:WhReg; Data = $script:WhData } {
             param($Reg, $Data)
-            Mock Invoke-RestMethod { @([pscustomobject]@{ version = '1.2'; minWindhawkVersion = '1.8' }) }
+            Mock Invoke-RestMethod { ,@([pscustomobject]@{ version = '1.2'; minWindhawkVersion = '1.8' }) }
             Mock Invoke-WebRequest { }
             $mod = [pscustomobject]@{ id = 'demo'; version = '1.2'; settings = [pscustomobject]@{} }
 
@@ -2346,9 +2346,12 @@ Describe 'Windhawk extras' {
                 $curated = (Get-WinarchyWindhawkManifest).mods.id
                 foreach ($id in @($curated) + 'my-own-mod') { New-Item -Path "$Reg\Engine\Mods\$id" -Force | Out-Null }
                 Mock Test-WinarchyElevated { $true }
-                Mock Get-WinarchyWindhawkExe { $PSCommandPath }
+                $script:WhExe = Join-Path $Data 'windhawk.exe'
+                New-Item -ItemType File -Path $script:WhExe -Force | Out-Null
+                Mock Get-WinarchyWindhawkExe { $script:WhExe }
                 Mock Backup-WinarchyRegistryKey { }
-                Mock winget { }
+                Mock Start-Process { }
+                Mock winget { Remove-Item $script:WhExe; $global:LASTEXITCODE = 0 }
 
                 Remove-WinarchyExtra -Name windhawk
 
@@ -2359,6 +2362,7 @@ Describe 'Windhawk extras' {
                 Remove-Item "$Reg\Engine\Mods\my-own-mod"
                 Remove-WinarchyExtra -Name windhawk
                 Should -Invoke winget -Times 1
+                Should -Invoke Start-Process -Times 1 -ParameterFilter { $ArgumentList -contains '-exit' }
             }
             finally {
                 $script:WindhawkRegistryRoot = 'HKLM:\SOFTWARE\Windhawk'
