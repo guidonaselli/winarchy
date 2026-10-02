@@ -242,6 +242,7 @@ themes/my-theme/
   theme.toml
   preview.png
   backgrounds/
+  lockscreen.png
   wallpaper-engine.txt
   jetbrains.icls
   vscode.json
@@ -251,6 +252,13 @@ Everything in `backgrounds/` is a wallpaper the theme offers. Applying the theme
 one you picked last time for it (the first one otherwise); `winarchy background next` and
 `SUPER + CTRL + SPACE` cycle through the rest. A theme without the folder leaves the
 wallpaper alone, and `wallpaper-engine.txt` wins over it when Wallpaper Engine is installed.
+
+Applying a theme also sets the lock screen image, which the sign-in screen reuses: the
+theme's `lockscreen.png` (or `.jpg`), otherwise its current wallpaper. Themes using
+`wallpaper-engine.txt` and dynamic themes such as auto-accent leave it alone unless they ship a
+`lockscreen.*`. If the lock screen is set to Windows Spotlight it switches to Picture, and the
+sign-in screen only follows it with "Show the lock screen background picture on the sign-in
+screen" on.
 
 Only `theme.toml` is required, and any other file is ignored: keep leftovers from other
 ecosystems out of the folder.

@@ -688,6 +688,24 @@ public static extern int SystemParametersInfo(int uAction, int uParam, string lp
     }
 }
 
+function Set-WinarchyLockScreen {
+    <# Fija la imagen de lock/login vía WinRT (per-user, sin admin). Best-effort: warning si falla. #>
+    param([Parameter(Mandatory)][string]$ImagePath)
+    $script = @'
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$null = [Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime]
+$null = [Windows.System.UserProfile.LockScreen, Windows.System.UserProfile, ContentType = WindowsRuntime]
+$asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
+$file = $asTask.MakeGenericMethod([Windows.Storage.StorageFile]).Invoke($null, @([Windows.Storage.StorageFile]::GetFileFromPathAsync($env:WINARCHY_LOCK_IMAGE))).Result
+[Windows.System.UserProfile.LockScreen]::SetImageFileAsync($file).GetAwaiter().GetResult()
+'@
+    $env:WINARCHY_LOCK_IMAGE = $ImagePath
+    $out = & powershell.exe -NoProfile -NonInteractive -Command $script 2>&1
+    Remove-Item Env:WINARCHY_LOCK_IMAGE
+    if ($LASTEXITCODE -ne 0) { Write-WinarchyWarn "Lock screen image not applied: $($out | Select-Object -First 1)" }
+}
+
 function Invoke-WinarchyReload {
     <# Recarga komorebi, YASB, AHK y Flow para reflejar configs nuevas.
        -Light: solo komorebi y YASB (sync de accent: no matar AHK/Flow por un color). #>
@@ -857,6 +875,8 @@ function Set-WinarchyTheme {
             Sync-WinarchyClaudeCode -Mode $theme['mode']
             Set-WinarchyWindowsAppearance -Mode $theme['mode'] -AccentHex $theme['colors']['accent'] -SkipAccent:$dynamicAccent
             if (-not $dynamicAccent) { Set-WinarchyWallpaper -ThemeDir $themeDir }
+            $lockImage = Get-WinarchyLockScreenImage -ThemeDir $themeDir -Dynamic:$dynamicAccent
+            if ($lockImage) { Set-WinarchyLockScreen -ImagePath $lockImage }
         }
 
         # 6. Persistencia + recarga de servicios

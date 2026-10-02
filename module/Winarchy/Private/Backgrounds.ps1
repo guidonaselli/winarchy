@@ -29,6 +29,18 @@ function Get-WinarchyBackground {
     $available[0]
 }
 
+function Get-WinarchyLockScreenImage {
+    <# Imagen de lock/login: lockscreen.* del theme; si no, el fondo activo salvo theme dinámico o con Wallpaper Engine. $null = no tocar. #>
+    param([Parameter(Mandatory)][string]$ThemeDir, [switch]$Dynamic)
+    foreach ($ext in 'png', 'jpg', 'jpeg') {
+        $own = Join-Path $ThemeDir "lockscreen.$ext"
+        if (Test-Path $own) { return $own }
+    }
+    if ($Dynamic -or (Test-Path (Join-Path $ThemeDir 'wallpaper-engine.txt'))) { return $null }
+    $chosen = Get-WinarchyBackground -Name (Split-Path $ThemeDir -Leaf)
+    if ($chosen) { Join-Path $ThemeDir "backgrounds\$chosen" }
+}
+
 function Set-WinarchyBackground {
     <# Fija el fondo del theme y lo aplica. Sin -File cicla al siguiente. #>
     param([string]$File, [switch]$Next)

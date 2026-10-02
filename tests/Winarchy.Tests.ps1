@@ -2755,3 +2755,34 @@ try { Invoke-Expression (Get-Content $Boot -Raw) } catch { Add-Content $global:L
         }
     }
 }
+
+Describe 'Get-WinarchyLockScreenImage' {
+    BeforeEach {
+        $script:Dir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $script:Dir -Force | Out-Null
+    }
+    It 'prefers the theme lockscreen over everything else, even when dynamic' {
+        New-Item (Join-Path $script:Dir 'lockscreen.jpg') -ItemType File | Out-Null
+        InModuleScope Winarchy -Parameters @{ Dir = $script:Dir } {
+            Get-WinarchyLockScreenImage -ThemeDir $Dir | Should -Be (Join-Path $Dir 'lockscreen.jpg')
+            Get-WinarchyLockScreenImage -ThemeDir $Dir -Dynamic | Should -Be (Join-Path $Dir 'lockscreen.jpg')
+        }
+    }
+    It 'falls back to the active background' {
+        InModuleScope Winarchy -Parameters @{ Dir = $script:Dir } {
+            Mock Get-WinarchyBackground { 'wall.png' }
+            Get-WinarchyLockScreenImage -ThemeDir $Dir | Should -Be (Join-Path $Dir 'backgrounds\wall.png')
+        }
+    }
+    It 'returns nothing for dynamic themes, Wallpaper Engine themes or themes without backgrounds' {
+        InModuleScope Winarchy -Parameters @{ Dir = $script:Dir } {
+            Mock Get-WinarchyBackground { 'wall.png' }
+            Get-WinarchyLockScreenImage -ThemeDir $Dir -Dynamic | Should -BeNullOrEmpty
+            New-Item (Join-Path $Dir 'wallpaper-engine.txt') -ItemType File | Out-Null
+            Get-WinarchyLockScreenImage -ThemeDir $Dir | Should -BeNullOrEmpty
+            Remove-Item (Join-Path $Dir 'wallpaper-engine.txt')
+            Mock Get-WinarchyBackground { $null }
+            Get-WinarchyLockScreenImage -ThemeDir $Dir | Should -BeNullOrEmpty
+        }
+    }
+}
