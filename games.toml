@@ -257,3 +257,6 @@ exe = "Hearthstone.exe"
 
 [[games]]
 exe = "aLogin.exe"
+
+[[games]]
+exe = "WindowsSandboxRemoteSession.exe"
