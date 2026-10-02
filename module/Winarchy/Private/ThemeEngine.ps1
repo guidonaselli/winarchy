@@ -698,7 +698,9 @@ $null = [Windows.System.UserProfile.LockScreen, Windows.System.UserProfile, Cont
 $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
     $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
 $file = $asTask.MakeGenericMethod([Windows.Storage.StorageFile]).Invoke($null, @([Windows.Storage.StorageFile]::GetFileFromPathAsync($env:WINARCHY_LOCK_IMAGE))).Result
-[Windows.System.UserProfile.LockScreen]::SetImageFileAsync($file).GetAwaiter().GetResult()
+$asAction = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncAction' })[0]
+$asAction.Invoke($null, @([Windows.System.UserProfile.LockScreen]::SetImageFileAsync($file))).Wait()
 '@
     $env:WINARCHY_LOCK_IMAGE = $ImagePath
     $out = & powershell.exe -NoProfile -NonInteractive -Command $script 2>&1
@@ -875,8 +877,9 @@ function Set-WinarchyTheme {
             Sync-WinarchyClaudeCode -Mode $theme['mode']
             Set-WinarchyWindowsAppearance -Mode $theme['mode'] -AccentHex $theme['colors']['accent'] -SkipAccent:$dynamicAccent
             if (-not $dynamicAccent) { Set-WinarchyWallpaper -ThemeDir $themeDir }
-            $lockImage = Get-WinarchyLockScreenImage -ThemeDir $themeDir -Dynamic:$dynamicAccent
-            if ($lockImage) { Set-WinarchyLockScreen -ImagePath $lockImage }
+        }
+        if (-not $LightRefresh -or $dynamicAccent) {
+            Update-WinarchyLockScreen -ThemeDir $themeDir -Colors $theme['colors'] -Dynamic:$dynamicAccent
         }
 
         # 6. Persistencia + recarga de servicios

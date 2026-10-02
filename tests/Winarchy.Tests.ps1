@@ -2786,3 +2786,54 @@ Describe 'Get-WinarchyLockScreenImage' {
         }
     }
 }
+
+Describe 'Accent lock screen' {
+    It 'scales the mark to fit the screen with a margin' {
+        InModuleScope Winarchy {
+            Get-WinarchyLockScreenScale -Width 1920 -Height 1080 | Should -BeGreaterThan 17
+            Get-WinarchyLockScreenScale -Width 1920 -Height 1080 | Should -BeLessThan 18
+            Get-WinarchyLockScreenScale -Width 3440 -Height 1440 | Should -Be (1440 * 0.9 / 56)
+        }
+    }
+    It 'renders the requested size with the accent on the last bar and the background in the corner' {
+        $out = Join-Path $TestDrive 'lock.png'
+        InModuleScope Winarchy -Parameters @{ Out = $out } {
+            New-WinarchyAccentLockScreen -Accent '#e5484d' -Background '#1a1b26' -Foreground '#c8c8c8' -OutPath $Out -Width 800 -Height 450
+        }
+        Add-Type -AssemblyName System.Drawing
+        $bmp = [System.Drawing.Bitmap]::new($out)
+        try {
+            $bmp.Width | Should -Be 800
+            $bmp.Height | Should -Be 450
+            $bar = $bmp.GetPixel(680, 250)
+            $bar.R | Should -BeGreaterThan ($bar.B + 40)
+            $corner = $bmp.GetPixel(2, 2)
+            [Math]::Abs($corner.R - 0x1a) | Should -BeLessThan 12
+            [Math]::Abs($corner.B - 0x26) | Should -BeLessThan 12
+        }
+        finally { $bmp.Dispose() }
+    }
+    It 'generates and applies the image for a dynamic theme without lockscreen' {
+        $dir = Join-Path $TestDrive 'dyn'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        InModuleScope Winarchy -Parameters @{ Dir = $dir; State = $TestDrive } {
+            Mock Get-WinarchyStateDir { $State }
+            Mock Get-WinarchyPrimaryScreenSize { @{ Width = 400; Height = 225 } }
+            Mock Set-WinarchyLockScreen {}
+            $colors = @{ accent = '#0078d4'; background = '#1a1b26'; foreground = '#c8c8c8' }
+            Update-WinarchyLockScreen -ThemeDir $Dir -Colors $colors -Dynamic
+            Should -Invoke Set-WinarchyLockScreen -Times 1 -ParameterFilter { $ImagePath -eq (Join-Path $State 'lockscreen-accent.png') }
+            Test-Path (Join-Path $State 'lockscreen-accent.png') | Should -BeTrue
+        }
+    }
+    It 'leaves the lock screen alone for a static theme without images' {
+        $dir = Join-Path $TestDrive 'static'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        InModuleScope Winarchy -Parameters @{ Dir = $dir } {
+            Mock Get-WinarchyBackground { $null }
+            Mock Set-WinarchyLockScreen {}
+            Update-WinarchyLockScreen -ThemeDir $Dir -Colors @{ accent = '#0078d4'; background = '#1a1b26'; foreground = '#c8c8c8' }
+            Should -Invoke Set-WinarchyLockScreen -Times 0
+        }
+    }
+}

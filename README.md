@@ -255,10 +255,11 @@ wallpaper alone, and `wallpaper-engine.txt` wins over it when Wallpaper Engine i
 
 Applying a theme also sets the lock screen image, which the sign-in screen reuses: the
 theme's `lockscreen.png` (or `.jpg`), otherwise its current wallpaper. Themes using
-`wallpaper-engine.txt` and dynamic themes such as auto-accent leave it alone unless they ship a
-`lockscreen.*`. If the lock screen is set to Windows Spotlight it switches to Picture, and the
-sign-in screen only follows it with "Show the lock screen background picture on the sign-in
-screen" on.
+`wallpaper-engine.txt` leave it alone unless they ship a `lockscreen.*`. Dynamic themes such as
+auto-accent draw it from the live accent (the Winarchy mark with its last bar in the accent) and
+redraw it whenever the accent changes. If the lock screen is set to Windows Spotlight it switches
+to Picture, and the sign-in screen only follows it with "Show the lock screen background picture
+on the sign-in screen" on.
 
 Only `theme.toml` is required, and any other file is ignored: keep leftovers from other
 ecosystems out of the folder.
