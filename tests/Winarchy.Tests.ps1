@@ -2837,3 +2837,22 @@ Describe 'Accent lock screen' {
         }
     }
 }
+
+Describe 'Get-WinarchyDefenderExclusionPaths' {
+    It 'includes the profile tools and the target of their scoop shims' {
+        InModuleScope Winarchy {
+            $real = Join-Path $TestDrive 'apps\eza\eza.exe'
+            $shim = Join-Path $TestDrive 'shims\eza.exe'
+            New-Item -ItemType Directory -Path (Split-Path $real), (Split-Path $shim) -Force | Out-Null
+            Set-Content $real 'x'; Set-Content $shim 'x'
+            Set-Content ([IO.Path]::ChangeExtension($shim, '.shim')) "path = `"$real`""
+            Mock Get-Command { }
+            Mock Get-Command { [pscustomobject]@{ Source = $shim } } -ParameterFilter { $All -and $Name -eq 'eza' }
+
+            $paths = @(Get-WinarchyDefenderExclusionPaths)
+
+            $paths | Should -Contain $shim
+            $paths | Should -Contain $real
+        }
+    }
+}

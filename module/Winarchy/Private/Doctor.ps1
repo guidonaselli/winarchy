@@ -227,7 +227,7 @@ function Invoke-WinarchyDoctor {
         $wantExclusion = @(Get-WinarchyDefenderExclusionPaths)
         $missingExclusions = @($wantExclusion | Where-Object { $defenderExclusions -notcontains $_ })
         Add-Check 'Defender exclusions applied' ($missingExclusions.Count -eq 0) `
-            $(if ($missingExclusions.Count -eq 0) { 'ShareX, Everything, pwsh, komorebic, repo excluded from real-time scan' } else { "missing: $($missingExclusions -join ', ')" }) `
+            $(if ($missingExclusions.Count -eq 0) { 'ShareX, Everything, pwsh, komorebic, shell tools, repo excluded from real-time scan' } else { "missing: $($missingExclusions -join ', ')" }) `
             '.\install.ps1  (from an elevated shell)'
     }
 

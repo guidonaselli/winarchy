@@ -250,7 +250,17 @@ function Get-WinarchyDefenderExclusionPaths {
     if (-not $komorebic) {
         $komorebic = "$env:ProgramFiles\komorebi\bin\komorebic.exe"
     }
+    $profileTools = foreach ($tool in 'zoxide', 'fzf', 'eza', 'bat', 'mise') {
+        foreach ($cmd in @(Get-Command $tool -All -CommandType Application -ErrorAction SilentlyContinue)) {
+            $cmd.Source
+            $shim = [IO.Path]::ChangeExtension($cmd.Source, '.shim')
+            if ((Test-Path $shim) -and ((Get-Content $shim -Raw) -match '(?m)^\s*path\s*=\s*"?([^"\r\n]+)"?')) {
+                $Matches[1]
+            }
+        }
+    }
     @(
+        ($profileTools | Select-Object -Unique)
         (Get-WinarchyShareXExe),
         "$env:USERPROFILE\Documents\ShareX",
         "$env:ProgramFiles\Everything\Everything.exe",
