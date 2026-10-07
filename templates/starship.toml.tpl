@@ -4,6 +4,7 @@
 
 add_newline = true
 scan_timeout = 100
+command_timeout = 2000
 
 format = """
 $directory$git_branch$git_status$git_state$cmd_duration$python$nodejs$rust
