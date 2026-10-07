@@ -84,6 +84,10 @@ function Test-WinarchyWindhawkModCurrent {
     foreach ($p in $Mod.settings.PSObject.Properties) {
         if ("$($current.PSObject.Properties[$p.Name]?.Value)" -ne "$($p.Value)") { return $false }
     }
+    if ($Mod.PSObject.Properties['include']) {
+        $writable = Get-ItemProperty "$RegistryRoot\Engine\ModsWritable\$($Mod.id)" -ErrorAction SilentlyContinue
+        if ($writable.PSObject.Properties['IncludeCustom']?.Value -ne ($Mod.include -join '|') -or $writable.PSObject.Properties['IncludeExcludeCustomOnly']?.Value -ne 1) { return $false }
+    }
     $true
 }
 
@@ -145,6 +149,13 @@ function Install-WinarchyWindhawkMod {
         Architecture = $meta.architecture -join '|'; Version = $version
     }
     foreach ($name in $values.Keys) { Set-ItemProperty -Path $key -Name $name -Value $values[$name] -Type String }
+    if ($Mod.PSObject.Properties['include']) {
+        $writable = "$RegistryRoot\Engine\ModsWritable\$id"
+        if (-not (Test-Path $writable)) { New-Item -Path $writable -Force | Out-Null }
+        Set-ItemProperty -Path $writable -Name IncludeCustom -Value ($Mod.include -join '|') -Type String
+        Set-ItemProperty -Path $writable -Name ExcludeCustom -Value '' -Type String
+        Set-ItemProperty -Path $writable -Name IncludeExcludeCustomOnly -Value 1 -Type DWord
+    }
     Set-ItemProperty -Path $key -Name Disabled -Value 0 -Type DWord
     Set-ItemProperty -Path $key -Name LibraryFileName -Value $dllName -Type String
     Set-ItemProperty -Path $key -Name SettingsChangeTime -Value ([int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) -Type DWord

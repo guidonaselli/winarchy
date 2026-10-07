@@ -12,6 +12,9 @@
     {
       "id": "winui-context-menu-animation",
       "version": "1.0.1",
+      "include": [
+        "explorer.exe"
+      ],
       "settings": {
         "animationDuration": 320,
         "fadeDuration": 80,
@@ -22,11 +25,17 @@
     {
       "id": "modernize-folder-picker-dialog",
       "version": "1.0.0",
+      "include": [
+        "explorer.exe"
+      ],
       "settings": {}
     },
     {
       "id": "explorer-details-better-file-sizes",
       "version": "1.5.1",
+      "include": [
+        "explorer.exe"
+      ],
       "settings": {
         "calculateFolderSizes": "everything",
         "disableKbOnlySizes": 1,
@@ -89,6 +98,10 @@
     {
       "id": "translucent-windows",
       "version": "1.8.2",
+      "include": [
+        "explorer.exe",
+        "wezterm-gui.exe"
+      ],
       "settings": {
         "BackgroundEffects.AccentBlurBehind": "3A232323",
         "BackgroundEffects.type": "acrylicblur",
