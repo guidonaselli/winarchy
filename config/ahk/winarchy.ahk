@@ -1002,10 +1002,10 @@ AccentWatch() {
 #^9::Komorebic('send-to-workspace 8')
 
 ; --- Monitors ------------------------------------------------------------------
-#,::Komorebic('cycle-focus-monitor previous')    ; focus previous monitor
-#.::Komorebic('cycle-focus-monitor next')        ; focus next monitor
-#+,::Komorebic('cycle-move-monitor previous')    ; move window to previous monitor
-#+.::Komorebic('cycle-move-monitor next')        ; move window to next monitor
+#,::Komorebic('cycle-monitor previous')    ; focus previous monitor
+#.::Komorebic('cycle-monitor next')        ; focus next monitor
+#+,::Komorebic('cycle-move-to-monitor previous')    ; move window to previous monitor
+#+.::Komorebic('cycle-move-to-monitor next')        ; move window to next monitor
 #^,::Komorebic('cycle-send-to-monitor previous') ; send window to previous monitor, stay here
 #^.::Komorebic('cycle-send-to-monitor next')     ; send window to next monitor, stay here
 #!+,::Komorebic('cycle-move-workspace-to-monitor previous')  ; move workspace to previous monitor
