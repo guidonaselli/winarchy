@@ -436,7 +436,7 @@ WinarchyTilingItems() {
 }
 
 WinarchyLayoutItems() {
-    L := (name, glyph, what, cmd) => {text: name, hint: glyph '  ' what, action: (*) => Komorebic('change-layout ' cmd)}
+    L := (name, glyph, what, cmd) => {text: name, hint: glyph '  ' what, layout: cmd, action: (*) => Komorebic('change-layout ' cmd)}
     return [
         L('BSP', Chr(0x25E9), 'split in halves', 'bsp'),
         L('Grid', Chr(0x25A6), 'even 2' Chr(0xD7) '2 grid', 'grid'),
@@ -611,7 +611,10 @@ PalOpen(mode, items, title) {
     count := g.Add('Text', Format('x{} y{} w{} h20 c{} Right', pad + labelW, fy, hintW, c.mut), '')
     h := fy + 20 + pad - 4
 
-    Pal := {gui: g, mode: mode, colors: c, items: items, title: title, stack: [], list: [],
+    boxes := []
+    loop 4
+        boxes.Push(g.Add('Text', 'x0 y0 w1 h1 Hidden Background' c.mut))
+    Pal := {gui: g, mode: mode, colors: c, pv: {boxes: boxes, w0: w, h: h, on: false}, items: items, title: title, stack: [], list: [],
         sel: 0, top: 1, rows: rows, rowH: rowH, y0: y0, x0: pad - 8, x1: pad + labelW + hintW + 8,
         edit: ed, crumb: crumb, count: count, mouse: ''}
     ed.OnEvent('Change', (*) => PalRefresh())
@@ -621,6 +624,8 @@ PalOpen(mode, items, title) {
     WorkAreaUnderMouse(&wl, &wt, &wr, &wb)
     g.Show(Format('x{} y{} w{} h{}', wl + (wr - wl - w) // 2, wt + (wb - wt - h) // 2, w, h))
     DllCall('dwmapi\DwmSetWindowAttribute', 'ptr', g.Hwnd, 'int', 33, 'int*', 2, 'int', 4)  ; rounded corners
+    Pal.pv.on := false
+    PalPreview()
     ed.Focus()
     OnMessage(0x200, PalMouseMove)       ; WM_MOUSEMOVE
     OnMessage(0x202, PalClick)           ; WM_LBUTTONUP
@@ -740,6 +745,50 @@ PalDraw() {
         r.label.Text := ' ' e.text
         r.hint.Text := e.hint ' '
     }
+    PalPreview()
+}
+
+; Layout items grow the palette a side panel that draws four windows tiled that way.
+PalPreview() {
+    pv := Pal.pv
+    e := Pal.sel ? Pal.list[Pal.sel] : ''
+    lay := (IsObject(e) && e.HasOwnProp('item') && e.item.HasOwnProp('layout')) ? e.item.layout : ''
+    if (lay = '') {
+        if pv.on {
+            for b in pv.boxes
+                b.Visible := false
+            Pal.gui.Move(, , pv.w0, pv.h)
+            pv.on := false
+        }
+        return
+    }
+    if !pv.on {
+        Pal.gui.Move(, , pv.w0 + 260, pv.h)
+        pv.on := true
+    }
+    px := pv.w0 + 20, py := Pal.y0 + 6, pw := 220, ph := 150
+    for i, b in pv.boxes {
+        r := LayoutRects(lay)[i]
+        b.Opt('Background' (i = 1 ? Pal.colors.ac : Pal.colors.mut))
+        b.Move(px + Round(r[1] * pw) + 2, py + Round(r[2] * ph) + 2, Round(r[3] * pw) - 4, Round(r[4] * ph) - 4)
+        b.Visible := true
+    }
+}
+
+; Four windows as [x, y, w, h] fractions; the first is the main one.
+LayoutRects(name) {
+    switch name {
+        case 'bsp': return [[0, 0, .5, 1], [.5, 0, .5, .5], [.5, .5, .25, .5], [.75, .5, .25, .5]]
+        case 'grid': return [[0, 0, .5, .5], [.5, 0, .5, .5], [0, .5, .5, .5], [.5, .5, .5, .5]]
+        case 'columns': return [[0, 0, .25, 1], [.25, 0, .25, 1], [.5, 0, .25, 1], [.75, 0, .25, 1]]
+        case 'rows': return [[0, 0, 1, .25], [0, .25, 1, .25], [0, .5, 1, .25], [0, .75, 1, .25]]
+        case 'vertical-stack': return [[0, 0, .5, 1], [.5, 0, .5, 1 / 3], [.5, 1 / 3, .5, 1 / 3], [.5, 2 / 3, .5, 1 / 3]]
+        case 'right-main-vertical-stack': return [[.5, 0, .5, 1], [0, 0, .5, 1 / 3], [0, 1 / 3, .5, 1 / 3], [0, 2 / 3, .5, 1 / 3]]
+        case 'horizontal-stack': return [[0, 0, 1, .5], [0, .5, 1 / 3, .5], [1 / 3, .5, 1 / 3, .5], [2 / 3, .5, 1 / 3, .5]]
+        case 'ultrawide-vertical-stack': return [[.25, 0, .5, 1], [0, 0, .25, 1], [.75, 0, .25, .5], [.75, .5, .25, .5]]
+        case 'scrolling': return [[0, 0, .4, 1], [.4, 0, .4, 1], [.8, 0, .2, 1], [0, 0, 0, 0]]
+    }
+    return [[0, 0, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
 }
 
 PalMove(d) {
