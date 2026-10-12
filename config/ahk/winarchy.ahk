@@ -83,17 +83,28 @@ CloseWindow() {
 ; Move: the window follows the cursor, then swaps with the tile it was dropped on.
 ; Resize: grab near an edge or corner, the drop distance becomes a resize-edge.
 WindowDrag(move, held := 0) {
+    global DragReleased
     CoordMode('Mouse', 'Screen')
     MouseGetPos(&x, &y, &under)
     hwnd := DllCall('user32\GetAncestor', 'ptr', under, 'uint', 2, 'ptr')
-    btn := move ? 'LButton' : 'RButton'
-    held := held || (() => GetKeyState(btn, 'P'))
+    DragReleased := false
+    t0 := A_TickCount
+    held := held || (() => !DragReleased && A_TickCount - t0 < 30000)
     if !hwnd || WinGetMinMax(hwnd) = 1 || !DragTarget(hwnd) {
-        KeyWait(btn, 'P')
+        while held()
+            Sleep(10)
         return
     }
     WinActivate(hwnd), WinWaitActive(hwnd, , 0.5)
     move ? DragMove(hwnd, x, y, held) : DragResize(hwnd, x, y, held)
+}
+
+; AHK swallows the click, so the release is read from pass-through hotkeys instead of key state.
+DragReleased := true
+*~LButton Up::DragRelease()
+*~RButton Up::DragRelease()
+DragRelease() {
+    global DragReleased := true
 }
 
 ; A real, visible app window: not the desktop, taskbar, bar or a tool window.
