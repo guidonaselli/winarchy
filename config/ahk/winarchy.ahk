@@ -117,13 +117,20 @@ DragTarget(hwnd) {
 
 DragMove(hwnd, x0, y0, held) {
     WinGetPos(&wx, &wy, &ww, &wh, hwnd)
+    SetWinDelay(-1)
+    DllCall('winmm\timeBeginPeriod', 'uint', 1)    ; Sleep(1) otherwise rounds up to ~15 ms
+    px := x0, py := y0
     while held() {
         MouseGetPos(&x, &y)
-        WinMove(wx + x - x0, wy + y - y0, , , hwnd)
-        Sleep(10)
+        if (x != px || y != py) {
+            px := x, py := y
+            DllCall('user32\SetWindowPos', 'ptr', hwnd, 'ptr', 0, 'int', wx + x - x0, 'int', wy + y - y0, 'int', 0, 'int', 0, 'uint', 0x15)   ; NOSIZE | NOZORDER | NOACTIVATE
+        }
+        Sleep(1)
     }
+    DllCall('winmm\timeEndPeriod', 'uint', 1)
     MouseGetPos(&x, &y)
-    WinMove(wx, wy, ww, wh, hwnd)
+    DllCall('user32\SetWindowPos', 'ptr', hwnd, 'ptr', 0, 'int', wx, 'int', wy, 'int', 0, 'int', 0, 'uint', 0x15)
     if Abs(x - x0) + Abs(y - y0) < 40
         return
     for t in WinGetList() {                      ; top of the z-order first
