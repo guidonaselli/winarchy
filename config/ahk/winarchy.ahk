@@ -78,6 +78,74 @@ CloseWindow() {
     }
 }
 
+; Super+drag, driven by komorebi commands: AHK swallows the click, so the system
+; move/size loops (and komorebi's own drag handling) never see the button held.
+; Move: the window follows the cursor, then swaps with the tile it was dropped on.
+; Resize: grab near an edge or corner, the drop distance becomes a resize-edge.
+WindowDrag(move, held := 0) {
+    CoordMode('Mouse', 'Screen')
+    MouseGetPos(&x, &y, &under)
+    hwnd := DllCall('user32\GetAncestor', 'ptr', under, 'uint', 2, 'ptr')
+    btn := move ? 'LButton' : 'RButton'
+    held := held || (() => GetKeyState(btn, 'P'))
+    if !hwnd || WinGetMinMax(hwnd) = 1 || !DragTarget(hwnd) {
+        KeyWait(btn, 'P')
+        return
+    }
+    WinActivate(hwnd), WinWaitActive(hwnd, , 0.5)
+    move ? DragMove(hwnd, x, y, held) : DragResize(hwnd, x, y, held)
+}
+
+; A real, visible app window: not the desktop, taskbar, bar or a tool window.
+DragTarget(hwnd) {
+    return (WinGetStyle(hwnd) & 0x10000000) && !(WinGetExStyle(hwnd) & 0x80)
+        && WinGetMinMax(hwnd) != -1
+        && !(WinGetClass(hwnd) ~= '^(Progman|WorkerW|Shell_TrayWnd|Shell_SecondaryTrayWnd)$')
+        && WinGetProcessName(hwnd) != 'yasb.exe'
+}
+
+DragMove(hwnd, x0, y0, held) {
+    WinGetPos(&wx, &wy, &ww, &wh, hwnd)
+    while held() {
+        MouseGetPos(&x, &y)
+        WinMove(wx + x - x0, wy + y - y0, , , hwnd)
+        Sleep(10)
+    }
+    MouseGetPos(&x, &y)
+    WinMove(wx, wy, ww, wh, hwnd)
+    if Abs(x - x0) + Abs(y - y0) < 40
+        return
+    for t in WinGetList() {                      ; top of the z-order first
+        if t = hwnd || !DragTarget(t) || !WinGetTitle(t)
+            continue
+        WinGetPos(&tx, &ty, &tw, &th, t)
+        if x < tx || x >= tx + tw || y < ty || y >= ty + th
+            continue
+        dx := tx + tw // 2 - (wx + ww // 2), dy := ty + th // 2 - (wy + wh // 2)
+        Komorebic('move ' (Abs(dx) >= Abs(dy) ? (dx < 0 ? 'left' : 'right') : (dy < 0 ? 'up' : 'down')))
+        return
+    }
+}
+
+DragResize(hwnd, x0, y0, held) {
+    WinGetPos(&wx, &wy, &ww, &wh, hwnd)
+    col := Min(Max((x0 - wx) * 3 // ww, 0), 2), row := Min(Max((y0 - wy) * 3 // wh, 0), 2)
+    while held()
+        Sleep(10)
+    MouseGetPos(&x, &y)
+    dx := x - x0, dy := y - y0
+    K := (cmd) => RunWait('"' KomorebicExe '" ' cmd, , 'Hide')
+    for axis in [[dx, col = 0 ? 'left' : 'right', col = 1 && row != 1], [dy, row = 0 ? 'up' : 'down', row = 1 && col != 1]] {
+        d := axis[1], edge := axis[2]
+        if axis[3] || Abs(d) < 20
+            continue
+        grows := (edge = 'left' || edge = 'up') ? d < 0 : d > 0
+        K('resize-delta ' Abs(d) * 2)               ; komorebi moves the shared edge by half the delta
+        K('resize-edge ' edge (grows ? ' increase' : ' decrease'))
+    }
+    K('resize-delta 50')
+}
+
 ; ShareX directo: como Komorebic(), evita el spawn de pwsh + Import-Module completo del
 ; módulo (24 archivos) que paga `winarchy screenshot` por cada hotkey de captura.
 ShareXExe := FileExist(A_ProgramFiles "\ShareX\ShareX.exe")
@@ -357,6 +425,7 @@ WinarchyThemeItems() {
 
 WinarchyTilingItems() {
     return [
+        {text:'Layout',                              hint:'SUPER+Shift+L',  sub: WinarchyLayoutItems()},
         {text:'Manage this window',                                action:(*)=>Komorebic('manage')},
         {text:'Unmanage this window',                              action:(*)=>Komorebic('unmanage')},
         {text:'Stop tiling this workspace', hint:'SUPER+Shift+Z',  action:(*)=>Komorebic('toggle-tiling')},
@@ -364,6 +433,21 @@ WinarchyTilingItems() {
         {text:'Title bars',                                        action:(*)=>Komorebic('toggle-title-bars')},
         {text:'Mouse follows focus',                               action:(*)=>Komorebic('toggle-mouse-follows-focus')},
         {text:'Restore hidden windows',                            action:(*)=>Komorebic('restore-windows')} ]
+}
+
+WinarchyLayoutItems() {
+    L := (name, glyph, what, cmd) => {text: name, hint: glyph '  ' what, action: (*) => Komorebic('change-layout ' cmd)}
+    return [
+        L('BSP', Chr(0x25E9), 'split in halves', 'bsp'),
+        L('Grid', Chr(0x25A6), 'even 2' Chr(0xD7) '2 grid', 'grid'),
+        L('Columns', Chr(0x25A5), 'side by side', 'columns'),
+        L('Rows', Chr(0x25A4), 'stacked rows', 'rows'),
+        L('Vertical stack', Chr(0x25E7), 'main left', 'vertical-stack'),
+        L('Right main stack', Chr(0x25E8), 'main right', 'right-main-vertical-stack'),
+        L('Horizontal stack', Chr(0x2B13), 'main on top', 'horizontal-stack'),
+        L('Ultrawide stack', Chr(0x25EB), 'main in centre', 'ultrawide-vertical-stack'),
+        L('Scrolling', Chr(0x25A3), 'scrolling strip', 'scrolling'),
+        {text: 'Next layout', hint: 'SUPER+Shift+L', action: (*) => Komorebic('cycle-layout next')} ]
 }
 
 WinarchyCaptureItems() {
@@ -452,6 +536,8 @@ ParseKeymap(path, defaultTitle := '', startAt := '') {
             key := Chr(0x2190) ' ' Chr(0x2191) ' ' Chr(0x2192) ' ' Chr(0x2193)
         else if (key = 'Enter')
             key := 'Return'
+        else if (key = 'LButton' || key = 'RButton')
+            key := (key = 'LButton' ? 'Left' : 'Right') ' drag'
         else
             key := StrUpper(SubStr(key, 1, 1)) SubStr(key, 2)
         desc := RegExMatch(rest, ';\s*(.+)$', &md) ? Trim(md[1]) : Trim(rest)
@@ -940,6 +1026,10 @@ AccentWatch() {
 #^m::Komorebic('minimize')                       ; minimize
 #^f::Komorebic('toggle-workspace-layer')         ; switch tiling / floating layer
 #^l::Komorebic('toggle-lock')                    ; lock the tile in place
+
+; --- Mouse ---------------------------------------------------------------------
+#LButton::WindowDrag(true)                       ; drag to move the window under the cursor
+#RButton::WindowDrag(false)                      ; drag to resize it (grab the nearest edge or corner)
 
 ; --- Focus ---------------------------------------------------------------------
 #Left::Komorebic('focus left')                   ; move focus

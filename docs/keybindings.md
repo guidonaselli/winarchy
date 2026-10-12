@@ -58,6 +58,8 @@ manual app list: Flow already indexes installed programs.
 | `SUPER+Shift+←/→/↑/↓` | Move window within the layout |
 | `SUPER+=` / `SUPER+-` | Horizontal resize +/- |
 | `SUPER+Shift+=` / `SUPER+Shift+-` | Vertical resize +/- |
+| `SUPER+LButton` (drag) | Move the window under the cursor; drop it on another tile to swap |
+| `SUPER+RButton` (drag) | Resize: grab near an edge or corner and drag (the centre grows right and down) |
 
 ## Stacks (komorebi draws them as tabs in the stackbar)
 
@@ -119,6 +121,7 @@ control panels — `W` is `N` here because `SUPER+Ctrl+W` is stay awake.
 | `SUPER+Shift+Z` | Stop tiling this workspace |
 | `SUPER+Shift+Tab` | Send the window to the previous workspace |
 | `SUPER+Shift+L` | Cycle to the next layout (BSP, columns, rows, grid, scrolling, …) |
+| `SUPER+Alt+Space` → Tiling → Layout | Pick any layout (BSP, grid, columns, rows, the stacks, scrolling) |
 | `SUPER+Tab` | Back to the workspace you came from |
 | `SUPER+Alt+Home` | Remember the current tile sizes |
 | `SUPER+Home` | Restore the remembered tile sizes |
