@@ -129,25 +129,29 @@ DragMove(hwnd, x0, y0, held) {
         Sleep(1)
     }
     DllCall('winmm\timeEndPeriod', 'uint', 1)
-    MouseGetPos(&x, &y)
     DllCall('user32\SetWindowPos', 'ptr', hwnd, 'ptr', 0, 'int', wx, 'int', wy, 'int', 0, 'int', 0, 'uint', 0x15)
-    if Abs(x - x0) + Abs(y - y0) < 40
-        return
-    for t in WinGetList() {                      ; top of the z-order first
-        if t = hwnd || !DragTarget(t) || !WinGetTitle(t)
-            continue
-        WinGetPos(&tx, &ty, &tw, &th, t)
-        if x < tx || x >= tx + tw || y < ty || y >= ty + th
-            continue
-        dx := tx + tw // 2 - (wx + ww // 2), dy := ty + th // 2 - (wy + wh // 2)
-        Komorebic('move ' (Abs(dx) >= Abs(dy) ? (dx < 0 ? 'left' : 'right') : (dy < 0 ? 'up' : 'down')))
-        return
+    MouseGetPos(&x, &y, &under)                  ; what is visible under the cursor once the window is back
+    t := DllCall('user32\GetAncestor', 'ptr', under, 'uint', 2, 'ptr')
+    while t && WinGetProcessName(t) = 'komorebi.exe' {   ; focus borders overhang the tile; look through them
+        loop {
+            t := DllCall('user32\GetWindow', 'ptr', t, 'uint', 2, 'ptr')   ; GW_HWNDNEXT
+            if !t
+                break
+            WinGetPos(&tx, &ty, &tw, &th, t)
+            if (WinGetStyle(t) & 0x10000000) && x >= tx && x < tx + tw && y >= ty && y < ty + th
+                break
+        }
     }
 }
 
 DragResize(hwnd, x0, y0, held) {
     WinGetPos(&wx, &wy, &ww, &wh, hwnd)
     col := Min(Max((x0 - wx) * 3 // ww, 0), 2), row := Min(Max((y0 - wy) * 3 // wh, 0), 2)
+    if !t || t = hwnd || !DragTarget(t)
+        return                                   ; dropped on itself: stay put
+    WinGetPos(&tx, &ty, &tw, &th, t)
+    dx := tx + tw // 2 - (wx + ww // 2), dy := ty + th // 2 - (wy + wh // 2)
+    Komorebic('move ' (Abs(dx) >= Abs(dy) ? (dx < 0 ? 'left' : 'right') : (dy < 0 ? 'up' : 'down')))
     while held()
         Sleep(10)
     MouseGetPos(&x, &y)
