@@ -31,6 +31,7 @@
    Qt dimensiona el QLabel por el advance de la fuente y muchos glifos pintan más
    ancho que eso, así que se recortan: min-width les reserva la caja completa. */
 .widget .icon {
+    font-family: 'JetBrainsMono NFP';
     font-size: 15px;
     padding: 0 5px;
     min-width: 18px;
@@ -123,6 +124,7 @@
 }
 
 .media-widget .label {
+    font-family: 'JetBrainsMonoNL NFP';
     font-size: 14px;
 }
 
@@ -173,6 +175,7 @@
 .system-grouper .grouper-button,
 .connections-grouper .grouper-button {
     color: {{ui.net}};
+    font-family: 'JetBrainsMono NFP';
     font-size: 16px;
     background: transparent;
     border: none;
