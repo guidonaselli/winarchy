@@ -107,7 +107,7 @@
         "BackgroundEffects.type": "acrylicblur",
         "FlyoutsEffects": 1,
         "RenderingMod.AccentColorControls": 1,
-        "RenderingMod.SysColors": 1,
+        "RenderingMod.SysColors": 0,
         "RenderingMod.ThemeBackground": 1
       }
     },
