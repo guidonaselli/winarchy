@@ -745,6 +745,17 @@ Describe 'Theme defaults' {
         }
     }
 
+    It 'darkens the [ui] colours that vanish against a light background' {
+        InModuleScope Winarchy {
+            $theme = @{ name = 'x'; mode = 'light'
+                colors = @{ accent = '#7aa2f7'; background = '#ffffff'; color4 = '#dddddd'; color5 = '#dddddd'; color6 = '#dddddd'; color8 = '#dddddd' } }
+            $ctx = Build-WinarchyThemeContext -Theme $theme -ThemeDir (Join-Path (Get-WinarchyThemesDir) 'tokyo-night')
+            foreach ($k in 'ui.system', 'ui.media', 'ui.net', 'ui.muted') {
+                (Get-WinarchyYiqLuminance -Hex $ctx[$k]) | Should -BeLessThan 126
+            }
+        }
+    }
+
     It 'lets the theme override a default' {
         InModuleScope Winarchy {
             $theme = @{ name = 'x'; mode = 'dark'; bar = @{ height = 40 }

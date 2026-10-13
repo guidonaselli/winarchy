@@ -158,6 +158,15 @@ function Build-WinarchyThemeContext {
     foreach ($pair in @(@('system', 'color6'), @('media', 'color5'), @('net', 'color4'))) {
         if (-not $ctx.ContainsKey("ui.$($pair[0])")) { $ctx["ui.$($pair[0])"] = $ctx["colors.$($pair[1])"] }
     }
+    # Sobre fondo claro esos slots (y el gris de las notificaciones) se pierden contra la barra.
+    $ctx['ui.muted'] = $ctx['colors.color8']
+    if ($Theme['mode'] -eq 'light') {
+        foreach ($k in 'system', 'media', 'net', 'muted') {
+            if ($ctx["ui.$k"]) {
+                $ctx["ui.$k"] = Get-WinarchyReadableAccentHex -Accent $ctx["ui.$k"] -Background $Theme['colors']['background'] -MinDiff 130
+            }
+        }
+    }
     # Accent como "R;G;B" decimal, para escapes ANSI truecolor (fastfetch usa "38;2;R;G;B")
     $accentHex = $ctx['colors.accent_ui'].TrimStart('#')
     $ctx['colors.accent_ansi_rgb'] = (0, 2, 4 | ForEach-Object {
@@ -605,13 +614,13 @@ function Get-WinarchyReadableAccentHex {
     <# Accent apto como texto/superficie sobre el background del theme: si el
        contraste YIQ es bajo, lo acerca a blanco (fondo oscuro) o negro (fondo
        claro) lo justo para que se distinga. Themes curados quedan intactos. #>
-    param([Parameter(Mandatory)][string]$Accent, [Parameter(Mandatory)][string]$Background)
+    param([Parameter(Mandatory)][string]$Accent, [Parameter(Mandatory)][string]$Background, [double]$MinDiff = 80)
     $bgYiq = Get-WinarchyYiqLuminance -Hex $Background
     $direction = if ($bgYiq -lt 128) { 1.0 } else { -1.0 }
     $hex = $Accent
     for ($f = 0.0; $f -le 1.0; $f += 0.1) {
         $hex = Get-WinarchyShadedHex -Hex $Accent -Factor ($direction * $f)
-        if ([Math]::Abs((Get-WinarchyYiqLuminance -Hex $hex) - $bgYiq) -ge 80) { break }
+        if ([Math]::Abs((Get-WinarchyYiqLuminance -Hex $hex) - $bgYiq) -ge $MinDiff) { break }
     }
     $hex
 }

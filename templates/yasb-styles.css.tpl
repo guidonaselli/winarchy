@@ -130,7 +130,7 @@
 
 .notification-widget .label,
 .notification-widget .icon {
-    color: {{colors.color8}};
+    color: {{ui.muted}};
 }
 
 .notification-widget .new-notification {
