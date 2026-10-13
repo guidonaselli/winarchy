@@ -160,8 +160,9 @@ function Build-WinarchyThemeContext {
     }
     # Sobre fondo claro esos slots (y el gris de las notificaciones) se pierden contra la barra.
     $ctx['ui.muted'] = $ctx['colors.color8']
+    $ctx['ui.accent'] = $ctx['colors.accent_ui']
     if ($Theme['mode'] -eq 'light') {
-        foreach ($k in 'system', 'media', 'net', 'muted') {
+        foreach ($k in 'system', 'media', 'net', 'muted', 'accent') {
             if ($ctx["ui.$k"]) {
                 $ctx["ui.$k"] = Get-WinarchyReadableAccentHex -Accent $ctx["ui.$k"] -Background $Theme['colors']['background'] -MinDiff 130
             }

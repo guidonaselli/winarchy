@@ -24,7 +24,7 @@
 }
 
 .widget .label.alt {
-    color: {{colors.accent_ui}};
+    color: {{ui.accent}};
 }
 
 /* Iconos nerd-font (<span> en los labels): YASB les pone clase "icon" (sin "label").
@@ -65,7 +65,7 @@
 }
 
 .komorebi-active-layout .label {
-    color: {{colors.accent_ui}};
+    color: {{ui.accent}};
 }
 
 .active-window-widget .label {
@@ -73,12 +73,12 @@
 }
 
 .clock-widget .label {
-    color: {{colors.accent_ui}};
+    color: {{ui.accent}};
     font-weight: 600;
 }
 
 .home-widget .label {
-    color: {{colors.accent_ui}};
+    color: {{ui.accent}};
     font-size: 15px;
     padding: 0 6px;
 }
@@ -134,7 +134,7 @@
 }
 
 .notification-widget .new-notification {
-    color: {{colors.accent_ui}};
+    color: {{ui.accent}};
 }
 
 .dnd-widget .label,
@@ -299,13 +299,13 @@
 
 /* Misma identidad que el logo de la izquierda: los dos abren el mismo menu. */
 .winarchy-menu-widget .label {
-    color: {{colors.accent_ui}};
+    color: {{ui.accent}};
     font-size: 15px;
     padding: 0 6px;
 }
 
 .winarchy-update-widget .label {
-    color: {{colors.accent_ui}};
+    color: {{ui.accent}};
     font-weight: 700;
 }
 

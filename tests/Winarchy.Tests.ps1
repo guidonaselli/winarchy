@@ -750,7 +750,7 @@ Describe 'Theme defaults' {
             $theme = @{ name = 'x'; mode = 'light'
                 colors = @{ accent = '#7aa2f7'; background = '#ffffff'; color4 = '#dddddd'; color5 = '#dddddd'; color6 = '#dddddd'; color8 = '#dddddd' } }
             $ctx = Build-WinarchyThemeContext -Theme $theme -ThemeDir (Join-Path (Get-WinarchyThemesDir) 'tokyo-night')
-            foreach ($k in 'ui.system', 'ui.media', 'ui.net', 'ui.muted') {
+            foreach ($k in 'ui.system', 'ui.media', 'ui.net', 'ui.muted', 'ui.accent') {
                 (Get-WinarchyYiqLuminance -Hex $ctx[$k]) | Should -BeLessThan 126
             }
         }
