@@ -24,8 +24,8 @@ config/windows.toml
 config/komorebi/rules.toml
 config/wezterm/user.lua
 
-# Planning interno (specs/changes de OpenSpec y tooling de agentes) — no es parte del producto
-openspec/
+# Planning interno (changes y specs de lmd y tooling de agentes) — no es parte del producto
+lmd/
 .claude/
 .memsearch/
 config/ahk/user-menu.ahk
