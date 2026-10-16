@@ -54,8 +54,11 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
 - `config/` — configs (estáticos + generados). KOMOREBI_CONFIG_HOME y YASB_CONFIG_HOME apuntan acá.
 - `state/`, `backups/` — runtime, gitignored.
 
+## Verificación
+- Cambio visible (barra YASB, theme, WezTerm) o de lógica: seguir `.claude/skills/verify-winarchy/SKILL.md` (doctor, chequeos, captura y vuelta al estado anterior) y su mapa de features.
+
 ## Workflow
-- Spec-driven con OpenSpec (`openspec/`, local y no versionado). Cambios no triviales: proposal primero; el `tasks.md` de cada change es el único registro de avance (`openspec list`).
+- Planning con lmd (`lmd/`, local y no versionado). Cambios no triviales: proposal primero; el `tasks.md` de cada change es el único registro de avance (`lmd status`).
 - Antes de commitear: `.\tests\Invoke-WinarchyChecks.ps1` (parseo de todo el PowerShell + Pester).
   Lo mismo corre en CI (`.github/workflows/ci.yml`). Requiere Pester 5+.
 - `bin\winarchy.cmd` debe quedar en CRLF (`.gitattributes` lo fuerza): con LF, cmd.exe no
