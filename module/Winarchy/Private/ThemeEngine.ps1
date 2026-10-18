@@ -311,6 +311,9 @@ function Set-WinarchyFlowTheme {
             foreach ($k in @('QueryBoxFont', 'ResultFont', 'ResultSubFont')) { $settings[$k] = $FontFamily }
         }
         $settings['IgnoreHotkeysOnFullscreen'] = $true
+        # acrylic y sombra pintan fuera del borde del theme: un halo mas grande que la ventana
+        $settings['BackdropType'] = 0
+        $settings['UseDropShadowEffect'] = $false
         $settings | ConvertTo-Json -Depth 50 | Set-Content -Path $settingsPath -Encoding UTF8
     }
 }
