@@ -59,6 +59,22 @@
       }
     },
     {
+      "id": "windows-11-taskbar-styler",
+      "version": "1.10",
+      "include": [
+        "explorer.exe"
+      ],
+      "settings": {
+        "clickThroughTaskbar": 1,
+        "controlStyles[0].styles[0]": "",
+        "controlStyles[0].target": "",
+        "styleConstants[0]": "",
+        "theme": "FrostyGlass",
+        "themeResourceVariables[0]": "",
+        "xamlDiagnosticsHandling": "alert"
+      }
+    },
+    {
       "id": "windows-11-start-menu-styler",
       "version": "1.7",
       "settings": {

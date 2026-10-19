@@ -198,7 +198,7 @@ winarchy doctor
 `winarchy extras add windhawk` (elevated shell) installs [Windhawk](https://windhawk.net)
 with a curated set of mods pinned in `extras/windhawk/mods.json`: dark menus, WinUI
 context menu animation, modern folder picker, better file sizes in Explorer, the
-File Explorer / Start menu / notification center / Settings stylers, translucent windows
+File Explorer / taskbar (FrostyGlass) / Start menu / notification center / Settings stylers, translucent windows
 and invisible borders. No clicks: each mod is installed from its precompiled build at the
 pinned version with its settings, and Windhawk is left without its own tray icon or update
 check.

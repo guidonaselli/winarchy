@@ -2224,7 +2224,7 @@ Describe 'Set-WinarchyEverythingIdentity' {
 }
 
 Describe 'Windhawk extras manifest' {
-    It 'pins every curated mod with its full settings and leaves the taskbar styler out' {
+    It 'pins every curated mod with its full settings and the taskbar styler on FrostyGlass' {
         $manifest = Get-Content (Join-Path $script:Root 'extras\windhawk\mods.json') -Raw | ConvertFrom-Json
         $manifest.windhawk | Should -Match '^\d+\.\d+'
         $manifest.mods.Count | Should -BeGreaterThan 0
@@ -2233,7 +2233,7 @@ Describe 'Windhawk extras manifest' {
             $mod.version | Should -Match '^\d+(\.\d+)*$'
             $mod.PSObject.Properties.Name | Should -Contain 'settings'
         }
-        $manifest.mods.id | Should -Not -Contain 'windows-11-taskbar-styler'
+        ($manifest.mods | Where-Object id -eq 'windows-11-taskbar-styler').settings.theme | Should -Be 'FrostyGlass'
     }
 }
 
