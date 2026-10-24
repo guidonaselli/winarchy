@@ -122,8 +122,13 @@ function Install-WinarchyWindhawkMod {
         foreach ($folder in (Get-WinarchyWindhawkSubfolders -Architecture $meta.architecture)) {
             $target = Join-Path $DataRoot "Engine\Mods\$folder\$dllName"
             New-Item -ItemType Directory -Path (Split-Path $target) -Force | Out-Null
+            $pinned = $Mod.PSObject.Properties['sha256']?.Value
+            $expected = if ($pinned) { $pinned.PSObject.Properties[$folder]?.Value }
+            if (-not $expected) { throw "no pinned SHA256 for $folder (run scripts\Update-WindhawkHashes.ps1)" }
             Invoke-WebRequest -Uri "$base${version}_$folder.dll" -OutFile $target -UseBasicParsing
             $written += $target
+            $actual = (Get-FileHash $target -Algorithm SHA256).Hash
+            if ($actual -ne $expected) { throw "SHA256 mismatch for $folder DLL (expected $expected, got $actual)" }
         }
     }
     catch {

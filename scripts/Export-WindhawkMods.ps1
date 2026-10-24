@@ -34,3 +34,4 @@ New-Item -ItemType Directory -Path (Split-Path $OutFile) -Force | Out-Null
     mods     = @($mods)
 } | ConvertTo-Json -Depth 10 | Set-Content -Path $OutFile -Encoding UTF8
 Write-Host "Exported $(@($mods).Count) mods to $OutFile"
+& (Join-Path $PSScriptRoot 'Update-WindhawkHashes.ps1') -ManifestPath $OutFile

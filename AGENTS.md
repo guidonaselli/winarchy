@@ -45,7 +45,8 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
   No reintroducir un segundo tray.
 - Windhawk es un extra opcional FUERA del core (`winarchy extras`): solo se instala a pedido
   explícito; ni `install.ps1` ni `update` lo tocan. Su set curado vive en
-  `extras/windhawk/mods.json` (se regenera con `scripts/Export-WindhawkMods.ps1`).
+  `extras/windhawk/mods.json` (se regenera con `scripts/Export-WindhawkMods.ps1`; los SHA256 de las DLL se fijan con
+  `scripts/Update-WindhawkHashes.ps1` y el instalador los verifica antes de tocar el registro).
 - Fuera de alcance: novideo_srgb, Twinkle Tray (dependen del hardware de la máquina).
 - Antes de cambios de sistema (registry, autostart): snapshot en `backups/<timestamp>/`.
 

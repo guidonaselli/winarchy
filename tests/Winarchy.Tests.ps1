@@ -2359,6 +2359,8 @@ Describe 'Windhawk extras manifest' {
             $mod.id | Should -Match '^[a-z0-9-]+$'
             $mod.version | Should -Match '^\d+(\.\d+)*$'
             $mod.PSObject.Properties.Name | Should -Contain 'settings'
+            $mod.sha256.PSObject.Properties.Name | Should -Contain '64'
+            foreach ($hash in $mod.sha256.PSObject.Properties.Value) { $hash | Should -Match '^[0-9a-f]{64}$' }
         }
         ($manifest.mods | Where-Object id -eq 'windows-11-taskbar-styler').settings.theme | Should -Be 'FrostyGlass'
     }
@@ -2379,13 +2381,14 @@ Describe 'Windhawk extras' {
             $source = "// ==WindhawkMod==`n// @id demo`n// @version 1.2`n// @include explorer.exe`n// @exclude a.exe`n// @exclude b.exe`n// ==/WindhawkMod==`n"
             Mock Invoke-RestMethod { ,@([pscustomobject]@{ version = '1.1' }, [pscustomobject]@{ version = '1.2' }) }
             Mock Invoke-WebRequest {
-                if ($OutFile) { Set-Content -Path $OutFile -Value $Uri; return }
+                if ($OutFile) { [IO.File]::WriteAllText($OutFile, 'dll'); return }
                 [pscustomobject]@{ RawContentStream = [IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes($source)) }
             }
             New-Item -ItemType Directory -Path "$Data\Engine\Mods\64" -Force | Out-Null
             Set-Content "$Data\Engine\Mods\64\demo_1.1_123456.dll" 'old'
             Set-Content "$Data\Engine\Mods\64\demo-other_1.0_123456.dll" 'other mod'
-            $mod = [pscustomobject]@{ id = 'demo'; version = '1.2'; settings = [pscustomobject]@{ theme = 'Glass'; size = 3 } }
+            $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes('dll')))
+            $mod = [pscustomobject]@{ id = 'demo'; version = '1.2'; settings = [pscustomobject]@{ theme = 'Glass'; size = 3 }; sha256 = [pscustomobject]@{ '32' = $hash; '64' = $hash } }
 
             Install-WinarchyWindhawkMod -Mod $mod -WindhawkVersion '1.7.3' -RegistryRoot $Reg -DataRoot $Data
 
@@ -2413,16 +2416,52 @@ Describe 'Windhawk extras' {
             Mock Invoke-RestMethod { ,@([pscustomobject]@{ version = '1.2' }) }
             Mock Invoke-WebRequest {
                 if ($Uri -like '*_64.dll') { throw 'network down' }
-                if ($OutFile) { Set-Content -Path $OutFile -Value 'dll'; return }
+                if ($OutFile) { [IO.File]::WriteAllText($OutFile, 'dll'); return }
                 [pscustomobject]@{ RawContentStream = [IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes($source)) }
             }
-            $mod = [pscustomobject]@{ id = 'demo'; version = '1.2'; settings = [pscustomobject]@{} }
+            $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes('dll')))
+            $mod = [pscustomobject]@{ id = 'demo'; version = '1.2'; settings = [pscustomobject]@{}; sha256 = [pscustomobject]@{ '32' = $hash; '64' = $hash } }
 
             { Install-WinarchyWindhawkMod -Mod $mod -WindhawkVersion '1.7.3' -RegistryRoot $Reg -DataRoot $Data } |
                 Should -Throw '*network down*'
 
             Test-Path "$Reg\Engine\Mods\demo" | Should -BeFalse
             @(Get-ChildItem "$Data\Engine\Mods" -Recurse -File -ErrorAction SilentlyContinue).Count | Should -Be 0
+        }
+    }
+
+    It 'rejects a DLL whose SHA256 differs from the pinned one and leaves nothing behind' {
+        InModuleScope Winarchy -Parameters @{ Reg = $script:WhReg; Data = $script:WhData } {
+            param($Reg, $Data)
+            $source = "// ==WindhawkMod==`n// @id demo`n// @version 1.2`n// ==/WindhawkMod==`n"
+            Mock Invoke-RestMethod { ,@([pscustomobject]@{ version = '1.2' }) }
+            Mock Invoke-WebRequest {
+                if ($OutFile) { [IO.File]::WriteAllText($OutFile, 'tampered'); return }
+                [pscustomobject]@{ RawContentStream = [IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes($source)) }
+            }
+            $mod = [pscustomobject]@{ id = 'demo'; version = '1.2'; settings = [pscustomobject]@{}; sha256 = [pscustomobject]@{ '32' = 'aa'; '64' = 'aa' } }
+
+            { Install-WinarchyWindhawkMod -Mod $mod -WindhawkVersion '1.7.3' -RegistryRoot $Reg -DataRoot $Data } |
+                Should -Throw '*SHA256 mismatch*'
+
+            Test-Path "$Reg\Engine\Mods\demo" | Should -BeFalse
+            @(Get-ChildItem "$Data\Engine\Mods" -Recurse -File -ErrorAction SilentlyContinue).Count | Should -Be 0
+        }
+    }
+
+    It 'refuses a mod without a pinned hash before downloading its DLL' {
+        InModuleScope Winarchy -Parameters @{ Reg = $script:WhReg; Data = $script:WhData } {
+            param($Reg, $Data)
+            $source = "// ==WindhawkMod==`n// @id demo`n// @version 1.2`n// ==/WindhawkMod==`n"
+            Mock Invoke-RestMethod { ,@([pscustomobject]@{ version = '1.2' }) }
+            Mock Invoke-WebRequest {
+                if ($OutFile) { throw 'DLL must not be downloaded' }
+                [pscustomobject]@{ RawContentStream = [IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes($source)) }
+            }
+            $mod = [pscustomobject]@{ id = 'demo'; version = '1.2'; settings = [pscustomobject]@{} }
+
+            { Install-WinarchyWindhawkMod -Mod $mod -WindhawkVersion '1.7.3' -RegistryRoot $Reg -DataRoot $Data } |
+                Should -Throw '*no pinned SHA256*'
         }
     }
 

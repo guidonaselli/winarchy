@@ -7,6 +7,11 @@
       "settings": {
         "AppMode": "ForceDark",
         "TranslucentFlyoutsFix": 1
+      },
+      "sha256": {
+        "32": "f0013d2d062971de7ef95f1688ddb26ceb2fc0eb157806e30dbde26f0299264f",
+        "64": "536e8640391c069a0926337c06ef777ee79ed024ba319c70498b769468769c6a",
+        "arm64": "58384b08a512919ff60c9e03e4fac96aa0093ea49e22c3e86f7e6a61d1129c96"
       }
     },
     {
@@ -20,6 +25,11 @@
         "fadeDuration": 80,
         "timerInterval": 6,
         "translucentWindowsCompat": 1
+      },
+      "sha256": {
+        "32": "0fbbe5ad13a0079d8177f2f44bc9282d169d1e36e95470fef09c2614e09ef97c",
+        "64": "5ffa89f5fc127c6645636c773422a73671132dd92a5b20b35609e4d465736aea",
+        "arm64": "6d6d976a1531fdeaeda9c551f2d1db7492202a6bb74d29a3025ad65bab6b56ad"
       }
     },
     {
@@ -28,7 +38,12 @@
       "include": [
         "explorer.exe"
       ],
-      "settings": {}
+      "settings": {},
+      "sha256": {
+        "32": "b56681f656c6d6b5c8d9bf29ba95565dc5602fd45e37156bc0c1d22333c5c195",
+        "64": "54ff487eb49db8e21d40e6e512f57e283b341942681e436e215b2d04a18b4e87",
+        "arm64": "f59394b893242798711d84e32375f4634d79cd6318fcb4d5928cd27a7e895f26"
+      }
     },
     {
       "id": "explorer-details-better-file-sizes",
@@ -41,6 +56,11 @@
         "disableKbOnlySizes": 1,
         "sortSizesMixFolders": 1,
         "useIecTerms": 0
+      },
+      "sha256": {
+        "32": "22d699908e153a88d1453ac82f6ad419ac3526b6f8eb1c1edfdfae98dc1fffba",
+        "64": "1d2ab86ea24cddc8b43f13519dfec5a8ce6bfdaefb32554975a5be8c92d8a8e6",
+        "arm64": "4c40bcf3aee05c0aea882832c50b228f28c7bb359877cbcc47ac7ea4f530077d"
       }
     },
     {
@@ -56,6 +76,10 @@
         "theme": "Translucent Explorer11",
         "themeResourceVariables[0]": "",
         "xamlDiagnosticsHandling": "alert"
+      },
+      "sha256": {
+        "64": "9faed5d89f4ab3442554a99a42c9cd76e97147704ac1d95c8483d856f3730c96",
+        "arm64": "32452824e22201b899be0c256a8dfc2584b81e012fc2336111d523075d0cea41"
       }
     },
     {
@@ -72,6 +96,10 @@
         "theme": "FrostyGlass",
         "themeResourceVariables[0]": "",
         "xamlDiagnosticsHandling": "alert"
+      },
+      "sha256": {
+        "64": "e755b075aae140de0379a2ec6d6c2ea6a025a84e68792c3493fa52282d0b800b",
+        "arm64": "ff3c23e9bae9625f899464cc5f8bd3ed0cd35897a39c5bbf7280bc2636c423db"
       }
     },
     {
@@ -87,6 +115,10 @@
         "webContentCustomJs": "",
         "webContentStyles[0].styles[0]": "",
         "webContentStyles[0].target": ""
+      },
+      "sha256": {
+        "64": "c116a5388ac8299ca9098e139bddff496ab025d75fe0652f607767904dd89f4d",
+        "arm64": "60b8f99916229a44bdbe71960bd30236169ff94a1f3564fa383bd91a4bb9b60f"
       }
     },
     {
@@ -98,6 +130,10 @@
         "styleConstants[0]": "",
         "theme": "TranslucentShell",
         "themeResourceVariables[0]": ""
+      },
+      "sha256": {
+        "64": "13afa343c42f31d1d2cc0b07c726f1e93f04f9989aa4033ac6566ae49d52069a",
+        "arm64": "97d0f7fafba5131797bd54677823f5542c9d97fcd0e38b59610b91feac0f7a04"
       }
     },
     {
@@ -109,6 +145,10 @@
         "styleConstants[0]": "",
         "theme": "WindowGlass",
         "themeResourceVariables[0]": ""
+      },
+      "sha256": {
+        "64": "62d1dd7b49dc6ebdf0877a8279e09532ce345f422b53985ce3a6d697059841b6",
+        "arm64": "fd2c97293ae0d87f3ab180282abdc1a74dad1cdf305c746788348f1ccf51a43c"
       }
     },
     {
@@ -125,6 +165,11 @@
         "RenderingMod.AccentColorControls": 1,
         "RenderingMod.SysColors": 0,
         "RenderingMod.ThemeBackground": 1
+      },
+      "sha256": {
+        "32": "54cf288ae79f7725dc1495ad917ca8aa1d72d75f45badd4efe510355dd9e1dcb",
+        "64": "617481d03498992dbf55a29cf95843373e3f7dc8b6003f6df25538b3fab7b0d8",
+        "arm64": "4e0c6efd3559740da6c9235bc2117310118e52ca1ebcd310438efea222738023"
       }
     },
     {
@@ -132,6 +177,11 @@
       "version": "1.0.0",
       "settings": {
         "SpecialWindows": 1
+      },
+      "sha256": {
+        "32": "fbd7747efa808f8ae42754fc01c4b46dbb5257a0b40dff963c17b8965832fb16",
+        "64": "b4e311f7deda9f72b9064ebb506741a8fc628b567e2ff3b5fbac99faa0e0133e",
+        "arm64": "e6dbd6dc9b356885c1a7acae7123628e184fa3bbdb71319a5304c1eb3c1d0a00"
       }
     }
   ]
