@@ -75,6 +75,10 @@ CloseWindow() {
         if WinGetClass(hwnd) ~= '^(Progman|WorkerW|Shell_TrayWnd|Shell_SecondaryTrayWnd)$'
             || WinGetProcessName(hwnd) = 'yasb.exe'
             return
+        ; WezTerm tarda 2-4 s en cerrar (apaga los procesos del pane); oculta primero para que
+        ; el tiling reaccione al instante. Seguro: window_close_confirmation = NeverPrompt.
+        if WinGetProcessName(hwnd) = 'wezterm-gui.exe'
+            WinHide(hwnd)
         PostMessage(0x0010, 0, 0, , hwnd)
     }
 }
