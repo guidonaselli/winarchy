@@ -1,4 +1,5 @@
-# Hardening.ps1 — apaga la publicidad, sugerencias y búsqueda web de Windows.
+# Hardening.ps1 — apaga la publicidad, sugerencias y búsqueda web de Windows y quita
+# retardos y animaciones de la interfaz.
 # Solo HKCU (sin admin), idempotente y reversible: revertir borra los valores, que devuelve
 # a Windows su default.
 
@@ -29,6 +30,11 @@ function Get-WinarchyHardeningSettings {
         , @("$base\UserProfileEngagement", 'ScoobeSystemSettingEnabled', 0)
         , @('HKCU:\Control Panel\International\User Profile', 'HttpAcceptLanguageOptOut', 1)
         , @('HKCU:\Software\Policies\Microsoft\Windows\CloudContent', 'DisableWindowsSpotlightFeatures', 1)
+        # fluidez: submenús en 100 ms (default 400) y sin animar minimizar/maximizar ni la taskbar;
+        # el tiling reordena las ventanas al instante. Los dos primeros son REG_SZ.
+        , @('HKCU:\Control Panel\Desktop', 'MenuShowDelay', '100', 'String')
+        , @('HKCU:\Control Panel\Desktop\WindowMetrics', 'MinAnimate', '0', 'String')
+        , @("$base\Explorer\Advanced", 'TaskbarAnimations', 0)
     )
     foreach ($name in 'ContentDeliveryAllowed', 'FeatureManagementEnabled', 'OemPreInstalledAppsEnabled',
         'PreInstalledAppsEnabled', 'PreInstalledAppsEverEnabled', 'SilentInstalledAppsEnabled',
@@ -58,7 +64,8 @@ function Set-WinarchyWindowsHardening {
     $priorFile = Join-Path (Get-WinarchyStateDir) 'hardening-prior.json'
     $prior = if (Test-Path $priorFile) { Get-Content $priorFile -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable } else { @{} }
     foreach ($setting in Get-WinarchyHardeningSettings) {
-        $path, $name, $value = $setting
+        $path, $name, $value, $type = $setting
+        if (-not $type) { $type = 'DWord' }
         $id = "$path|$name"
         try {
             $item = Get-ItemProperty -Path $path -Name $name -ErrorAction Ignore
@@ -67,7 +74,7 @@ function Set-WinarchyWindowsHardening {
                 $restore = $prior[$id]
                 if ($null -ne $restore) {
                     if ($current -eq $restore) { continue }
-                    Set-ItemProperty -Path $path -Name $name -Value $restore -Type DWord -ErrorAction Stop
+                    Set-ItemProperty -Path $path -Name $name -Value $restore -Type $type -ErrorAction Stop
                 }
                 else {
                     if ($null -eq $current) { continue }
@@ -78,7 +85,7 @@ function Set-WinarchyWindowsHardening {
                 if (-not $prior.ContainsKey($id)) { $prior[$id] = $current }   # también si ya valía $value: revertir no debe borrar lo que el usuario ya tenía
                 if ($current -eq $value) { continue }
                 if (-not (Test-Path $path)) { $null = New-Item -Path $path -Force }
-                Set-ItemProperty -Path $path -Name $name -Value $value -Type DWord -ErrorAction Stop
+                Set-ItemProperty -Path $path -Name $name -Value $value -Type $type -ErrorAction Stop
             }
             $changed++
         }

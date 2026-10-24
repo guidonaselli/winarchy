@@ -1729,28 +1729,33 @@ Describe 'Window slots' {
             Mock Get-WinarchyHardeningSettings {
                 , @('HKCU:\Software\WinarchyPesterHardening', 'Had', 0)
                 , @('HKCU:\Software\WinarchyPesterHardening', 'Absent', 0)
+                , @('HKCU:\Software\WinarchyPesterHardening', 'Delay', '100', 'String')
             }
             try {
                 $null = New-Item -Path $key -Force
                 Set-ItemProperty -Path $key -Name 'Had' -Value 1 -Type DWord
+                Set-ItemProperty -Path $key -Name 'Delay' -Value '400' -Type String
 
-                Set-WinarchyWindowsHardening | Should -Be 2
+                Set-WinarchyWindowsHardening | Should -Be 3
                 (Get-ItemProperty $key).Had | Should -Be 0
+                (Get-Item $key).GetValueKind('Delay') | Should -Be 'String'
+                (Get-ItemProperty $key).Delay | Should -Be '100'
 
-                Set-WinarchyWindowsHardening -Revert | Should -Be 2
+                Set-WinarchyWindowsHardening -Revert | Should -Be 3
                 (Get-ItemProperty $key).Had | Should -Be 1
+                (Get-ItemProperty $key).Delay | Should -Be '400'
                 (Get-ItemProperty $key).PSObject.Properties['Absent'] | Should -BeNullOrEmpty
             }
             finally { Remove-Item $key -Recurse -Force -ErrorAction SilentlyContinue }
         }
     }
 
-    It 'declares every hardening setting as a (path, name, value) triple' {
+    It 'declares every hardening setting as (path, name, value[, type])' {
         InModuleScope Winarchy {
             $settings = @(Get-WinarchyHardeningSettings)
             $settings.Count | Should -BeGreaterThan 20
             foreach ($s in $settings) {
-                @($s).Count | Should -Be 3
+                @($s).Count | Should -BeIn 3, 4
                 $s[0] | Should -Match '^HKCU:\\'
             }
         }
