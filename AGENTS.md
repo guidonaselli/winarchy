@@ -24,7 +24,9 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
   limpia en un momento indeterminado posterior.
 - Las reglas por app de la comunidad (`vendor/asc/`) se COMPILAN dentro del komorebi.json
   generado; nunca `app_specific_configuration_path` (la precedencia la define Winarchy).
-  Capas, de menor a mayor: ASC -> template -> games.toml -> `config/komorebi/rules.toml`.
+  Capas, de menor a mayor: ASC -> template -> games.toml + games.user.toml -> `config/komorebi/rules.toml`.
+  `games.toml` es el catálogo versionado; lo que el usuario registra con `game-mode add` va
+  a `games.user.toml` (gitignored) para que `update --self` nunca vea el árbol sucio.
   Ubicacion (ignore/manage/floating) es excluyente y la capa alta reemplaza; los atributos
   se unen. `rules.toml` es del usuario y gitignored: ningun update lo toca.
 - WezTerm es el terminal por defecto (SUPER+Return, agentes, `winarchy menu`). Su config

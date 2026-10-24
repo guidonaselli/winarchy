@@ -111,10 +111,17 @@ function Invoke-WinarchySelfUpdate {
     }
 
     # Guard: no pisar cambios locales sin commitear en archivos versionados.
-    $dirty = & git -C $root status --porcelain 2>$null
+    $dirty = & git -C $root status --porcelain --untracked-files=no 2>$null
     if ($dirty) {
         Write-WinarchyErr 'Working tree has uncommitted changes to tracked files; aborting to avoid overwriting your edits.'
         Write-WinarchyInfo 'Commit or stash them (your customization should live in untracked overrides), then retry.'
+        return
+    }
+
+    $branch = (& git -C $root symbolic-ref --short -q HEAD 2>$null)
+    if ($branch -ne $script:WinarchyReleaseBranch) {
+        Write-WinarchyErr "Self-update needs the '$($script:WinarchyReleaseBranch)' branch checked out (now: $(if ($branch) { $branch } else { 'detached HEAD' }))."
+        Write-WinarchyInfo "Switch with: git -C `"$root`" switch $($script:WinarchyReleaseBranch)"
         return
     }
 
@@ -124,9 +131,9 @@ function Invoke-WinarchySelfUpdate {
     & git -C $root fetch origin $script:WinarchyReleaseBranch 2>&1 | Out-Host
     if ($LASTEXITCODE -ne 0) { Write-WinarchyErr 'git fetch failed; check your network/remote and retry.'; return }
 
-    & git -C $root pull --ff-only origin $script:WinarchyReleaseBranch 2>&1 | Out-Host
+    & git -C $root merge --ff-only FETCH_HEAD 2>&1 | Out-Host
     if ($LASTEXITCODE -ne 0) {
-        Write-WinarchyErr "git pull --ff-only failed (local branch diverged from $($script:WinarchyReleaseBranch)). Resolve manually or re-clone."
+        Write-WinarchyErr "Fast-forward failed (local '$($script:WinarchyReleaseBranch)' diverged from origin, or a local edit conflicts). Resolve manually or re-clone."
         return
     }
 
@@ -143,5 +150,6 @@ function Invoke-WinarchySelfUpdate {
         Write-WinarchyErr "Migration failed. Roll back with: git -C `"$root`" checkout $before  (then re-run install.ps1)."
         return
     }
+    Remove-Item (Join-Path (Get-WinarchyStateDir) 'update-available.flag') -Force -ErrorAction SilentlyContinue
     Write-WinarchyOk "Winarchy updated. Rollback if needed: git -C `"$root`" checkout $before"
 }

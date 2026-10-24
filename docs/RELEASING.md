@@ -1,7 +1,7 @@
 # Releasing Winarchy
 
 Winarchy actualiza a sus usuarios vía `winarchy update --self`, que hace
-`git pull --ff-only origin release` + migración idempotente. Para que eso funcione, cada
+`git fetch` + `git merge --ff-only FETCH_HEAD` en la rama `release` + migración idempotente. Para que eso funcione, cada
 release tiene que dejar la rama `release` apuntando al tag estable y la `ModuleVersion` en
 sync con el tag.
 

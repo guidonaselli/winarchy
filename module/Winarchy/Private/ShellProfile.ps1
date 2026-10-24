@@ -23,7 +23,7 @@ function Install-WinarchyShellProfile {
         $script:WinarchyProfileMarkerEnd
     ) -join "`r`n"
 
-    $existing = if (Test-Path $profilePath) { Get-Content $profilePath -Raw } else { '' }
+    $existing = if (Test-Path $profilePath) { [string](Get-Content $profilePath -Raw) } else { '' }
     $pattern = '(?s)' + [regex]::Escape($script:WinarchyProfileMarkerStart) + '.*?' +
         [regex]::Escape($script:WinarchyProfileMarkerEnd)
 
@@ -58,7 +58,7 @@ function Remove-WinarchyShellProfile {
         Write-WinarchyInfo 'No pwsh $PROFILE found; nothing to remove.'
         return
     }
-    $existing = Get-Content $profilePath -Raw
+    $existing = [string](Get-Content $profilePath -Raw)
     $pattern = '(?s)\r?\n?' + [regex]::Escape($script:WinarchyProfileMarkerStart) + '.*?' +
         [regex]::Escape($script:WinarchyProfileMarkerEnd) + '\r?\n?'
     if ($existing -notmatch $pattern) {

@@ -45,6 +45,10 @@
         if ($current -ne $branch) {
             throw "$dir is a git checkout on '$current', not '$branch'. Set WINARCHY_DIR to another folder."
         }
+        $origin = git -C $dir remote get-url origin
+        if (($origin -replace '\.git$', '') -ne ($repo -replace '\.git$', '')) {
+            throw "$dir has origin '$origin', not '$repo'; refusing to run its install.ps1. Set WINARCHY_DIR to another folder."
+        }
         Write-Host "Updating $dir..."
         git -C $dir pull --ff-only origin $branch
         if ($LASTEXITCODE -ne 0) { throw "git pull failed in $dir." }

@@ -62,9 +62,9 @@ function Start-WinarchyCodingAgent {
     # --config-file explícito: sin él, un entorno sin WEZTERM_CONFIG_FILE deja al agente
     # en un WezTerm con los defaults de fábrica (sin theme y con cmd.exe por shell).
     Start-Process 'wezterm-gui.exe' -ArgumentList @(
-        '--config-file', (Join-Path (Get-WinarchyRoot) 'config\wezterm\wezterm.lua')
+        '--config-file', "`"$(Join-Path (Get-WinarchyRoot) 'config\wezterm\wezterm.lua')`""
         'start'
-        '--cwd', ([Environment]::GetFolderPath('UserProfile'))
+        '--cwd', "`"$([Environment]::GetFolderPath('UserProfile'))`""
         '--', $agent.Command
     )
 }

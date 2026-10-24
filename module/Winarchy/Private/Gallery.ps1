@@ -87,7 +87,8 @@ function Show-WinarchyThemeGallery {
         $border.Add_MouseLeftButtonUp({
             param($sender, $e)
             $window.Close()
-            Set-WinarchyTheme -Name $sender.Tag
+            # una excepción sin atrapar en un handler WPF tira el proceso entero sin mensaje
+            try { Set-WinarchyTheme -Name $sender.Tag } catch { Write-WinarchyErr "Theme '$($sender.Tag)' was not applied: $($_.Exception.Message)" }
         }.GetNewClosure())
 
         $wrap.AddChild($border)

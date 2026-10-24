@@ -175,6 +175,14 @@ the `SUPER+K` overlay under "User", or under your own `; --- Section ---` header
 - `Win+G` is WhatsApp outside games; in game-mode all SUPER hotkeys are suspended,
   so Game Bar gets `Win+G` back exactly when it is useful.
 
+## Elevated windows (known limit)
+AHK runs un-elevated, and Windows (UIPI) does not let it see keys while an elevated
+window has focus: Task Manager, regedit, an admin terminal, and any app that runs
+"as administrator" (Revo Uninstaller, installers). There `Win+Shift+S` falls through to
+the native Windows snipping tool and the other SUPER hotkeys do nothing. They work again
+as soon as a non-elevated window is focused. AHK is not elevated on purpose: everything
+it launches would inherit admin rights.
+
 ## Differences vs Omarchy
 - `SUPER+Space` opens Flow unscoped (in Omarchy it opens Walker, apps-only); the
   apps-only equivalent lives in the menu's **Apps** entry instead, to avoid

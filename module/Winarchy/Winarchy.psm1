@@ -41,6 +41,8 @@ function Show-WinarchyHelp {
     screenshot [kind]         Capture via ShareX: region window full last scrolling
                               record record-gif stop ocr qr color ruler pin
     game-mode on|off|status   Manual game mode (AHK also enables it on its own)
+                              on needs the registered game focused: from a terminal use
+                              `game-mode on --delay 5` and switch to the game
     layout save [exe]         Remember where each app currently lives (monitor+workspace+slot)
                               (one exe if given; --dry-run to preview without saving)
     layout apply              Re-apply the saved placement rules to komorebi
@@ -126,7 +128,7 @@ function Invoke-Winarchy {
             switch ($sub) {
                 'install' {
                     if ($rest.Count -lt 3) { throw 'Usage: winarchy webapp install <name> <url>' }
-                    Install-WinarchyWebapp -Name $rest[1] -Url $rest[2]
+                    Install-WinarchyWebapp -Name ($rest[1..($rest.Count - 2)] -join ' ') -Url $rest[-1]
                 }
                 'remove' {
                     if ($rest.Count -lt 2) { throw 'Usage: winarchy webapp remove <name>' }
@@ -143,16 +145,20 @@ function Invoke-Winarchy {
         'game-mode' {
             $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'status' }
             switch ($sub) {
-                'on' { Enable-WinarchyGameMode }
+                'on' {
+                    $i = [array]::IndexOf($rest, '--delay')
+                    if ($i -ge 0 -and ($i + 1 -ge $rest.Count -or $rest[$i + 1] -notmatch '^\d+$')) { throw 'Usage: winarchy game-mode on [--delay <seconds>]' }
+                    Enable-WinarchyGameMode -Delay $(if ($i -ge 0) { [int]$rest[$i + 1] } else { 0 })
+                }
                 'off' { Disable-WinarchyGameMode }
                 'status' { Get-WinarchyGameModeStatus }
                 'add' {
                     if ($rest.Count -lt 2) { throw 'Usage: winarchy game-mode add <exe>' }
-                    Add-WinarchyGame -Exe $rest[1]
+                    Add-WinarchyGame -Exe ($rest[1..($rest.Count - 1)] -join ' ')
                 }
                 'remove' {
                     if ($rest.Count -lt 2) { throw 'Usage: winarchy game-mode remove <exe>' }
-                    Remove-WinarchyGame -Exe $rest[1]
+                    Remove-WinarchyGame -Exe ($rest[1..($rest.Count - 1)] -join ' ')
                 }
                 default { throw "Unknown subcommand: game-mode $sub (on|off|status|add|remove)" }
             }
@@ -161,7 +167,7 @@ function Invoke-Winarchy {
             $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'list' }
             switch ($sub) {
                 'save' {
-                    $target = @($rest | Select-Object -Skip 1 | Where-Object { $_ -notlike '-*' }) | Select-Object -First 1
+                    $target = @($rest | Select-Object -Skip 1 | Where-Object { $_ -notlike '-*' }) -join ' '
                     Save-WinarchyWindowLayout -Exe $target `
                         -WhatIf:($rest -contains '--dry-run' -or $rest -contains '-WhatIf')
                 }
@@ -170,7 +176,7 @@ function Invoke-Winarchy {
                 'list' { Get-WinarchyWindowLayout }
                 'forget' {
                     if ($rest.Count -lt 2) { throw 'Usage: winarchy layout forget <exe>' }
-                    Remove-WinarchyWindowPref -Exe $rest[1]
+                    Remove-WinarchyWindowPref -Exe ($rest[1..($rest.Count - 1)] -join ' ')
                 }
                 default { throw "Unknown subcommand: layout $sub (save|apply|order|list|forget)" }
             }
@@ -216,7 +222,7 @@ function Invoke-Winarchy {
                 'next' { Set-WinarchyBackground -Next }
                 'set' {
                     if ($rest.Count -lt 2) { throw 'Usage: winarchy background set <file>' }
-                    Set-WinarchyBackground -File $rest[1]
+                    Set-WinarchyBackground -File ($rest[1..($rest.Count - 1)] -join ' ')
                 }
                 default { throw "Unknown subcommand: background $sub (list|set|next)" }
             }
@@ -226,13 +232,18 @@ function Invoke-Winarchy {
             switch ($sub) {
                 'add' {
                     if ($rest.Count -lt 4) { throw 'Usage: winarchy rules add <category> <exe|class|title|asc> <value> [matching_strategy]' }
-                    Add-WinarchyUserRule -Category $rest[1].ToLower() -Field $rest[2].ToLower() -Value $rest[3] `
-                        -MatchingStrategy $(if ($rest.Count -ge 5) { $rest[4] } else { '' })
+                    $strategies = 'Legacy', 'Equals', 'StartsWith', 'EndsWith', 'Contains', 'Regex',
+                    'DoesNotEqual', 'DoesNotStartWith', 'DoesNotEndWith', 'DoesNotContain'
+                    $hasStrategy = $rest.Count -ge 5 -and $rest[-1] -in $strategies
+                    $valueEnd = if ($hasStrategy) { $rest.Count - 2 } else { $rest.Count - 1 }
+                    Add-WinarchyUserRule -Category $rest[1].ToLower() -Field $rest[2].ToLower() `
+                        -Value ($rest[3..$valueEnd] -join ' ') -MatchingStrategy $(if ($hasStrategy) { $rest[-1] } else { '' })
                 }
                 'explain' {
                     if ($rest.Count -lt 2) { throw 'Usage: winarchy rules explain <exe|class|title fragment>' }
-                    $report = @(Get-WinarchyAppRuleReport -Match $rest[1])
-                    if ($report.Count -eq 0) { Write-WinarchyInfo "No app rule matches '$($rest[1])'."; break }
+                    $fragment = $rest[1..($rest.Count - 1)] -join ' '
+                    $report = @(Get-WinarchyAppRuleReport -Match $fragment)
+                    if ($report.Count -eq 0) { Write-WinarchyInfo "No app rule matches '$fragment'."; break }
                     $report | Format-Table Layer, Category, Rule, Applied, Source -AutoSize
                 }
                 'collisions' {

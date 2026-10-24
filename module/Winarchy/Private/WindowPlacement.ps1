@@ -168,7 +168,7 @@ function Export-WinarchyWindowPrefs {
         if ($null -ne $p.Slot) { $lines.Add("slot = $($p.Slot)") }
         if ($p.Pin) { $lines.Add('pin = true') }
     }
-    Set-Content -Path (Get-WinarchyWindowPrefsPath) -Value ($lines -join "`r`n") -Encoding UTF8 -NoNewline
+    Set-WinarchyFileAtomic -Path (Get-WinarchyWindowPrefsPath) -Value ($lines -join "`r`n")
 }
 
 function Save-WinarchyWindowLayout {

@@ -12,7 +12,8 @@ function Get-WinarchyBrowserExe {
     try {
         $progId = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice').ProgId
         $cmd = (Get-ItemProperty "Registry::HKEY_CLASSES_ROOT\$progId\shell\open\command").'(default)'
-        if ($cmd -match '^"([^"]+)"') { return $Matches[1] }
+        # --app solo existe en Chromium: con Firefox como default cae al fallback
+        if ($cmd -match '^"([^"]+)"' -and $Matches[1] -notmatch 'firefox|librewolf|waterfox|iexplore') { return $Matches[1] }
     }
     catch { }
     $fallbacks = @(
@@ -28,6 +29,10 @@ function Install-WinarchyWebapp {
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][string]$Url
     )
+    if ($Name.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0 -or $Name -match '^\.+$') {
+        throw "Invalid webapp name '$Name': it becomes a file name, so no \ / : * ? `" < > | characters."
+    }
+    if ($Url -notmatch '^https?://\S+$') { throw "Invalid webapp URL '$Url': it must start with http:// or https:// and have no spaces." }
     $browser = Get-WinarchyBrowserExe
     if (-not $browser) { throw 'No Chromium browser (Chrome/Edge) found to create the webapp.' }
 
@@ -43,7 +48,7 @@ function Install-WinarchyWebapp {
     $registry = Get-WinarchyWebappsRegistry
     $apps = if (Test-Path $registry) { Get-Content $registry -Raw | ConvertFrom-Json -AsHashtable } else { @{} }
     $apps[$Name] = @{ url = $Url; shortcut = $lnkPath; browser = $browser; created = (Get-Date -Format 'o') }
-    $apps | ConvertTo-Json -Depth 5 | Set-Content -Path $registry -Encoding UTF8
+    Set-WinarchyFileAtomic -Path $registry -Value ($apps | ConvertTo-Json -Depth 5)
 
     Write-WinarchyOk "Webapp '$Name' created → $Url (launcher in the Start Menu, visible to Flow Launcher)."
 }
@@ -55,7 +60,7 @@ function Remove-WinarchyWebapp {
     if (-not $apps.ContainsKey($Name)) { Write-WinarchyWarn "Webapp '$Name' does not exist."; return }
     if (Test-Path $apps[$Name]['shortcut']) { Remove-Item $apps[$Name]['shortcut'] -Force }
     $apps.Remove($Name)
-    $apps | ConvertTo-Json -Depth 5 | Set-Content -Path $registry -Encoding UTF8
+    Set-WinarchyFileAtomic -Path $registry -Value ($apps | ConvertTo-Json -Depth 5)
     Write-WinarchyOk "Webapp '$Name' removed."
 }
 

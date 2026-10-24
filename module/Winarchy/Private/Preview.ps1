@@ -15,7 +15,7 @@ function New-WinarchyThemePreview {
     Add-Type -AssemblyName System.Drawing
 
     $themeDir = Join-Path (Get-WinarchyThemesDir) $Name
-    $theme = Import-WinarchyToml -Path (Join-Path $themeDir 'theme.toml')
+    $theme = Expand-WinarchyThemePalette -Theme (Import-WinarchyToml -Path (Join-Path $themeDir 'theme.toml'))
     $c = $theme['colors']
 
     $W = 900; $H = 506
@@ -55,7 +55,7 @@ function New-WinarchyThemePreview {
         $g.DrawRectangle([System.Drawing.Pen]::new($selBg, 1), $panel)
 
         $lines = @(
-            @(@($accent, '~/winarchy ❯ '), @($fg, 'winarchy theme set ' + $Name)),
+            @(@($accent, '~/winarchy ❯ '), @($fg, ('winarchy theme set ' + $Name))),
             @(@((ConvertTo-WinarchyDrawingColor $c['color2']), '  [OK] '), @($fg, "Theme '$($theme['name'])' applied across all surfaces.")),
             @(@((ConvertTo-WinarchyDrawingColor $c['color3']), '  warn '), @($bDim.Color, 'sample warning line for palette contrast')),
             @(@((ConvertTo-WinarchyDrawingColor $c['color1']), '  err  '), @($bDim.Color, 'sample error line for palette contrast')),

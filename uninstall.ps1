@@ -46,6 +46,9 @@ Invoke-Step 'Stop komorebi, YASB and the Winarchy AHK script' {
         $komorebi | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
     }
     Stop-Process -Name yasb -Force -ErrorAction SilentlyContinue
+    Get-Process -Name powershell, pwsh -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*Start-NetIcon.ps1*' } |
+        Stop-Process -Force -ErrorAction SilentlyContinue
     Get-Process -Name 'AutoHotkey*' -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -like '*winarchy.ahk*' } |
         Stop-Process -Force -ErrorAction SilentlyContinue
@@ -58,6 +61,8 @@ Invoke-Step 'Turn off the Windows focus-follows-mouse' { Disable-WinarchyXMouse 
 Invoke-Step 'Remove the autostart (scheduled tasks + legacy .lnk)' { Unregister-WinarchyAutostart } `
     'Autostart removed'
 
+$prior = Get-WinarchyPriorState
+
 Invoke-Step 'Restore the Windows taskbar (turn off auto-hide)' {
     $null = Set-WinarchyTaskbarAutoHide -Enabled $false
 } 'Windows taskbar restored'
@@ -66,9 +71,12 @@ Invoke-Step 'Revert the Windows hardening (Bing, suggestions, ads)' {
     $null = Set-WinarchyWindowsHardening -Revert
 } 'Windows hardening reverted'
 
-Invoke-Step 'Restore the default Startup app delay' {
-    Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize' `
-        -Name 'StartupDelayInMSec' -ErrorAction SilentlyContinue
+Invoke-Step 'Restore the Startup app delay to what it was before Winarchy' {
+    $serialize = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize'
+    if ($null -ne $prior['startupDelay']) {
+        Set-ItemProperty -Path $serialize -Name 'StartupDelayInMSec' -Value ([int]$prior['startupDelay']) -Type DWord
+    }
+    else { Remove-ItemProperty -Path $serialize -Name 'StartupDelayInMSec' -ErrorAction SilentlyContinue }
 } 'Startup app delay restored'
 
 Invoke-Step 'Remove the "winarchy" skill from AI coding agents' { Uninstall-WinarchySkill } `
@@ -79,6 +87,9 @@ Invoke-Step 'Remove the Winarchy commands from the Start menu' { Remove-Winarchy
 
 Invoke-Step 'Remove the Winarchy hook from the pwsh $PROFILE' { Remove-WinarchyShellProfile } `
     'Shell profile checked'
+
+Invoke-Step 'Remove "Open in WezTerm" from the Explorer context menu' { Remove-WinarchyWeztermContextMenu } `
+    'Explorer context menu checked'
 
 Invoke-Step 'Remove the Winarchy Defender exclusions' { Remove-WinarchyDefenderExclusions } `
     'Defender exclusions checked'

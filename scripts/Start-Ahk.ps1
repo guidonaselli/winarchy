@@ -28,7 +28,8 @@ function Write-Log([string]$m) {
 }
 
 function Test-AhkRunning {
-    [bool](Get-Process AutoHotkey64 -ErrorAction SilentlyContinue)
+    [bool](Get-CimInstance Win32_Process -Filter "Name = 'AutoHotkey64.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like "*$([IO.Path]::GetFileName($script))*" })
 }
 
 if (-not (Test-Path $exe)) { Write-Log "AutoHotkey64.exe no encontrado en $exe; abortando."; exit 1 }

@@ -81,6 +81,30 @@ function Invoke-WinarchyDoctor {
         $(if ($staleSock) { "$sock left behind by a dirty exit" } else { 'clean' }) `
         'Remove-Item "$env:LOCALAPPDATA\komorebi\komorebi.sock"; then .\scripts\Start-Komorebi.ps1'
 
+    # komorebi elevado no maneja bien las ventanas y rompe su pipe para el resto del stack.
+    # Un proceso elevado niega MainModule a quien no lo está; si el doctor mismo corre
+    # elevado no hay forma de distinguirlos, así que ahí no se chequea.
+    $selfElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $selfElevated) {
+        $komoProc = Get-Process -Name 'komorebi' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($komoProc) {
+            $komoElevated = try { $null = $komoProc.MainModule; $false } catch { $true }
+            Add-Check 'komorebi not elevated' (-not $komoElevated) `
+                $(if ($komoElevated) { 'komorebi runs as administrator' } else { 'normal user process' }) `
+                'Stop-Process -Name komorebi; then relaunch it from a normal (non-admin) shell: .\scripts\Start-Komorebi.ps1'
+        }
+    }
+
+    # Un TOML de usuario con un error de sintaxis rompe `theme set`, `game-mode` y `rules`.
+    $badToml = foreach ($rel in 'games.toml', 'games.user.toml', 'config\windows.toml', 'config\komorebi\rules.toml') {
+        $file = Join-Path $root $rel
+        if (-not (Test-Path $file)) { continue }
+        try { $null = Import-WinarchyToml -Path $file } catch { "$rel ($($_.Exception.Message))" }
+    }
+    Add-Check 'user TOML files parse' (-not $badToml) `
+        $(if ($badToml) { @($badToml) -join '; ' } else { 'games, windows and rules files OK' }) `
+        'fix the line the message points at (or delete the file if it is generated)'
+
     # game-mode.flag es estado de sesión: si sobrevive a un crash/reboot, AHK arranca
     # creyéndose en juego y deja el AccentWatch inerte sin ninguna señal visible.
     $gameFlag = Test-Path (Get-WinarchyGameModeFlag)
@@ -112,6 +136,15 @@ function Invoke-WinarchyDoctor {
         $(if ($autoMissing) { "missing: $($autoMissing -join ', ')" } else { 'At-LogOn tasks present' }) `
         '.\install.ps1 -Activate  (registers the At-LogOn tasks)'
 
+    # Mover el repo deja las tareas apuntando al lugar viejo: fallan en silencio en cada login.
+    $staleTasks = foreach ($task in 'komorebi', 'yasb', 'window-slots', 'net-icon', 'ahk') {
+        $xml = & schtasks.exe /Query /TN "\Winarchy\$task" /XML 2>$null
+        if ($LASTEXITCODE -eq 0 -and $xml -and "$xml" -notlike "*$root*") { $task }
+    }
+    Add-Check 'autostart tasks point at this repo' (-not $staleTasks) `
+        $(if ($staleTasks) { "old path in: $(@($staleTasks) -join ', ')" } else { 'task paths match' }) `
+        '.\install.ps1 -Activate  (re-registers them with the current path)'
+
     # --- Configs parseables ---------------------------------------------------
     $komorebiJson = Join-Path $root 'config\komorebi\komorebi.json'
     $komorebiOk = $false
@@ -128,8 +161,9 @@ function Invoke-WinarchyDoctor {
     if (Test-Path $ascPath) {
         $lock = Import-WinarchyToml -Path (Join-Path $root 'versions.lock.toml')
         $pinned = $lock.ContainsKey('asc') -and (Get-FileHash $ascPath -Algorithm SHA256).Hash.ToLower() -eq $lock['asc']['sha256']
+        $ascInfo = if ($lock.ContainsKey('asc')) { "pinned $($lock['asc']['date']) ($($lock['asc']['commit'].Substring(0, 7)))" } else { 'not pinned in versions.lock.toml' }
         Add-Check 'community app rules vendored' $pinned `
-            "$(Get-WinarchyAscAppCount) community app rules, pinned $($lock['asc']['date']) ($($lock['asc']['commit'].Substring(0, 7)))" `
+            "$(Get-WinarchyAscAppCount) community app rules, $ascInfo" `
             'winarchy rules sync --apply  (re-pins the vendored copy)'
         $collisions = @(Get-WinarchyAppRuleCollisions)
         Add-Check 'app rule collisions' $true `
@@ -180,7 +214,8 @@ function Invoke-WinarchyDoctor {
         $found = $pinned.Path -and (Test-Path $pinned.Path)
         $installed = if ($found) { (Get-Item $pinned.Path).VersionInfo.ProductVersion } else { $null }
         # Flow reporta 4 componentes (2.1.3.0) contra el 2.1.3 del lockfile
-        $matchesLock = $installed -and $installed.StartsWith($lock['core'][$pinned.Key])
+        $pin = $lock['core'][$pinned.Key]
+        $matchesLock = $installed -and ($installed -eq $pin -or $installed.StartsWith("$pin."))
         Add-Check "$($pinned.Name) at lockfile version" ([bool]$matchesLock) `
             $(if ($installed) { "installed=$installed lockfile=$($lock['core'][$pinned.Key])" } else { 'not found on disk' }) `
             'winarchy update --core  (or reinstall the pinned version)'

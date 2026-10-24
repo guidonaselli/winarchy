@@ -74,7 +74,7 @@ function Test-WinarchyThemeData {
     # entran en el YAML/CSS generado: un valor no numerico rompe la barra entera.
     if ($Theme.ContainsKey('bar')) {
         foreach ($k in @('height', 'font_size', 'padding')) {
-            if ($Theme['bar'].ContainsKey($k) -and $Theme['bar'][$k] -isnot [int]) {
+            if ($Theme['bar'].ContainsKey($k) -and $Theme['bar'][$k] -isnot [int64]) {
                 $missing.Add("bar.$k (must be an integer)")
             }
         }
@@ -287,7 +287,10 @@ function Merge-WinarchyTerminalScheme {
         $settings['theme'] = 'Winarchy'
     }
 
-    $settings | ConvertTo-Json -Depth 50 | Set-Content -Path $settingsPath -Encoding UTF8
+    if ($settings['profiles'] -isnot [hashtable]) {
+        Write-WinarchyWarn 'Windows Terminal profiles use the legacy list format; the Winarchy color scheme was added but not set as default.'
+    }
+    Set-WinarchyFileAtomic -Path $settingsPath -Value ($settings | ConvertTo-Json -Depth 50)
     $settingsPath
 }
 
@@ -314,7 +317,7 @@ function Set-WinarchyFlowTheme {
         # acrylic y sombra pintan fuera del borde del theme: un halo mas grande que la ventana
         $settings['BackdropType'] = 0
         $settings['UseDropShadowEffect'] = $false
-        $settings | ConvertTo-Json -Depth 50 | Set-Content -Path $settingsPath -Encoding UTF8
+        Set-WinarchyFileAtomic -Path $settingsPath -Value ($settings | ConvertTo-Json -Depth 50)
     }
 }
 
@@ -355,6 +358,19 @@ function Get-WinarchyVSCodeProfileNames {
     catch { @() }
 }
 
+function Set-WinarchyThemeLiveAccent {
+    <# Pisa el accent placeholder de un theme dinámico con el de Windows; devuelve el hex, o $null si no se pudo leer. #>
+    param([Parameter(Mandatory)][hashtable]$Theme)
+    $liveAccent = Get-WinarchyWindowsAccent
+    if ($liveAccent) {
+        $Theme['colors']['accent'] = $liveAccent
+        $Theme['borders']['focused'] = $liveAccent
+        $Theme['borders']['monocle'] = Get-WinarchyShadedHex -Hex $liveAccent -Factor 0.25
+        $Theme['borders']['stack'] = Get-WinarchyShadedHex -Hex $liveAccent -Factor -0.2
+    }
+    $liveAccent
+}
+
 function Set-WinarchyJsonSetting {
     <# Setea una clave string editando solo ese valor en el texto: los settings de estas
        apps son JSONC (comentarios, trailing commas) y un parse/re-serialize los
@@ -364,24 +380,25 @@ function Set-WinarchyJsonSetting {
         [Parameter(Mandatory)][string]$Key,
         [Parameter(Mandatory)][string]$Value
     )
+    $json = ConvertTo-Json $Value -Compress   # escapa comillas, barras y control chars
     $raw = if (Test-Path $Path) { Get-Content $Path -Raw -Encoding UTF8 } else { '' }
     if (-not $raw -or -not $raw.Trim()) {
-        "{`n  `"$Key`": `"$Value`"`n}" | Set-Content -Path $Path -Encoding UTF8
+        Set-WinarchyFileAtomic -Path $Path -Value "{`n  `"$Key`": $json`n}"
         return
     }
-    $pattern = [regex]("(`"$([regex]::Escape($Key))`"\s*:\s*`")(?:[^`"\\]|\\.)*(`")")
+    $pattern = [regex]("(`"$([regex]::Escape($Key))`"\s*:\s*)`"(?:[^`"\\]|\\.)*`"")
     if ($pattern.IsMatch($raw)) {
-        $updated = $pattern.Replace($raw, "`${1}$Value`${2}", 1)
+        $updated = $pattern.Replace($raw, { param($m) $m.Groups[1].Value + $json }, 1)
     }
     else {
         $brace = $raw.IndexOf('{')
         if ($brace -lt 0) { throw "no root JSON object: $Path" }
         $rest = $raw.Substring($brace + 1)
         $comma = if ($rest -match '^\s*\}') { '' } else { ',' }
-        $updated = $raw.Substring(0, $brace + 1) + "`n  `"$Key`": `"$Value`"$comma" + $rest
+        $updated = $raw.Substring(0, $brace + 1) + "`n  `"$Key`": $json$comma" + $rest
     }
     $null = $updated | ConvertFrom-Json -AsHashtable   # sanity: sigue siendo JSON(C) válido
-    Set-Content -Path $Path -Value $updated -Encoding UTF8
+    Set-WinarchyFileAtomic -Path $Path -Value $updated
 }
 
 function Get-WinarchyObsidianVaults {
@@ -794,14 +811,8 @@ function Set-WinarchyTheme {
     }
     $liveAccent = $null
     if ($dynamicAccent) {
-        $liveAccent = Get-WinarchyWindowsAccent
-        if ($liveAccent) {
-            $theme['colors']['accent'] = $liveAccent
-            $theme['borders']['focused'] = $liveAccent
-            $theme['borders']['monocle'] = Get-WinarchyShadedHex -Hex $liveAccent -Factor 0.25
-            $theme['borders']['stack'] = Get-WinarchyShadedHex -Hex $liveAccent -Factor -0.2
-        }
-        else { Write-WinarchyWarn 'Windows accent unreadable; using the theme base palette.' }
+        $liveAccent = Set-WinarchyThemeLiveAccent -Theme $theme
+        if (-not $liveAccent) { Write-WinarchyWarn 'Windows accent unreadable; using the theme base palette.' }
     }
 
     # 2. Render a staging
@@ -863,8 +874,12 @@ function Set-WinarchyTheme {
     }
     $personalize = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize'
     $personalizeBackup = Get-ItemProperty -Path $personalize -ErrorAction SilentlyContinue
-    $prevLight = $personalizeBackup.AppsUseLightTheme
-    $prevPrevalence = $personalizeBackup.ColorPrevalence
+    $prevLight = $personalizeBackup.PSObject.Properties['AppsUseLightTheme']?.Value
+    $prevPrevalence = $personalizeBackup.PSObject.Properties['ColorPrevalence']?.Value
+    $currentFile = Join-Path (Get-WinarchyStateDir) 'current-theme'
+    $marker = Join-Path (Get-WinarchyStateDir) 'dynamic-accent'
+    $prevCurrent = if (Test-Path $currentFile) { Get-Content $currentFile -Raw -Encoding UTF8 }
+    $prevMarker = if (Test-Path $marker) { Get-Content $marker -Raw -Encoding UTF8 }
 
     try {
         # 4. Apply atómico de los generados (move desde staging)
@@ -896,9 +911,8 @@ function Set-WinarchyTheme {
         }
 
         # 6. Persistencia + recarga de servicios
-        Set-Content -Path (Join-Path (Get-WinarchyStateDir) 'current-theme') -Value $Name -Encoding UTF8 -NoNewline
+        Set-Content -Path $currentFile -Value $Name -Encoding UTF8 -NoNewline
         # marker del watcher AccentWatch (AHK): existe = theme dinámico activo + hex aplicado
-        $marker = Join-Path (Get-WinarchyStateDir) 'dynamic-accent'
         if ($dynamicAccent -and $liveAccent) {
             Set-Content -Path $marker -Value $liveAccent -Encoding UTF8 -NoNewline
         }
@@ -926,7 +940,11 @@ function Set-WinarchyTheme {
             Set-ItemProperty -Path $personalize -Name 'ColorPrevalence' -Value $prevPrevalence -Type DWord
             Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\DWM' -Name 'ColorPrevalence' -Value $prevPrevalence -Type DWord
         }
-        Invoke-WinarchyReload -Light:$LightRefresh
+        if ($null -ne $prevCurrent) { Set-Content -Path $currentFile -Value $prevCurrent -Encoding UTF8 -NoNewline }
+        if ($null -ne $prevMarker) { Set-Content -Path $marker -Value $prevMarker -Encoding UTF8 -NoNewline }
+        elseif (Test-Path $marker) { Remove-Item $marker -Force }
+        try { Invoke-WinarchyReload -Light:$LightRefresh }
+        catch { Write-WinarchyErr "Reload after rollback also failed: $($_.Exception.Message)" }
         throw "Theme '$Name' NOT applied; previous state restored (snapshot: $snapshot)."
     }
 }

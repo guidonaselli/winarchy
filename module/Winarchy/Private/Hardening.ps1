@@ -53,16 +53,29 @@ function Set-WinarchyWindowsHardening {
             $null = Backup-WinarchyRegistryKey -Key "HKCU\Software\Microsoft\Windows\CurrentVersion\$key" -Label 'hardening'
         }
     }
+    # Valor previo de cada ajuste (null = no existía), para que revertir devuelva lo que el
+    # usuario tenía y no solo el default de Windows.
+    $priorFile = Join-Path (Get-WinarchyStateDir) 'hardening-prior.json'
+    $prior = if (Test-Path $priorFile) { Get-Content $priorFile -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable } else { @{} }
     foreach ($setting in Get-WinarchyHardeningSettings) {
         $path, $name, $value = $setting
+        $id = "$path|$name"
         try {
             $item = Get-ItemProperty -Path $path -Name $name -ErrorAction Ignore
             $current = if ($item) { $item.$name }
             if ($Revert) {
-                if ($null -eq $current) { continue }
-                Remove-ItemProperty -Path $path -Name $name -ErrorAction Stop
+                $restore = $prior[$id]
+                if ($null -ne $restore) {
+                    if ($current -eq $restore) { continue }
+                    Set-ItemProperty -Path $path -Name $name -Value $restore -Type DWord -ErrorAction Stop
+                }
+                else {
+                    if ($null -eq $current) { continue }
+                    Remove-ItemProperty -Path $path -Name $name -ErrorAction Stop
+                }
             }
             else {
+                if (-not $prior.ContainsKey($id)) { $prior[$id] = $current }   # también si ya valía $value: revertir no debe borrar lo que el usuario ya tenía
                 if ($current -eq $value) { continue }
                 if (-not (Test-Path $path)) { $null = New-Item -Path $path -Force }
                 Set-ItemProperty -Path $path -Name $name -Value $value -Type DWord -ErrorAction Stop
@@ -72,6 +85,8 @@ function Set-WinarchyWindowsHardening {
         catch [System.UnauthorizedAccessException], [System.Security.SecurityException] { $blocked++ }
         catch { Write-WinarchyWarn "${name}: $($_.Exception.Message)" }
     }
+    if ($Revert) { Remove-Item $priorFile -Force -ErrorAction SilentlyContinue }
+    elseif ($prior.Count) { Set-WinarchyFileAtomic -Path $priorFile -Value ($prior | ConvertTo-Json) }
     if ($blocked) { Write-WinarchyInfo "$blocked Windows setting(s) are locked for non-admin users; skipped." }
     if ($changed -gt 0) { Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue }
     $changed

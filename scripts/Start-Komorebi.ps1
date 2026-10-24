@@ -140,8 +140,11 @@ while ((Get-Date) -lt $overallDeadline) {
             # Desmanagea ventanas de games.toml que komorebi ya tileó en su escaneo
             # inicial (retile/ignore-rule no las desmanagean retroactivamente).
             try {
-                Import-Module (Join-Path $root 'module\Winarchy\Winarchy.psm1') -Force
-                $games = @(Get-WinarchyGames)
+                # el módulo es de PowerShell 7 y este script corre en 5.1: la lista se pide a pwsh
+                $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+                if (-not $pwsh) { throw 'pwsh is not on PATH' }
+                $module = (Join-Path $root 'module\Winarchy\Winarchy.psm1').Replace("'", "''")
+                $games = @(& $pwsh.Source -NoProfile -Command "Import-Module '$module' -Force; Get-WinarchyGames")
                 $stateJson = & $komorebic state 2>$null | ConvertFrom-Json
                 $tiledExes = @(
                     foreach ($m in $stateJson.monitors.elements) {

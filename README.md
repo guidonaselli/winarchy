@@ -218,7 +218,7 @@ Winarchy is the single update channel; third-party auto-updaters (YASB, Flow) ar
 | --- | --- | --- |
 | `winarchy update` | the packages Winarchy declares in `versions.lock.toml`, plus scoop | reports the outcome per package; warns if a core or Winarchy update is available |
 | `winarchy update --core` | pinned core: komorebi / YASB / Flow Launcher / AutoHotkey | unpins, upgrades, repins, rewrites `versions.lock.toml` |
-| `winarchy update --self` | Winarchy itself (CLI, templates, configs, AHK, themes) | `git pull --ff-only origin release` + idempotent migration (`install.ps1`, mode preserved) |
+| `winarchy update --self` | Winarchy itself (CLI, templates, configs, AHK, themes) | `git fetch` + `git merge --ff-only` of `release` (must be checked out) + idempotent migration (`install.ps1`, mode preserved) |
 
 `winarchy update` deliberately touches only what Winarchy declares, not every package on
 the machine: the stack owns its own dependencies, not your unrelated apps. Core components
@@ -432,6 +432,10 @@ winarchy game-mode off
 winarchy game-mode add <exe>
 ```
 
+`game-mode add` writes to `games.user.toml` (yours, gitignored), so `winarchy update --self`
+never collides with it. The shipped catalog stays in `games.toml`. Names with spaces work
+quoted or not: `winarchy game-mode add The iTero Coach.exe`.
+
 ---
 
 ## Window placement memory
@@ -516,7 +520,7 @@ Four layers, lowest priority first:
 |---|---|---|
 | 1 | `vendor/asc/applications.json` | the community (vendored, pinned) |
 | 2 | `templates/komorebi.json.tpl` | Winarchy |
-| 3 | `games.toml` | Winarchy |
+| 3 | `games.toml` + `games.user.toml` | Winarchy / **you** (`game-mode add`, gitignored) |
 | 4 | `config/komorebi/rules.toml` | **you** — gitignored, never overwritten |
 
 **Placement** (`ignore` / `manage` / `floating`) is exclusive: the highest layer that has an

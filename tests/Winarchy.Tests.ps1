@@ -6,6 +6,24 @@ BeforeAll {
 }
 
 Describe 'ConvertFrom-WinarchyToml' {
+    It 'accepts comments after headers, single-quoted strings and empty content' {
+        InModuleScope Winarchy {
+            $d = ConvertFrom-WinarchyToml -Content "[colors] # paleta`nbg = 'x'`n[[games]] # g`nexe = 'Foo.exe'"
+            $d['colors']['bg'] | Should -Be 'x'
+            $d['games'][0]['exe'] | Should -Be 'Foo.exe'
+            (ConvertFrom-WinarchyToml -Content $null).Count | Should -Be 0
+        }
+    }
+
+    It 'round-trips a background pref whose theme name has spaces' {
+        InModuleScope Winarchy {
+            $f = Join-Path $TestDrive 'bg.toml'
+            Mock Get-WinarchyBackgroundPrefsPath { $f }
+            Export-WinarchyBackgroundPrefs -Pref @{ 'my theme' = 'a.png' }
+            (Import-WinarchyToml -Path $f)['my theme'] | Should -Be 'a.png'
+        }
+    }
+
     It 'parses sections, quoted keys and scalar types' {
         InModuleScope Winarchy {
             $toml = @'
@@ -565,6 +583,15 @@ Describe 'Set-WinarchyJsonSetting' {
         (Get-Content $script:JsonFile -Raw | ConvertFrom-Json).'workbench.colorTheme' | Should -Be 'Winarchy'
     }
 
+    It 'escapes quotes, backslashes and $ in the value so the file stays valid' {
+        '{ "theme": "light" }' | Set-Content $script:JsonFile -Encoding UTF8
+        InModuleScope Winarchy -Parameters @{ Path = $script:JsonFile } {
+            param($Path)
+            Set-WinarchyJsonSetting -Path $Path -Key 'theme' -Value 'C:\a "b" $1'
+        }
+        (Get-Content $script:JsonFile -Raw | ConvertFrom-Json).theme | Should -Be 'C:\a "b" $1'
+    }
+
     It 'writes a whole file when there is none' {
         Remove-Item $script:JsonFile -Force -ErrorAction SilentlyContinue
         InModuleScope Winarchy -Parameters @{ Path = $script:JsonFile } {
@@ -679,6 +706,7 @@ Describe 'Backgrounds' {
             param($Theme)
             Mock Get-WinarchyCurrentTheme { $Theme }
             Mock Set-WinarchyWallpaper {}
+            Mock Set-WinarchyLockScreen {}
             Mock Write-WinarchyOk {}
             $all = Get-WinarchyBackgrounds -Name $Theme
             Export-WinarchyBackgroundPrefs -Pref @{ $Theme = $all[-1] }
@@ -998,9 +1026,11 @@ Describe 'games.toml (shipped)' {
 }
 
 Describe 'Game registration round-trip' {
-    It 'add then remove leaves games.toml byte for byte identical' {
+    It 'add writes games.user.toml, never the shipped games.toml, and remove undoes it' {
         InModuleScope Winarchy {
             $toml = Join-Path $TestDrive 'games.toml'
+            $user = Join-Path $TestDrive 'games.user.toml'
+            Remove-Item $user -ErrorAction SilentlyContinue
             Set-Content -Path $toml -Value "[[games]]`r`nexe = `"Existing.exe`"`r`n" -Encoding UTF8 -NoNewline
             $before = (Get-FileHash $toml -Algorithm SHA256).Hash
 
@@ -1009,9 +1039,81 @@ Describe 'Game registration round-trip' {
             Mock Update-WinarchyQuickAccentExclusion { }
 
             Add-WinarchyGame -Exe 'RoundTrip' | Out-Null
-            (Get-Content $toml -Raw) | Should -Match 'RoundTrip\.exe'
-            Remove-WinarchyGame -Exe 'RoundTrip' | Out-Null
+            (Get-Content $user -Raw) | Should -Match 'RoundTrip\.exe'
+            @(Get-WinarchyGames) | Should -Be @('Existing.exe', 'RoundTrip.exe')
             (Get-FileHash $toml -Algorithm SHA256).Hash | Should -Be $before
+
+            Remove-WinarchyGame -Exe 'RoundTrip' | Out-Null
+            @(Get-WinarchyGames) | Should -Be @('Existing.exe')
+            (Get-FileHash $toml -Algorithm SHA256).Hash | Should -Be $before
+        }
+    }
+
+    It 'keeps multi-word webapp names and rule values from the unquoted command line' {
+        InModuleScope Winarchy {
+            Mock Install-WinarchyWebapp { $script:got = "$Name|$Url" }
+            Mock Add-WinarchyUserRule { $script:rule = "$Value|$MatchingStrategy" }
+
+            Invoke-Winarchy 'webapp' 'install' 'My' 'App' 'https://x.test'
+            $script:got | Should -Be 'My App|https://x.test'
+
+            Invoke-Winarchy 'rules' 'add' 'ignore' 'title' 'Visual' 'Studio' 'Code'
+            $script:rule | Should -Be 'Visual Studio Code|'
+            Invoke-Winarchy 'rules' 'add' 'ignore' 'title' 'Visual' 'Studio' 'Contains'
+            $script:rule | Should -Be 'Visual Studio|Contains'
+        }
+    }
+
+    It 'rejects webapp names and URLs that would break the shortcut' {
+        InModuleScope Winarchy {
+            { Install-WinarchyWebapp -Name 'a/b' -Url 'https://x.test' } | Should -Throw '*Invalid webapp name*'
+            { Install-WinarchyWebapp -Name 'ok' -Url 'javascript:alert(1)' } | Should -Throw '*Invalid webapp URL*'
+            { Install-WinarchyWebapp -Name 'ok' -Url 'https://x.test --evil' } | Should -Throw '*Invalid webapp URL*'
+        }
+    }
+
+    It 'passes game-mode on --delay to Enable and rejects a bad value' {
+        InModuleScope Winarchy {
+            Mock Enable-WinarchyGameMode { $script:delay = $Delay }
+            Invoke-Winarchy 'game-mode' 'on' '--delay' '7'
+            $script:delay | Should -Be 7
+            Invoke-Winarchy 'game-mode' 'on'
+            $script:delay | Should -Be 0
+            { Invoke-Winarchy 'game-mode' 'on' '--delay' 'x' } | Should -Throw '*Usage*'
+            { Invoke-Winarchy 'game-mode' 'on' '--delay' } | Should -Throw '*Usage*'
+        }
+    }
+
+    It 'joins an unquoted multi-word exe name and rejects names that would break the toml' {
+        InModuleScope Winarchy {
+            $toml = Join-Path $TestDrive 'games.toml'
+            $user = Join-Path $TestDrive 'games.user.toml'
+            Remove-Item $user -ErrorAction SilentlyContinue
+            Set-Content -Path $toml -Value '' -Encoding UTF8 -NoNewline
+            Mock Get-WinarchyRoot { Split-Path $toml -Parent }
+            Mock Update-WinarchyKomorebiRules { }
+            Mock Update-WinarchyQuickAccentExclusion { }
+            Mock Test-WinarchyProcess { $false }
+
+            Invoke-Winarchy 'game-mode' 'add' 'The' 'iTero' 'Coach.exe' | Out-Null
+            (Get-Content $user -Raw) | Should -Match 'exe = "The iTero Coach\.exe"'
+            Remove-Item $user
+            { Add-WinarchyGame -Exe 'a"b.exe' } | Should -Throw
+        }
+    }
+
+    It 'removes launcher entries, commented entries and other capitalizations' {
+        InModuleScope Winarchy {
+            $toml = Join-Path $TestDrive 'games.toml'
+            Remove-Item (Join-Path $TestDrive 'games.user.toml') -ErrorAction SilentlyContinue
+            Set-Content -Path $toml -Value "[[games]]`nexe = `"Keep.exe`"`n`n[[launchers]]`nexe = `"Steam.exe`" # store`n`n[[games]]`nexe = `"Eso64.exe`"`n" -Encoding UTF8 -NoNewline
+            Mock Get-WinarchyRoot { Split-Path $toml -Parent }
+            Mock Update-WinarchyKomorebiRules { }
+            Mock Update-WinarchyQuickAccentExclusion { }
+
+            Remove-WinarchyGame -Exe 'steam.exe' | Out-Null
+            Remove-WinarchyGame -Exe 'ESO64' | Out-Null
+            @(Get-WinarchyGames) | Should -Be @('Keep.exe')
         }
     }
 
@@ -1172,7 +1274,7 @@ Describe 'WezTerm terminal' {
             Start-WinarchyCodingAgent
             Should -Invoke Start-Process -Times 1 -ParameterFilter {
                 $ArgumentList -contains '--config-file' -and
-                $ArgumentList -contains (Join-Path (Get-WinarchyRoot) 'config\wezterm\wezterm.lua')
+                $ArgumentList -contains "`"$(Join-Path (Get-WinarchyRoot) 'config\wezterm\wezterm.lua')`""
             }
         }
     }
@@ -1618,6 +1720,31 @@ Describe 'Window slots' {
         }
     }
 
+    It 'reverting hardening restores what the user had, and removes what did not exist' {
+        InModuleScope Winarchy {
+            $key = 'HKCU:\Software\WinarchyPesterHardening'
+            Mock Get-WinarchyStateDir { $TestDrive }
+            Mock Backup-WinarchyRegistryKey { }
+            Mock Stop-Process { }
+            Mock Get-WinarchyHardeningSettings {
+                , @('HKCU:\Software\WinarchyPesterHardening', 'Had', 0)
+                , @('HKCU:\Software\WinarchyPesterHardening', 'Absent', 0)
+            }
+            try {
+                $null = New-Item -Path $key -Force
+                Set-ItemProperty -Path $key -Name 'Had' -Value 1 -Type DWord
+
+                Set-WinarchyWindowsHardening | Should -Be 2
+                (Get-ItemProperty $key).Had | Should -Be 0
+
+                Set-WinarchyWindowsHardening -Revert | Should -Be 2
+                (Get-ItemProperty $key).Had | Should -Be 1
+                (Get-ItemProperty $key).PSObject.Properties['Absent'] | Should -BeNullOrEmpty
+            }
+            finally { Remove-Item $key -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
     It 'declares every hardening setting as a (path, name, value) triple' {
         InModuleScope Winarchy {
             $settings = @(Get-WinarchyHardeningSettings)
@@ -1820,7 +1947,7 @@ Describe 'Autostart' {
             $ast = [Management.Automation.Language.Parser]::ParseInput($inner, [ref]$null, [ref]$errors)
             $errors | Should -BeNullOrEmpty
             $ast.FindAll({ $args[0] -is [Management.Automation.Language.StringConstantExpressionAst] }, $true).Value |
-                Should -Contain "C:\Users\O'Brien\winarchy\scripts\Start-WindowSlots.ps1"
+                Should -Contain "\`"C:\Users\O'Brien\winarchy\scripts\Start-WindowSlots.ps1\`""   # entre \" para que un path con espacios llegue entero a -File
         }
     }
 
@@ -2338,7 +2465,7 @@ Describe 'Windhawk extras' {
     It 'hides the Windhawk tray and update check once' {
         InModuleScope Winarchy -Parameters @{ Reg = $script:WhReg } {
             param($Reg)
-            Mock Get-ScheduledTask { }
+            Mock schtasks.exe { }
             Mock Start-Process { }
             Mock Get-WinarchyWindhawkExe { $PSCommandPath }
 
@@ -2625,19 +2752,19 @@ Describe 'First install on a clean machine' {
         $missing | Sort-Object -Unique | Should -BeNullOrEmpty
     }
 
-    It 'keeps the line endings of games.toml when a game is added' {
+    It 'keeps the line endings of games.user.toml when a game is added' {
         InModuleScope Winarchy {
             $root = Join-Path $TestDrive 'games-root'
             New-Item -ItemType Directory -Force $root | Out-Null
-            [IO.File]::WriteAllText((Join-Path $root 'games.toml'), "[[games]]`nexe = `"a.exe`"`n")
+            [IO.File]::WriteAllText((Join-Path $root 'games.user.toml'), "[[games]]`r`nexe = `"a.exe`"`r`n")
             Mock Get-WinarchyRoot { $root }
             Mock Update-WinarchyKomorebiRules { }
             Mock Test-WinarchyProcess { $false }
             Mock Update-WinarchyQuickAccentExclusion { }
             Add-WinarchyGame -Exe 'b.exe'
-            $raw = [IO.File]::ReadAllText((Join-Path $root 'games.toml'))
-            $raw | Should -Not -Match "`r"
-            $raw | Should -Match "exe = `"b.exe`"`n$"
+            $raw = [IO.File]::ReadAllText((Join-Path $root 'games.user.toml'))
+            $raw | Should -Not -Match "(?<!`r)`n"
+            $raw | Should -Match "exe = `"b.exe`"`r`n$"
         }
     }
 

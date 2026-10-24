@@ -33,6 +33,10 @@ try {
 }
 catch { Write-WinarchyWarn "Taskbar: $($_.Exception.Message)" }
 
+# Las tareas programadas \Winarchy\* arrancan todo en el próximo logon, junto con Seelen
+try { Unregister-WinarchyAutostart }
+catch { Write-WinarchyWarn "Autostart de Winarchy no se pudo quitar: $($_.Exception.Message)" }
+
 # 2. Restaurar autostart de Seelen
 $stateDir = Get-WinarchyStateDir
 foreach ($bak in Get-ChildItem $stateDir -Filter 'seelen-run-*.bak' -ErrorAction SilentlyContinue) {

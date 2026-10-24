@@ -13,6 +13,30 @@ function Get-WinarchyStateDir {
     $dir
 }
 
+function Set-WinarchyFileAtomic {
+    <# Escribe a un temporal y lo mueve encima: un lector concurrente ve el archivo viejo o el
+       nuevo entero, nunca uno truncado. #>
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Value)
+    $tmp = "$Path.tmp"
+    Set-Content -Path $tmp -Value $Value -Encoding UTF8 -NoNewline
+    Move-Item -Path $tmp -Destination $Path -Force
+}
+
+function Get-WinarchyPriorState {
+    <# Lo que había en el sistema antes de que Winarchy lo tocara (clave -> valor; $null = no existía). #>
+    $file = Join-Path (Get-WinarchyStateDir) 'system-prior.json'
+    if (Test-Path $file) { Get-Content $file -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable } else { @{} }
+}
+
+function Save-WinarchyPriorState {
+    <# Solo la primera vez por clave: un reinstall no debe pisar el original con un valor ya modificado. #>
+    param([Parameter(Mandatory)][string]$Key, $Value)
+    $state = Get-WinarchyPriorState
+    if ($state.ContainsKey($Key)) { return }
+    $state[$Key] = $Value
+    Set-WinarchyFileAtomic -Path (Join-Path (Get-WinarchyStateDir) 'system-prior.json') -Value ($state | ConvertTo-Json)
+}
+
 function Get-WinarchyBackupsDir {
     $dir = Join-Path (Get-WinarchyRoot) 'backups'
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }

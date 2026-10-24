@@ -21,6 +21,7 @@ config/wezterm/wezterm.lua
 config/ahk/user.ahk
 config/pwsh/user.ps1
 config/windows.toml
+games.user.toml
 config/komorebi/rules.toml
 config/wezterm/user.lua
 

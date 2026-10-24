@@ -3,7 +3,7 @@
 # NO soporta: strings multilínea, arrays inline, tablas inline (no se usan en Winarchy).
 
 function ConvertFrom-WinarchyToml {
-    param([Parameter(Mandatory)][string]$Content)
+    param([Parameter(Mandatory)][AllowEmptyString()][AllowNull()][string]$Content)
 
     $root = @{}
     $current = $root
@@ -13,7 +13,7 @@ function ConvertFrom-WinarchyToml {
         if ($line.Length -eq 0 -or $line.StartsWith('#')) { continue }
 
         # [[tabla.array]]
-        if ($line -match '^\[\[\s*([^\]]+?)\s*\]\]$') {
+        if ($line -match '^\[\[\s*([^\]]+?)\s*\]\]\s*(#.*)?$') {
             $name = $Matches[1]
             if (-not $root.ContainsKey($name)) {
                 $root[$name] = [System.Collections.Generic.List[object]]::new()
@@ -24,7 +24,7 @@ function ConvertFrom-WinarchyToml {
         }
 
         # [seccion]
-        if ($line -match '^\[\s*([^\]]+?)\s*\]$') {
+        if ($line -match '^\[\s*([^\]]+?)\s*\]\s*(#.*)?$') {
             $name = $Matches[1]
             if (-not $root.ContainsKey($name)) { $root[$name] = @{} }
             $current = $root[$name]
@@ -45,10 +45,13 @@ function ConvertFrom-WinarchyToml {
             if ($raw -match '^"(?<s>(?:[^"\\]|\\.)*)"') {
                 $value = $Matches['s'] -replace '\\"', '"' -replace '\\\\', '\'
             }
+            elseif ($raw -match "^'(?<s>[^']*)'") {
+                $value = $Matches['s']
+            }
             elseif ($raw -match '^(?<b>true|false)\b') {
                 $value = [bool]::Parse($Matches['b'])
             }
-            elseif ($raw -match '^(?<n>-?\d+(\.\d+)?)\b') {
+            elseif ($raw -match '^(?<n>-?\d+(\.\d+)?)\s*(#.*)?$') {
                 $value = if ($Matches['n'] -like '*.*') { [double]$Matches['n'] } else { [int64]$Matches['n'] }
             }
             else {

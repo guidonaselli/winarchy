@@ -62,15 +62,18 @@ function Set-WinarchyBackground {
     $prefs[$theme] = $File
     Export-WinarchyBackgroundPrefs -Pref $prefs
 
-    Set-WinarchyWallpaper -ThemeDir (Join-Path (Get-WinarchyThemesDir) $theme)
+    $themeDir = Join-Path (Get-WinarchyThemesDir) $theme
+    Set-WinarchyWallpaper -ThemeDir $themeDir
+    $lockImage = Get-WinarchyLockScreenImage -ThemeDir $themeDir
+    if ($lockImage) { Set-WinarchyLockScreen -ImagePath $lockImage }
     Write-WinarchyOk "Background: $File"
 }
 
 function Export-WinarchyBackgroundPrefs {
     param([Parameter(Mandatory)][hashtable]$Pref)
     $lines = @('# Fondo elegido por theme. Lo escribe `winarchy background`.')
-    $lines += ($Pref.Keys | Sort-Object | ForEach-Object { "$_ = `"$($Pref[$_])`"" })
-    Set-Content -Path (Get-WinarchyBackgroundPrefsPath) -Value ($lines -join "`r`n") -Encoding UTF8 -NoNewline
+    $lines += ($Pref.Keys | Sort-Object | ForEach-Object { "`"$_`" = `"$($Pref[$_])`"" })
+    Set-WinarchyFileAtomic -Path (Get-WinarchyBackgroundPrefsPath) -Value ($lines -join "`r`n")
 }
 
 function Get-WinarchyBackgroundStatus {

@@ -5,8 +5,13 @@ function Get-WinarchyGameModeFlag { Join-Path (Get-WinarchyStateDir) 'game-mode.
 function Get-WinarchyFloatedMarker { Join-Path (Get-WinarchyStateDir) 'game-mode-floated' }
 
 function Enable-WinarchyGameMode {
+    param([int]$Delay)
     $flag = Get-WinarchyGameModeFlag
     if (Test-Path $flag) { Write-WinarchyInfo 'Game-mode was already active.'; return }
+    if ($Delay -gt 0) {
+        Write-WinarchyInfo "Switch to the game now; enabling game mode in $Delay s..."
+        Start-Sleep -Seconds $Delay
+    }
 
     # `session-float-rule` flota CIEGAMENTE la ventana en primer plano por título: si se
     # activa game-mode con un navegador/editor en foco (no el juego), esa ventana queda
@@ -62,21 +67,30 @@ function Get-WinarchyGameModeStatus {
     Write-WinarchyInfo 'Note: AHK also suspends hotkeys automatically for games.toml entries and fullscreen-exclusive apps.'
 }
 
+function Get-WinarchyGamesPaths {
+    <# games.toml es el catálogo versionado; games.user.toml (gitignored) es lo que el usuario
+       registra con `game-mode add`, así un update por git nunca choca con él. #>
+    $root = Get-WinarchyRoot
+    @{ Shipped = Join-Path $root 'games.toml'; User = Join-Path $root 'games.user.toml' }
+}
+
 function Get-WinarchyGames {
-    <# Exes de games.toml, normalizados con .exe y sin duplicados. Incluye [[launchers]]:
-       para komorebi y AHK las dos secciones significan lo mismo (no tilear + estado de
-       game-mode), la separación es solo documental. #>
-    $gamesToml = Join-Path (Get-WinarchyRoot) 'games.toml'
-    if (-not (Test-Path $gamesToml)) { return }
-    $data = Import-WinarchyToml -Path $gamesToml
+    <# Exes de games.toml + games.user.toml, normalizados con .exe y sin duplicados. Incluye
+       [[launchers]]: para komorebi y AHK las dos secciones significan lo mismo (no tilear +
+       estado de game-mode), la separación es solo documental. #>
+    $paths = Get-WinarchyGamesPaths
     $list = @(
-        foreach ($section in @('games', 'launchers')) {
-            if ($data.ContainsKey($section)) {
-                foreach ($entry in $data[$section]) {
-                    $exe = $entry['exe']
-                    if (-not $exe -or $exe -like '*`**') { continue }
-                    if ($exe -notlike '*.exe') { $exe = "$exe.exe" }
-                    $exe
+        foreach ($path in $paths.Shipped, $paths.User) {
+            if (-not (Test-Path $path)) { continue }
+            $data = Import-WinarchyToml -Path $path
+            foreach ($section in @('games', 'launchers')) {
+                if ($data.ContainsKey($section)) {
+                    foreach ($entry in $data[$section]) {
+                        $exe = $entry['exe']
+                        if (-not $exe -or $exe -like '*`**') { continue }
+                        if ($exe -notlike '*.exe') { $exe = "$exe.exe" }
+                        $exe
+                    }
                 }
             }
         }
@@ -96,13 +110,14 @@ function Update-WinarchyKomorebiRules {
     }
     $root = Get-WinarchyRoot
     $themeDir = Join-Path (Get-WinarchyThemesDir) $current
-    $theme = Import-WinarchyToml -Path (Join-Path $themeDir 'theme.toml')
+    $theme = Expand-WinarchyThemePalette -Theme (Import-WinarchyToml -Path (Join-Path $themeDir 'theme.toml'))
+    if ($theme.ContainsKey('dynamic_accent') -and $theme['dynamic_accent']) { $null = Set-WinarchyThemeLiveAccent -Theme $theme }
     $ctx = Build-WinarchyThemeContext -Theme $theme -ThemeDir $themeDir
     $rendered = Invoke-WinarchyTemplate -TemplatePath (Join-Path $root 'templates\komorebi.json.tpl') -Context $ctx
     $rendered = Add-WinarchyAppRulesToKomorebiJson -Json $rendered
     $rendered = Add-WinarchyWindowRulesToKomorebiJson -Json $rendered
     $rendered | ConvertFrom-Json | Out-Null
-    Set-Content -Path (Join-Path $root 'config\komorebi\komorebi.json') -Value $rendered -Encoding UTF8 -NoNewline
+    Set-WinarchyFileAtomic -Path (Join-Path $root 'config\komorebi\komorebi.json') -Value $rendered
     if (Test-WinarchyProcess 'komorebi') { komorebic reload-configuration 2>$null | Out-Null }
 }
 
@@ -169,14 +184,16 @@ function Update-WinarchyQuickAccentExclusion {
 function Add-WinarchyGame {
     param([Parameter(Mandatory)][string]$Exe)
     if ($Exe -notlike '*.exe') { $Exe = "$Exe.exe" }
-    $gamesToml = Join-Path (Get-WinarchyRoot) 'games.toml'
+    if ($Exe -match '["\\/]') { throw "Invalid exe name '$Exe': pass the process file name only (e.g. `"My Game.exe`")." }
+    $gamesToml = (Get-WinarchyGamesPaths).User
     $existing = @(Get-WinarchyGames)
     $alreadyRegistered = $existing -contains $Exe
     if (-not $alreadyRegistered) {
         $raw = if (Test-Path $gamesToml) { Get-Content $gamesToml -Raw -Encoding UTF8 } else { '' }
         $nl = if ($raw -match "`r`n") { "`r`n" } else { "`n" }
         $lead = if ($raw -and -not $raw.EndsWith("`n")) { $nl } else { '' }
-        Add-Content -Path $gamesToml -Value "$lead$nl[[games]]$($nl)exe = `"$Exe`"$nl" -Encoding UTF8 -NoNewline
+        $gap = if ($raw) { $nl } else { '' }
+        Add-Content -Path $gamesToml -Value "$lead$gap[[games]]$($nl)exe = `"$Exe`"$nl" -Encoding UTF8 -NoNewline
     }
     Update-WinarchyKomorebiRules
     if (Test-WinarchyProcess 'komorebi') {
@@ -185,7 +202,7 @@ function Add-WinarchyGame {
     }
     Update-WinarchyQuickAccentExclusion -Exe $Exe
     if ($alreadyRegistered) {
-        Write-WinarchyInfo "'$Exe' was already in games.toml; exclusions reapplied."
+        Write-WinarchyInfo "'$Exe' was already registered; exclusions reapplied."
         return
     }
     Write-WinarchyOk "'$Exe' added: excluded from tiling, hotkeys suspended while in the foreground."
@@ -194,14 +211,18 @@ function Add-WinarchyGame {
 function Remove-WinarchyGame {
     param([Parameter(Mandatory)][string]$Exe)
     if ($Exe -notlike '*.exe') { $Exe = "$Exe.exe" }
-    $gamesToml = Join-Path (Get-WinarchyRoot) 'games.toml'
-    if (-not (Test-Path $gamesToml)) { Write-WinarchyWarn 'games.toml does not exist.'; return }
-    $content = Get-Content $gamesToml -Raw -Encoding UTF8
-    $pattern = "(?ms)(\r?\n)?^\[\[games\]\]\s*\r?\nexe\s*=\s*`"$([regex]::Escape($Exe))`"[ \t]*(\r?\n)?"
-    $updated = [regex]::Replace($content, $pattern, '')
-    if ($updated -eq $content) { Write-WinarchyWarn "'$Exe' was not in games.toml."; return }
-    Set-Content -Path $gamesToml -Value $updated -Encoding UTF8 -NoNewline
-    Update-WinarchyKomorebiRules
-    Update-WinarchyQuickAccentExclusion -Exe $Exe -Remove
-    Write-WinarchyOk "'$Exe' removed from games.toml."
+    $paths = Get-WinarchyGamesPaths
+    $pattern = "(?ims)(\r?\n)?^\[\[(?:games|launchers)\]\]\s*\r?\nexe\s*=\s*`"$([regex]::Escape($Exe))`"[ \t]*(?:#[^\r\n]*)?(\r?\n)?"
+    foreach ($file in $paths.User, $paths.Shipped) {
+        if (-not (Test-Path $file)) { continue }
+        $content = Get-Content $file -Raw -Encoding UTF8
+        $updated = [regex]::Replace($content, $pattern, '')
+        if ($updated -eq $content) { continue }
+        Set-Content -Path $file -Value $updated -Encoding UTF8 -NoNewline
+        Update-WinarchyKomorebiRules
+        Update-WinarchyQuickAccentExclusion -Exe $Exe -Remove
+        Write-WinarchyOk "'$Exe' removed from $(Split-Path $file -Leaf)."
+        return
+    }
+    Write-WinarchyWarn "'$Exe' was not registered."
 }

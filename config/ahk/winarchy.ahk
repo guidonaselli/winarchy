@@ -18,9 +18,10 @@ StateDir := RepoRoot "\state"
 GameFlag := StateDir "\game-mode.flag"
 MenuFlag := StateDir "\show-menu.flag"
 AwakeFlag := StateDir "\stay-awake.flag"
-GamesToml := RepoRoot "\games.toml"
+GamesTomls := [RepoRoot "\games.toml", RepoRoot "\games.user.toml"]
 WinarchyPs1 := RepoRoot "\bin\winarchy.ps1"
 DirCreate(StateDir)
+try FileDelete(AwakeFlag)   ; the execution state dies with this process, so a surviving flag would lie
 
 ; Define WinarchyUserMenu con entradas propias del menu y del tray.
 #Include *i %A_ScriptDir%\user-menu.ahk
@@ -142,16 +143,16 @@ DragMove(hwnd, x0, y0, held) {
                 break
         }
     }
-}
-
-DragResize(hwnd, x0, y0, held) {
-    WinGetPos(&wx, &wy, &ww, &wh, hwnd)
-    col := Min(Max((x0 - wx) * 3 // ww, 0), 2), row := Min(Max((y0 - wy) * 3 // wh, 0), 2)
     if !t || t = hwnd || !DragTarget(t)
         return                                   ; dropped on itself: stay put
     WinGetPos(&tx, &ty, &tw, &th, t)
     dx := tx + tw // 2 - (wx + ww // 2), dy := ty + th // 2 - (wy + wh // 2)
     Komorebic('move ' (Abs(dx) >= Abs(dy) ? (dx < 0 ? 'left' : 'right') : (dy < 0 ? 'up' : 'down')))
+}
+
+DragResize(hwnd, x0, y0, held) {
+    WinGetPos(&wx, &wy, &ww, &wh, hwnd)
+    col := Min(Max((x0 - wx) * 3 // ww, 0), 2), row := Min(Max((y0 - wy) * 3 // wh, 0), 2)
     while held()
         Sleep(10)
     MouseGetPos(&x, &y)
@@ -346,6 +347,8 @@ MenuWatch() {
     global MenuFlag
     if FileExist(MenuFlag) {
         try FileDelete(MenuFlag)
+        catch
+            return   ; flag aún tomado por YASB: sin borrarlo, cada tick alternaría abrir/cerrar el menú
         ShowMainMenu()
     }
 }
@@ -372,6 +375,7 @@ ToggleStayAwake() {
 
 QuitStack() {
     ; parada ordenada y NO elevada: komorebi primero, luego barra/launcher, AHK al final
+    SetTimer(YasbWatch, 0)   ; si no, relanza la barra que acabamos de matar
     try Komorebic('stop')
     try RunWait('taskkill /IM yasb.exe /F', , 'Hide')
     try RunWait('taskkill /IM Flow.Launcher.exe /F', , 'Hide')
@@ -383,11 +387,14 @@ QuitStack() {
 YasbcExe := FileExist(A_ProgramFiles "\YASB\yasbc.exe") ? A_ProgramFiles "\YASB\yasbc.exe" : ""
 YasbMisses := 0
 YasbRelaunches := []
+YasbCooldown := 0
 if YasbcExe
     SetTimer(YasbWatch, 5000)
 
 YasbWatch() {
-    global YasbMisses, YasbRelaunches
+    global YasbMisses, YasbRelaunches, YasbCooldown
+    if A_TickCount < YasbCooldown
+        return
     if ProcessExist('yasb.exe') || ProcessExist('winget.exe') {
         YasbMisses := 0
         return
@@ -398,8 +405,8 @@ YasbWatch() {
     while YasbRelaunches.Length && A_TickCount - YasbRelaunches[1] > 300000
         YasbRelaunches.RemoveAt(1)
     if (YasbRelaunches.Length >= 3) {
-        SetTimer(YasbWatch, 0)
-        TrayTip('The bar keeps crashing; stopped relaunching it. Run: winarchy doctor', 'Winarchy')
+        YasbCooldown := A_TickCount + 600000   ; pausa 10 min y reintenta: una caída pasajera no deja la barra muerta hasta reiniciar AHK
+        TrayTip('The bar keeps crashing; pausing relaunches for 10 min. Run: winarchy doctor', 'Winarchy')
         return
     }
     YasbRelaunches.Push(A_TickCount)
@@ -936,30 +943,46 @@ WorkAreaUnderMouse(&wl, &wt, &wr, &wb) {
     }
 }
 
-; --- Lista de juegos (games.toml: exe = "...") --------------------------------
+; --- Lista de juegos (games.toml + games.user.toml: exe = "...") ---------------
 GameExes := Map()
 LoadGames() {
-    global GameExes
+    global GameExes, GamesTomls
     GameExes := Map()
-    if !FileExist(GamesToml)
-        return
-    for line in StrSplit(FileRead(GamesToml, 'UTF-8'), '`n') {
-        if RegExMatch(line, 'i)^\s*exe\s*=\s*"([^"]+)"', &m) {
-            exe := StrLower(m[1])
-            if !InStr(exe, '*')                 ; los placeholders con * se ignoran
-                GameExes[exe] := true
+    for file in GamesTomls {
+        if !FileExist(file)
+            continue
+        for line in StrSplit(FileRead(file, 'UTF-8'), '`n') {
+            if RegExMatch(line, 'i)^\s*exe\s*=\s*"([^"]+)"', &m) {
+                exe := StrLower(m[1])
+                if !InStr(exe, '*')                 ; los placeholders con * se ignoran
+                    GameExes[exe] := true
+            }
         }
     }
 }
 LoadGames()
+
+GamesStamp() {
+    s := ''
+    for f in GamesTomls
+        try s .= FileGetTime(f) ';'
+    return s
+}
+GamesSeen := GamesStamp()
 
 ; --- Game-mode watcher (≥1 s, costo CPU despreciable) --------------------------
 GameModeActive := false
 SetTimer(GameWatch, 1000)
 
 GameWatch() {
-    global GameModeActive
+    global GameModeActive, GamesSeen
     active := false
+
+    ; altas en caliente (`game-mode add`): recargar solo si cambió algún toml
+    if ((now := GamesStamp()) != GamesSeen) {
+        GamesSeen := now
+        LoadGames()
+    }
 
     ; 1) Flag manual/CLI: winarchy game-mode on
     if FileExist(GameFlag)
@@ -981,7 +1004,6 @@ GameWatch() {
             style := WinGetStyle(hwnd)
             if !(style & 0xC00000) {            ; sin WS_CAPTION
                 WinGetPos(&x, &y, &w, &h, hwnd)
-                MonitorGet(MonitorGetPrimary(), &ml, &mt, &mr, &mb)
                 ; cubre el monitor donde está (chequeo sobre todos los monitores)
                 loop MonitorGetCount() {
                     MonitorGet(A_Index, &l, &t, &r, &b)
@@ -1001,10 +1023,9 @@ GameWatch() {
     ; vivos durante el juego. game-mode NO pausa komorebi (solo flota la ventana del
     ; juego vía ignore-rule), así que el tiling y SUPER+1/2 siguen funcionando; los
     ; combos de geometría aplican al resto de ventanas tileadas. game-mode solo
-    ; trackea estado y refresca games.toml. Animaciones ya apagadas siempre (config).
+    ; trackea estado. Animaciones ya apagadas siempre (config).
     if (active && !GameModeActive) {
         GameModeActive := true
-        LoadGames()                              ; refresco para altas en caliente
     } else if (!active && GameModeActive) {
         GameModeActive := false
     }
@@ -1027,7 +1048,10 @@ AccentWatch() {
     catch
         return
     hex := Format('#{:02x}{:02x}{:02x}', v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF)
-    if (hex = Trim(FileRead(AccentMarker, 'UTF-8'))) {
+    try cur := Trim(FileRead(AccentMarker, 'UTF-8'))
+    catch
+        return   ; theme set lo está reescribiendo; el próximo tick lo lee
+    if (hex = cur) {
         AccentPending := ''
         return
     }

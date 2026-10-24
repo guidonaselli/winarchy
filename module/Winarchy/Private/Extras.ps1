@@ -218,7 +218,7 @@ function Set-WinarchyWindhawkIdentity {
         return
     }
     foreach ($name in $desired.Keys) { Set-ItemProperty -Path $key -Name $name -Value $desired[$name] -Type DWord }
-    Get-ScheduledTask -TaskName 'WindhawkUpdateTask' -ErrorAction SilentlyContinue | Disable-ScheduledTask | Out-Null
+    & schtasks.exe /Change /TN 'WindhawkUpdateTask' /DISABLE *> $null
     $exe = Get-WinarchyWindhawkExe
     if (Test-Path $exe) { Start-Process $exe -ArgumentList '-restart', '-tray-only' }
     Write-WinarchyOk 'Windhawk identity applied (tray + update check off)'

@@ -184,7 +184,8 @@ function Update-WinarchyFlowPlugins {
             Expand-Archive -Path "$tmp.zip" -DestinationPath $tmp -Force
             $root = Get-ChildItem $tmp -Recurse -Filter plugin.json | Select-Object -First 1
             if (-not $root) { throw 'plugin.json not found in the release zip' }
-            $u | Add-Member -NotePropertyName Source -NotePropertyValue $root.DirectoryName -PassThru
+            $u | Add-Member -NotePropertyName Source -NotePropertyValue $root.DirectoryName -PassThru |
+                Add-Member -NotePropertyName Tmp -NotePropertyValue $tmp -PassThru
         }
         catch { Write-WinarchyErr "Flow plugin $($u.Name): update to $($u.To) failed ($($_.Exception.Message))." }
         finally { Remove-Item "$tmp.zip" -Force -ErrorAction SilentlyContinue }
@@ -193,8 +194,10 @@ function Update-WinarchyFlowPlugins {
     New-WinarchySnapshot -Label 'flow-plugins' -Path @($staged.Dir) | Out-Null
     Save-WinarchyFlowSettings -WhileStopped {
         foreach ($u in $staged) {
+            # el nuevo entra primero: si el Move falla, el plugin viejo sigue en su lugar
+            Move-Item $u.Source (Join-Path $pluginsDir ("$($u.Name)-$($u.To)" -replace '[\\/:*?"<>|]', '_'))
             Remove-Item $u.Dir -Recurse -Force
-            Move-Item $u.Source (Join-Path $pluginsDir "$($u.Name)-$($u.To)")
+            Remove-Item $u.Tmp -Recurse -Force -ErrorAction SilentlyContinue
             Write-Host ("  {0,-12} Flow plugin {1} {2} -> {3}" -f 'updated', $u.Name, $u.From, $u.To)
         }
     }

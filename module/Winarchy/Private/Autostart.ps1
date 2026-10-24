@@ -61,7 +61,7 @@ function Get-WinarchyAutostartComponents {
     if ($komorebiExe -and $pwsh) {
         $slots = Join-Path $root 'scripts\Start-WindowSlots.ps1'
         $ps = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $inner = "Start-Process -FilePath '$($pwsh.Replace("'", "''"))' -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','$($slots.Replace("'", "''"))'"
+        $inner = "Start-Process -FilePath '$($pwsh.Replace("'", "''"))' -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','\`"$($slots.Replace("'", "''"))\`"'"   # \" sobrevive al -Command de 5.1 y deja el path entero con espacios
         $items.Add([pscustomobject]@{
             Key = 'window-slots'; TaskName = 'window-slots'; LnkName = 'Winarchy window slots.lnk'
             Exe = $ps
@@ -237,9 +237,10 @@ function Register-WinarchyAutostart {
 
 function Unregister-WinarchyAutostart {
     <# Borra las Scheduled Tasks de Winarchy y los .lnk legacy de Startup. #>
-    foreach ($c in Get-WinarchyAutostartComponents) {
-        $full = Get-WinarchyTaskFullName -TaskName $c.TaskName
-        & schtasks.exe /Delete /TN $full /F *> $null
+    # Lista fija: Get-WinarchyAutostartComponents solo devuelve lo instalado, y la tarea de un
+    # componente desinstalado seguiría lanzando algo que ya no existe.
+    foreach ($taskName in 'komorebi', 'yasb', 'window-slots', 'net-icon', 'sharex', 'ahk') {
+        & schtasks.exe /Delete /TN (Get-WinarchyTaskFullName -TaskName $taskName) /F *> $null
     }
     Remove-WinarchyStartupShortcuts
 }

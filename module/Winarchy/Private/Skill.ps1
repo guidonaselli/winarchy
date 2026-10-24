@@ -4,21 +4,21 @@ function Get-WinarchyAgentSkillRoots {
     <# Devuelve los dirs de skills de cada agente instalado en la máquina.
        Un agente se considera presente si existe su carpeta base (~/.claude, etc.).
        Estructura agnóstica: cada agente usa <base>\skills\<skill>\SKILL.md. #>
-    $home = [Environment]::GetFolderPath('UserProfile')
+    $userHome = [Environment]::GetFolderPath('UserProfile')
     $bases = @(
-        (Join-Path $home '.claude')              # Claude Code
-        (Join-Path $home '.codex')               # OpenAI Codex CLI
-        (Join-Path $home '.gemini')              # Google Gemini CLI
-        (Join-Path $home '.cursor')              # Cursor
-        (Join-Path $home '.windsurf')            # Windsurf
-        (Join-Path $home '.codeium\windsurf')    # Windsurf (Codeium legacy path)
-        (Join-Path $home '.continue')            # Continue
-        (Join-Path $home '.aider')               # Aider
-        (Join-Path $home '.cline')               # Cline
-        (Join-Path $home '.roo')                 # Roo Code
-        (Join-Path $home '.copilot')             # GitHub Copilot CLI
-        (Join-Path $home '.opencode')            # opencode
-        (Join-Path $home '.amp')                 # Sourcegraph Amp
+        (Join-Path $userHome '.claude')              # Claude Code
+        (Join-Path $userHome '.codex')               # OpenAI Codex CLI
+        (Join-Path $userHome '.gemini')              # Google Gemini CLI
+        (Join-Path $userHome '.cursor')              # Cursor
+        (Join-Path $userHome '.windsurf')            # Windsurf
+        (Join-Path $userHome '.codeium\windsurf')    # Windsurf (Codeium legacy path)
+        (Join-Path $userHome '.continue')            # Continue
+        (Join-Path $userHome '.aider')               # Aider
+        (Join-Path $userHome '.cline')               # Cline
+        (Join-Path $userHome '.roo')                 # Roo Code
+        (Join-Path $userHome '.copilot')             # GitHub Copilot CLI
+        (Join-Path $userHome '.opencode')            # opencode
+        (Join-Path $userHome '.amp')                 # Sourcegraph Amp
         (Join-Path $env:APPDATA 'opencode')      # opencode (Windows AppData)
     )
     foreach ($base in $bases) {

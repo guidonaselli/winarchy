@@ -51,6 +51,10 @@ function Set-WinarchyFlowIdentity {
     }
 
     $settings = Get-Content $settingsPath -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable
+    if (-not $settings) {
+        Write-WinarchyWarn "Flow Launcher Settings.json is empty; identity toggles not applied: $settingsPath"
+        return
+    }
 
     $needsChange = $false
     foreach ($k in $desired.Keys) {
@@ -79,12 +83,16 @@ function Save-WinarchyFlowSettings {
         $flow | Stop-Process -Force
         $flow | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue
     }
-    foreach ($path in $Files.Keys) {
-        $Files[$path] | ConvertTo-Json -Depth 50 | Set-Content -Path $path -Encoding UTF8
+    try {
+        foreach ($path in $Files.Keys) {
+            Set-WinarchyFileAtomic -Path $path -Value ($Files[$path] | ConvertTo-Json -Depth 50)
+        }
+        if ($WhileStopped) { & $WhileStopped }
     }
-    if ($WhileStopped) { & $WhileStopped }
-    $exe = "$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe"
-    if ($flow -and (Test-Path $exe)) { Start-Process $exe }
+    finally {
+        $exe = "$env:LOCALAPPDATA\FlowLauncher\Flow.Launcher.exe"
+        if ($flow -and (Test-Path $exe)) { Start-Process $exe }
+    }
 }
 
 function Set-WinarchyShareXIdentity {
@@ -98,7 +106,8 @@ function Set-WinarchyShareXIdentity {
     $configPath = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'ShareX\ApplicationConfig.json'
     $desired = [ordered]@{ ShowTray = $true; AutoCheckUpdate = $false }
 
-    $config = if (Test-Path $configPath) { Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable } else { [ordered]@{} }
+    $config = if (Test-Path $configPath) { Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable } else { $null }
+    if (-not $config) { $config = [ordered]@{} }
     if (-not @($desired.Keys | Where-Object { $config[$_] -ne $desired[$_] })) {
         Write-WinarchyOk "ShareX identity already applied: $configPath"
         return
@@ -113,7 +122,7 @@ function Set-WinarchyShareXIdentity {
         $sharex | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue
     }
     New-Item -ItemType Directory -Path (Split-Path $configPath) -Force | Out-Null
-    $config | ConvertTo-Json -Depth 50 | Set-Content -Path $configPath -Encoding UTF8
+    Set-WinarchyFileAtomic -Path $configPath -Value ($config | ConvertTo-Json -Depth 50)
     if ($sharex) { Start-Process $exe -ArgumentList '-silent' }
     Write-WinarchyOk "ShareX identity applied (starts hidden, auto-update off): $configPath"
 }
@@ -160,7 +169,7 @@ function Set-WinarchyEverythingIdentity {
         }
     }
     New-Item -ItemType Directory -Path (Split-Path $iniPath) -Force | Out-Null
-    Set-Content -Path $iniPath -Value $updated -NoNewline -Encoding UTF8
+    Set-WinarchyFileAtomic -Path $iniPath -Value $updated
     if ($running) { Start-Process $exe -ArgumentList '-startup' }
     Write-WinarchyOk "Everything identity applied (tray + update check off): $iniPath"
 }
@@ -192,7 +201,11 @@ function Set-WinarchyFlowKeywords {
     }
 
     $settings = Get-Content $settingsPath -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable
-    $plugins = $settings['PluginSettings']['Plugins']
+    $plugins = $settings -and $settings.ContainsKey('PluginSettings') ? $settings['PluginSettings']['Plugins'] : $null
+    if (-not $plugins) {
+        Write-WinarchyWarn 'Flow Launcher has no plugin settings yet (start it once); scoped keywords not applied.'
+        return
+    }
     $files = @{}
     $changes = @()
     if (Add-WinarchyFlowKeyword $plugins $script:WinarchyFlowProgramPluginId 'app') { $changes += "Program 'app'" }

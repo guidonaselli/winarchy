@@ -42,7 +42,7 @@ Write-WinarchyOk "Pre-install snapshot: $snapshot"
 # Export de las Scheduled Tasks de Winarchy (si existieran) al snapshot, para rollback.
 # Vía schtasks.exe (no usa CIM/MI, que está roto en algunas máquinas).
 try {
-    foreach ($name in @('komorebi', 'yasb', 'ahk')) {
+    foreach ($name in @('komorebi', 'yasb', 'window-slots', 'net-icon', 'sharex', 'ahk')) {
         $xml = & schtasks.exe /Query /TN "\Winarchy\$name" /XML 2>$null
         if ($LASTEXITCODE -eq 0 -and $xml) {
             $xml | Set-Content -Path (Join-Path $snapshot "task-$name.xml") -Encoding Unicode
@@ -159,11 +159,10 @@ Set-WinarchyTheme -Name $initialTheme
 # Idempotente: se reaplica en cada install/repair, así un update de Flow/ShareX/Everything
 # no reintroduce su tray/auto-update. YASB ya queda configurado por su config.yaml
 # (show_systray/update_check off); AHK hostea el tray del stack; komorebi no tiene tray.
-Set-WinarchyFlowIdentity
-Set-WinarchyShareXIdentity
-Set-WinarchyEverythingIdentity
-Set-WinarchyFlowKeywords
-Set-WinarchyDefenderExclusions
+foreach ($step in 'Set-WinarchyFlowIdentity', 'Set-WinarchyShareXIdentity', 'Set-WinarchyEverythingIdentity', 'Set-WinarchyFlowKeywords', 'Set-WinarchyDefenderExclusions') {
+    try { & $step }
+    catch { Write-WinarchyWarn "$step skipped: $($_.Exception.Message)" }
+}
 
 # --- 5. Autostart + taskbar (solo con -Activate) --------------------------------------
 if ($Activate) {
@@ -192,6 +191,9 @@ if ($Activate) {
     # komorebi/YASB/AHK levantan apenas inicia la sesión.
     try {
         $serialize = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize'
+        $null = Backup-WinarchyRegistryKey -Key 'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize' -Label 'install'
+        $delay = Get-ItemPropertyValue $serialize -Name StartupDelayInMSec -ErrorAction Ignore
+        Save-WinarchyPriorState -Key 'startupDelay' -Value $(if ($delay) { $delay })   # 0 podría ser nuestro de un install anterior: se trata como "no existía"
         if (-not (Test-Path $serialize)) { New-Item $serialize -Force | Out-Null }
         Set-ItemProperty -Path $serialize -Name 'StartupDelayInMSec' -Value 0 -Type DWord
         Write-WinarchyOk 'Startup app delay removed (StartupDelayInMSec=0)'
@@ -199,7 +201,7 @@ if ($Activate) {
     catch { Write-WinarchyWarn "Could not remove the Startup delay: $($_.Exception.Message)" }
 
     Write-WinarchyInfo 'Starting the stack...'
-    if ($komorebic) { & $komorebic start }
+    if ($komorebic) { Start-WinarchyKomorebi }
     if ($yasb) { & $yasb start }
     if ($ahkExe) {
         Remove-Item Env:CLAUDE_CODE_CHILD_SESSION, Env:CLAUDECODE -ErrorAction SilentlyContinue

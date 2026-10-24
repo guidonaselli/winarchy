@@ -7,7 +7,7 @@ function Add-WinarchyTheme {
     )
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'git is required to install a theme from a repository.' }
 
-    if (-not $Name) { $Name = (($Url -split '[/\\]')[-1] -replace '\.git$', '') }
+    if (-not $Name) { $Name = (($Url -split '[/\\]')[-1] -replace '\.git$', '').ToLower() }
     if ($Name -notmatch '^[a-z0-9][a-z0-9-]*$') { throw "Theme name '$Name' must be lowercase letters, digits and dashes." }
 
     $dest = Join-Path (Get-WinarchyThemesDir) $Name
@@ -15,7 +15,7 @@ function Add-WinarchyTheme {
 
     $temp = Join-Path ([IO.Path]::GetTempPath()) "winarchy-theme-$([guid]::NewGuid())"
     try {
-        & git clone --depth 1 --quiet $Url $temp 2>&1 | Out-Null
+        & git clone --depth 1 --quiet -- $Url $temp 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path $temp)) { throw "git clone failed for $Url" }
 
         $toml = Join-Path $temp 'theme.toml'
