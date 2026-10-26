@@ -226,6 +226,9 @@ unsafe fn render_pill(pill: HWND) {
     });
     if animating {
         SetTimer(strip, TIMER_ANIM, 8, None);
+    } else {
+        let name = widestr(&format!("Winarchy {} {}", String::from_utf16_lossy(&text), String::from_utf16_lossy(&label)));
+        let _ = SetWindowTextW(pill, PCWSTR(name.as_ptr()));
     }
     let bmi = BITMAPINFO { bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: width, biHeight: -h, biPlanes: 1, biBitCount: 32, ..Default::default() }, ..Default::default() };
     let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
@@ -348,6 +351,12 @@ unsafe fn spring_step(strip: HWND) {
     render_pill(pill);
 }
 
+// El cursor está sobre la pastilla: más fiable que esperar WM_MOUSELEAVE, que se pierde si la ventana cambia de tamaño o monitor.
+unsafe fn hovered(pill: HWND) -> bool {
+    let (mut p, mut r) = (POINT::default(), RECT::default());
+    GetCursorPos(&mut p).is_ok() && GetWindowRect(pill, &mut r).is_ok() && PtInRect(&r, p).as_bool()
+}
+
 unsafe fn fullscreen_busy() -> bool {
     matches!(SHQueryUserNotificationState(), Ok(s) if s == QUNS_BUSY || s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE)
 }
@@ -377,8 +386,9 @@ fn foreground_title() -> String {
 // Las llamadas lentas (COM, WinRT) corren fuera del borrow del estado: pueden bombear mensajes y reentrar al wndproc.
 fn expand_step() -> bool {
     let now = std::time::Instant::now();
+    let over = unsafe { hovered(with(|s| s.pill)) };
     let until = with(|s| {
-        if s.tracking && s.expand_until.is_some() {
+        if over && s.expand_until.is_some() {
             s.expand_until = Some(now + std::time::Duration::from_secs(EXPAND_SECS));
         }
         s.expand_until
@@ -494,6 +504,11 @@ unsafe fn tick_inner() {
     if with(|s| s.layout_sig != sig) {
         with(|s| s.layout_sig = sig);
         rebuild_strips();
+    }
+    let (pill, stale) = with(|s| (s.pill, s.tracking));
+    if stale && !hovered(pill) {
+        with(|s| s.tracking = false);
+        let _ = PostMessageW(with(|s| s.strip), WM_COLLAPSE, WPARAM(0), LPARAM(0));
     }
     let expanding = expand_step();
     let minute = GetLocalTime().wMinute;
