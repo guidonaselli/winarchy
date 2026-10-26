@@ -43,10 +43,18 @@ function Invoke-WinarchyDoctor {
     # Un solo proceso yasb: con >1 vivo, cada uno mantiene su suscripción al named pipe
     # de komorebi y las barras pelean el foco mandando FocusWorkspaceNumber(0) — el
     # sintoma es "salto al workspace 1" al minimizar o abrir un juego.
-    $yasbCount = @(Get-Process -Name 'yasb' -ErrorAction SilentlyContinue).Count
-    Add-Check 'YASB running (single instance)' ($yasbCount -eq 1) `
-        $(if ($yasbCount -eq 0) { 'status bar down' } elseif ($yasbCount -eq 1) { 'status bar' } else { "$yasbCount yasb processes — duplicate komorebi subscribers" }) `
-        $(if ($yasbCount -gt 1) { 'winarchy reload  (kill+start leaves a single subscriber)' } else { 'yasbc start  (or launch YASB from the Start Menu)' })
+    if ((Get-WinarchyActiveBar) -eq 'yasb') {
+        $yasbCount = @(Get-Process -Name 'yasb' -ErrorAction SilentlyContinue).Count
+        Add-Check 'YASB running (single instance)' ($yasbCount -eq 1) `
+            $(if ($yasbCount -eq 0) { 'status bar down' } elseif ($yasbCount -eq 1) { 'status bar' } else { "$yasbCount yasb processes — duplicate komorebi subscribers" }) `
+            $(if ($yasbCount -gt 1) { 'winarchy reload  (kill+start leaves a single subscriber)' } else { 'yasbc start  (or launch YASB from the Start Menu)' })
+    }
+    else {
+        $shellCount = @(Get-Process -Name 'winarchy-shell' -ErrorAction SilentlyContinue).Count
+        Add-Check 'native shell running (single instance)' ($shellCount -eq 1) `
+            $(if ($shellCount -eq 0) { 'status bar down' } elseif ($shellCount -eq 1) { 'status bar' } else { "$shellCount winarchy-shell processes" }) `
+            'winarchy reload'
+    }
     # Primero por PID file (winarchy.ahk lo escribe al arrancar; CommandLine depende
     # de WMI/CIM, que no está disponible en todos los entornos)
     $ahkAlive = $false
@@ -137,7 +145,7 @@ function Invoke-WinarchyDoctor {
         '.\install.ps1 -Activate  (registers the At-LogOn tasks)'
 
     # Mover el repo deja las tareas apuntando al lugar viejo: fallan en silencio en cada login.
-    $staleTasks = foreach ($task in 'komorebi', 'yasb', 'window-slots', 'net-icon', 'ahk') {
+    $staleTasks = foreach ($task in 'komorebi', 'yasb', 'shell', 'window-slots', 'net-icon', 'ahk') {
         $xml = & schtasks.exe /Query /TN "\Winarchy\$task" /XML 2>$null
         if ($LASTEXITCODE -eq 0 -and $xml -and "$xml" -notlike "*$root*") { $task }
     }

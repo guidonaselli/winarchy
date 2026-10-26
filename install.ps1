@@ -42,7 +42,7 @@ Write-WinarchyOk "Pre-install snapshot: $snapshot"
 # Export de las Scheduled Tasks de Winarchy (si existieran) al snapshot, para rollback.
 # Vía schtasks.exe (no usa CIM/MI, que está roto en algunas máquinas).
 try {
-    foreach ($name in @('komorebi', 'yasb', 'window-slots', 'net-icon', 'sharex', 'ahk')) {
+    foreach ($name in @('komorebi', 'yasb', 'shell', 'window-slots', 'net-icon', 'sharex', 'ahk')) {
         $xml = & schtasks.exe /Query /TN "\Winarchy\$name" /XML 2>$null
         if ($LASTEXITCODE -eq 0 -and $xml) {
             $xml | Set-Content -Path (Join-Path $snapshot "task-$name.xml") -Encoding Unicode
@@ -202,7 +202,7 @@ if ($Activate) {
 
     Write-WinarchyInfo 'Starting the stack...'
     if ($komorebic) { Start-WinarchyKomorebi }
-    if ($yasb) { & $yasb start }
+    if ($yasb -and (Get-WinarchyActiveBar) -eq 'yasb') { & $yasb start }
     if ($ahkExe) {
         Remove-Item Env:CLAUDE_CODE_CHILD_SESSION, Env:CLAUDECODE -ErrorAction SilentlyContinue
         Start-Process $ahkExe -ArgumentList "`"$Root\config\ahk\winarchy.ahk`""

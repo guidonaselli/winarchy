@@ -41,7 +41,7 @@ function Get-WinarchyAutostartComponents {
 
     # YASB arranca vía el launcher scripts\Start-Yasb.ps1 (espera shell listo).
     $yasbc = (Get-Command yasbc -ErrorAction SilentlyContinue)?.Source
-    if ($yasbc) {
+    if ($yasbc -and (Get-WinarchyActiveBar) -eq 'yasb') {
         $ps = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $launcher = Join-Path $root 'scripts\Start-Yasb.ps1'
         $yasbHome = Join-Path $root 'config\yasb'
@@ -49,6 +49,17 @@ function Get-WinarchyAutostartComponents {
             Key = 'yasb'; TaskName = 'yasb'; LnkName = 'Winarchy YASB.lnk'
             Exe = $ps
             Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$launcher`" -YasbExe `"$yasbc`" -YasbConfigHome `"$yasbHome`""
+            Delay = 'PT0S'
+        })
+    }
+
+    # La shell nativa solo se registra cuando es la barra activa; el binario es el verificado o el build local.
+    $shellExe = Get-WinarchyShellExe
+    if ($shellExe -and (Get-WinarchyActiveBar) -eq 'native') {
+        $items.Add([pscustomobject]@{
+            Key = 'shell'; TaskName = 'shell'; LnkName = 'Winarchy shell.lnk'
+            Exe = $shellExe
+            Arguments = ''
             Delay = 'PT0S'
         })
     }
@@ -239,7 +250,7 @@ function Unregister-WinarchyAutostart {
     <# Borra las Scheduled Tasks de Winarchy y los .lnk legacy de Startup. #>
     # Lista fija: Get-WinarchyAutostartComponents solo devuelve lo instalado, y la tarea de un
     # componente desinstalado seguiría lanzando algo que ya no existe.
-    foreach ($taskName in 'komorebi', 'yasb', 'window-slots', 'net-icon', 'sharex', 'ahk') {
+    foreach ($taskName in 'komorebi', 'yasb', 'shell', 'window-slots', 'net-icon', 'sharex', 'ahk') {
         & schtasks.exe /Delete /TN (Get-WinarchyTaskFullName -TaskName $taskName) /F *> $null
     }
     Remove-WinarchyStartupShortcuts

@@ -144,6 +144,7 @@ function Build-WinarchyThemeContext {
     $ctx['computed.game_ignore_rules'] = Get-WinarchyGameIgnoreRulesJson
     $ctx['computed.bar_position'] = Get-WinarchyBarPosition
     $ctx['computed.bar_background'] = Get-WinarchyBarBackground -Hex $Theme['colors']['background']
+    $ctx['computed.bar_opacity'] = if (Test-WinarchyBarTransparent) { '0.72' } else { '1' }
     # La traslucidez sobre fondo claro degrada la legibilidad: solo los themes oscuros.
     $ctx['computed.terminal_opacity'] = if ($Theme['mode'] -eq 'light') { '1.0' } else { '0.95' }
     # auto-accent puede traer un accent tan oscuro (o claro) como el background:
@@ -211,6 +212,7 @@ function Get-WinarchyRenderTargets {
         @{ Template = 'flow-theme.xaml.tpl';              Output = Join-Path $root 'config\flow\Winarchy.xaml';          Validate = 'xml' }
         @{ Template = 'btop.theme.tpl';                   Output = Join-Path $root 'config\btop\winarchy.theme';         Validate = $null }
         @{ Template = 'nvim-theme.lua.tpl';               Output = Join-Path $root 'config\nvim\winarchy-theme.lua';     Validate = $null }
+        @{ Template = 'shell-theme.json.tpl';             Output = Join-Path $root 'config\shell\theme.json';           Validate = 'json' }
         @{ Template = 'ahk-theme.ini.tpl';                Output = Join-Path $root 'config\ahk\theme.ini';               Validate = $null }
         @{ Template = 'obsidian.css.tpl';                 Output = Join-Path $root 'config\obsidian\winarchy-theme.css'; Validate = $null }
         @{ Template = 'starship.toml.tpl';                Output = Join-Path $root 'config\pwsh\starship.toml';          Validate = $null }
@@ -753,15 +755,24 @@ function Invoke-WinarchyReload {
     # que te tira al workspace 1 al minimizar/maximizar o abrir un juego. Un kill+start deja
     # un único suscriptor y elimina la pelea. (Investigación 2026-06-28; ver también
     # watch_config/watch_stylesheet apagados en config/yasb/config.yaml.)
-    if (Test-WinarchyProcess 'yasb') {
+    if ((Get-WinarchyActiveBar) -eq 'yasb') {
+        if (Test-WinarchyProcess 'yasb') {
+            Stop-Process -Name 'yasb' -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 300
+        }
+        if (Get-Command yasbc -ErrorAction SilentlyContinue) { Start-Process 'yasbc' -ArgumentList 'start' -WindowStyle Hidden }
+        else {
+            $yasbExe = Get-Command yasb -ErrorAction SilentlyContinue
+            if ($yasbExe) { Start-Process $yasbExe.Source }
+        }
+    }
+    if ((Get-WinarchyActiveBar) -eq 'native') {
         Stop-Process -Name 'yasb' -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Milliseconds 300
+        Stop-Process -Name 'winarchy-shell' -Force -ErrorAction SilentlyContinue
+        $shellExe = Get-WinarchyShellExe
+        if ($shellExe) { Start-Process $shellExe -WindowStyle Hidden }
     }
-    if (Get-Command yasbc -ErrorAction SilentlyContinue) { Start-Process 'yasbc' -ArgumentList 'start' -WindowStyle Hidden }
-    else {
-        $yasbExe = Get-Command yasb -ErrorAction SilentlyContinue
-        if ($yasbExe) { Start-Process $yasbExe.Source }
-    }
+    else { Stop-Process -Name 'winarchy-shell' -Force -ErrorAction SilentlyContinue }
     if ($Light) { return }
     Start-WinarchyWindowSlots
     $ahk = Join-Path (Get-WinarchyRoot) 'config\ahk\winarchy.ahk'

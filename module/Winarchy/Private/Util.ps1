@@ -13,6 +13,12 @@ function Get-WinarchyStateDir {
     $dir
 }
 
+function Get-WinarchyActiveBar {
+    # Ausente o con cualquier otro valor = YASB; solo 'native' cede la franja a la shell nativa.
+    $file = Join-Path (Join-Path (Get-WinarchyRoot) 'state') 'bar'
+    if ((Test-Path $file) -and ((Get-Content $file -Raw).Trim() -eq 'native')) { 'native' } else { 'yasb' }
+}
+
 function Set-WinarchyFileAtomic {
     <# Escribe a un temporal y lo mueve encima: un lector concurrente ve el archivo viejo o el
        nuevo entero, nunca uno truncado. #>

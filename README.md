@@ -83,6 +83,11 @@ That means Winarchy optimizes for:
   - one place for global shortcuts
   - Linux-style muscle memory, adapted to Windows reality
 
+- **Optional native shell (experimental)**
+  - a Dynamic-Island-style pill with workspace dots and a clock, over a thin strip
+  - opt-in with `statear` = `native`; YASB stays the default and is never modified
+  - source in `shell/` (Rust + Win32), binary pinned by SHA256 in `versions.lock.toml`
+
 - **Tiling that respects Windows**
   - powered by `komorebi`
   - designed to coexist with regular desktop usage
@@ -398,7 +403,7 @@ winarchy accent status
 **WezTerm is the default terminal** — `SUPER+Return`, the coding-agent launcher and
 `winarchy menu` all open it. Its whole config is generated at
 `config\wezterm\wezterm.lua` from the active theme (colors, JetBrainsMono NF with
-ligatures, padding, opacity, 10k scrollback, tabs and panes behind the `CTRL+a`
+ligatures, padding, opacity, 10k scrollback, tabs and panes behind the `CTRL+Space`
 leader — see `docs/keybindings.md`). Your own settings go in `config\wezterm\user.lua`
 (gitignored, never touched by `theme set` or `update`; copy `user.lua.example` to start).
 Windows Terminal stays installed and keeps getting the "Winarchy" color scheme, but

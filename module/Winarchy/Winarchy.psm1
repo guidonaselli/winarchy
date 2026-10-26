@@ -200,7 +200,12 @@ function Invoke-Winarchy {
                     $mode = if ($rest.Count -ge 2) { $rest[1].ToLower() } else { 'toggle' }
                     Set-WinarchyBarTransparent -Mode $mode
                 }
-                default { throw "Unknown subcommand: bar $sub (position|transparent)" }
+                'use' {
+                    $which = if ($rest.Count -ge 2) { $rest[1].ToLower() } else { '' }
+                    if ($which -notin 'yasb', 'native') { throw 'Usage: winarchy bar use <yasb|native>' }
+                    Set-WinarchyBar -Name $which
+                }
+                default { throw "Unknown subcommand: bar $sub (position|transparent|use)" }
             }
         }
         'agent' {
