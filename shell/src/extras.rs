@@ -1,7 +1,7 @@
 use std::os::windows::process::CommandExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::Duration;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -42,45 +42,6 @@ pub fn media() -> Option<String> {
     let (t, a) = (p.Title().ok()?.to_string(), p.Artist().ok()?.to_string());
     let line = if a.is_empty() { t } else { format!("{t} - {a}") };
     Some(if line.chars().count() > 40 { line.chars().take(39).chain(std::iter::once('…')).collect::<String>() } else { line }).map(|l| format!("♪ {l}"))
-}
-
-fn recent_files(dir: &Path, since: SystemTime, depth: u8) -> usize {
-    let Ok(rd) = std::fs::read_dir(dir) else { return 0 };
-    rd.flatten()
-        .map(|e| {
-            let p = e.path();
-            if p.is_dir() && depth > 0 {
-                recent_files(&p, since, depth - 1)
-            } else {
-                (p.extension().is_some_and(|x| x == "jsonl") && e.metadata().and_then(|m| m.modified()).is_ok_and(|m| m > since)) as usize
-            }
-        })
-        .sum()
-}
-
-// Sesiones de Claude y Codex activas en la última hora, contadas por archivos de sesión locales (sin credenciales ni red).
-pub struct AiSessions {
-    cache: Option<(Instant, String)>,
-}
-
-impl AiSessions {
-    pub const fn new() -> Self {
-        Self { cache: None }
-    }
-
-    pub fn label(&mut self) -> Option<String> {
-        if let Some((t, s)) = &self.cache {
-            if t.elapsed() < Duration::from_secs(30) {
-                return Some(s.clone()).filter(|s| !s.is_empty());
-            }
-        }
-        let home = PathBuf::from(std::env::var_os("USERPROFILE")?);
-        let since = SystemTime::now() - Duration::from_secs(3600);
-        let (c, x) = (recent_files(&home.join(".claude").join("projects"), since, 3), recent_files(&home.join(".codex").join("sessions"), since, 4));
-        let text = [("CLAUDE", c), ("CODEX", x)].iter().filter(|(_, n)| *n > 0).map(|(l, n)| format!("{l} {n}")).collect::<Vec<_>>().join("  ");
-        self.cache = Some((Instant::now(), text.clone()));
-        Some(text).filter(|s| !s.is_empty())
-    }
 }
 
 #[cfg(test)]
