@@ -33,17 +33,15 @@ pub fn spawn_weather() {
     });
 }
 
-// "Título - Artista" de la sesión multimedia actual si está reproduciendo.
+// "♪ Título - Artista" de la primera sesión multimedia que esté reproduciendo.
 pub fn media() -> Option<String> {
     use windows::Media::Control::{GlobalSystemMediaTransportControlsSessionManager as Mgr, GlobalSystemMediaTransportControlsSessionPlaybackStatus as St};
-    let s = Mgr::RequestAsync().ok()?.get().ok()?.GetCurrentSession().ok()?;
-    if s.GetPlaybackInfo().ok()?.PlaybackStatus().ok()? != St::Playing {
-        return None;
-    }
+    let sessions = Mgr::RequestAsync().ok()?.get().ok()?.GetSessions().ok()?;
+    let s = sessions.into_iter().find(|s| s.GetPlaybackInfo().and_then(|i| i.PlaybackStatus()).is_ok_and(|st| st == St::Playing))?;
     let p = s.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
     let (t, a) = (p.Title().ok()?.to_string(), p.Artist().ok()?.to_string());
     let line = if a.is_empty() { t } else { format!("{t} - {a}") };
-    Some(line.chars().take(48).collect())
+    Some(if line.chars().count() > 40 { line.chars().take(39).chain(std::iter::once('…')).collect::<String>() } else { line }).map(|l| format!("♪ {l}"))
 }
 
 fn recent_files(dir: &Path, since: SystemTime, depth: u8) -> usize {

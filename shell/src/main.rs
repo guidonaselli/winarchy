@@ -120,7 +120,8 @@ unsafe fn render_pill(pill: HWND) {
     let dots_w: i32 = dots.iter().map(|f| if *f { active } else { dot }).sum::<i32>() + gap * (dots.len() as i32 - 1).max(0);
     let lead = if dots.is_empty() { 0 } else { dots_w + sep };
     let label_w = if label.is_empty() { 0 } else { lext.cx + sep };
-    let need = (pad * 2 + lead + label_w + ext.cx).min(px(PILL_MAX_W, scale));
+    let need_raw = pad * 2 + lead + label_w + ext.cx;
+    let need = need_raw.min(px(PILL_MAX_W, scale));
     let base = pad * 2 + lead + ext.cx;
     let (width, animating, strip, label) = with(|s| {
         s.target_w = need as f32;
@@ -195,7 +196,12 @@ unsafe fn render_pill(pill: HWND) {
         if lext.cx == 0 {
             let _ = GetTextExtentPoint32W(mem, &label, &mut lext);
         }
-        let _ = ExtTextOutW(mem, pad + lead, (h - lext.cy) / 2, ETO_CLIPPED, Some(&clip), PCWSTR(label.as_ptr()), label.len() as u32, None);
+        if need_raw > need && width >= need {
+            let (mut text, mut rc) = (label.clone(), clip);
+            DrawTextW(mem, &mut text, &mut rc, DT_END_ELLIPSIS | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        } else {
+            let _ = ExtTextOutW(mem, pad + lead, (h - lext.cy) / 2, ETO_CLIPPED, Some(&clip), PCWSTR(label.as_ptr()), label.len() as u32, None);
+        }
     }
     let _ = TextOutW(mem, width - pad - ext.cx, (h - ext.cy) / 2, &text);
     // GDI no escribe alfa: dentro de la pastilla el texto debe quedar opaco.
@@ -228,9 +234,11 @@ unsafe fn spring_step(strip: HWND) {
         let now = std::time::Instant::now();
         let dt = s.anim_last.map(|t| (now - t).as_secs_f32()).unwrap_or(0.008).min(0.05);
         s.anim_last = Some(now);
-        let acc = OMEGA * OMEGA * (s.target_w - s.cur_w) - 2.0 * OMEGA * s.vel;
-        s.vel += acc * dt;
-        s.cur_w += s.vel * dt;
+        // Solución exacta del resorte críticamente amortiguado: estable para cualquier dt, aunque el hilo se atrase.
+        let (d, e) = (s.cur_w - s.target_w, (-OMEGA * dt).exp());
+        let k = s.vel + OMEGA * d;
+        s.cur_w = s.target_w + (d + k * dt) * e;
+        s.vel = (s.vel - OMEGA * k * dt) * e;
         let settled = (s.cur_w - s.target_w).abs() < 0.5 && s.vel.abs() < 1.0;
         if settled {
             s.cur_w = s.target_w;
@@ -252,14 +260,20 @@ unsafe fn fullscreen_busy() -> bool {
 fn foreground_title() -> String {
     let mut buf = [0u16; 128];
     let n = unsafe { GetWindowTextW(GetForegroundWindow(), &mut buf) } as usize;
-    String::from_utf16_lossy(&buf[..n]).chars().take(28).collect()
+    let t = String::from_utf16_lossy(&buf[..n]);
+    if t.chars().count() > 24 { t.chars().take(23).chain(std::iter::once('…')).collect() } else { t }
 }
 
 // Mientras la isla está expandida refresca las métricas cada tick; al vencer, la limpia. Devuelve si hay que redibujar.
 // Las llamadas lentas (COM, WinRT) corren fuera del borrow del estado: pueden bombear mensajes y reentrar al wndproc.
 fn expand_step() -> bool {
     let now = std::time::Instant::now();
-    let until = with(|s| s.expand_until);
+    let until = with(|s| {
+        if s.tracking && s.expand_until.is_some() {
+            s.expand_until = Some(now + std::time::Duration::from_secs(EXPAND_SECS));
+        }
+        s.expand_until
+    });
     if !until.is_some_and(|t| t > now) {
         let vol = metrics::volume();
         let early = with(|s| {
@@ -293,12 +307,12 @@ fn expand_step() -> bool {
             if let Some(l) = komorebi::CURRENT.lock().unwrap().as_ref().map(|w| w.layout.clone()).filter(|l| !l.is_empty()) {
                 rest.push(l);
             }
+            if let Some(m) = extras::media() {
+                rest.push(m);
+            }
             let title = foreground_title();
             if !title.is_empty() {
                 rest.push(title);
-            }
-            if let Some(m) = extras::media() {
-                rest.push(m);
             }
             if let Some(w) = extras::WEATHER.lock().unwrap().clone() {
                 rest.push(w);
