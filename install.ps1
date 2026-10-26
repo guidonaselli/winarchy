@@ -212,7 +212,7 @@ if ($Activate) {
     Write-WinarchyInfo 'Starting the stack...'
     if ($komorebic) { Start-WinarchyKomorebi }
     if ($yasb -and (Get-WinarchyActiveBar) -eq 'yasb') { & $yasb start }
-    elseif ((Get-WinarchyActiveBar) -eq 'native' -and ($shellExe = Get-WinarchyShellExe)) { Start-Process $shellExe }
+    elseif ((Get-WinarchyActiveBar) -eq 'native' -and -not (Get-Process winarchy-shell -ErrorAction SilentlyContinue) -and ($shellExe = Get-WinarchyShellExe)) { Start-Process $shellExe -WindowStyle Hidden }
     if ($ahkExe) {
         Remove-Item Env:CLAUDE_CODE_CHILD_SESSION, Env:CLAUDECODE -ErrorAction SilentlyContinue
         Start-Process $ahkExe -ArgumentList "`"$Root\config\ahk\winarchy.ahk`""
