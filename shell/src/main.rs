@@ -1,3 +1,4 @@
+mod extras;
 mod metrics;
 mod komorebi;
 mod pipe;
@@ -38,6 +39,9 @@ struct State {
     hidden: bool,
     expand_until: Option<std::time::Instant>,
     sampler: metrics::Sampler,
+    ai: extras::AiSessions,
+    last_vol: Option<(u32, bool)>,
+    osd_until: Option<std::time::Instant>,
 }
 
 thread_local! { static STATE: RefCell<Option<State>> = const { RefCell::new(None) }; }
@@ -193,11 +197,42 @@ unsafe fn fullscreen_busy() -> bool {
 
 // Mientras la isla está expandida refresca las métricas cada tick; al vencer, la limpia. Devuelve si hay que redibujar.
 fn expand_step() -> bool {
-    with(|s| match s.expand_until {
+    with(|s| {
+        let expanded = s.expand_until.is_some_and(|t| t > std::time::Instant::now());
+        let now = std::time::Instant::now();
+        if !expanded {
+            let vol = metrics::volume();
+            let changed = s.last_vol.is_some() && vol.is_some() && vol != s.last_vol;
+            s.last_vol = vol;
+            if let (true, Some((v, muted))) = (changed, vol) {
+                s.osd_until = Some(now + std::time::Duration::from_secs(2));
+                *pipe::ISLAND.lock().unwrap() = Some(pipe::Island { title: if muted { "MUTE".into() } else { "VOL".into() }, detail: format!("{v}%"), progress: Some(v as f64 / 100.0) });
+                return true;
+            }
+            match s.osd_until {
+                Some(t) if t > now => return false,
+                Some(_) => {
+                    s.osd_until = None;
+                    *pipe::ISLAND.lock().unwrap() = None;
+                    return true;
+                }
+                None => {}
+            }
+        }
+        match s.expand_until {
         Some(t) if t > std::time::Instant::now() => {
             let cpu = s.sampler.cpu().map(|c| format!("{c:.0}%")).unwrap_or_else(|| "--".into());
             let ram = metrics::ram_percent().map(|r| format!("{r}%")).unwrap_or_else(|| "--".into());
             let mut rest = Vec::new();
+            if let Some(m) = extras::media() {
+                rest.push(m);
+            }
+            if let Some(w) = extras::WEATHER.lock().unwrap().clone() {
+                rest.push(w);
+            }
+            if let Some(a) = s.ai.label() {
+                rest.push(a);
+            }
             if let Some(g) = s.sampler.gpu() {
                 rest.push(format!("GPU {g:.0}%"));
             }
@@ -224,6 +259,7 @@ fn expand_step() -> bool {
             true
         }
         None => false,
+    }
     })
 }
 
@@ -327,9 +363,10 @@ fn main() {
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, px(PILL_DIP, scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { theme_mtime: mtime(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default() })
+            *s.borrow_mut() = Some(State { theme_mtime: mtime(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), ai: extras::AiSessions::new(), last_vol: None, osd_until: None })
         });
         register_strip(strip);
+        extras::spawn_weather();
         render_pill(pill);
         let _ = ShowWindow(pill, SW_SHOWNOACTIVATE);
         SetTimer(strip, TIMER_TICK, 1000, None);
