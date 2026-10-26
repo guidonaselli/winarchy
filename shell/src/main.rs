@@ -26,7 +26,7 @@ const EXPAND_SECS: u64 = 6;
 const TIMER_TICK: usize = 1;
 const STRIP_DIP: i32 = 8;
 const PILL_DIP: i32 = 32;
-const PILL_MAX_W: i32 = 760;
+const PILL_MAX_W: i32 = 1000;
 
 struct State {
     theme: Theme,
@@ -195,6 +195,12 @@ unsafe fn fullscreen_busy() -> bool {
     matches!(SHQueryUserNotificationState(), Ok(s) if s == QUNS_BUSY || s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE)
 }
 
+fn foreground_title() -> String {
+    let mut buf = [0u16; 128];
+    let n = unsafe { GetWindowTextW(GetForegroundWindow(), &mut buf) } as usize;
+    String::from_utf16_lossy(&buf[..n]).chars().take(28).collect()
+}
+
 // Mientras la isla está expandida refresca las métricas cada tick; al vencer, la limpia. Devuelve si hay que redibujar.
 fn expand_step() -> bool {
     with(|s| {
@@ -224,6 +230,13 @@ fn expand_step() -> bool {
             let cpu = s.sampler.cpu().map(|c| format!("{c:.0}%")).unwrap_or_else(|| "--".into());
             let ram = metrics::ram_percent().map(|r| format!("{r}%")).unwrap_or_else(|| "--".into());
             let mut rest = Vec::new();
+            if let Some(l) = komorebi::CURRENT.lock().unwrap().as_ref().map(|w| w.layout.clone()).filter(|l| !l.is_empty()) {
+                rest.push(l);
+            }
+            let title = foreground_title();
+            if !title.is_empty() {
+                rest.push(title);
+            }
             if let Some(m) = extras::media() {
                 rest.push(m);
             }

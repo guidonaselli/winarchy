@@ -14,6 +14,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub struct Workspaces {
     pub occupied: Vec<bool>,
     pub focused: usize,
+    pub layout: String,
 }
 
 pub static CURRENT: Mutex<Option<Workspaces>> = Mutex::new(None);
@@ -30,7 +31,9 @@ pub fn parse(event: &Value) -> Option<Workspaces> {
             has("containers") || has("floating_windows") || !w["monocle_container"].is_null()
         })
         .collect();
-    Some(Workspaces { occupied, focused: ws["focused"].as_u64()? as usize })
+    let focused = ws["focused"].as_u64()? as usize;
+    let layout = ws["elements"][focused]["layout"]["Default"].as_str().unwrap_or_default().to_string();
+    Some(Workspaces { occupied, focused, layout })
 }
 
 // Hilo propio: un suscriptor que no lee degrada a komorebi (probe 1.4), así que nunca se lee desde la UI.
@@ -97,6 +100,7 @@ mod tests {
         let ws = parse(&ev).unwrap();
         assert_eq!(ws.focused, 2);
         assert_eq!(ws.occupied, vec![false, true, false]);
+        assert_eq!(ws.layout, "");
     }
 
     #[test]
