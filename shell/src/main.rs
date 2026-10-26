@@ -48,7 +48,6 @@ struct State {
     hidden: bool,
     expand_until: Option<std::time::Instant>,
     sampler: metrics::Sampler,
-    ai: extras::AiSessions,
     last_vol: Option<(u32, bool)>,
     osd_until: Option<std::time::Instant>,
     last_label: Vec<u16>,
@@ -419,7 +418,7 @@ fn expand_step() -> bool {
     }
     match until {
         Some(t) if t > now => {
-            let (mut sampler, mut ai, theme_path) = with(|s| (std::mem::take(&mut s.sampler), std::mem::replace(&mut s.ai, extras::AiSessions::new()), s.theme_path.clone()));
+            let (mut sampler, theme_path) = with(|s| (std::mem::take(&mut s.sampler), s.theme_path.clone()));
             let cpu = sampler.cpu().map(|c| format!("{c:.0}%")).unwrap_or_else(|| "--".into());
             let ram = metrics::ram_percent().map(|r| format!("{r}%")).unwrap_or_else(|| "--".into());
             let mut rest = Vec::new();
@@ -435,9 +434,6 @@ fn expand_step() -> bool {
             }
             if let Some(w) = extras::WEATHER.lock().unwrap().clone() {
                 rest.push(w);
-            }
-            if let Some(a) = ai.label() {
-                rest.push(a);
             }
             if let Some(g) = sampler.gpu() {
                 rest.push(format!("GPU {g:.0}%"));
@@ -458,7 +454,6 @@ fn expand_step() -> bool {
             rest.extend(metrics::flags(&state_dir).into_iter().map(String::from));
             with(|s| {
                 s.sampler = sampler;
-                s.ai = ai;
             });
             *pipe::ISLAND.lock().unwrap() = Some(pipe::Island { title: format!("CPU {cpu}  RAM {ram}"), detail: rest.join("  ·  "), progress: None });
             true
@@ -488,6 +483,10 @@ unsafe fn tick_inner() {
     if busy != hidden {
         let _ = ShowWindow(pill, if busy { SW_HIDE } else { SW_SHOWNOACTIVATE });
         with(|s| s.hidden = busy);
+    }
+    if !busy {
+        // otras ventanas topmost (launcher, overlays) nos pasan por encima: se reafirma el orden.
+        let _ = SetWindowPos(pill, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
     let reloaded = with(|s| {
         let m = Theme::stamp(&s.theme_path);
@@ -650,7 +649,7 @@ fn main() {
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, px(PILL_DIP, scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), ai: extras::AiSessions::new(), last_vol: None, osd_until: None, last_label: Vec::new(), tracking: false, strips: vec![(strip, rects[0])], pill_mon: rects[0], layout_sig: layout_sig() })
+            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_label: Vec::new(), tracking: false, strips: vec![(strip, rects[0])], pill_mon: rects[0], layout_sig: layout_sig() })
         });
         register_strip(strip);
         add_extra_strips(&rects);
