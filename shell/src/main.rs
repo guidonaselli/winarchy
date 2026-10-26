@@ -24,6 +24,7 @@ const WM_WORKSPACES: u32 = WM_APP + 4;
 const WM_EXPAND: u32 = WM_APP + 5;
 const EXPAND_SECS: u64 = 6;
 const TIMER_TICK: usize = 1;
+const TIMER_ANIM: usize = 2;
 const STRIP_DIP: i32 = 8;
 const PILL_DIP: i32 = 32;
 const PILL_MAX_W: i32 = 1000;
@@ -35,6 +36,11 @@ struct State {
     scale: f32,
     taskbar_created: u32,
     pill: HWND,
+    strip: HWND,
+    cur_w: f32,
+    vel: f32,
+    target_w: f32,
+    anim_last: Option<std::time::Instant>,
     last_minute: u16,
     hidden: bool,
     expand_until: Option<std::time::Instant>,
@@ -109,7 +115,18 @@ unsafe fn render_pill(pill: HWND) {
     let dots_w: i32 = dots.iter().map(|f| if *f { active } else { dot }).sum::<i32>() + gap * (dots.len() as i32 - 1).max(0);
     let lead = if dots.is_empty() { 0 } else { dots_w + sep };
     let label_w = if label.is_empty() { 0 } else { lext.cx + sep };
-    let width = (pad * 2 + lead + label_w + ext.cx).min(px(PILL_MAX_W, scale));
+    let need = (pad * 2 + lead + label_w + ext.cx).min(px(PILL_MAX_W, scale));
+    let base = pad * 2 + lead + ext.cx;
+    let (width, animating, strip) = with(|s| {
+        s.target_w = need as f32;
+        if s.cur_w == 0.0 {
+            s.cur_w = need as f32;
+        }
+        ((s.cur_w.round() as i32).max(base), (s.cur_w - s.target_w).abs() > 0.5, s.strip)
+    });
+    if animating {
+        SetTimer(strip, TIMER_ANIM, 8, None);
+    }
     let bmi = BITMAPINFO { bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: width, biHeight: -h, biPlanes: 1, biBitCount: 32, ..Default::default() }, ..Default::default() };
     let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
     let dib = CreateDIBSection(mem, &bmi, DIB_RGB_COLORS, &mut bits, None, 0).unwrap();
@@ -160,7 +177,7 @@ unsafe fn render_pill(pill: HWND) {
     }
     SetBkMode(mem, TRANSPARENT);
     SetTextColor(mem, colorref(&theme.foreground));
-    if !label.is_empty() {
+    if !label.is_empty() && width >= need {
         let _ = TextOutW(mem, pad + lead, (h - lext.cy) / 2, &label);
     }
     let _ = TextOutW(mem, width - pad - ext.cx, (h - ext.cy) / 2, &text);
@@ -185,6 +202,30 @@ unsafe fn render_pill(pill: HWND) {
     let _ = DeleteObject(font);
     let _ = DeleteDC(mem);
     ReleaseDC(None, screen);
+}
+
+// Resorte críticamente amortiguado sobre el ancho de la pastilla; dt real para no depender de la resolución del timer.
+unsafe fn spring_step(strip: HWND) {
+    const OMEGA: f32 = 22.0;
+    let (pill, settled) = with(|s| {
+        let now = std::time::Instant::now();
+        let dt = s.anim_last.map(|t| (now - t).as_secs_f32()).unwrap_or(0.008).min(0.05);
+        s.anim_last = Some(now);
+        let acc = OMEGA * OMEGA * (s.target_w - s.cur_w) - 2.0 * OMEGA * s.vel;
+        s.vel += acc * dt;
+        s.cur_w += s.vel * dt;
+        let settled = (s.cur_w - s.target_w).abs() < 0.5 && s.vel.abs() < 1.0;
+        if settled {
+            s.cur_w = s.target_w;
+            s.vel = 0.0;
+            s.anim_last = None;
+        }
+        (s.pill, settled)
+    });
+    if settled {
+        let _ = KillTimer(strip, TIMER_ANIM);
+    }
+    render_pill(pill);
 }
 
 unsafe fn fullscreen_busy() -> bool {
@@ -317,6 +358,10 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             let _ = DeleteObject(brush);
             LRESULT(1)
         }
+        WM_TIMER if wp.0 == TIMER_ANIM => {
+            spring_step(h);
+            LRESULT(0)
+        }
         WM_TIMER => {
             tick(h);
             LRESULT(0)
@@ -372,7 +417,7 @@ fn main() {
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, px(PILL_DIP, scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), ai: extras::AiSessions::new(), last_vol: None, osd_until: None })
+            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), ai: extras::AiSessions::new(), last_vol: None, osd_until: None })
         });
         register_strip(strip);
         extras::spawn_weather();
