@@ -49,14 +49,22 @@
         { "name": "6", "layout": "BSP" },
         { "name": "7", "layout": "BSP" },
         { "name": "8", "layout": "BSP" },
-        { "name": "9", "layout": "BSP" }
+        { "name": "9", "layout": "BSP" },
+        { "name": "10", "layout": "BSP" }
       ]
     },
     {
       "workspaces": [
-        { "name": "A", "layout": "BSP" },
-        { "name": "B", "layout": "BSP" },
-        { "name": "C", "layout": "BSP" }
+        { "name": "1", "layout": "BSP" },
+        { "name": "2", "layout": "BSP" },
+        { "name": "3", "layout": "BSP" },
+        { "name": "4", "layout": "BSP" },
+        { "name": "5", "layout": "BSP" },
+        { "name": "6", "layout": "BSP" },
+        { "name": "7", "layout": "BSP" },
+        { "name": "8", "layout": "BSP" },
+        { "name": "9", "layout": "BSP" },
+        { "name": "10", "layout": "BSP" }
       ]
     }
   ],
@@ -106,6 +114,7 @@
     { "kind": "Title", "id": "Winarchy — Themes", "matching_strategy": "Equals" },
     { "kind": "Class", "id": "ReunionWindowingCaptionControls", "matching_strategy": "Equals" },
     { "kind": "Class", "id": "InputNonClientPointerSource", "matching_strategy": "Equals" },
+    { "kind": "Exe", "id": "winarchy-shell.exe", "matching_strategy": "Equals" },
     { "kind": "Exe", "id": "ShareX.exe", "matching_strategy": "Equals" }{{computed.game_ignore_rules}}
   ]
 }

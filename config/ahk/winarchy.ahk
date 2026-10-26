@@ -67,13 +67,21 @@ Komorebic(cmd) {
     Run('"' KomorebicExe '" ' cmd, , 'Hide')
 }
 
+; komorebi no sigue al mouse en un escritorio vacío: sin esto SUPER+N cae en el monitor del
+; último foco y no en el que se está mirando.
+FocusWorkspace(index) {
+    Run('"' KomorebicExe '" focus-monitor-at-cursor', , 'Hide', &pid)
+    ProcessWaitClose(pid, 1)   ; acotado: un komorebi colgado no puede congelar el hotkey
+    Komorebic('focus-workspace ' index)
+}
+
 ; WM_CLOSE to the active window, never to the desktop or taskbar.
 CloseWindow() {
     if !(hwnd := WinExist('A'))
         return
     try {
         if WinGetClass(hwnd) ~= '^(Progman|WorkerW|Shell_TrayWnd|Shell_SecondaryTrayWnd)$'
-            || WinGetProcessName(hwnd) = 'yasb.exe'
+            || WinGetProcessName(hwnd) ~= '^(yasb|winarchy-shell)\.exe$'
             return
         ; WezTerm tarda 2-4 s en cerrar (apaga los procesos del pane); oculta primero para que
         ; el tiling reaccione al instante. Seguro: window_close_confirmation = NeverPrompt.
@@ -117,7 +125,7 @@ DragTarget(hwnd) {
     return (WinGetStyle(hwnd) & 0x10000000) && !(WinGetExStyle(hwnd) & 0x80)
         && WinGetMinMax(hwnd) != -1
         && !(WinGetClass(hwnd) ~= '^(Progman|WorkerW|Shell_TrayWnd|Shell_SecondaryTrayWnd)$')
-        && WinGetProcessName(hwnd) != 'yasb.exe'
+        && !(WinGetProcessName(hwnd) ~= '^(yasb|winarchy-shell)\.exe$')
 }
 
 DragMove(hwnd, x0, y0, held) {
@@ -382,6 +390,7 @@ QuitStack() {
     SetTimer(YasbWatch, 0)   ; si no, relanza la barra que acabamos de matar
     try Komorebic('stop')
     try RunWait('taskkill /IM yasb.exe /F', , 'Hide')
+    try RunWait('taskkill /IM winarchy-shell.exe /F', , 'Hide')
     try RunWait('taskkill /IM Flow.Launcher.exe /F', , 'Hide')
     ExitApp()
 }
@@ -392,11 +401,14 @@ YasbcExe := FileExist(A_ProgramFiles "\YASB\yasbc.exe") ? A_ProgramFiles "\YASB\
 YasbMisses := 0
 YasbRelaunches := []
 YasbCooldown := 0
+BarFile := StateDir "\bar"
 if YasbcExe
     SetTimer(YasbWatch, 5000)
 
 YasbWatch() {
-    global YasbMisses, YasbRelaunches, YasbCooldown
+    global YasbMisses, YasbRelaunches, YasbCooldown, BarFile
+    if FileExist(BarFile) && Trim(FileRead(BarFile)) = 'native'
+        return
     if A_TickCount < YasbCooldown
         return
     if ProcessExist('yasb.exe') || ProcessExist('winget.exe') {
@@ -560,11 +572,11 @@ ParseKeymap(path, defaultTitle := '', startAt := '') {
         if !IsObject(cur) || !RegExMatch(line, '^#([+^!]*)([^:\s]+)::(.*)$', &m)
             continue
         mods := m[1], key := m[2], rest := m[3]
-        ; 1..9 and the four arrows are listed once
-        if RegExMatch(key, '^[2-9]$') || key = 'Right' || key = 'Up' || key = 'Down'
+        ; 1..0 and the four arrows are listed once
+        if RegExMatch(key, '^[02-9]$') || key = 'Right' || key = 'Up' || key = 'Down'
             continue
         if (key = '1')
-            key := '1' Chr(0x2026) '9'
+            key := '1' Chr(0x2026) '0'
         else if (key = 'Left')
             key := Chr(0x2190) ' ' Chr(0x2191) ' ' Chr(0x2192) ' ' Chr(0x2193)
         else if (key = 'Enter')
@@ -1014,7 +1026,7 @@ GameWatch() {
                     if (x <= l && y <= t && x + w >= r && y + h >= b) {
                         exe := StrLower(WinGetProcessName(hwnd))
                         ; nunca tratar shell/escritorio como juego
-                        if exe != 'explorer.exe' && exe != 'searchhost.exe' && exe != 'yasb.exe'
+                        if exe != 'explorer.exe' && exe != 'searchhost.exe' && exe != 'yasb.exe' && exe != 'winarchy-shell.exe'
                             active := true
                         break
                     }
@@ -1112,8 +1124,11 @@ AccentWatch() {
 #+r::Winarchy('reload')                          ; reload the whole stack
 #+Enter::Komorebic('promote')                    ; promote to the largest tile
 #+l::Komorebic('cycle-layout next')              ; next layout
-#Tab::Komorebic('focus-last-workspace')          ; previous workspace
-#+Tab::Komorebic('move-to-last-workspace')       ; move window to the previous workspace
+#Tab::Komorebic('cycle-workspace next')          ; next workspace
+#+Tab::Komorebic('cycle-workspace previous')     ; previous workspace
+#^Tab::Komorebic('focus-last-workspace')         ; back to the workspace you came from
+#WheelDown::Komorebic('cycle-workspace next')    ; scroll to the next workspace
+#WheelUp::Komorebic('cycle-workspace previous')  ; scroll to the previous workspace
 #^Enter::Komorebic('promote-focus')              ; focus the largest tile
 #+h::Komorebic('flip-layout horizontal')         ; mirror layout left / right
 #+j::Komorebic('flip-layout vertical')           ; mirror layout up / down
@@ -1160,15 +1175,16 @@ AccentWatch() {
 #+-::Komorebic('resize-axis vertical decrease')  ; shorter
 
 ; --- Workspaces (komorebi, not Windows virtual desktops) -------------------------
-#1::Komorebic('focus-workspace 0')               ; go to workspace
-#2::Komorebic('focus-workspace 1')
-#3::Komorebic('focus-workspace 2')
-#4::Komorebic('focus-workspace 3')
-#5::Komorebic('focus-workspace 4')
-#6::Komorebic('focus-workspace 5')
-#7::Komorebic('focus-workspace 6')
-#8::Komorebic('focus-workspace 7')
-#9::Komorebic('focus-workspace 8')
+#1::FocusWorkspace(0)                            ; go to workspace N of the monitor under the cursor
+#2::FocusWorkspace(1)
+#3::FocusWorkspace(2)
+#4::FocusWorkspace(3)
+#5::FocusWorkspace(4)
+#6::FocusWorkspace(5)
+#7::FocusWorkspace(6)
+#8::FocusWorkspace(7)
+#9::FocusWorkspace(8)
+#0::FocusWorkspace(9)
 
 #+1::Komorebic('move-to-workspace 0')            ; move window to workspace
 #+2::Komorebic('move-to-workspace 1')
@@ -1179,6 +1195,7 @@ AccentWatch() {
 #+7::Komorebic('move-to-workspace 6')
 #+8::Komorebic('move-to-workspace 7')
 #+9::Komorebic('move-to-workspace 8')
+#+0::Komorebic('move-to-workspace 9')
 
 #^1::Komorebic('send-to-workspace 0')            ; send window to workspace, stay here
 #^2::Komorebic('send-to-workspace 1')
@@ -1189,6 +1206,7 @@ AccentWatch() {
 #^7::Komorebic('send-to-workspace 6')
 #^8::Komorebic('send-to-workspace 7')
 #^9::Komorebic('send-to-workspace 8')
+#^0::Komorebic('send-to-workspace 9')
 
 ; --- Monitors ------------------------------------------------------------------
 #,::Komorebic('cycle-monitor previous')    ; focus previous monitor

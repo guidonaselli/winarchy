@@ -74,31 +74,62 @@ config.audible_bell = 'Disabled'
 config.window_decorations = 'RESIZE'
 config.adjust_window_size_when_changing_font_size = false
 
--- Los hotkeys globales son de AHK: acá solo lo interno a la ventana, todo detrás del leader.
-config.leader = { key = 'a', mods = 'CTRL', timeout_milliseconds = 1000 }
+-- Los hotkeys globales son de AHK: acá solo lo interno a la ventana, detrás del leader
+-- (mismo mapa que las teclas de tmux de Omarchy) y Alt+1..9 para ir a una tab.
+config.leader = { key = 'Space', mods = 'CTRL', timeout_milliseconds = 1000 }
 config.keys = {
-  { key = 'a', mods = 'LEADER|CTRL', action = act.SendKey { key = 'a', mods = 'CTRL' } },
-  -- El '|' necesita SHIFT en mods (es el carácter con shift); 'v' es el alias sin shift,
-  -- que no depende del layout de teclado.
-  { key = '|', mods = 'LEADER|SHIFT', action = act.SplitHorizontal { domain = 'CurrentPaneDomain' } },
+  { key = 'Space', mods = 'LEADER|CTRL', action = act.SendKey { key = 'Space', mods = 'CTRL' } },
   { key = 'v', mods = 'LEADER', action = act.SplitHorizontal { domain = 'CurrentPaneDomain' } },
-  { key = '-', mods = 'LEADER', action = act.SplitVertical { domain = 'CurrentPaneDomain' } },
-  { key = 'h', mods = 'LEADER', action = act.ActivatePaneDirection 'Left' },
-  { key = 'j', mods = 'LEADER', action = act.ActivatePaneDirection 'Down' },
-  { key = 'k', mods = 'LEADER', action = act.ActivatePaneDirection 'Up' },
-  { key = 'l', mods = 'LEADER', action = act.ActivatePaneDirection 'Right' },
+  { key = 'h', mods = 'LEADER', action = act.SplitVertical { domain = 'CurrentPaneDomain' } },
+  { key = 'LeftArrow', mods = 'LEADER', action = act.ActivatePaneDirection 'Left' },
+  { key = 'DownArrow', mods = 'LEADER', action = act.ActivatePaneDirection 'Down' },
+  { key = 'UpArrow', mods = 'LEADER', action = act.ActivatePaneDirection 'Up' },
+  { key = 'RightArrow', mods = 'LEADER', action = act.ActivatePaneDirection 'Right' },
   { key = 'z', mods = 'LEADER', action = act.TogglePaneZoomState },
   { key = 'x', mods = 'LEADER', action = act.CloseCurrentPane { confirm = false } },
   { key = 'c', mods = 'LEADER', action = act.SpawnTab 'CurrentPaneDomain' },
-  { key = 'w', mods = 'LEADER', action = act.CloseCurrentTab { confirm = false } },
+  { key = 'k', mods = 'LEADER', action = act.CloseCurrentTab { confirm = false } },
   { key = 'n', mods = 'LEADER', action = act.ActivateTabRelative(1) },
   { key = 'p', mods = 'LEADER', action = act.ActivateTabRelative(-1) },
-  { key = 'f', mods = 'LEADER', action = act.Search { CaseInSensitiveString = '' } },
   { key = '[', mods = 'LEADER', action = act.ActivateCopyMode },
-  { key = 's', mods = 'LEADER', action = act.QuickSelect },
+  {
+    key = 'r', mods = 'LEADER',
+    action = act.PromptInputLine {
+      description = 'Tab name',
+      action = wezterm.action_callback(function(window, _, line)
+        if line then window:active_tab():set_title(line) end
+      end),
+    },
+  },
+  -- Las "sessions" de tmux son los workspaces de WezTerm.
+  {
+    key = 'C', mods = 'LEADER|SHIFT',
+    action = act.PromptInputLine {
+      description = 'New workspace',
+      action = wezterm.action_callback(function(window, pane, line)
+        if line and line ~= '' then
+          window:perform_action(act.SwitchToWorkspace { name = line }, pane)
+        end
+      end),
+    },
+  },
+  {
+    key = 'R', mods = 'LEADER|SHIFT',
+    action = act.PromptInputLine {
+      description = 'Rename workspace',
+      action = wezterm.action_callback(function(_, _, line)
+        if line and line ~= '' then
+          wezterm.mux.rename_workspace(wezterm.mux.get_active_workspace(), line)
+        end
+      end),
+    },
+  },
+  { key = 'N', mods = 'LEADER|SHIFT', action = act.SwitchWorkspaceRelative(1) },
+  { key = 'P', mods = 'LEADER|SHIFT', action = act.SwitchWorkspaceRelative(-1) },
+  { key = 's', mods = 'LEADER', action = act.ShowLauncherArgs { flags = 'FUZZY|WORKSPACES' } },
 }
 for i = 1, 9 do
-  table.insert(config.keys, { key = tostring(i), mods = 'LEADER', action = act.ActivateTab(i - 1) })
+  table.insert(config.keys, { key = tostring(i), mods = 'ALT', action = act.ActivateTab(i - 1) })
 end
 
 -- Titulo de tab: indice + programa. El default muestra la linea de comando entera, que
