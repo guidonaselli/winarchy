@@ -63,7 +63,7 @@ function Invoke-WinarchyUpdate {
     $lockPath = Join-Path (Get-WinarchyRoot) 'versions.lock.toml'
     $lock = Import-WinarchyToml -Path $lockPath
 
-    $ids = if ($Core) { @($script:CoreWingetIds.Keys | Sort-Object) }
+    $ids = if ($Core) { @($script:CoreWingetIds.Keys | Where-Object { $_ -ne 'AmN.yasb' -or (Get-Command yasbc -ErrorAction SilentlyContinue) } | Sort-Object) }
            else { @(Get-WinarchyDeclaredWingetIds -Lock $lock | Where-Object { -not $script:CoreWingetIds.ContainsKey($_) }) }
 
     if ($Core) { Write-WinarchyInfo 'Updating CORE components (pinned; review the changelogs)...' }
@@ -116,7 +116,7 @@ function Invoke-WinarchyUpdate {
 
     # Aviso de updates core disponibles, sin aplicarlos. `winget upgrade` oculta los
     # paquetes pinneados, por eso se consulta cada uno con `winget show`.
-    foreach ($id in ($script:CoreWingetIds.Keys | Sort-Object)) {
+    foreach ($id in ($script:CoreWingetIds.Keys | Where-Object { $_ -ne 'AmN.yasb' -or (Get-Command yasbc -ErrorAction SilentlyContinue) } | Sort-Object)) {
         $latest = if ((winget show --id $id --exact --source winget 2>$null | Out-String) -match '(?m)^Version:\s*(.+)$') { $Matches[1].Trim() } else { $null }
         $pinned = $lock['core'][$script:CoreWingetIds[$id]]
         if ($latest -and $pinned -and $latest -ne $pinned) {

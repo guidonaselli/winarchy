@@ -2834,7 +2834,7 @@ Describe 'First install on a clean machine' {
         $lock = Import-WinarchyToml -Path (Join-Path $script:Root 'versions.lock.toml')
         $pinned = Get-WinarchyCoreVersions -Lock $lock
         @($pinned.Values | Sort-Object) | Should -Be @($lock['core'].Values | Sort-Object)
-        foreach ($id in $pinned.Keys) { $lock['winget'][$id] | Should -BeTrue -Because $id }
+        foreach ($id in $pinned.Keys) { ($lock['winget'][$id] -or $lock['winget-optional'][$id]) | Should -BeTrue -Because $id }
     }
 }
 
@@ -3044,16 +3044,20 @@ Describe 'Get-WinarchyDefenderExclusionPaths' {
 }
 
 Describe 'Get-WinarchyActiveBar' {
-    It 'is yasb when state/bar is absent or unknown and native only when it says so' {
+    It 'honors state/bar; absent or unknown is native, or yasb on machines that already had it' {
         InModuleScope Winarchy {
             $root = Join-Path $TestDrive 'repo'
             New-Item -ItemType Directory -Path (Join-Path $root 'state') -Force | Out-Null
             Mock Get-WinarchyRoot { $root }
-            Get-WinarchyActiveBar | Should -Be 'yasb'
-            Set-Content (Join-Path $root 'state\bar') 'whatever'
-            Get-WinarchyActiveBar | Should -Be 'yasb'
-            Set-Content (Join-Path $root 'state\bar') "native`r`n"
+            Mock Get-Command { $null } -ParameterFilter { $Name -eq 'yasbc' }
             Get-WinarchyActiveBar | Should -Be 'native'
+            Mock Get-Command { [pscustomobject]@{ Source = 'yasbc.exe' } } -ParameterFilter { $Name -eq 'yasbc' }
+            Get-WinarchyActiveBar | Should -Be 'yasb'
+            Set-Content (Join-Path $root 'state\bar') 'native'
+            Get-WinarchyActiveBar | Should -Be 'native'
+            Set-Content (Join-Path $root 'state\bar') "yasb`r`n"
+            Mock Get-Command { $null } -ParameterFilter { $Name -eq 'yasbc' }
+            Get-WinarchyActiveBar | Should -Be 'yasb'
         }
     }
 

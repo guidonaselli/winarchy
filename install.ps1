@@ -16,7 +16,8 @@
 [CmdletBinding()]
 param(
     [switch]$Activate,
-    [switch]$SkipPackages
+    [switch]$SkipPackages,
+    [switch]$WithYasb
 )
 $ErrorActionPreference = 'Stop'
 $Root = $PSScriptRoot
@@ -60,8 +61,10 @@ $coreVersions = Get-WinarchyCoreVersions -Lock $lock
 $packageIds = if ($SkipPackages) { @($coreVersions.Keys) } else { @($lock['winget'].Keys) }
 if ($SkipPackages) { Write-WinarchyInfo 'Checking that the core components are present...' }
 $failedPackages = @()
+$optional = $lock['winget-optional']
+if ($WithYasb) { $packageIds += @($optional.Keys) }
 foreach ($id in $packageIds) {
-    if (-not $lock['winget'][$id]) { continue }
+    if (-not ($lock['winget'][$id] -or ($WithYasb -and $optional[$id]))) { continue }
     $installed = Get-WinarchyInstalledVersion -Id $id
     $outdated = $installed -and -not $SkipPackages -and $coreVersions.ContainsKey($id) -and
         (Test-WinarchyVersionBelow -Installed $installed -Pinned $coreVersions[$id])
@@ -131,6 +134,12 @@ if (-not $SkipPackages) {
     else { Write-WinarchyOk 'PSFzf already installed' }
 }
 Install-WinarchyShellProfile
+
+# --- 3a. Barra: la shell nativa por defecto (YASB solo si ya estaba o con -WithYasb) ----
+if ($WithYasb -and -not (Test-Path (Join-Path (Get-WinarchyStateDir) 'bar'))) {
+    Set-WinarchyFileAtomic -Path (Join-Path (Get-WinarchyStateDir) 'bar') -Value 'yasb'
+}
+Initialize-WinarchyBar
 
 # --- 3c. Skill "winarchy" en los agentes de IA detectados (estilo Omarchy) ----------
 Install-WinarchySkill
@@ -203,6 +212,7 @@ if ($Activate) {
     Write-WinarchyInfo 'Starting the stack...'
     if ($komorebic) { Start-WinarchyKomorebi }
     if ($yasb -and (Get-WinarchyActiveBar) -eq 'yasb') { & $yasb start }
+    elseif ((Get-WinarchyActiveBar) -eq 'native' -and ($shellExe = Get-WinarchyShellExe)) { Start-Process $shellExe }
     if ($ahkExe) {
         Remove-Item Env:CLAUDE_CODE_CHILD_SESSION, Env:CLAUDECODE -ErrorAction SilentlyContinue
         Start-Process $ahkExe -ArgumentList "`"$Root\config\ahk\winarchy.ahk`""

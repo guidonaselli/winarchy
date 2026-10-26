@@ -220,6 +220,7 @@ function Invoke-WinarchyDoctor {
         @{ Name = 'Everything'; Key = 'everything'; Path = "$env:ProgramFiles\Everything\Everything.exe" }
     )) {
         $found = $pinned.Path -and (Test-Path $pinned.Path)
+        if ($pinned.Key -eq 'yasb' -and -not $found -and (Get-WinarchyActiveBar) -ne 'yasb') { continue }   # YASB es opcional
         $installed = if ($found) { (Get-Item $pinned.Path).VersionInfo.ProductVersion } else { $null }
         # Flow reporta 4 componentes (2.1.3.0) contra el 2.1.3 del lockfile
         $pin = $lock['core'][$pinned.Key]
