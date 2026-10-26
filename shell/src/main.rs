@@ -30,7 +30,7 @@ const TIMER_TICK: usize = 1;
 const TIMER_ANIM: usize = 2;
 const STRIP_DIP: i32 = 8;
 const PILL_DIP: i32 = 32;
-const PILL_MAX_W: i32 = 1000;
+const PILL_MAX_W: i32 = 1400;
 
 struct State {
     theme: Theme,
@@ -121,7 +121,7 @@ unsafe fn render_pill(pill: HWND) {
     let lead = if dots.is_empty() { 0 } else { dots_w + sep };
     let label_w = if label.is_empty() { 0 } else { lext.cx + sep };
     let need_raw = pad * 2 + lead + label_w + ext.cx;
-    let need = need_raw.min(px(PILL_MAX_W, scale));
+    let need = need_raw.min(px(PILL_MAX_W, scale)).min(GetSystemMetrics(SM_CXSCREEN) * 3 / 4);
     let base = pad * 2 + lead + ext.cx;
     let (width, animating, strip, label) = with(|s| {
         s.target_w = need as f32;
@@ -341,7 +341,7 @@ fn expand_step() -> bool {
                 s.sampler = sampler;
                 s.ai = ai;
             });
-            *pipe::ISLAND.lock().unwrap() = Some(pipe::Island { title: format!("CPU {cpu}  RAM {ram}"), detail: rest.join("  "), progress: None });
+            *pipe::ISLAND.lock().unwrap() = Some(pipe::Island { title: format!("CPU {cpu}  RAM {ram}"), detail: rest.join("  ·  "), progress: None });
             true
         }
         Some(_) => {
