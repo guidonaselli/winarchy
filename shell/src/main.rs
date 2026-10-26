@@ -395,6 +395,19 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
 }
 
 unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    if m == WM_MOUSEMOVE {
+        let (strip, expanded) = with(|s| {
+            let expanded = s.expand_until.is_some();
+            if expanded {
+                s.expand_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(EXPAND_SECS));
+            }
+            (s.strip, expanded)
+        });
+        if !expanded {
+            let _ = PostMessageW(strip, WM_EXPAND, WPARAM(0), LPARAM(0));
+        }
+        return LRESULT(0);
+    }
     DefWindowProcW(h, m, wp, lp)
 }
 
@@ -408,8 +421,9 @@ fn main() {
         let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
         let theme = Theme::load(&theme_path).unwrap_or_default();
 
-        let strip_class = WNDCLASSW { lpfnWndProc: Some(strip_proc), hInstance: inst.into(), lpszClassName: w!("WinarchyShellStrip"), ..Default::default() };
-        let pill_class = WNDCLASSW { lpfnWndProc: Some(pill_proc), hInstance: inst.into(), lpszClassName: w!("WinarchyShellPill"), ..Default::default() };
+        let arrow = LoadCursorW(None, IDC_ARROW).unwrap_or_default();
+        let strip_class = WNDCLASSW { lpfnWndProc: Some(strip_proc), hInstance: inst.into(), hCursor: arrow, lpszClassName: w!("WinarchyShellStrip"), ..Default::default() };
+        let pill_class = WNDCLASSW { lpfnWndProc: Some(pill_proc), hInstance: inst.into(), hCursor: arrow, lpszClassName: w!("WinarchyShellPill"), ..Default::default() };
         RegisterClassW(&strip_class);
         RegisterClassW(&pill_class);
         let ex = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE;
