@@ -47,8 +47,9 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
   explícito; ni `install.ps1` ni `update` lo tocan. Su set curado vive en
   `extras/windhawk/mods.json` (se regenera con `scripts/Export-WindhawkMods.ps1`; los SHA256 de las DLL se fijan con
   `scripts/Update-WindhawkHashes.ps1` y el instalador los verifica antes de tocar el registro).
-- Barra: YASB por defecto; la shell nativa (`shell/`, Rust + Win32, `winarchy-shell.exe`) se activa con
-  `state/bar` = `native` y coexiste sin tocar YASB. La shell nunca registra hotkeys ni hooks de teclado
+- Barra: la shell nativa (`shell/`, Rust + Win32, `winarchy-shell.exe`, "Winarchy Island") es el default; YASB es
+  opcional (`install.ps1 -WithYasb` o `winarchy bar use yasb`, que lo instala pinneado si falta) y una máquina que ya
+  tenía YASB lo conserva (`state/bar` ausente + `yasbc` presente = yasb). La shell nunca registra hotkeys ni hooks de teclado
   (AHK es el dueño), no corre elevada, lee komorebi desde un hilo dedicado (un suscriptor sin leer
   degrada a komorebi) y toma sus colores de `config/shell/theme.json`, generado desde
   `templates/shell-theme.json.tpl`. El binario sale como asset del Release con SHA256 en `[shell]`

@@ -38,7 +38,8 @@ sync con el tag.
 6. **Binario de la shell nativa** (solo si cambió `shell/`): bajar el artefacto `winarchy-shell` del
    CI del commit que se va a taggear, adjuntarlo a la release (`gh release upload vX.Y.Z winarchy-shell.exe`) y fijar su
    `Get-FileHash -Algorithm SHA256` en `[shell] sha256` de `versions.lock.toml` antes de taggear.
-   `install.ps1` solo instala el binario si el hash coincide.
+   `install.ps1` baja `releases/download/vX.Y.Z/winarchy-shell.exe` (X.Y.Z = `ModuleVersion`) y solo lo instala si el hash
+   coincide: subir el asset apenas se crea la release, porque un `update --self` anterior a eso no encuentra el binario.
 
 ## Notas
 

@@ -83,10 +83,13 @@ That means Winarchy optimizes for:
   - one place for global shortcuts
   - Linux-style muscle memory, adapted to Windows reality
 
-- **Optional native shell (experimental)**
-  - a Dynamic-Island-style pill with workspace dots and a clock, over a thin strip
-  - opt-in with `statear` = `native`; YASB stays the default and is never modified
-  - source in `shell/` (Rust + Win32), binary pinned by SHA256 in `versions.lock.toml`
+- **Winarchy Island (the default bar)**
+  - a Dynamic-Island-style pill with workspace dots and a clock, over a thin strip per monitor;
+    it expands on hover or `SUPER+I` into CPU/RAM/GPU, media, weather and more
+  - source in `shell/` (Rust + Win32); `install.ps1` downloads the binary from the GitHub Release
+    and installs it only if its SHA256 matches `versions.lock.toml`
+  - YASB is optional: `install.ps1 -WithYasb`, or `winarchy bar use yasb` (installs it if missing).
+    Machines that already had YASB keep it after an update
 
 - **Tiling that respects Windows**
   - powered by `komorebi`
