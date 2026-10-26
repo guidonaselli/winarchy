@@ -54,10 +54,6 @@ fn px(dip: i32, scale: f32) -> i32 {
     (dip as f32 * scale).round() as i32
 }
 
-fn mtime(p: &PathBuf) -> Option<SystemTime> {
-    std::fs::metadata(p).and_then(|m| m.modified()).ok()
-}
-
 fn colorref(hex: &str) -> COLORREF {
     let (r, g, b) = rgb(hex);
     COLORREF(r as u32 | (g as u32) << 8 | (b as u32) << 16)
@@ -284,7 +280,7 @@ unsafe fn tick(strip: HWND) {
         with(|s| s.hidden = busy);
     }
     let reloaded = with(|s| {
-        let m = mtime(&s.theme_path);
+        let m = Theme::stamp(&s.theme_path);
         if m != s.theme_mtime {
             s.theme_mtime = m;
             if let Some(t) = Theme::load(&s.theme_path) {
@@ -376,7 +372,7 @@ fn main() {
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, px(PILL_DIP, scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { theme_mtime: mtime(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), ai: extras::AiSessions::new(), last_vol: None, osd_until: None })
+            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), ai: extras::AiSessions::new(), last_vol: None, osd_until: None })
         });
         register_strip(strip);
         extras::spawn_weather();
