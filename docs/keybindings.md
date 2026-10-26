@@ -1,7 +1,7 @@
 # Winarchy — Keybindings (SUPER scheme, owner: AHK v2)
 
 `SUPER` = Windows key. Everything is suspended automatically in game-mode,
-except `SUPER+1..9` (workspace switching), which stays active as an alt-tab-style
+except `SUPER+1..0` (workspace switching), which stays active as an alt-tab-style
 escape — otherwise Windows' native Win+N (launch taskbar app N) would fire instead.
 
 ## Apps
@@ -16,6 +16,7 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 | `SUPER+M` | Music (Spotify, fallback YT Music webapp) |
 | `SUPER+O` | Obsidian |
 | `SUPER+K` | Keybindings list: searchable, auto-generated from winarchy.ahk, themed, on the active monitor |
+| `SUPER+I` | Native shell only (`winarchy bar use native`): expands the island with CPU and RAM for a few seconds |
 
 ## Menu (popup, Omarchy-style)
 | Keybinding | Action |
@@ -73,8 +74,11 @@ manual app list: Flow already indexes installed programs.
 ## Workspaces (komorebi, per monitor)
 | Keybinding | Action |
 |---|---|
-| `SUPER+1..9` | Go to workspace N |
-| `SUPER+Shift+1..9` | Move window to workspace N |
+| `SUPER+1..0` | Go to workspace N (1–10) of the monitor under the cursor |
+| `SUPER+Shift+1..0` | Move window to workspace N |
+| `SUPER+Tab` / `SUPER+Shift+Tab` | Next / previous workspace |
+| `SUPER+Ctrl+Tab` | Back to the workspace you came from |
+| `SUPER+WheelDown` / `SUPER+WheelUp` | Scroll to the next / previous workspace |
 | `SUPER+,` / `SUPER+.` | Focus previous / next monitor |
 | `SUPER+Shift+,` / `SUPER+Shift+.` | Move window to previous / next monitor |
 | `SUPER+Ctrl+,` / `SUPER+Ctrl+.` | Send window to previous / next monitor without following it |
@@ -119,10 +123,8 @@ control panels — `W` is `N` here because `SUPER+Ctrl+W` is stay awake.
 | `SUPER+Ctrl+Return` | Focus the window at the top of the tree |
 | `SUPER+Shift+H` / `SUPER+Shift+J` | Mirror the layout left/right or up/down |
 | `SUPER+Shift+Z` | Stop tiling this workspace |
-| `SUPER+Shift+Tab` | Send the window to the previous workspace |
 | `SUPER+Shift+L` | Cycle to the next layout (BSP, columns, rows, grid, scrolling, …) |
 | `SUPER+Alt+Space` → Tiling → Layout | Pick any layout (BSP, grid, columns, rows, the stacks, scrolling) |
-| `SUPER+Tab` | Back to the workspace you came from |
 | `SUPER+Alt+Home` | Remember the current tile sizes |
 | `SUPER+Home` | Restore the remembered tile sizes |
 | `SUPER+Shift+D` | Dim unfocused windows (toggle transparency) |
@@ -130,32 +132,35 @@ control panels — `W` is `N` here because `SUPER+Ctrl+W` is stay awake.
 | `SUPER+Ctrl+M` | Minimize the focused window |
 | `SUPER+Ctrl+F` | Switch between the tiling and floating layers |
 | `SUPER+Ctrl+W` | Keep the machine awake (toggle) |
-| `SUPER+Ctrl+1`–`9` | Send the window to workspace N without following it |
+| `SUPER+Ctrl+1`–`0` | Send the window to workspace N without following it |
 
 ## Terminal (WezTerm, internal — not global hotkeys)
 WezTerm registers **no** global hotkeys: AHK stays the sole owner of those. Everything
-below only works inside a WezTerm window and lives behind the leader key `CTRL+a`
-(press the leader, release it, then the key). `CTRL+a` twice sends a literal `CTRL+a`
-to the shell.
+below only works inside a WezTerm window and lives behind the leader key `CTRL+Space`
+(press the leader, release it, then the key), the same map as Omarchy's tmux. `CTRL+Space`
+twice sends a literal `CTRL+Space` to the shell. `ALT+1`–`9` goes straight to a tab.
 
 | Keybinding | Action |
 |---|---|
-| `LEADER+\|` (or `LEADER+V`) | Split the pane left/right |
-| `LEADER+-` | Split the pane top/bottom |
-| `LEADER+H/J/K/L` | Move focus between panes (left/down/up/right) |
+| `LEADER+V` | Split the pane left/right |
+| `LEADER+H` | Split the pane top/bottom |
+| `LEADER+←/↓/↑/→` | Move focus between panes |
 | `LEADER+Z` | Zoom the focused pane (toggle) |
 | `LEADER+X` | Close the focused pane |
 | `LEADER+C` | New tab |
-| `LEADER+W` | Close the current tab |
+| `LEADER+K` | Close the current tab |
+| `LEADER+R` | Rename the current tab |
 | `LEADER+N` / `LEADER+P` | Next / previous tab |
-| `LEADER+1`–`9` | Go to tab N |
-| `LEADER+F` | Search the scrollback |
+| `ALT+1`–`9` | Go to tab N |
 | `LEADER+[` | Copy mode (keyboard selection) |
-| `LEADER+S` | Quick select (grab a path, hash or URL on screen) |
-| `CTRL+a` `CTRL+a` | Send a literal `CTRL+a` |
+| `LEADER+Shift+C` | New workspace (a tmux session) |
+| `LEADER+Shift+R` | Rename the workspace |
+| `LEADER+Shift+N` / `LEADER+Shift+P` | Next / previous workspace |
+| `LEADER+S` | Pick a workspace |
+| `CTRL+Space` `CTRL+Space` | Send a literal `CTRL+Space` |
 
 Selecting with the mouse already copies (WezTerm default), and so do WezTerm's own
-`CTRL+SHIFT+C` / `CTRL+SHIFT+V`. New tabs open PowerShell 7; right-clicking the new-tab
+`CTRL+SHIFT+C` / `CTRL+SHIFT+V`; scrollback search is `CTRL+SHIFT+F` and quick select `CTRL+SHIFT+Space` (WezTerm defaults). New tabs open PowerShell 7; right-clicking the new-tab
 button lists the other shells (Windows PowerShell, Command Prompt).
 
 Personalize it in `config\wezterm\user.lua` (gitignored, never touched by

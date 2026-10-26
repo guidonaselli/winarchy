@@ -13,6 +13,8 @@ config/nvim/winarchy-theme.lua
 config/flow/Winarchy.xaml
 config/terminal/winarchy-scheme.json
 config/ahk/theme.ini
+config/shell/theme.json
+config/shell/user.json
 config/pwsh/starship.toml
 config/obsidian/winarchy-theme.css
 config/wezterm/wezterm.lua

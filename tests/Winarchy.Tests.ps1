@@ -1283,16 +1283,19 @@ Describe 'WezTerm terminal' {
     # detras del leader y no pueden tomar un combo suelto que pise a uno global.
     It 'keeps its keybinds out of the global AHK hotkey space' {
         $tpl = Get-Content (Join-Path $script:Root 'templates\wezterm.lua.tpl') -Raw
-        $tpl | Should -Match "config\.leader = \{ key = 'a', mods = 'CTRL'"
+        $tpl | Should -Match "config\.leader = \{ key = 'Space', mods = 'CTRL'"
 
+        # Alt+1..9 (ir a la tab N) es lo único suelto que se permite; ningún hotkey de AHK lo toma.
         $unprefixed = [regex]::Matches($tpl, "\{ key = '(?<key>[^']+)', mods = '(?<mods>[^']+)'") |
             Where-Object { $_.Groups['mods'].Value -notmatch 'LEADER' } |
             ForEach-Object { "$($_.Groups['mods'].Value)+$($_.Groups['key'].Value)" } |
-            Where-Object { $_ -ne 'CTRL+a' }   # el leader mismo, y su passthrough
-        $unprefixed -join ', ' | Should -BeNullOrEmpty
+            Where-Object { $_ -ne 'CTRL+Space' }   # el leader mismo, y su passthrough
+        $unprefixed -join ', ' | Should -BeNullOrEmpty -Because 'Alt+N se agrega en un bucle, no como literal'
+        $tpl | Should -Match "mods = 'ALT', action = act\.ActivateTab"
 
         $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk')
-        @($ahk | Where-Object { $_ -match '^\^a::' }) | Should -BeNullOrEmpty
+        @($ahk | Where-Object { $_ -match '^\^Space::' }) | Should -BeNullOrEmpty
+        @($ahk | Where-Object { $_ -match '^![0-9]::' }) | Should -BeNullOrEmpty
     }
 
     It 'cleans inherited agent session variables on startup' {
@@ -1529,7 +1532,7 @@ Describe 'Keybindings documentation' {
         $script:Doc = Get-Content (Join-Path $script:Root 'docs\keybindings.md') -Raw
         # Las teclas de dígito y las flechas están colapsadas a propósito en la doc
         # (SUPER+1..9, SUPER+←/→/↑/↓), así que se verifican por su forma colapsada.
-        $collapsed = '^([1-9]|Left|Right|Up|Down)$'
+        $collapsed = '^([0-9]|Left|Right|Up|Down)$'
         $script:Hotkeys = foreach ($line in $ahk) {
             if ($line -notmatch '^#(?<mods>[!+^]*)(?<key>[^:\s]+)::') { continue }
             if ($Matches['key'] -match $collapsed) { continue }
@@ -1554,7 +1557,7 @@ Describe 'Keybindings documentation' {
     }
 
     It 'documents the collapsed workspace and direction ranges' {
-        foreach ($range in 'SUPER+1..9', 'SUPER+Shift+1..9') {
+        foreach ($range in 'SUPER+1..0', 'SUPER+Shift+1..0') {
             $script:Doc | Should -Match ([regex]::Escape($range))
         }
     }
@@ -2005,6 +2008,7 @@ Describe 'Runtime configuration environment' {
             try {
                 Mock Get-WinarchyRoot { $Root }
                 Mock Test-WinarchyProcess { $false }
+                Mock Get-WinarchyActiveBar { 'yasb' }
                 Mock Start-WinarchyKomorebi {}
                 Mock Get-Command { [pscustomobject]@{ Source = 'C:\Program Files\YASB\yasbc.exe' } } -ParameterFilter { $Name -eq 'yasbc' }
                 Mock Start-Process {}
@@ -2830,7 +2834,7 @@ Describe 'First install on a clean machine' {
         $lock = Import-WinarchyToml -Path (Join-Path $script:Root 'versions.lock.toml')
         $pinned = Get-WinarchyCoreVersions -Lock $lock
         @($pinned.Values | Sort-Object) | Should -Be @($lock['core'].Values | Sort-Object)
-        foreach ($id in $pinned.Keys) { $lock['winget'][$id] | Should -BeTrue -Because $id }
+        foreach ($id in $pinned.Keys) { ($lock['winget'][$id] -or $lock['winget-optional'][$id]) | Should -BeTrue -Because $id }
     }
 }
 
@@ -3035,6 +3039,111 @@ Describe 'Get-WinarchyDefenderExclusionPaths' {
 
             $paths | Should -Contain $shim
             $paths | Should -Contain $real
+        }
+    }
+}
+
+Describe 'Get-WinarchyActiveBar' {
+    It 'honors state/bar; absent or unknown is native, or yasb on machines that already had it' {
+        InModuleScope Winarchy {
+            $root = Join-Path $TestDrive 'repo'
+            New-Item -ItemType Directory -Path (Join-Path $root 'state') -Force | Out-Null
+            Mock Get-WinarchyRoot { $root }
+            Mock Get-Command { $null } -ParameterFilter { $Name -eq 'yasbc' }
+            Get-WinarchyActiveBar | Should -Be 'native'
+            Mock Get-Command { [pscustomobject]@{ Source = 'yasbc.exe' } } -ParameterFilter { $Name -eq 'yasbc' }
+            Get-WinarchyActiveBar | Should -Be 'yasb'
+            Set-Content (Join-Path $root 'state\bar') 'native'
+            Get-WinarchyActiveBar | Should -Be 'native'
+            Set-Content (Join-Path $root 'state\bar') "yasb`r`n"
+            Mock Get-Command { $null } -ParameterFilter { $Name -eq 'yasbc' }
+            Get-WinarchyActiveBar | Should -Be 'yasb'
+        }
+    }
+
+    It 'keeps YASB out of the reload, autostart, doctor and the AHK watchdog when native' {
+        $root = Split-Path $PSScriptRoot -Parent
+        foreach ($f in 'module\Winarchy\Private\ThemeEngine.ps1', 'module\Winarchy\Private\Autostart.ps1', 'module\Winarchy\Private\Doctor.ps1', 'install.ps1') {
+            (Get-Content (Join-Path $root $f) -Raw) | Should -Match 'Get-WinarchyActiveBar'
+        }
+        (Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw) | Should -Match "(?s)YasbWatch\(\) \{.*?'native'"
+    }
+}
+
+Describe 'shell theme tokens' {
+    It 'renders valid shell theme.json for every theme' {
+        InModuleScope Winarchy {
+            $target = Get-WinarchyRenderTargets | Where-Object { $_.Template -eq 'shell-theme.json.tpl' }
+            $target | Should -Not -BeNullOrEmpty
+            foreach ($name in (Get-WinarchyThemes)) {
+                $dir = Join-Path (Get-WinarchyThemesDir) $name
+                $theme = Expand-WinarchyThemePalette -Theme (Import-WinarchyToml -Path (Join-Path $dir 'theme.toml'))
+                $ctx = Build-WinarchyThemeContext -Theme $theme -ThemeDir $dir
+                $json = Invoke-WinarchyTemplate -TemplatePath (Join-Path (Get-WinarchyRoot) 'templates\shell-theme.json.tpl') -Context $ctx | ConvertFrom-Json
+                $json.v | Should -Be 1
+                $json.background | Should -Match '^#[0-9a-fA-F]{6}$'
+                $json.accent | Should -Match '^#[0-9a-fA-F]{6}$'
+                $json.position | Should -BeIn 'top', 'bottom'
+            }
+        }
+    }
+}
+
+Describe 'native shell guardrails' {
+    It 'never registers global hotkeys or keyboard hooks (AHK owns them)' {
+        $src = Get-ChildItem (Join-Path (Split-Path $PSScriptRoot -Parent) 'shell\src') -Filter *.rs -Recurse
+        $src | Should -Not -BeNullOrEmpty
+        foreach ($f in $src) {
+            (Get-Content $f.FullName -Raw) | Should -Not -Match 'RegisterHotKey|SetWindowsHookEx|WH_KEYBOARD'
+        }
+    }
+
+    It 'keeps the shell exe out of tiling, window close and game detection' {
+        $root = Split-Path $PSScriptRoot -Parent
+        (Get-Content (Join-Path $root 'templates\komorebi.json.tpl') -Raw) | Should -Match 'winarchy-shell\.exe'
+        (Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw) | Should -Match '\(yasb\|winarchy-shell\)'
+    }
+
+    It 'opens the shell pipe write-only from AHK (read mode blocks the hotkey thread waiting for a BOM)' {
+        $root = Split-Path $PSScriptRoot -Parent
+        (Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw) | Should -Match ([regex]::Escape("FileOpen('\\.\pipe\winarchy-shell', 'w')"))
+    }
+
+    It 'points the YASB watchdog at state\bar so it does not relaunch YASB under the native bar' {
+        $root = Split-Path $PSScriptRoot -Parent
+        (Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw) | Should -Match ([regex]::Escape('BarFile := StateDir "\bar"'))
+    }
+}
+
+Describe 'Install-WinarchyShellBinary' {
+    BeforeEach {
+        $script:repo = Join-Path $TestDrive 'repo'
+        New-Item -ItemType Directory -Path $script:repo -Force | Out-Null
+        $script:exe = Join-Path $TestDrive 'winarchy-shell.exe'
+        Set-Content $script:exe 'fake binary' -NoNewline
+    }
+
+    It 'refuses to install without a pinned hash or with a mismatching one' {
+        InModuleScope Winarchy -Parameters @{ Repo = $script:repo; Exe = $script:exe } {
+            param($Repo, $Exe)
+            Mock Get-WinarchyRoot { $Repo }
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[core]`nkomorebi = `"1`""
+            { Install-WinarchyShellBinary -Source $Exe } | Should -Throw '*no [[]shell[]] sha256*'
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[shell]`nsha256 = `"$('0' * 64)`""
+            { Install-WinarchyShellBinary -Source $Exe } | Should -Throw '*mismatch*'
+            Test-Path (Join-Path $Repo 'state\bin\winarchy-shell.exe') | Should -BeFalse
+        }
+    }
+
+    It 'installs it into state\bin when the SHA256 matches' {
+        InModuleScope Winarchy -Parameters @{ Repo = $script:repo; Exe = $script:exe } {
+            param($Repo, $Exe)
+            Mock Get-WinarchyRoot { $Repo }
+            $hash = (Get-FileHash $Exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[shell]`nsha256 = `"$hash`""
+            $dest = Install-WinarchyShellBinary -Source $Exe
+            Test-Path $dest | Should -BeTrue
+            Get-WinarchyShellExe | Should -Be $dest
         }
     }
 }

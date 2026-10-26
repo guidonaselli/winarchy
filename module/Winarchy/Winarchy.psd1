@@ -1,6 +1,6 @@
 @{
     RootModule        = 'Winarchy.psm1'
-    ModuleVersion     = '1.11.0'
+    ModuleVersion     = '2.0.0'
     GUID              = 'b7e3a9c4-2f5d-4e8a-9c1b-6d0f4a7e2b58'
     Author            = 'Guido Naselli'
     Description       = 'Winarchy — Omarchy-style integration layer for Windows 11 (komorebi + YASB + AHK + Flow Launcher + theme engine).'
@@ -32,7 +32,7 @@
         'Set-WinarchyDefenderExclusions', 'Remove-WinarchyDefenderExclusions',
         # helpers usados por install.ps1 y scripts\*.ps1
         'Sync-WinarchyPalette', 'Remove-WinarchyPalette',
-        'Get-WinarchyPriorState', 'Save-WinarchyPriorState', 'Remove-WinarchyWeztermContextMenu', 'Backup-WinarchyRegistryKey', 'Start-WinarchyKomorebi',
+        'Get-WinarchyPriorState', 'Save-WinarchyPriorState', 'Remove-WinarchyWeztermContextMenu', 'Backup-WinarchyRegistryKey', 'Start-WinarchyKomorebi', 'Get-WinarchyActiveBar', 'Set-WinarchyBar', 'Initialize-WinarchyBar', 'Get-WinarchyShellExe', 'Set-WinarchyFileAtomic',
         'Install-WinarchySkill', 'Uninstall-WinarchySkill',
         'New-WinarchySnapshot', 'Import-WinarchyToml', 'Get-WinarchyCoreVersions', 'Get-WinarchyInstalledVersion', 'Test-WinarchyVersionBelow', 'Get-WinarchyAhkExe', 'Get-WinarchyKomorebiExe', 'Get-WinarchyStateDir',
         'Disable-WinarchyXMouse', 'Set-WinarchyTaskbarAutoHide', 'Set-WinarchyWindowsHardening', 'Stop-WinarchyWindowSlots',

@@ -13,6 +13,15 @@ function Get-WinarchyStateDir {
     $dir
 }
 
+function Get-WinarchyActiveBar {
+    # 'native' o 'yasb' lo fija `winarchy bar use`; ausente, gana la shell nativa salvo en máquinas que
+    # ya tenían YASB (un update no les cambia la barra).
+    $file = Join-Path (Join-Path (Get-WinarchyRoot) 'state') 'bar'
+    $value = if (Test-Path $file) { (Get-Content $file -Raw).Trim() }
+    if ($value -in 'native', 'yasb') { return $value }
+    if (Get-Command yasbc -ErrorAction SilentlyContinue) { 'yasb' } else { 'native' }
+}
+
 function Set-WinarchyFileAtomic {
     <# Escribe a un temporal y lo mueve encima: un lector concurrente ve el archivo viejo o el
        nuevo entero, nunca uno truncado. #>
