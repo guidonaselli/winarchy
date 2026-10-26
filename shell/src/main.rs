@@ -55,6 +55,7 @@ struct State {
     tracking: bool,
     strips: Vec<(HWND, RECT)>,
     pill_mon: RECT,
+    layout_sig: Vec<(i32, i32, i32, i32, u32)>,
 }
 
 thread_local! { static STATE: RefCell<Option<State>> = const { RefCell::new(None) }; }
@@ -113,9 +114,26 @@ unsafe fn focus_monitor() -> RECT {
     }
 }
 
+// Escala del monitor que contiene el rectángulo: cada monitor puede tener su propio DPI.
+unsafe fn mon_scale(r: &RECT) -> f32 {
+    let m = MonitorFromPoint(POINT { x: r.left + 1, y: r.top + 1 }, MONITOR_DEFAULTTONEAREST);
+    let (mut x, mut y) = (0u32, 0u32);
+    if GetDpiForMonitor(m, MDT_EFFECTIVE_DPI, &mut x, &mut y).is_ok() && x > 0 {
+        x as f32 / 96.0
+    } else {
+        1.0
+    }
+}
+
+// Firma de la disposición de monitores y sus escalas: si cambia, hay que reconstruir las barras.
+unsafe fn layout_sig() -> Vec<(i32, i32, i32, i32, u32)> {
+    monitor_rects().iter().map(|r| (r.left, r.top, r.right, r.bottom, (mon_scale(r) * 100.0) as u32)).collect()
+}
+
 unsafe fn register_strip(h: HWND) {
-    let (scale, bottom, mon) = with(|s| (s.scale, s.theme.position == "bottom", s.strips.iter().find(|(w, _)| *w == h).map(|(_, r)| *r)));
+    let (bottom, mon) = with(|s| (s.theme.position == "bottom", s.strips.iter().find(|(w, _)| *w == h).map(|(_, r)| *r)));
     let mon = mon.unwrap_or_else(|| monitor_rects()[0]);
+    let scale = mon_scale(&mon);
     let mut d = APPBARDATA { cbSize: std::mem::size_of::<APPBARDATA>() as u32, hWnd: h, ..Default::default() };
     d.uCallbackMessage = WM_APPBAR;
     SHAppBarMessage(ABM_NEW, &mut d);
@@ -133,9 +151,9 @@ unsafe fn register_strip(h: HWND) {
 }
 
 unsafe fn add_extra_strips(rects: &[RECT]) {
-    let (inst, scale) = (GetModuleHandleW(PCWSTR::null()).unwrap(), with(|s| s.scale));
+    let inst = GetModuleHandleW(PCWSTR::null()).unwrap();
     for r in &rects[1..] {
-        if let Ok(w) = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE, w!("WinarchyShellStrip"), w!(""), WS_POPUP, 0, 0, 1, px(STRIP_DIP, scale), None, None, inst, None) {
+        if let Ok(w) = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE, w!("WinarchyShellStrip"), w!(""), WS_POPUP, 0, 0, 1, px(STRIP_DIP, mon_scale(r)), None, None, inst, None) {
             with(|s| s.strips.push((w, *r)));
             register_strip(w);
         }
@@ -144,6 +162,7 @@ unsafe fn add_extra_strips(rects: &[RECT]) {
 
 // Tras un cambio de monitores: se destruyen las barras secundarias y se recrean a medida.
 unsafe fn rebuild_strips() {
+    with(|s| s.layout_sig = layout_sig());
     let (hub, extra) = with(|s| (s.strip, s.strips.iter().map(|(w, _)| *w).filter(|w| *w != s.strip).collect::<Vec<_>>()));
     for w in extra {
         let _ = DestroyWindow(w);
@@ -156,7 +175,16 @@ unsafe fn rebuild_strips() {
 }
 
 unsafe fn render_pill(pill: HWND) {
-    let (theme, scale) = with(|s| (s.theme.clone(), s.scale));
+    let mon = focus_monitor();
+    let scale = mon_scale(&mon);
+    let theme = with(|s| {
+        if (s.scale - scale).abs() > 0.01 {
+            s.scale = scale;
+            s.cur_w = 0.0;
+            s.vel = 0.0;
+        }
+        s.theme.clone()
+    });
     let t = GetLocalTime();
     let text: Vec<u16> = format!("{:02}:{:02}", t.wHour, t.wMinute).encode_utf16().collect();
     let h = px(PILL_DIP, scale);
@@ -180,7 +208,6 @@ unsafe fn render_pill(pill: HWND) {
     let lead = if dots.is_empty() { 0 } else { dots_w + sep };
     let label_w = if label.is_empty() { 0 } else { lext.cx + sep };
     let need_raw = pad * 2 + lead + label_w + ext.cx;
-    let mon = focus_monitor();
     let need = need_raw.min(px(PILL_MAX_W, scale)).min((mon.right - mon.left) * 3 / 4);
     let base = pad * 2 + lead + ext.cx;
     let (width, animating, strip, label) = with(|s| {
@@ -463,14 +490,9 @@ unsafe fn tick_inner() {
         }
         false
     });
-    let (hub, known) = with(|s| (s.strip, s.scale));
-    let scale = GetDpiForWindow(hub) as f32 / 96.0;
-    if scale > 0.0 && (scale - known).abs() > 0.01 {
-        with(|s| {
-            s.scale = scale;
-            s.cur_w = 0.0;
-            s.vel = 0.0;
-        });
+    let sig = layout_sig();
+    if with(|s| s.layout_sig != sig) {
+        with(|s| s.layout_sig = sig);
         rebuild_strips();
     }
     let expanding = expand_step();
@@ -613,7 +635,7 @@ fn main() {
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, px(PILL_DIP, scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), ai: extras::AiSessions::new(), last_vol: None, osd_until: None, last_label: Vec::new(), tracking: false, strips: vec![(strip, rects[0])], pill_mon: rects[0] })
+            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), ai: extras::AiSessions::new(), last_vol: None, osd_until: None, last_label: Vec::new(), tracking: false, strips: vec![(strip, rects[0])], pill_mon: rects[0], layout_sig: layout_sig() })
         });
         register_strip(strip);
         add_extra_strips(&rects);
