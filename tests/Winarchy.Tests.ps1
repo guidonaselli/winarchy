@@ -2008,6 +2008,7 @@ Describe 'Runtime configuration environment' {
             try {
                 Mock Get-WinarchyRoot { $Root }
                 Mock Test-WinarchyProcess { $false }
+                Mock Get-WinarchyActiveBar { 'yasb' }
                 Mock Start-WinarchyKomorebi {}
                 Mock Get-Command { [pscustomobject]@{ Source = 'C:\Program Files\YASB\yasbc.exe' } } -ParameterFilter { $Name -eq 'yasbc' }
                 Mock Start-Process {}

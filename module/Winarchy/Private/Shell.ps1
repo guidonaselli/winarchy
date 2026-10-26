@@ -32,6 +32,11 @@ function Set-WinarchyBar {
         if (-not (Test-Path $theme) -and (Test-Path $current)) { Set-WinarchyTheme -Name (Get-Content $current -Raw).Trim() }
     }
     Set-WinarchyFileAtomic -Path (Join-Path (Get-WinarchyStateDir) 'bar') -Value $Name
+    if (Test-WinarchyTask -TaskName 'ahk') {
+        Register-WinarchyAutostart
+        $inactive = if ($Name -eq 'native') { 'yasb' } else { 'shell' }
+        & schtasks.exe /Delete /TN (Get-WinarchyTaskFullName -TaskName $inactive) /F *> $null
+    }
     Invoke-WinarchyReload -Light
     Write-WinarchyOk "Bar: $Name"
 }
