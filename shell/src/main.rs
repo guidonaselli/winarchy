@@ -463,6 +463,16 @@ unsafe fn tick_inner() {
         }
         false
     });
+    let (hub, known) = with(|s| (s.strip, s.scale));
+    let scale = GetDpiForWindow(hub) as f32 / 96.0;
+    if scale > 0.0 && (scale - known).abs() > 0.01 {
+        with(|s| {
+            s.scale = scale;
+            s.cur_w = 0.0;
+            s.vel = 0.0;
+        });
+        rebuild_strips();
+    }
     let expanding = expand_step();
     let minute = GetLocalTime().wMinute;
     if reloaded {
