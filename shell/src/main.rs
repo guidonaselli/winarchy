@@ -207,6 +207,9 @@ fn expand_step() -> bool {
             if let Some((b, ac)) = metrics::battery() {
                 rest.push(format!("BAT {b}%{}", if ac { "+" } else { "" }));
             }
+            if let Some(n) = metrics::notification_count().filter(|n| *n > 0) {
+                rest.push(format!("NOTIF {n}"));
+            }
             if let Some(on) = metrics::online() {
                 rest.push(if on { "NET ok".into() } else { "NET off".into() });
             }

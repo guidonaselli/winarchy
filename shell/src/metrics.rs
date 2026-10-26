@@ -140,3 +140,14 @@ mod tests {
         assert!(ram_percent().unwrap() <= 100);
     }
 }
+
+// Cantidad de toasts en el centro de notificaciones; None si el acceso no fue concedido.
+pub fn notification_count() -> Option<usize> {
+    use windows::UI::Notifications::Management::{UserNotificationListener, UserNotificationListenerAccessStatus};
+    use windows::UI::Notifications::NotificationKinds;
+    let l = UserNotificationListener::Current().ok()?;
+    if l.GetAccessStatus().ok()? != UserNotificationListenerAccessStatus::Allowed {
+        return None;
+    }
+    Some(l.GetNotificationsAsync(NotificationKinds::Toast).ok()?.get().ok()?.Size().ok()? as usize)
+}
