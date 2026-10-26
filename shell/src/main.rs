@@ -101,8 +101,12 @@ unsafe fn monitor_rects() -> Vec<RECT> {
 
 // Monitor de la ventana en foco: ahí vive la pastilla.
 unsafe fn focus_monitor() -> RECT {
+    let fg = GetForegroundWindow();
+    if fg.0.is_null() {
+        return with(|s| s.pill_mon);
+    }
     let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
-    if GetMonitorInfoW(MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTOPRIMARY), &mut mi).as_bool() {
+    if GetMonitorInfoW(MonitorFromWindow(fg, MONITOR_DEFAULTTOPRIMARY), &mut mi).as_bool() {
         mi.rcMonitor
     } else {
         monitor_rects()[0]
