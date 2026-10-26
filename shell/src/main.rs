@@ -25,7 +25,7 @@ const EXPAND_SECS: u64 = 6;
 const TIMER_TICK: usize = 1;
 const STRIP_DIP: i32 = 8;
 const PILL_DIP: i32 = 32;
-const PILL_MAX_W: i32 = 480;
+const PILL_MAX_W: i32 = 760;
 
 struct State {
     theme: Theme,
@@ -197,7 +197,22 @@ fn expand_step() -> bool {
         Some(t) if t > std::time::Instant::now() => {
             let cpu = s.sampler.cpu().map(|c| format!("{c:.0}%")).unwrap_or_else(|| "--".into());
             let ram = metrics::ram_percent().map(|r| format!("{r}%")).unwrap_or_else(|| "--".into());
-            *pipe::ISLAND.lock().unwrap() = Some(pipe::Island { title: format!("CPU {cpu}"), detail: format!("RAM {ram}"), progress: None });
+            let mut rest = Vec::new();
+            if let Some(g) = s.sampler.gpu() {
+                rest.push(format!("GPU {g:.0}%"));
+            }
+            if let Some((v, muted)) = metrics::volume() {
+                rest.push(if muted { "VOL mute".to_string() } else { format!("VOL {v}%") });
+            }
+            if let Some((b, ac)) = metrics::battery() {
+                rest.push(format!("BAT {b}%{}", if ac { "+" } else { "" }));
+            }
+            if let Some(on) = metrics::online() {
+                rest.push(if on { "NET ok".into() } else { "NET off".into() });
+            }
+            let state_dir = s.theme_path.ancestors().nth(3).map(|r| r.join("state")).unwrap_or_default();
+            rest.extend(metrics::flags(&state_dir).into_iter().map(String::from));
+            *pipe::ISLAND.lock().unwrap() = Some(pipe::Island { title: format!("CPU {cpu}  RAM {ram}"), detail: rest.join("  "), progress: None });
             true
         }
         Some(_) => {
@@ -297,6 +312,7 @@ fn main() {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let inst = GetModuleHandleW(PCWSTR::null()).unwrap();
         let scale = GetDpiForSystem() as f32 / 96.0;
+        let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
         let theme = Theme::load(&theme_path).unwrap_or_default();
 
         let strip_class = WNDCLASSW { lpfnWndProc: Some(strip_proc), hInstance: inst.into(), lpszClassName: w!("WinarchyShellStrip"), ..Default::default() };
