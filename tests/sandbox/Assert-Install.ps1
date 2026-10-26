@@ -15,7 +15,7 @@ function Test-Check([string]$CheckName, [scriptblock]$Test) {
 
 $lock = Import-WinarchyToml -Path (Join-Path $Root 'versions.lock.toml')
 $pins = winget pin list --accept-source-agreements | Out-String -Width 400
-foreach ($pin in (Get-WinarchyCoreVersions -Lock $lock).GetEnumerator()) {
+foreach ($pin in (Get-WinarchyCoreVersions -Lock $lock).GetEnumerator() | Where-Object { $_.Key -ne 'AmN.yasb' }) {   # YASB es opcional
     $id = $pin.Key; $version = $pin.Value
     Test-Check "$id installed at $version" { (Get-WinGetPackage -Id $id -MatchOption Equals -Source winget).InstalledVersion -eq $version }
     Test-Check "$id pinned" { $pins -match [regex]::Escape($id) }
@@ -39,7 +39,7 @@ if ($profileErrors.Trim()) { "profile errors: $profileErrors" }
 $doctor = & (Join-Path $Root 'bin\winarchy.cmd') doctor *>&1 | Out-String
 $doctor | Set-Content (Join-Path $Out 'doctor.txt')
 $allowed = @('Flow Launcher running')
-if ($Mode -eq 'coexistence') { $allowed += 'komorebi running', 'YASB running (single instance)', 'AHK winarchy.ahk running', 'autostart registered' }
+if ($Mode -eq 'coexistence') { $allowed += 'komorebi running', 'native shell running (single instance)', 'AHK winarchy.ahk running', 'autostart registered' }
 foreach ($line in $doctor -split "`r?`n") {
     if ($line -notmatch '^\s*\[XX\] (.+?)\s{2,}') { continue }
     $name = $Matches[1]
@@ -52,7 +52,7 @@ if ($Mode -eq 'active') {
 [DllImport("advapi32.dll", SetLastError = true)] public static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
 [DllImport("advapi32.dll")] public static extern bool GetTokenInformation(IntPtr token, int cls, out int info, int len, out int ret);
 '@
-    foreach ($name in 'komorebi', 'yasb', 'AutoHotkey64') {
+    foreach ($name in 'komorebi', 'winarchy-shell', 'AutoHotkey64') {
         Test-Check "$name running, not elevated" {
             $proc = Get-Process -Name $name -ErrorAction Stop | Select-Object -First 1
             $handle = [Sbx.Token]::OpenProcess(0x1000, $false, $proc.Id)
@@ -69,7 +69,7 @@ if ($Mode -eq 'active') {
     Test-Check 'Windows hardening applied' {
         (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search' -Name BingSearchEnabled).BingSearchEnabled -eq 0
     }
-    foreach ($task in 'komorebi', 'yasb', 'ahk') {
+    foreach ($task in 'komorebi', 'shell', 'ahk') {
         Test-Check "logon task \Winarchy\$task" { schtasks /Query /TN "\Winarchy\$task" *> $null; $LASTEXITCODE -eq 0 }
     }
 }
