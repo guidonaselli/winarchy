@@ -74,3 +74,4 @@ bat = true
 [shell]
 # SHA256 del winarchy-shell.exe adjunto al Release de esta versión (lo fija el release; docs/RELEASING.md).
 # install.ps1 baja el binario del Release y solo lo instala si el hash coincide.
+sha256 = "4a2158a092714923865835cb1220798eaafeb01d926b66113c77393edf3686c0"
