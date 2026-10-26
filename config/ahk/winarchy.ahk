@@ -541,6 +541,14 @@ ShowSystemMenu(*) {
         PalOpen('system', WinarchySysItems(), 'System')
 }
 
+ShellIsland(cmd) {
+    try {
+        pipe := FileOpen('\\.\pipe\winarchy-shell', 'w')   ; 'rw' lee para detectar BOM y se cuelga esperando
+        pipe.Write('{"v":1,"id":1,"cmd":"' cmd '"}`n')
+        pipe.Close()
+    }
+}
+
 ToggleKeyOverlay(*) {
     if PalClosed('keys')
         return
@@ -1105,6 +1113,7 @@ AccentWatch() {
 #!Space::ShowMainMenu()                          ; Winarchy menu
 #Esc::ShowSystemMenu()                           ; system / power menu
 #k::ToggleKeyOverlay()                           ; this keybindings list
+#i::ShellIsland('island.expand')                 ; native shell: show CPU / RAM in the island
 
 ; --- Webapps --------------------------------------------------------------------
 #a::WebApp('https://chatgpt.com')                ; ChatGPT

@@ -3099,6 +3099,11 @@ Describe 'native shell guardrails' {
         (Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw) | Should -Match '\(yasb\|winarchy-shell\)'
     }
 
+    It 'opens the shell pipe write-only from AHK (read mode blocks the hotkey thread waiting for a BOM)' {
+        $root = Split-Path $PSScriptRoot -Parent
+        (Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw) | Should -Match ([regex]::Escape("FileOpen('\\.\pipe\winarchy-shell', 'w')"))
+    }
+
     It 'points the YASB watchdog at state\bar so it does not relaunch YASB under the native bar' {
         $root = Split-Path $PSScriptRoot -Parent
         (Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw) | Should -Match ([regex]::Escape('BarFile := StateDir "\bar"'))

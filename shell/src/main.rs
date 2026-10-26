@@ -20,6 +20,8 @@ const WM_APPBAR: u32 = WM_APP + 1;
 const WM_CMD_RELOAD: u32 = WM_APP + 2;
 const WM_CMD_QUIT: u32 = WM_APP + 3;
 const WM_WORKSPACES: u32 = WM_APP + 4;
+const WM_EXPAND: u32 = WM_APP + 5;
+const EXPAND_SECS: u64 = 6;
 const TIMER_TICK: usize = 1;
 const STRIP_DIP: i32 = 8;
 const PILL_DIP: i32 = 32;
@@ -34,6 +36,8 @@ struct State {
     pill: HWND,
     last_minute: u16,
     hidden: bool,
+    expand_until: Option<std::time::Instant>,
+    sampler: metrics::Sampler,
 }
 
 thread_local! { static STATE: RefCell<Option<State>> = const { RefCell::new(None) }; }
@@ -187,6 +191,24 @@ unsafe fn fullscreen_busy() -> bool {
     matches!(SHQueryUserNotificationState(), Ok(s) if s == QUNS_BUSY || s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE)
 }
 
+// Mientras la isla está expandida refresca las métricas cada tick; al vencer, la limpia. Devuelve si hay que redibujar.
+fn expand_step() -> bool {
+    with(|s| match s.expand_until {
+        Some(t) if t > std::time::Instant::now() => {
+            let cpu = s.sampler.cpu().map(|c| format!("{c:.0}%")).unwrap_or_else(|| "--".into());
+            let ram = metrics::ram_percent().map(|r| format!("{r}%")).unwrap_or_else(|| "--".into());
+            *pipe::ISLAND.lock().unwrap() = Some(pipe::Island { title: format!("CPU {cpu}"), detail: format!("RAM {ram}"), progress: None });
+            true
+        }
+        Some(_) => {
+            s.expand_until = None;
+            *pipe::ISLAND.lock().unwrap() = None;
+            true
+        }
+        None => false,
+    })
+}
+
 unsafe fn tick(strip: HWND) {
     let (pill, hidden, last) = with(|s| (s.pill, s.hidden, s.last_minute));
     let busy = fullscreen_busy();
@@ -205,12 +227,13 @@ unsafe fn tick(strip: HWND) {
         }
         false
     });
+    let expanding = expand_step();
     let minute = GetLocalTime().wMinute;
     if reloaded {
         register_strip(strip);
         let _ = InvalidateRect(strip, None, true);
     }
-    if !busy && (reloaded || minute != last) {
+    if !busy && (reloaded || expanding || minute != last) {
         with(|s| s.last_minute = minute);
         render_pill(pill);
     }
@@ -237,6 +260,11 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
         }
         WM_CMD_RELOAD => {
             with(|s| s.theme_mtime = None);
+            tick(h);
+            LRESULT(0)
+        }
+        WM_EXPAND => {
+            with(|s| s.expand_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(EXPAND_SECS)));
             tick(h);
             LRESULT(0)
         }
@@ -280,7 +308,7 @@ fn main() {
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, px(PILL_DIP, scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { theme_mtime: mtime(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, last_minute: 99, hidden: false })
+            *s.borrow_mut() = Some(State { theme_mtime: mtime(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default() })
         });
         register_strip(strip);
         render_pill(pill);
@@ -293,6 +321,7 @@ fn main() {
                 pipe::Command::Reload => WM_CMD_RELOAD,
                 pipe::Command::Quit => WM_CMD_QUIT,
                 pipe::Command::Redraw => WM_WORKSPACES,
+                pipe::Command::Expand => WM_EXPAND,
             };
             let _ = PostMessageW(HWND(target as *mut _), m, WPARAM(0), LPARAM(0));
         });

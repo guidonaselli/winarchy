@@ -52,6 +52,7 @@ pub enum Command {
     Reload,
     Quit,
     Redraw,
+    Expand,
 }
 
 // Un cliente por vez; el hilo de UI recibe Reload/Quit por `dispatch`, nunca bloquea acá.
@@ -146,6 +147,10 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
         "ptt.up" => {
             *ISLAND.lock().unwrap() = None;
             dispatch(Command::Redraw);
+            ok(json!({}))
+        }
+        "island.expand" => {
+            dispatch(Command::Expand);
             ok(json!({}))
         }
         "island.dismiss" => {

@@ -1,5 +1,3 @@
-// shortcut: sin consumidor hasta decidir dónde se muestran los widgets (4.4), quitar el allow al conectarlo.
-#![allow(dead_code)]
 use windows::Win32::Foundation::FILETIME;
 use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 use windows::Win32::System::Threading::GetSystemTimes;
