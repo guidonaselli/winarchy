@@ -28,7 +28,7 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'windhawk')][string]$Scenario,
+    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'windhawk', 'barswitch')][string]$Scenario,
     [switch]$Keep,
     [string]$Out = (Join-Path $env:TEMP 'winarchy-sandbox')
 )
