@@ -14,6 +14,7 @@ use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::SystemInformation::GetLocalTime;
 use windows::Win32::UI::HiDpi::*;
+use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT};
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -22,6 +23,8 @@ const WM_CMD_RELOAD: u32 = WM_APP + 2;
 const WM_CMD_QUIT: u32 = WM_APP + 3;
 const WM_WORKSPACES: u32 = WM_APP + 4;
 const WM_EXPAND: u32 = WM_APP + 5;
+const WM_COLLAPSE: u32 = WM_APP + 6;
+const WM_MOUSELEAVE: u32 = 0x02A3;
 const EXPAND_SECS: u64 = 6;
 const TIMER_TICK: usize = 1;
 const TIMER_ANIM: usize = 2;
@@ -48,6 +51,8 @@ struct State {
     ai: extras::AiSessions,
     last_vol: Option<(u32, bool)>,
     osd_until: Option<std::time::Instant>,
+    last_label: Vec<u16>,
+    tracking: bool,
 }
 
 thread_local! { static STATE: RefCell<Option<State>> = const { RefCell::new(None) }; }
@@ -117,12 +122,19 @@ unsafe fn render_pill(pill: HWND) {
     let label_w = if label.is_empty() { 0 } else { lext.cx + sep };
     let need = (pad * 2 + lead + label_w + ext.cx).min(px(PILL_MAX_W, scale));
     let base = pad * 2 + lead + ext.cx;
-    let (width, animating, strip) = with(|s| {
+    let (width, animating, strip, label) = with(|s| {
         s.target_w = need as f32;
         if s.cur_w == 0.0 {
             s.cur_w = need as f32;
         }
-        ((s.cur_w.round() as i32).max(base), (s.cur_w - s.target_w).abs() > 0.5, s.strip)
+        let width = (s.cur_w.round() as i32).max(base);
+        // Al colapsar se sigue mostrando la última etiqueta, recortada, hasta que el ancho llega a la base.
+        if !label.is_empty() {
+            s.last_label = label;
+        } else if width <= base {
+            s.last_label.clear();
+        }
+        (width, (s.cur_w - s.target_w).abs() > 0.5, s.strip, s.last_label.clone())
     });
     if animating {
         SetTimer(strip, TIMER_ANIM, 8, None);
@@ -177,8 +189,13 @@ unsafe fn render_pill(pill: HWND) {
     }
     SetBkMode(mem, TRANSPARENT);
     SetTextColor(mem, colorref(&theme.foreground));
-    if !label.is_empty() && width >= need {
-        let _ = TextOutW(mem, pad + lead, (h - lext.cy) / 2, &label);
+    let avail = width - pad - ext.cx - sep - (pad + lead);
+    if !label.is_empty() && avail > 0 {
+        let clip = RECT { left: pad + lead, top: 0, right: pad + lead + avail, bottom: h };
+        if lext.cx == 0 {
+            let _ = GetTextExtentPoint32W(mem, &label, &mut lext);
+        }
+        let _ = ExtTextOutW(mem, pad + lead, (h - lext.cy) / 2, ETO_CLIPPED, Some(&clip), PCWSTR(label.as_ptr()), label.len() as u32, None);
     }
     let _ = TextOutW(mem, width - pad - ext.cx, (h - ext.cy) / 2, &text);
     // GDI no escribe alfa: dentro de la pastilla el texto debe quedar opaco.
@@ -206,7 +223,7 @@ unsafe fn render_pill(pill: HWND) {
 
 // Resorte críticamente amortiguado sobre el ancho de la pastilla; dt real para no depender de la resolución del timer.
 unsafe fn spring_step(strip: HWND) {
-    const OMEGA: f32 = 22.0;
+    const OMEGA: f32 = 30.0;
     let (pill, settled) = with(|s| {
         let now = std::time::Instant::now();
         let dt = s.anim_last.map(|t| (now - t).as_secs_f32()).unwrap_or(0.008).min(0.05);
@@ -239,32 +256,38 @@ fn foreground_title() -> String {
 }
 
 // Mientras la isla está expandida refresca las métricas cada tick; al vencer, la limpia. Devuelve si hay que redibujar.
+// Las llamadas lentas (COM, WinRT) corren fuera del borrow del estado: pueden bombear mensajes y reentrar al wndproc.
 fn expand_step() -> bool {
-    with(|s| {
-        let expanded = s.expand_until.is_some_and(|t| t > std::time::Instant::now());
-        let now = std::time::Instant::now();
-        if !expanded {
-            let vol = metrics::volume();
+    let now = std::time::Instant::now();
+    let until = with(|s| s.expand_until);
+    if !until.is_some_and(|t| t > now) {
+        let vol = metrics::volume();
+        let early = with(|s| {
             let changed = s.last_vol.is_some() && vol.is_some() && vol != s.last_vol;
             s.last_vol = vol;
             if let (true, Some((v, muted))) = (changed, vol) {
                 s.osd_until = Some(now + std::time::Duration::from_secs(2));
                 *pipe::ISLAND.lock().unwrap() = Some(pipe::Island { title: if muted { "MUTE".into() } else { "VOL".into() }, detail: format!("{v}%"), progress: Some(v as f64 / 100.0) });
-                return true;
+                return Some(true);
             }
             match s.osd_until {
-                Some(t) if t > now => return false,
+                Some(t) if t > now => Some(false),
                 Some(_) => {
                     s.osd_until = None;
                     *pipe::ISLAND.lock().unwrap() = None;
-                    return true;
+                    Some(true)
                 }
-                None => {}
+                None => None,
             }
+        });
+        if let Some(redraw) = early {
+            return redraw;
         }
-        match s.expand_until {
-        Some(t) if t > std::time::Instant::now() => {
-            let cpu = s.sampler.cpu().map(|c| format!("{c:.0}%")).unwrap_or_else(|| "--".into());
+    }
+    match until {
+        Some(t) if t > now => {
+            let (mut sampler, mut ai, theme_path) = with(|s| (std::mem::take(&mut s.sampler), std::mem::replace(&mut s.ai, extras::AiSessions::new()), s.theme_path.clone()));
+            let cpu = sampler.cpu().map(|c| format!("{c:.0}%")).unwrap_or_else(|| "--".into());
             let ram = metrics::ram_percent().map(|r| format!("{r}%")).unwrap_or_else(|| "--".into());
             let mut rest = Vec::new();
             if let Some(l) = komorebi::CURRENT.lock().unwrap().as_ref().map(|w| w.layout.clone()).filter(|l| !l.is_empty()) {
@@ -280,10 +303,10 @@ fn expand_step() -> bool {
             if let Some(w) = extras::WEATHER.lock().unwrap().clone() {
                 rest.push(w);
             }
-            if let Some(a) = s.ai.label() {
+            if let Some(a) = ai.label() {
                 rest.push(a);
             }
-            if let Some(g) = s.sampler.gpu() {
+            if let Some(g) = sampler.gpu() {
                 rest.push(format!("GPU {g:.0}%"));
             }
             if let Some((v, muted)) = metrics::volume() {
@@ -298,22 +321,35 @@ fn expand_step() -> bool {
             if let Some(on) = metrics::online() {
                 rest.push(if on { "NET ok".into() } else { "NET off".into() });
             }
-            let state_dir = s.theme_path.ancestors().nth(3).map(|r| r.join("state")).unwrap_or_default();
+            let state_dir = theme_path.ancestors().nth(3).map(|r| r.join("state")).unwrap_or_default();
             rest.extend(metrics::flags(&state_dir).into_iter().map(String::from));
+            with(|s| {
+                s.sampler = sampler;
+                s.ai = ai;
+            });
             *pipe::ISLAND.lock().unwrap() = Some(pipe::Island { title: format!("CPU {cpu}  RAM {ram}"), detail: rest.join("  "), progress: None });
             true
         }
         Some(_) => {
-            s.expand_until = None;
+            with(|s| s.expand_until = None);
             *pipe::ISLAND.lock().unwrap() = None;
             true
         }
         None => false,
     }
-    })
 }
 
+thread_local! { static IN_TICK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+
 unsafe fn tick(strip: HWND) {
+    if IN_TICK.with(|t| t.replace(true)) {
+        return;
+    }
+    tick_inner(strip);
+    IN_TICK.with(|t| t.set(false));
+}
+
+unsafe fn tick_inner(strip: HWND) {
     let (pill, hidden, last) = with(|s| (s.pill, s.hidden, s.last_minute));
     let busy = fullscreen_busy();
     if busy != hidden {
@@ -376,6 +412,15 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             tick(h);
             LRESULT(0)
         }
+        WM_COLLAPSE => {
+            let pill = with(|s| {
+                s.expand_until = None;
+                s.pill
+            });
+            *pipe::ISLAND.lock().unwrap() = None;
+            render_pill(pill);
+            LRESULT(0)
+        }
         WM_WORKSPACES => {
             render_pill(with(|s| s.pill));
             LRESULT(0)
@@ -395,18 +440,33 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
 }
 
 unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    if m == WM_MOUSEMOVE {
-        let (strip, expanded) = with(|s| {
-            let expanded = s.expand_until.is_some();
-            if expanded {
-                s.expand_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(EXPAND_SECS));
+    match m {
+        WM_MOUSEMOVE => {
+            let (strip, expanded, track) = with(|s| {
+                let expanded = s.expand_until.is_some();
+                if expanded {
+                    s.expand_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(EXPAND_SECS));
+                }
+                (s.strip, expanded, std::mem::replace(&mut s.tracking, true))
+            });
+            if !track {
+                let mut e = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: h, dwHoverTime: 0 };
+                let _ = TrackMouseEvent(&mut e);
             }
-            (s.strip, expanded)
-        });
-        if !expanded {
-            let _ = PostMessageW(strip, WM_EXPAND, WPARAM(0), LPARAM(0));
+            if !expanded {
+                let _ = PostMessageW(strip, WM_EXPAND, WPARAM(0), LPARAM(0));
+            }
+            return LRESULT(0);
         }
-        return LRESULT(0);
+        WM_MOUSELEAVE => {
+            let strip = with(|s| {
+                s.tracking = false;
+                s.strip
+            });
+            let _ = PostMessageW(strip, WM_COLLAPSE, WPARAM(0), LPARAM(0));
+            return LRESULT(0);
+        }
+        _ => {}
     }
     DefWindowProcW(h, m, wp, lp)
 }
@@ -431,7 +491,7 @@ fn main() {
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, px(PILL_DIP, scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), ai: extras::AiSessions::new(), last_vol: None, osd_until: None })
+            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), ai: extras::AiSessions::new(), last_vol: None, osd_until: None, last_label: Vec::new(), tracking: false })
         });
         register_strip(strip);
         extras::spawn_weather();
