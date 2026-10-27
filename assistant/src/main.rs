@@ -23,7 +23,9 @@ fn main() {
     let pcm = rec.stop();
     let rms = (pcm.iter().map(|x| x * x).sum::<f32>() / pcm.len().max(1) as f32).sqrt();
     println!("{} muestras ({:.1}s), rms {rms:.4}", pcm.len(), pcm.len() as f32 / 16000.0);
-    if rms < 0.003 {
+    let per_sec: Vec<String> = pcm.chunks(16000).map(|c| format!("{:.3}", (c.iter().map(|x| x * x).sum::<f32>() / c.len() as f32).sqrt())).collect();
+    println!("rms por segundo: {}", per_sec.join(" "));
+    if mic::is_silent(&pcm) {
         println!("silencio: no se transcribe (Whisper alucina sobre el vacío)");
         return;
     }

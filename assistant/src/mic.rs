@@ -104,6 +104,11 @@ fn tally(sink: &Mutex<(f64, u64)>, d: &[f32], ch: usize) {
     }
 }
 
+/// Silencio = ninguna ventana de 100 ms supera el umbral de voz (el promedio global diluye frases cortas).
+pub fn is_silent(pcm: &[f32]) -> bool {
+    !pcm.chunks(RATE as usize / 10).any(|w| (w.iter().map(|x| x * x).sum::<f32>() / w.len() as f32).sqrt() > 0.01)
+}
+
 pub fn write_wav(path: &std::path::Path, pcm: &[f32]) -> std::io::Result<()> {
     let data: Vec<u8> = pcm.iter().flat_map(|s| ((s.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes()).collect();
     let mut h = Vec::with_capacity(44 + data.len());
@@ -131,6 +136,14 @@ mod tests {
     fn resample_48k_to_16k_keeps_duration() {
         let x = vec![0.5f32; 48_000];
         assert_eq!(resample(&x, 48_000).len(), 16_000);
+    }
+
+    #[test]
+    fn short_speech_in_long_silence_is_not_silent() {
+        let mut x = vec![0.0f32; 96_000];
+        x[40_000..44_800].fill(0.05);
+        assert!(!is_silent(&x));
+        assert!(is_silent(&vec![0.002f32; 96_000]));
     }
 
     #[test]
