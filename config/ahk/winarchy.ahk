@@ -607,7 +607,7 @@ AssistantReady() {
     return !FileExist(GameFlag) && ProcessExist('winarchy-assistant.exe')
 }
 
-AssistantPtt() {
+AssistantPtt(key := 'Space') {
     static held := false
     if held
         return
@@ -615,7 +615,7 @@ AssistantPtt() {
     AssistantSend('ptt.down')
     SetTimer(Watch, 40)
     Watch() {
-        if GetKeyState('Space', 'P') && GetKeyState('RControl', 'P')
+        if GetKeyState(key, 'P') && (key = 'CapsLock' || GetKeyState('RControl', 'P'))
             return
         SetTimer(Watch, 0)
         held := false
@@ -1190,6 +1190,8 @@ AccentWatch() {
 #i::ShellIsland('island.expand')                 ; native shell: show CPU / RAM in the island
 #HotIf AssistantReady()
 $>^Space::AssistantPtt()                         ; hold to talk to the voice assistant (needs `winarchy assistant on`)
+$CapsLock::AssistantPtt('CapsLock')              ; same, with one key: CapsLock is not a typing key here (Shift+CapsLock still toggles it)
++CapsLock::SetCapsLockState(!GetKeyState('CapsLock', 'T'))
 #HotIf
 
 ; --- Webapps --------------------------------------------------------------------
