@@ -17,13 +17,16 @@ pub struct Llm {
 }
 
 /// Saca de `buf` las oraciones completas (terminador seguido de espacio) y deja el resto.
-pub fn take_sentences(buf: &mut String) -> Vec<String> {
+/// `eager`: la primera salida del turno también corta en coma o dos puntos, para empezar a hablar antes.
+pub fn take_sentences(buf: &mut String, eager: bool) -> Vec<String> {
     let mut out = Vec::new();
     let chars: Vec<(usize, char)> = buf.char_indices().collect();
     let mut start = 0;
     for w in chars.windows(2) {
         let ((i, c), (j, next)) = (w[0], w[1]);
-        if matches!(c, '.' | '?' | '!' | '\n') && next.is_whitespace() && buf[start..j].trim().chars().count() >= 8 {
+        let clause = eager && out.is_empty() && matches!(c, ',' | ';' | ':');
+        let min = if clause { 24 } else { 8 };
+        if (clause || matches!(c, '.' | '?' | '!' | '\n')) && next.is_whitespace() && buf[start..j].trim().chars().count() >= min {
             out.push(buf[start..=i].trim().to_string());
             start = j;
         }
@@ -72,7 +75,7 @@ impl Llm {
                     match event.as_str() {
                         "response.output_text.delta" => {
                             buf.push_str(v["delta"].as_str().unwrap_or(""));
-                            for s in take_sentences(&mut buf) {
+                            for s in take_sentences(&mut buf, spoken.is_empty()) {
                                 say(&s);
                                 spoken.push_str(&s);
                                 spoken.push(' ');
@@ -112,16 +115,27 @@ mod tests {
     #[test]
     fn sentences_are_cut_at_terminator_plus_space() {
         let mut b = "Listo, pasé al workspace tres. Abrí la termi".to_string();
-        assert_eq!(take_sentences(&mut b), ["Listo, pasé al workspace tres."]);
+        assert_eq!(take_sentences(&mut b, false), ["Listo, pasé al workspace tres."]);
         assert_eq!(b.trim(), "Abrí la termi");
+    }
+
+    #[test]
+    fn first_output_cuts_at_a_comma_only_when_eager() {
+        let text = "Un tiling window manager es un gestor de ventanas, que las acomoda solo. ";
+        let mut a = text.to_string();
+        assert_eq!(take_sentences(&mut a, true)[0], "Un tiling window manager es un gestor de ventanas,");
+        let mut b = text.to_string();
+        assert_eq!(take_sentences(&mut b, false), [text.trim()]);
+        let mut c = "Sí, claro, listo. ".to_string();
+        assert_eq!(take_sentences(&mut c, true), ["Sí, claro, listo."]);
     }
 
     #[test]
     fn decimals_and_short_fragments_do_not_split() {
         let mut b = "La versión 3.5 anda bien. ".to_string();
-        assert_eq!(take_sentences(&mut b), ["La versión 3.5 anda bien."]);
+        assert_eq!(take_sentences(&mut b, false), ["La versión 3.5 anda bien."]);
         let mut c = "Sí. No sé bien qué decir ahora. ".to_string();
-        assert_eq!(take_sentences(&mut c), ["Sí. No sé bien qué decir ahora."]);
+        assert_eq!(take_sentences(&mut c, false), ["Sí. No sé bien qué decir ahora."]);
     }
 
     #[test]

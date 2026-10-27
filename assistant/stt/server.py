@@ -1,14 +1,19 @@
 """Sidecar de STT: una línea con la ruta de un WAV 16 kHz mono por stdin, una línea JSON por stdout."""
 import json, os, sys, wave
 import numpy as np
-import nvidia.cublas, nvidia.cudnn
-for m in (nvidia.cublas, nvidia.cudnn):
-    d = os.path.join(list(m.__path__)[0], "bin")
-    os.add_dll_directory(d)
-    os.environ["PATH"] = d + os.pathsep + os.environ["PATH"]
+try:
+    import nvidia.cublas, nvidia.cudnn
+    for m in (nvidia.cublas, nvidia.cudnn):
+        d = os.path.join(list(m.__path__)[0], "bin")
+        os.add_dll_directory(d)
+        os.environ["PATH"] = d + os.pathsep + os.environ["PATH"]
+except ImportError:
+    pass
+import ctranslate2
 from faster_whisper import WhisperModel
 
-model = WhisperModel(os.environ.get("WINARCHY_STT_MODEL", "large-v3-turbo"), device="cuda", compute_type="float16")
+gpu = ctranslate2.get_cuda_device_count() > 0
+model = WhisperModel(os.environ.get("WINARCHY_STT_MODEL", "large-v3-turbo" if gpu else "small"), device="cuda" if gpu else "cpu", compute_type="float16" if gpu else "int8")
 
 def read(path):
     with wave.open(path) as w:

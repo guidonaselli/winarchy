@@ -11,12 +11,13 @@ mod tts;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-const HELP: &str = "winarchy-assistant serve | login | logout | status | levels [s] | listen <python> <stt/server.py> [s]";
+const HELP: &str = "winarchy-assistant serve | ask <texto> | login | logout | status | levels [s] | listen <python> <stt/server.py> [s]";
 
 fn main() {
     let a: Vec<String> = std::env::args().collect();
     let code = match a.get(1).map(String::as_str) {
         Some("serve") => report(serve::run()),
+        Some("ask") if a.len() >= 3 => report(serve::ask(&a[2..].join(" "))),
         Some("login") => report(auth::login().map(|_| println!("login ok"))),
         Some("logout") => {
             auth::logout();

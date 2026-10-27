@@ -25,6 +25,8 @@ function Show-WinarchyHelp {
     background next           Cycle to the next background
     bar position [top|bottom] Where the bar sits (no arg: show current)
     bar transparent [on|off]  See through the bar (no arg: toggle)
+    assistant on|off|status   Voice assistant (hold Right Ctrl+Space to talk); on installs its local speech
+                              runtime and signs in with ChatGPT; also: assistant login|logout
     agent list                Known coding agents (* = preferred, marks what is installed)
     agent set <id>            Pick the coding agent SUPER+Shift+Ctrl+A launches
     agent launch              Open it in WezTerm
@@ -208,6 +210,7 @@ function Invoke-Winarchy {
                 default { throw "Unknown subcommand: bar $sub (position|transparent|use)" }
             }
         }
+        'assistant' { Invoke-WinarchyAssistant -Sub $(if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'status' }) }
         'agent' {
             $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'list' }
             switch ($sub) {
