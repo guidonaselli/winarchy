@@ -2586,6 +2586,13 @@ Describe 'Windhawk extras' {
     }
 }
 
+Describe 'Assistant doctor check' {
+    It 'checks the assistant process only when it is enabled' {
+        $src = Get-Content (Join-Path $script:Root 'module\Winarchy\Private\Doctor.ps1') -Raw
+        $src | Should -Match "(?s)assistant\.enabled'\)\) \{\s+Add-Check 'voice assistant running' \(Test-WinarchyAssistantRunning\)"
+    }
+}
+
 Describe 'Extras suggestions' {
     It 'doctor lists the extras as an informational check that never fails' {
         $src = Get-Content (Join-Path $script:Root 'module\Winarchy\Private\Doctor.ps1') -Raw

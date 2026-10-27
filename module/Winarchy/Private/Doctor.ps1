@@ -80,6 +80,12 @@ function Invoke-WinarchyDoctor {
             'winarchy reload   (or run scripts\Start-WindowSlots.ps1 hidden)'
     }
 
+    # Opt-in: sin `assistant.enabled` el asistente no se espera.
+    if (Test-Path (Join-Path $root 'state\assistant.enabled')) {
+        Add-Check 'voice assistant running' (Test-WinarchyAssistantRunning) `
+            'push-to-talk: hold SUPER+CapsLock' 'winarchy assistant on'
+    }
+
     # --- Estado de sesión stale ------------------------------------------------
     # komorebi.sock es AF_UNIX: si komorebi crasheó, el archivo queda y el próximo
     # arranque no bindea hasta limpiarlo (komorebi "offline al boot, no levanta solo").
