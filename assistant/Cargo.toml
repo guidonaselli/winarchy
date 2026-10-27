@@ -1,0 +1,10 @@
+[package]
+name = "winarchy-assistant"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
