@@ -2012,6 +2012,7 @@ Describe 'Runtime configuration environment' {
                 Mock Start-WinarchyKomorebi {}
                 Mock Get-Command { [pscustomobject]@{ Source = 'C:\Program Files\YASB\yasbc.exe' } } -ParameterFilter { $Name -eq 'yasbc' }
                 Mock Start-Process {}
+                Mock Stop-Process {}
 
                 foreach ($initial in @($null, 'C:\stale')) {
                     $env:KOMOREBI_CONFIG_HOME = $initial
@@ -2042,6 +2043,7 @@ Describe 'Runtime configuration environment' {
                 Mock Get-WinarchyAhkExe { 'AutoHotkey64.exe' }
                 Mock Get-Command { [pscustomobject]@{ Source = 'C:\Program Files\YASB\yasbc.exe' } } -ParameterFilter { $Name -eq 'yasbc' }
                 Mock Start-Process {}
+                Mock Stop-Process {}
 
                 Invoke-WinarchyReload
                 $env:CLAUDE_CODE_CHILD_SESSION | Should -BeNullOrEmpty
