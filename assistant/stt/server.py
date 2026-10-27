@@ -1,0 +1,29 @@
+"""Sidecar de STT: una línea con la ruta de un WAV 16 kHz mono por stdin, una línea JSON por stdout."""
+import json, os, sys, wave
+import numpy as np
+try:
+    import nvidia.cublas, nvidia.cudnn
+    for m in (nvidia.cublas, nvidia.cudnn):
+        d = os.path.join(list(m.__path__)[0], "bin")
+        os.add_dll_directory(d)
+        os.environ["PATH"] = d + os.pathsep + os.environ["PATH"]
+except ImportError:
+    pass
+import ctranslate2
+from faster_whisper import WhisperModel
+
+gpu = ctranslate2.get_cuda_device_count() > 0
+model = WhisperModel(os.environ.get("WINARCHY_STT_MODEL", "large-v3-turbo" if gpu else "small"), device="cuda" if gpu else "cpu", compute_type="float16" if gpu else "int8")
+
+def read(path):
+    with wave.open(path) as w:
+        return np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768
+
+list(model.transcribe(np.zeros(16000, np.float32), language="es", beam_size=1)[0])
+print(json.dumps({"ready": True}), flush=True)
+for line in sys.stdin:
+    try:
+        segs, _ = model.transcribe(read(line.strip()), language="es", beam_size=1)
+        print(json.dumps({"text": " ".join(s.text for s in segs).strip()}), flush=True)
+    except Exception as e:
+        print(json.dumps({"error": str(e)}), flush=True)

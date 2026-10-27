@@ -129,7 +129,7 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
     match req.cmd.as_str() {
         "ping" => ok(json!({"pong": true})),
         "version" => ok(json!({"shell": env!("CARGO_PKG_VERSION")})),
-        "hello" => ok(json!({"shell": env!("CARGO_PKG_VERSION"), "caps": ["island"]})),
+        "hello" => ok(json!({"shell": env!("CARGO_PKG_VERSION"), "caps": ["island", "assistant"]})),
         "island.present" | "island.update" => match island_from(&req.params) {
             Ok(i) => {
                 *ISLAND.lock().unwrap() = Some(i);
@@ -138,17 +138,15 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
             }
             Err(e) => json!({"v": VERSION, "id": req.id, "ok": false, "error": e}),
         },
-        // Push-to-talk: AHK avisa down/up; la isla solo refleja el estado, el audio es del asistente.
-        "ptt.down" => {
-            *ISLAND.lock().unwrap() = Some(Island { title: "Escuchando".into(), ..Default::default() });
-            dispatch(Command::Redraw);
-            ok(json!({}))
-        }
-        "ptt.up" => {
-            *ISLAND.lock().unwrap() = None;
-            dispatch(Command::Redraw);
-            ok(json!({}))
-        }
+        // El asistente (proceso aparte) publica su estado; la isla solo lo dibuja.
+        "assistant.state" => match req.params["state"].as_str().and_then(crate::spirit::Assist::parse) {
+            Some(a) => {
+                crate::spirit::set(a);
+                dispatch(Command::Redraw);
+                ok(json!({}))
+            }
+            None => json!({"v": VERSION, "id": req.id, "ok": false, "error": "bad state"}),
+        },
         "island.expand" => {
             dispatch(Command::Expand);
             ok(json!({}))
@@ -194,10 +192,11 @@ mod tests {
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"island.update","params":{"progress":2}}"#, &|_| {})["ok"], false);
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"island.dismiss"}"#, &|_| {})["ok"], true);
         assert!(ISLAND.lock().unwrap().is_none());
-        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"ptt.down"}"#, &|_| {})["ok"], true);
-        assert_eq!(ISLAND.lock().unwrap().as_ref().unwrap().title, "Escuchando");
-        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"ptt.up"}"#, &|_| {})["ok"], true);
-        assert!(ISLAND.lock().unwrap().is_none());
+        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"assistant.state","params":{"state":"thinking"}}"#, &|_| {})["ok"], true);
+        assert_eq!(crate::spirit::current().0, crate::spirit::Assist::Thinking);
+        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"assistant.state","params":{"state":"dancing"}}"#, &|_| {})["ok"], false);
+        handle(br#"{"v":1,"id":1,"cmd":"assistant.state","params":{"state":"idle"}}"#, &|_| {});
+        assert_eq!(crate::spirit::current().0, crate::spirit::Assist::Idle);
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"confirm.request"}"#, &|_| {})["result"], "denied");
     }
 }

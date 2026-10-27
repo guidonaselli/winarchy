@@ -3147,3 +3147,44 @@ Describe 'Install-WinarchyShellBinary' {
         }
     }
 }
+
+Describe 'Install-WinarchyAssistantBinary' {
+    It 'installs only a binary whose SHA256 matches the pin' {
+        $repo = Join-Path $TestDrive 'repo'
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        $exe = Join-Path $TestDrive 'winarchy-assistant.exe'
+        Set-Content $exe 'fake binary' -NoNewline
+        InModuleScope Winarchy -Parameters @{ Repo = $repo; Exe = $exe } {
+            param($Repo, $Exe)
+            Mock Get-WinarchyRoot { $Repo }
+            $dest = Join-Path $Repo 'state\bin\winarchy-assistant.exe'
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[core]`nkomorebi = `"1`""
+            { Install-WinarchyAssistantBinary -Source $Exe } | Should -Throw '*no [[]assistant[]] sha256*'
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[assistant]`nsha256 = `"$('0' * 64)`""
+            { Install-WinarchyAssistantBinary -Source $Exe } | Should -Throw '*mismatch*'
+            Test-Path $dest | Should -BeFalse
+            $hash = (Get-FileHash $Exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[assistant]`nsha256 = `"$hash`""
+            Install-WinarchyAssistantBinary -Source $Exe
+            Test-Path $dest | Should -BeTrue
+        }
+    }
+}
+
+Describe 'Invoke-WinarchyAssistant' {
+    It 'rejects unknown subcommands and reports status without a binary' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyAssistantExe { $null }
+            { Invoke-WinarchyAssistant -Sub 'dance' } | Should -Throw '*Unknown subcommand*'
+            $s = Get-WinarchyAssistantStatus
+            $s.Binary | Should -BeFalse
+            $s.Login | Should -Be 'n/a'
+        }
+    }
+
+    It 'only enables push-to-talk while the assistant runs and game mode is off' {
+        $ahk = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'config\ahk\winarchy.ahk') -Raw
+        $ahk | Should -Match "(?s)AssistantReady\(\) \{.*?GameFlag.*?winarchy-assistant\.exe"
+        $ahk | Should -Match '(?s)#HotIf AssistantReady\(\)\s*\r?\n\$>\^Space::AssistantPtt\(\)'
+    }
+}

@@ -23,6 +23,17 @@ WinarchyPs1 := RepoRoot "\bin\winarchy.ps1"
 DirCreate(StateDir)
 try FileDelete(AwakeFlag)   ; the execution state dies with this process, so a surviving flag would lie
 
+; Asistente de voz: opt-in (`winarchy assistant on`); este script, que arranca con la sesión, lo levanta.
+if FileExist(StateDir "\assistant.enabled") && !ProcessExist("winarchy-assistant.exe") {
+    for exe in [StateDir "\bin\winarchy-assistant.exe", RepoRoot "\assistant\target\release\winarchy-assistant.exe"] {
+        if FileExist(exe) {
+            EnvSet("WINARCHY_ROOT", RepoRoot)
+            Run('"' exe '" serve', , "Hide")
+            break
+        }
+    }
+}
+
 ; Define WinarchyUserMenu con entradas propias del menu y del tray.
 #Include *i %A_ScriptDir%\user-menu.ahk
 
@@ -578,6 +589,37 @@ ShellIsland(cmd) {
         pipe := FileOpen('\\.\pipe\winarchy-shell', 'w')   ; 'rw' lee para detectar BOM y se cuelga esperando
         pipe.Write('{"v":1,"id":1,"cmd":"' cmd '"}`n')
         pipe.Close()
+    }
+}
+
+; Push-to-talk del asistente de voz. Se suelta con el reloj de pulsaciones físicas: no depende del orden
+; en que se sueltan Ctrl y Espacio, ni de que el hotkey "up" sobreviva a un cambio de modificadores.
+AssistantSend(cmd) {
+    try {
+        pipe := FileOpen('\\.\pipe\winarchy-assistant', 'w')
+        pipe.Write(cmd '`n')
+        pipe.Close()
+    }
+}
+
+AssistantReady() {
+    global GameFlag
+    return !FileExist(GameFlag) && ProcessExist('winarchy-assistant.exe')
+}
+
+AssistantPtt() {
+    static held := false
+    if held
+        return
+    held := true
+    AssistantSend('ptt.down')
+    SetTimer(Watch, 40)
+    Watch() {
+        if GetKeyState('Space', 'P') && GetKeyState('RControl', 'P')
+            return
+        SetTimer(Watch, 0)
+        held := false
+        AssistantSend('ptt.up')
     }
 }
 
@@ -1146,6 +1188,9 @@ AccentWatch() {
 #Esc::ShowSystemMenu()                           ; system / power menu
 #k::ToggleKeyOverlay()                           ; this keybindings list
 #i::ShellIsland('island.expand')                 ; native shell: show CPU / RAM in the island
+#HotIf AssistantReady()
+$>^Space::AssistantPtt()                         ; hold to talk to the voice assistant (needs `winarchy assistant on`)
+#HotIf
 
 ; --- Webapps --------------------------------------------------------------------
 #a::WebApp('https://chatgpt.com')                ; ChatGPT
