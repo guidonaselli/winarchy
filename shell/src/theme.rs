@@ -11,6 +11,12 @@ pub struct Theme {
     pub font_family: String,
     pub font_size: i32,
     pub position: String,
+    #[serde(default = "on")]
+    pub pet: bool,
+}
+
+fn on() -> bool {
+    true
 }
 
 impl Default for Theme {
@@ -24,6 +30,7 @@ impl Default for Theme {
             font_family: "Segoe UI".into(),
             font_size: 13,
             position: "top".into(),
+            pet: true,
         }
     }
 }
@@ -87,5 +94,15 @@ mod tests {
         let t: Theme = serde_json::from_str(json).unwrap();
         assert_eq!(t.font_size, 12);
         assert_eq!(t.position, "top");
+        assert!(t.pet);
+    }
+
+    #[test]
+    fn user_json_can_turn_the_pet_off() {
+        let d = std::env::temp_dir().join("ws-theme-pet");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("theme.json"), r##"{"background":"#000000","opacity":1.0,"foreground":"#ffffff","accent":"#ff0000","muted":"#111111","font_family":"A","font_size":12,"position":"top"}"##).unwrap();
+        std::fs::write(d.join("user.json"), r#"{"pet":false}"#).unwrap();
+        assert!(!Theme::load(&d.join("theme.json")).unwrap().pet);
     }
 }

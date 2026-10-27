@@ -86,6 +86,8 @@ That means Winarchy optimizes for:
 - **Winarchy Island (the default bar)**
   - a Dynamic-Island-style pill with workspace dots and a clock, over a thin strip per monitor;
     it expands on hover or `SUPER+I` into CPU/RAM/GPU, media, weather and more
+  - the assistant orb shows in the pill only while it listens, thinks or speaks; `{"pet": false}` in
+    `config/shell/user.json` hides it (that file survives `theme set` and updates)
   - source in `shell/` (Rust + Win32); `install.ps1` downloads the binary from the GitHub Release
     and installs it only if its SHA256 matches `versions.lock.toml`
   - YASB is optional: `install.ps1 -WithYasb`, or `winarchy bar use yasb` (installs it if missing).
