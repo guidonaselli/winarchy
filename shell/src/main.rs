@@ -32,6 +32,8 @@ const EXPAND_SECS: u64 = 6;
 const TIMER_TICK: usize = 1;
 const TIMER_ANIM: usize = 2;
 const TIMER_SPIRIT: usize = 3;
+const TIMER_FLASH: usize = 4;
+const FLASH_MS: u32 = 800;
 const STRIP_DIP: i32 = 8;
 const PILL_DIP: i32 = 32;
 const PILL_MAX_W: i32 = 1400;
@@ -54,6 +56,8 @@ struct State {
     sampler: metrics::Sampler,
     last_vol: Option<(u32, bool)>,
     osd_until: Option<std::time::Instant>,
+    last_ws: Option<usize>,
+    flash_title: Option<String>,
     last_label: Vec<u16>,
     tracking: bool,
     strips: Vec<(HWND, RECT)>,
@@ -564,6 +568,17 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             render_pill(with(|s| s.pill));
             LRESULT(0)
         }
+        WM_TIMER if wp.0 == TIMER_FLASH => {
+            let _ = KillTimer(h, TIMER_FLASH);
+            let title = with(|s| s.flash_title.take());
+            let mut island = pipe::ISLAND.lock().unwrap();
+            if title.is_some() && island.as_ref().map(|i| &i.title) == title.as_ref() {
+                *island = None;
+            }
+            drop(island);
+            render_pill(with(|s| s.pill));
+            LRESULT(0)
+        }
         WM_TIMER if wp.0 == TIMER_ANIM => {
             spring_step(h);
             LRESULT(0)
@@ -592,6 +607,21 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             LRESULT(0)
         }
         WM_WORKSPACES => {
+            let cur = komorebi::CURRENT.lock().unwrap().as_ref().map(|w| w.focused);
+            let flash = with(|s| {
+                let changed = workspace_changed(s.last_ws, cur);
+                s.last_ws = cur.or(s.last_ws);
+                changed
+            });
+            if let (true, Some(n)) = (flash, cur) {
+                let mut island = pipe::ISLAND.lock().unwrap();
+                if island.is_none() {
+                    let title = format!("WS {}", n + 1);
+                    *island = Some(pipe::Island { title: title.clone(), ..Default::default() });
+                    with(|s| s.flash_title = Some(title));
+                    SetTimer(h, TIMER_FLASH, FLASH_MS, None);
+                }
+            }
             render_pill(with(|s| s.pill));
             LRESULT(0)
         }
@@ -652,6 +682,11 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
     DefWindowProcW(h, m, wp, lp)
 }
 
+// El destello es solo para un cambio real: el primer estado leído no cuenta.
+fn workspace_changed(prev: Option<usize>, cur: Option<usize>) -> bool {
+    matches!((prev, cur), (Some(p), Some(c)) if p != c)
+}
+
 fn main() {
     let root = std::env::current_exe().ok().and_then(|p| p.ancestors().nth(4).map(|p| p.to_path_buf())).unwrap_or_default();
     let theme_path = std::env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| root.join("config").join("shell").join("theme.json"));
@@ -673,7 +708,7 @@ fn main() {
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, px(PILL_DIP, scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_label: Vec::new(), tracking: false, strips: vec![(strip, rects[0])], pill_mon: rects[0], layout_sig: layout_sig() })
+            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, strips: vec![(strip, rects[0])], pill_mon: rects[0], layout_sig: layout_sig() })
         });
         register_strip(strip);
         add_extra_strips(&rects);
@@ -706,6 +741,14 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn flash_only_on_a_real_workspace_change() {
+        assert!(!super::workspace_changed(None, Some(0)));
+        assert!(!super::workspace_changed(Some(2), Some(2)));
+        assert!(!super::workspace_changed(Some(2), None));
+        assert!(super::workspace_changed(Some(2), Some(3)));
+    }
+
     #[test]
     fn segments_dim_keys_and_separators() {
         let seg = super::segments("CPU 26%  RAM 9% · el SEXO FE");
