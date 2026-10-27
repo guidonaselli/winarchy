@@ -4,3 +4,5 @@ background={{colors.background}}
 foreground={{colors.foreground}}
 accent={{colors.accent_ui}}
 muted={{colors.color8}}
+[font]
+family={{bar.font_family}}

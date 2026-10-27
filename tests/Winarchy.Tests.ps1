@@ -2586,6 +2586,15 @@ Describe 'Windhawk extras' {
     }
 }
 
+Describe 'Menu font from the theme' {
+    It 'emits bar.font_family into theme.ini and the palette reads it with a JetBrainsMono fallback' {
+        (Get-Content (Join-Path $script:Root 'templates\ahk-theme.ini.tpl') -Raw) | Should -Match '(?s)\[font\]\s+family=\{\{bar\.font_family\}\}'
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $ahk | Should -Match "IniRead\(ini, 'font', 'family', c\.font\)"
+        $ahk | Should -Match 'g\.SetFont\(opts, font\)'
+    }
+}
+
 Describe 'Assistant doctor check' {
     It 'checks the assistant process only when it is enabled' {
         $src = Get-Content (Join-Path $script:Root 'module\Winarchy\Private\Doctor.ps1') -Raw

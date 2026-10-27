@@ -679,13 +679,14 @@ ParseKeymap(path, defaultTitle := '', startAt := '') {
 Pal := ''
 
 ThemeColors() {
-    c := {bg:'1a1b26', fg:'c0caf5', ac:'7aa2f7', mut:'565f89'}
+    c := {bg:'1a1b26', fg:'c0caf5', ac:'7aa2f7', mut:'565f89', font:'JetBrainsMono NF'}
     ini := A_ScriptDir '\theme.ini'
     if FileExist(ini) {
         c.bg  := LTrim(IniRead(ini, 'colors', 'background', c.bg), '#')
         c.fg  := LTrim(IniRead(ini, 'colors', 'foreground', c.fg), '#')
         c.ac  := LTrim(IniRead(ini, 'colors', 'accent', c.ac), '#')
         c.mut := LTrim(IniRead(ini, 'colors', 'muted', c.mut), '#')
+        c.font := IniRead(ini, 'font', 'family', c.font)
     }
     return c
 }
@@ -713,16 +714,16 @@ PalOpen(mode, items, title) {
     g.BackColor := c.bg
     g.MarginX := 0, g.MarginY := 0
 
-    PalSetFont(g, 's10 bold')
+    PalSetFont(g, 's10 bold', c.font)
     crumb := g.Add('Text', Format('x{} y{} w{} h20 c{} 0x4200', pad, pad, w - pad * 2, c.ac), '')
-    PalSetFont(g, 's12 norm')
+    PalSetFont(g, 's12 norm', c.font)
     g.Add('Text', Format('x{} y{} w24 h30 c{} 0x200', pad, pad + 30, c.mut), Chr(0xF002))
     ed := g.Add('Edit', Format('x{} y{} w{} h30 -E0x200 -Multi Background{} c{}', pad + 28, pad + 34, w - pad * 2 - 28, c.bg, c.fg))
     SendMessage(0x1501, 1, StrPtr(keys ? 'Filter by key or action' : 'Search'), ed)   ; EM_SETCUEBANNER
     g.Add('Text', Format('x{} y{} w{} h1 Background{}', pad, pad + 68, w - pad * 2, c.mut))
 
     y0 := pad + 80
-    PalSetFont(g, 's11 norm')
+    PalSetFont(g, 's11 norm', c.font)
     rows := []
     loop n {
         y := y0 + (A_Index - 1) * rowH
@@ -731,7 +732,7 @@ PalOpen(mode, items, title) {
         rows.Push({label: lbl, hint: hnt, y: y, on: false})
     }
     fy := y0 + n * rowH + 10
-    PalSetFont(g, 's9 norm')
+    PalSetFont(g, 's9 norm', c.font)
     arrows := Chr(0x2191) Chr(0x2193)
     help := keys ? arrows ' scroll    esc close' : arrows ' move    ' Chr(0x21B5) ' select    esc back'
     g.Add('Text', Format('x{} y{} w{} h20 c{}', pad, fy, labelW, c.mut), help)
@@ -760,10 +761,11 @@ PalOpen(mode, items, title) {
     SetTimer(PalWatch, 250)              ; closes when it loses focus
 }
 
-; JetBrainsMono under its Nerd Fonts v2 or v3 family name.
-PalSetFont(g, opts) {
+; Fallback JetBrainsMono (Nerd Fonts v3 or v2 name); the theme's font wins when installed.
+PalSetFont(g, opts, font) {
     g.SetFont(opts, 'JetBrainsMono Nerd Font')
     g.SetFont(opts, 'JetBrainsMono NF')
+    g.SetFont(opts, font)
 }
 
 PalClose() {
