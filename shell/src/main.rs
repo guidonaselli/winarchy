@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 mod extras;
 mod metrics;
 mod komorebi;

@@ -2012,6 +2012,7 @@ Describe 'Runtime configuration environment' {
                 Mock Start-WinarchyKomorebi {}
                 Mock Get-Command { [pscustomobject]@{ Source = 'C:\Program Files\YASB\yasbc.exe' } } -ParameterFilter { $Name -eq 'yasbc' }
                 Mock Start-Process {}
+                Mock Stop-Process {}
 
                 foreach ($initial in @($null, 'C:\stale')) {
                     $env:KOMOREBI_CONFIG_HOME = $initial
@@ -2042,6 +2043,7 @@ Describe 'Runtime configuration environment' {
                 Mock Get-WinarchyAhkExe { 'AutoHotkey64.exe' }
                 Mock Get-Command { [pscustomobject]@{ Source = 'C:\Program Files\YASB\yasbc.exe' } } -ParameterFilter { $Name -eq 'yasbc' }
                 Mock Start-Process {}
+                Mock Stop-Process {}
 
                 Invoke-WinarchyReload
                 $env:CLAUDE_CODE_CHILD_SESSION | Should -BeNullOrEmpty
@@ -2581,6 +2583,22 @@ Describe 'Windhawk extras' {
                 $script:WindhawkDataRoot = "$env:ProgramData\Windhawk"
             }
         }
+    }
+}
+
+Describe 'Menu font from the theme' {
+    It 'emits bar.font_family into theme.ini and the palette reads it with a JetBrainsMono fallback' {
+        (Get-Content (Join-Path $script:Root 'templates\ahk-theme.ini.tpl') -Raw) | Should -Match '(?s)\[font\]\s+family=\{\{bar\.font_family\}\}'
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $ahk | Should -Match "IniRead\(ini, 'font', 'family', c\.font\)"
+        $ahk | Should -Match 'g\.SetFont\(opts, font\)'
+    }
+}
+
+Describe 'Assistant doctor check' {
+    It 'checks the assistant process only when it is enabled' {
+        $src = Get-Content (Join-Path $script:Root 'module\Winarchy\Private\Doctor.ps1') -Raw
+        $src | Should -Match "(?s)assistant\.enabled'\)\) \{\s+Add-Check 'voice assistant running' \(Test-WinarchyAssistantRunning\)"
     }
 }
 
