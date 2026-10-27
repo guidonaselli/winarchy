@@ -1,5 +1,5 @@
 # Runs in the sandbox (Windows PowerShell 5.1). `elevated` runs as SYSTEM, the rest as the non-elevated user.
-param([Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'windhawk', 'elevated')][string]$Scenario)
+param([Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'windhawk', 'elevated', 'barswitch')][string]$Scenario)
 $ProgressPreference = 'SilentlyContinue'
 $out = 'C:\sandbox'
 $bare = Join-Path $out 'winarchy.git'
@@ -144,6 +144,24 @@ switch ($Scenario) {
         Install-Prerequisites
         Invoke-WinarchyScript install.ps1
         Test-WindhawkExtra C:\winarchy
+    }
+    'barswitch' {
+        Install-Prerequisites
+        Invoke-WinarchyScript install.ps1
+        Update-SessionPath
+        $bar = { (Get-Content C:\winarchy\state\bar -Raw).Trim() }
+        if ((& $bar) -ne 'native') { $failed = $true; "default bar is $(& $bar), expected native" }
+        if (Get-Command yasbc -ErrorAction SilentlyContinue) { $failed = $true; 'YASB present before asking for it' }
+        cmd /c 'C:\winarchy\bin\winarchy.cmd bar use yasb 2>&1' | Out-Host
+        Update-SessionPath
+        if (-not (Get-Command yasbc -ErrorAction SilentlyContinue)) { $failed = $true; 'bar use yasb did not install YASB' }
+        if ((& $bar) -ne 'yasb') { $failed = $true; "bar is $(& $bar), expected yasb" }
+        if ((winget pin list --accept-source-agreements | Out-String) -notmatch 'AmN.yasb') { $failed = $true; 'YASB not pinned' }
+        cmd /c 'C:\winarchy\bin\winarchy.cmd bar use native 2>&1' | Out-Host
+        if ((& $bar) -ne 'native') { $failed = $true; "bar is $(& $bar), expected native" }
+        Start-Sleep 5
+        if (@(Get-Process winarchy-shell -ErrorAction SilentlyContinue).Count -ne 1) { $failed = $true; 'expected exactly one winarchy-shell' }
+        if (Get-Process yasb -ErrorAction SilentlyContinue) { $failed = $true; 'yasb still running after switching to native' }
     }
     'selfupdate' {
         Install-Prerequisites
