@@ -104,7 +104,7 @@ function Invoke-WinarchyAssistant {
             }
             Set-WinarchyFileAtomic -Path $flag -Value '1'
             Start-WinarchyAssistant
-            Write-WinarchyOk 'Assistant on: hold Right Ctrl + Space to talk.'
+            Write-WinarchyOk 'Assistant on: hold SUPER + CapsLock to talk.'
         }
         'off' {
             Remove-Item $flag -Force -ErrorAction SilentlyContinue

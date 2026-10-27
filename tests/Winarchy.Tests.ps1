@@ -3185,6 +3185,6 @@ Describe 'Invoke-WinarchyAssistant' {
     It 'only enables push-to-talk while the assistant runs and game mode is off' {
         $ahk = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'config\ahk\winarchy.ahk') -Raw
         $ahk | Should -Match "(?s)AssistantReady\(\) \{.*?GameFlag.*?winarchy-assistant\.exe"
-        $ahk | Should -Match '(?s)#HotIf AssistantReady\(\)\s*\r?\n\$>\^Space::AssistantPtt\(\)'
+        $ahk | Should -Match '(?s)#HotIf AssistantReady\(\)\s*\r?\n#CapsLock::AssistantPtt\(\)'
     }
 }
