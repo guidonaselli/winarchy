@@ -75,6 +75,38 @@ FocusWorkspace(index) {
     Komorebic('focus-workspace ' index)
 }
 
+; Como Hyprland `e+1`: salta los workspaces vacios. wrap=false (la rueda) se detiene en los extremos.
+CycleOccupied(dir, wrap := true) {
+    global KomorebicExe
+    static last := 0
+    if (A_TickCount - last < 120)   ; una rueda libre manda varios eventos por gesto
+        return
+    last := A_TickCount
+    tmp := A_Temp '\winarchy-state.json'
+    try {
+        RunWait(A_ComSpec ' /c ""' KomorebicExe '" focus-monitor-at-cursor & "' KomorebicExe '" state > "' tmp '""', , 'Hide')
+        doc := ComObject('htmlfile')
+        doc.write('<meta http-equiv="X-UA-Compatible" content="IE=edge">')
+        state := doc.parentWindow.JSON.parse(FileRead(tmp))
+        wss := state.monitors.elements.%state.monitors.focused%.workspaces
+        n := wss.elements.length, cur := wss.focused
+        Loop n - 1 {
+            i := cur + dir * A_Index
+            if (wrap)
+                i := Mod(i + n, n)
+            else if (i < 0 || i >= n)
+                return
+            w := wss.elements.%i%
+            if (w.containers.elements.length || w.floating_windows.elements.length || IsObject(w.monocle_container) || IsObject(w.maximized_window)) {
+                Komorebic('focus-workspace ' i)
+                return
+            }
+        }
+    } catch {
+        Komorebic('cycle-workspace ' (dir > 0 ? 'next' : 'previous'))   ; sin estado legible, el ciclo plano
+    }
+}
+
 ; WM_CLOSE to the active window, never to the desktop or taskbar.
 CloseWindow() {
     if !(hwnd := WinExist('A'))
@@ -1133,11 +1165,11 @@ AccentWatch() {
 #+r::Winarchy('reload')                          ; reload the whole stack
 #+Enter::Komorebic('promote')                    ; promote to the largest tile
 #+l::Komorebic('cycle-layout next')              ; next layout
-#Tab::Komorebic('cycle-workspace next')          ; next workspace
-#+Tab::Komorebic('cycle-workspace previous')     ; previous workspace
+#Tab::CycleOccupied(1)                           ; next occupied workspace
+#+Tab::CycleOccupied(-1)                         ; previous occupied workspace
 #^Tab::Komorebic('focus-last-workspace')         ; back to the workspace you came from
-#WheelDown::Komorebic('cycle-workspace next')    ; scroll to the next workspace
-#WheelUp::Komorebic('cycle-workspace previous')  ; scroll to the previous workspace
+#WheelDown::CycleOccupied(-1, false)             ; scroll down = previous occupied workspace
+#WheelUp::CycleOccupied(1, false)                ; scroll up = next occupied workspace
 #^Enter::Komorebic('promote-focus')              ; focus the largest tile
 #+h::Komorebic('flip-layout horizontal')         ; mirror layout left / right
 #+j::Komorebic('flip-layout vertical')           ; mirror layout up / down

@@ -76,9 +76,9 @@ manual app list: Flow already indexes installed programs.
 |---|---|
 | `SUPER+1..0` | Go to workspace N (1–10) of the monitor under the cursor |
 | `SUPER+Shift+1..0` | Move window to workspace N |
-| `SUPER+Tab` / `SUPER+Shift+Tab` | Next / previous workspace |
+| `SUPER+Tab` / `SUPER+Shift+Tab` | Next / previous occupied workspace (empty ones are skipped, wraps around) |
 | `SUPER+Ctrl+Tab` | Back to the workspace you came from |
-| `SUPER+WheelDown` / `SUPER+WheelUp` | Scroll to the next / previous workspace |
+| `SUPER+WheelUp` / `SUPER+WheelDown` | Scroll to the next / previous occupied workspace (stops at the ends) |
 | `SUPER+,` / `SUPER+.` | Focus previous / next monitor |
 | `SUPER+Shift+,` / `SUPER+Shift+.` | Move window to previous / next monitor |
 | `SUPER+Ctrl+,` / `SUPER+Ctrl+.` | Send window to previous / next monitor without following it |
