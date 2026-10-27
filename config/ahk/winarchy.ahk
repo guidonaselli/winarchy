@@ -593,7 +593,7 @@ ShellIsland(cmd) {
 }
 
 ; Push-to-talk del asistente de voz. Se suelta con el reloj de pulsaciones físicas: no depende del orden
-; en que se sueltan Ctrl y Espacio, ni de que el hotkey "up" sobreviva a un cambio de modificadores.
+; en que se sueltan Win y CapsLock, ni de que el hotkey "up" sobreviva a un cambio de modificadores.
 AssistantSend(cmd) {
     try {
         pipe := FileOpen('\\.\pipe\winarchy-assistant', 'w')
@@ -607,7 +607,7 @@ AssistantReady() {
     return !FileExist(GameFlag) && ProcessExist('winarchy-assistant.exe')
 }
 
-AssistantPtt(key := 'Space') {
+AssistantPtt() {
     static held := false
     if held
         return
@@ -615,7 +615,7 @@ AssistantPtt(key := 'Space') {
     AssistantSend('ptt.down')
     SetTimer(Watch, 40)
     Watch() {
-        if GetKeyState(key, 'P') && (key = 'CapsLock' || GetKeyState('RControl', 'P'))
+        if GetKeyState('CapsLock', 'P')
             return
         SetTimer(Watch, 0)
         held := false
@@ -1189,9 +1189,7 @@ AccentWatch() {
 #k::ToggleKeyOverlay()                           ; this keybindings list
 #i::ShellIsland('island.expand')                 ; native shell: show CPU / RAM in the island
 #HotIf AssistantReady()
-$>^Space::AssistantPtt()                         ; hold to talk to the voice assistant (needs `winarchy assistant on`)
-$CapsLock::AssistantPtt('CapsLock')              ; same, with one key: CapsLock is not a typing key here (Shift+CapsLock still toggles it)
-+CapsLock::SetCapsLockState(!GetKeyState('CapsLock', 'T'))
+#CapsLock::AssistantPtt()                        ; hold to talk to the voice assistant (needs `winarchy assistant on`)
 #HotIf
 
 ; --- Webapps --------------------------------------------------------------------

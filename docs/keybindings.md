@@ -17,7 +17,7 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 | `SUPER+O` | Obsidian |
 | `SUPER+K` | Keybindings list: searchable, auto-generated from winarchy.ahk, themed, on the active monitor |
 | `SUPER+I` | Native shell only (`winarchy bar use native`): expands the island with CPU and RAM for a few seconds |
-| `CapsLock` or `Right Ctrl+Space` (hold) | Push-to-talk to the voice assistant: speak while held, release to send (only with `winarchy assistant on`) |
+| `SUPER+CapsLock` (hold) | Push-to-talk to the voice assistant: speak while held, release to send (only with `winarchy assistant on`) |
 
 ## Menu (popup, Omarchy-style)
 | Keybinding | Action |
