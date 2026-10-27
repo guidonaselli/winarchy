@@ -213,7 +213,7 @@ unsafe fn render_pill(pill: HWND) {
     let dots: Vec<bool> = focused_ws.occupied.iter().enumerate().filter(|(i, o)| **o || *i == focused_ws.focused).map(|(i, _)| i == focused_ws.focused).collect();
     let (dot, gap, active, pad, sep) = (px(6, scale), px(5, scale), px(18, scale), px(16, scale), px(12, scale));
     let dots_w: i32 = dots.iter().map(|f| if *f { active } else { dot }).sum::<i32>() + gap * (dots.len() as i32 - 1).max(0);
-    let orb_lead = if assist == spirit::Assist::Idle { 0 } else { h };
+    let orb_lead = if assist == spirit::Assist::Idle || !theme.pet { 0 } else { h };
     let lead = orb_lead + if dots.is_empty() { 0 } else { dots_w + sep };
     let label_w = if label.is_empty() { 0 } else { lext.cx + sep };
     let need_raw = pad * 2 + lead + label_w + ext.cx;
@@ -281,7 +281,9 @@ unsafe fn render_pill(pill: HWND) {
     }
     let animate = animations_enabled();
     if assist != spirit::Assist::Idle {
-        spirit::paint(pixels, width, pad / 2, h, &spirit::shapes(assist, if animate { assist_t } else { 0.0 }), (ar, ag, ab));
+        if theme.pet {
+            spirit::paint(pixels, width, pad / 2, h, &spirit::shapes(assist, if animate { assist_t } else { 0.0 }), (ar, ag, ab));
+        }
         SetTimer(strip, TIMER_SPIRIT, if animate { 33 } else { 250 }, None);
     } else {
         let _ = KillTimer(strip, TIMER_SPIRIT);
