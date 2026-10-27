@@ -80,7 +80,7 @@ impl Machine {
                 self.go(Speaking, now);
                 Effect::None
             }
-            (Speaking, Event::SpeechDone) => {
+            (Thinking | Speaking, Event::SpeechDone) => {
                 self.go(Idle, now);
                 Effect::None
             }
@@ -156,6 +156,16 @@ mod tests {
         m.tick(at(30, t));
         assert_eq!(m.on(Event::PttUp, at(31, t)), Effect::None);
         assert_eq!(m.state(), State::Thinking);
+    }
+
+    #[test]
+    fn turn_without_speech_returns_to_idle() {
+        let t = Instant::now();
+        let mut m = Machine::new(t);
+        m.on(Event::PttDown, t);
+        m.on(Event::PttUp, t);
+        m.on(Event::SpeechDone, t);
+        assert_eq!(m.state(), State::Idle);
     }
 
     #[test]
