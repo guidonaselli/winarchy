@@ -2,6 +2,7 @@ mod extras;
 mod metrics;
 mod komorebi;
 mod pipe;
+mod spirit;
 mod theme;
 
 use std::cell::RefCell;
@@ -28,6 +29,7 @@ const WM_MOUSELEAVE: u32 = 0x02A3;
 const EXPAND_SECS: u64 = 6;
 const TIMER_TICK: usize = 1;
 const TIMER_ANIM: usize = 2;
+const TIMER_SPIRIT: usize = 3;
 const STRIP_DIP: i32 = 8;
 const PILL_DIP: i32 = 32;
 const PILL_MAX_W: i32 = 1400;
@@ -194,7 +196,8 @@ unsafe fn render_pill(pill: HWND) {
     let old_font = SelectObject(mem, font);
     let mut ext = SIZE::default();
     let _ = GetTextExtentPoint32W(mem, &text, &mut ext);
-    let island = pipe::ISLAND.lock().unwrap().clone();
+    let (assist, assist_t) = spirit::current();
+    let island = pipe::ISLAND.lock().unwrap().clone().or_else(|| (assist != spirit::Assist::Idle).then(|| pipe::Island { title: assist.label().into(), ..Default::default() }));
     let label: Vec<u16> = island.as_ref().map(|i| if i.detail.is_empty() { i.title.clone() } else { format!("{}  {}", i.title, i.detail) }).unwrap_or_default().encode_utf16().collect();
     let mut lext = SIZE::default();
     if !label.is_empty() {
@@ -204,7 +207,8 @@ unsafe fn render_pill(pill: HWND) {
     let dots: Vec<bool> = focused_ws.occupied.iter().enumerate().filter(|(i, o)| **o || *i == focused_ws.focused).map(|(i, _)| i == focused_ws.focused).collect();
     let (dot, gap, active, pad, sep) = (px(6, scale), px(5, scale), px(18, scale), px(16, scale), px(12, scale));
     let dots_w: i32 = dots.iter().map(|f| if *f { active } else { dot }).sum::<i32>() + gap * (dots.len() as i32 - 1).max(0);
-    let lead = if dots.is_empty() { 0 } else { dots_w + sep };
+    let orb_lead = if assist == spirit::Assist::Idle { 0 } else { h };
+    let lead = orb_lead + if dots.is_empty() { 0 } else { dots_w + sep };
     let label_w = if label.is_empty() { 0 } else { lext.cx + sep };
     let need_raw = pad * 2 + lead + label_w + ext.cx;
     let need = need_raw.min(px(PILL_MAX_W, scale)).min((mon.right - mon.left) * 3 / 4);
@@ -250,7 +254,7 @@ unsafe fn render_pill(pill: HWND) {
     }
     let (ar, ag, ab) = rgb(&theme.accent);
     let (mr, mg, mb) = rgb(&theme.muted);
-    let mut x0 = pad;
+    let mut x0 = pad + orb_lead;
     for focused in &dots {
         let w = if *focused { active } else { dot };
         let (cr, cg, cb) = if *focused { (ar, ag, ab) } else { (mr, mg, mb) };
@@ -268,6 +272,13 @@ unsafe fn render_pill(pill: HWND) {
             }
         }
         x0 += w + gap;
+    }
+    let animate = animations_enabled();
+    if assist != spirit::Assist::Idle {
+        spirit::paint(pixels, width, pad / 2, h, &spirit::shapes(assist, if animate { assist_t } else { 0.0 }), (ar, ag, ab));
+        SetTimer(strip, TIMER_SPIRIT, if animate { 33 } else { 250 }, None);
+    } else {
+        let _ = KillTimer(strip, TIMER_SPIRIT);
     }
     if let Some(p) = island.as_ref().and_then(|i| i.progress) {
         let (bar_h, bar_w) = (px(2, scale), ((width - 2 * pad) as f64 * p) as i32);
@@ -354,6 +365,13 @@ unsafe fn spring_step(strip: HWND) {
 unsafe fn hovered(pill: HWND) -> bool {
     let (mut p, mut r) = (POINT::default(), RECT::default());
     GetCursorPos(&mut p).is_ok() && GetWindowRect(pill, &mut r).is_ok() && PtInRect(&r, p).as_bool()
+}
+
+// "Reducir animaciones" de Windows: el espíritu queda estático.
+unsafe fn animations_enabled() -> bool {
+    let mut on = BOOL(1);
+    let _ = SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, Some(&mut on as *mut _ as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
+    on.as_bool()
 }
 
 unsafe fn fullscreen_busy() -> bool {
@@ -539,6 +557,10 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             FillRect(HDC(wp.0 as *mut _), &rc, brush);
             let _ = DeleteObject(brush);
             LRESULT(1)
+        }
+        WM_TIMER if wp.0 == TIMER_SPIRIT => {
+            render_pill(with(|s| s.pill));
+            LRESULT(0)
         }
         WM_TIMER if wp.0 == TIMER_ANIM => {
             spring_step(h);
