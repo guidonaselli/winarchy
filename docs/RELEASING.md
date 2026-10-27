@@ -35,6 +35,8 @@ sync con el tag.
    solo debe avanzar linealmente sobre tags estables.
 5. **GitHub Release**: crear la release `vX.Y.Z` con changelog (`gh release create vX.Y.Z
    --notes "..."`). La API `releases/latest` es la que consulta el chequeo no intrusivo.
+   - **Binario del asistente** (solo si cambió `assistant/`): igual que la shell con `winarchy-assistant.exe` y
+   `[assistant] sha256`; `winarchy assistant on` lo baja del Release y lo verifica.
 6. **Binario de la shell nativa** (solo si cambió `shell/`): bajar el artefacto `winarchy-shell` del
    CI del commit que se va a taggear, adjuntarlo a la release (`gh release upload vX.Y.Z winarchy-shell.exe`) y fijar su
    `Get-FileHash -Algorithm SHA256` en `[shell] sha256` de `versions.lock.toml` antes de taggear.

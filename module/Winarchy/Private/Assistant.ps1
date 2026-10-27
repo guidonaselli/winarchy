@@ -6,6 +6,31 @@ function Get-WinarchyAssistantExe {
     }
 }
 
+function Install-WinarchyAssistantBinary {
+    <# Copia un winarchy-assistant.exe a state\bin solo si su SHA256 coincide con el de versions.lock.toml. #>
+    param([Parameter(Mandatory)][string]$Source)
+    $lock = Import-WinarchyToml -Path (Join-Path (Get-WinarchyRoot) 'versions.lock.toml')
+    $expected = $lock['assistant']?['sha256']
+    if (-not $expected) { throw 'versions.lock.toml has no [assistant] sha256 pinned: nothing to verify against.' }
+    $actual = (Get-FileHash -Path $Source -Algorithm SHA256).Hash
+    if ($actual -ne $expected.ToUpperInvariant()) {
+        throw "winarchy-assistant.exe SHA256 mismatch (expected $expected, got $actual): not installed."
+    }
+    $dest = Join-Path (Join-Path (Get-WinarchyStateDir) 'bin') 'winarchy-assistant.exe'
+    New-Item -ItemType Directory -Path (Split-Path $dest -Parent) -Force | Out-Null
+    Copy-Item -Path $Source -Destination $dest -Force
+}
+
+function Install-WinarchyAssistantRelease {
+    $url = "https://github.com/$script:WinarchyRepo/releases/download/v$((Get-WinarchyVersion).Version)/winarchy-assistant.exe"
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) "winarchy-assistant-$([guid]::NewGuid().ToString('N')).exe"
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing -ErrorAction Stop
+        Install-WinarchyAssistantBinary -Source $tmp
+    }
+    finally { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
+}
+
 function Get-WinarchyAssistantDir { Join-Path (Get-WinarchyStateDir) 'assistant' }
 
 function Test-WinarchyAssistantRuntime {
@@ -70,7 +95,7 @@ function Invoke-WinarchyAssistant {
     $flag = Join-Path (Get-WinarchyStateDir) 'assistant.enabled'
     switch ($Sub) {
         'on' {
-            if (-not (Get-WinarchyAssistantExe)) { throw 'winarchy-assistant.exe not found: build it with `cargo build --release` in assistant\ (release asset pending).' }
+            if (-not (Get-WinarchyAssistantExe)) { Install-WinarchyAssistantRelease }
             Install-WinarchyAssistantRuntime
             if (-not (& (Get-WinarchyAssistantExe) status | Select-String '^logged in')) {
                 Write-WinarchyInfo 'Opening the browser to sign in with ChatGPT...'
