@@ -76,6 +76,9 @@ function Set-WinarchyBar {
         if (-not (Test-Path $theme) -and (Test-Path $current)) { Set-WinarchyTheme -Name (Get-Content $current -Raw).Trim() }
     }
     Set-WinarchyFileAtomic -Path (Join-Path (Get-WinarchyStateDir) 'bar') -Value $Name
+    # el offset superior de komorebi depende de la barra activa
+    $current = Join-Path (Get-WinarchyStateDir) 'current-theme'
+    if (Test-Path $current) { Set-WinarchyTheme -Name (Get-Content $current -Raw).Trim() }
     if (Test-WinarchyTask -TaskName 'ahk') {
         Register-WinarchyAutostart
         $inactive = if ($Name -eq 'native') { 'yasb' } else { 'shell' }

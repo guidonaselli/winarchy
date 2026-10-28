@@ -21,7 +21,6 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TR
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-const WM_APPBAR: u32 = WM_APP + 1;
 const WM_CMD_RELOAD: u32 = WM_APP + 2;
 const WM_CMD_QUIT: u32 = WM_APP + 3;
 const WM_WORKSPACES: u32 = WM_APP + 4;
@@ -34,7 +33,6 @@ const TIMER_ANIM: usize = 2;
 const TIMER_SPIRIT: usize = 3;
 const TIMER_FLASH: usize = 4;
 const FLASH_MS: u32 = 800;
-const STRIP_DIP: i32 = 8;
 const PILL_DIP: i32 = 32;
 const PILL_MAX_W: i32 = 1400;
 
@@ -43,7 +41,6 @@ struct State {
     theme_path: PathBuf,
     theme_mtime: Option<SystemTime>,
     scale: f32,
-    taskbar_created: u32,
     pill: HWND,
     strip: HWND,
     cur_w: f32,
@@ -60,7 +57,6 @@ struct State {
     flash_title: Option<String>,
     last_label: Vec<u16>,
     tracking: bool,
-    strips: Vec<(HWND, RECT)>,
     pill_mon: RECT,
     layout_sig: Vec<(i32, i32, i32, i32, u32)>,
 }
@@ -132,53 +128,9 @@ unsafe fn mon_scale(r: &RECT) -> f32 {
     }
 }
 
-// Firma de la disposición de monitores y sus escalas: si cambia, hay que reconstruir las barras.
+// Firma de la disposición de monitores y sus escalas: si cambia, hay que redibujar la pastilla.
 unsafe fn layout_sig() -> Vec<(i32, i32, i32, i32, u32)> {
     monitor_rects().iter().map(|r| (r.left, r.top, r.right, r.bottom, (mon_scale(r) * 100.0) as u32)).collect()
-}
-
-unsafe fn register_strip(h: HWND) {
-    let (bottom, mon) = with(|s| (s.theme.position == "bottom", s.strips.iter().find(|(w, _)| *w == h).map(|(_, r)| *r)));
-    let mon = mon.unwrap_or_else(|| monitor_rects()[0]);
-    let scale = mon_scale(&mon);
-    let mut d = APPBARDATA { cbSize: std::mem::size_of::<APPBARDATA>() as u32, hWnd: h, ..Default::default() };
-    d.uCallbackMessage = WM_APPBAR;
-    SHAppBarMessage(ABM_NEW, &mut d);
-    let strip = px(STRIP_DIP, scale);
-    d.uEdge = if bottom { ABE_BOTTOM } else { ABE_TOP };
-    d.rc = RECT { left: mon.left, top: if bottom { mon.bottom - strip } else { mon.top }, right: mon.right, bottom: if bottom { mon.bottom } else { mon.top + strip } };
-    SHAppBarMessage(ABM_QUERYPOS, &mut d);
-    if bottom {
-        d.rc.top = d.rc.bottom - strip;
-    } else {
-        d.rc.bottom = d.rc.top + strip;
-    }
-    SHAppBarMessage(ABM_SETPOS, &mut d);
-    let _ = SetWindowPos(h, HWND_TOPMOST, d.rc.left, d.rc.top, d.rc.right - d.rc.left, strip, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-}
-
-unsafe fn add_extra_strips(rects: &[RECT]) {
-    let inst = GetModuleHandleW(PCWSTR::null()).unwrap();
-    for r in &rects[1..] {
-        if let Ok(w) = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE, w!("WinarchyShellStrip"), w!(""), WS_POPUP, 0, 0, 1, px(STRIP_DIP, mon_scale(r)), None, None, inst, None) {
-            with(|s| s.strips.push((w, *r)));
-            register_strip(w);
-        }
-    }
-}
-
-// Tras un cambio de monitores: se destruyen las barras secundarias y se recrean a medida.
-unsafe fn rebuild_strips() {
-    with(|s| s.layout_sig = layout_sig());
-    let (hub, extra) = with(|s| (s.strip, s.strips.iter().map(|(w, _)| *w).filter(|w| *w != s.strip).collect::<Vec<_>>()));
-    for w in extra {
-        let _ = DestroyWindow(w);
-    }
-    let rects = monitor_rects();
-    with(|s| s.strips = vec![(hub, rects[0])]);
-    register_strip(hub);
-    add_extra_strips(&rects);
-    render_pill(with(|s| s.pill));
 }
 
 unsafe fn render_pill(pill: HWND) {
@@ -536,7 +488,7 @@ unsafe fn tick_inner() {
     let sig = layout_sig();
     if with(|s| s.layout_sig != sig) {
         with(|s| s.layout_sig = sig);
-        rebuild_strips();
+        render_pill(pill);
     }
     let (pill, stale) = with(|s| (s.pill, s.tracking));
     if stale && !hovered(pill) {
@@ -546,10 +498,6 @@ unsafe fn tick_inner() {
     let expanding = expand_step();
     let minute = GetLocalTime().wMinute;
     if reloaded {
-        for w in with(|s| s.strips.iter().map(|(w, _)| *w).collect::<Vec<_>>()) {
-            register_strip(w);
-            let _ = InvalidateRect(w, None, true);
-        }
     }
     let fm = focus_monitor();
     let moved = with(|s| (fm.left, fm.top) != (s.pill_mon.left, s.pill_mon.top));
@@ -560,20 +508,7 @@ unsafe fn tick_inner() {
 }
 
 unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    let tc = STATE.with(|s| s.borrow().as_ref().map(|s| s.taskbar_created)).unwrap_or(0);
-    if tc != 0 && m == tc {
-        register_strip(h);
-        return LRESULT(0);
-    }
     match m {
-        WM_ERASEBKGND => {
-            let mut rc = RECT::default();
-            let _ = GetClientRect(h, &mut rc);
-            let brush = CreateSolidBrush(colorref(&with(|s| s.theme.background.clone())));
-            FillRect(HDC(wp.0 as *mut _), &rc, brush);
-            let _ = DeleteObject(brush);
-            LRESULT(1)
-        }
         WM_TIMER if wp.0 == TIMER_SPIRIT => {
             render_pill(with(|s| s.pill));
             LRESULT(0)
@@ -637,20 +572,16 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
         }
         WM_DISPLAYCHANGE => {
             if with(|s| s.strip) == h {
-                rebuild_strips();
+                with(|s| s.layout_sig = layout_sig());
+                render_pill(with(|s| s.pill));
             }
             LRESULT(0)
         }
         WM_CMD_QUIT => {
-            for w in with(|s| s.strips.iter().map(|(w, _)| *w).filter(|w| *w != h).collect::<Vec<_>>()) {
-                let _ = DestroyWindow(w);
-            }
             let _ = DestroyWindow(h);
             LRESULT(0)
         }
         WM_DESTROY => {
-            let mut d = APPBARDATA { cbSize: std::mem::size_of::<APPBARDATA>() as u32, hWnd: h, ..Default::default() };
-            SHAppBarMessage(ABM_REMOVE, &mut d);
             if with(|s| s.strip) == h {
                 PostQuitMessage(0);
             }
@@ -714,14 +645,12 @@ fn main() {
         RegisterClassW(&pill_class);
         let ex = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE;
         let rects = monitor_rects();
-        let strip = CreateWindowExW(ex, strip_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, px(STRIP_DIP, scale), None, None, inst, None).unwrap();
+        let strip = CreateWindowExW(ex, strip_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, 1, None, None, inst, None).unwrap();
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, px(PILL_DIP, scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path, scale, taskbar_created: RegisterWindowMessageW(w!("TaskbarCreated")), pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, strips: vec![(strip, rects[0])], pill_mon: rects[0], layout_sig: layout_sig() })
+            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path, scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pill_mon: rects[0], layout_sig: layout_sig() })
         });
-        register_strip(strip);
-        add_extra_strips(&rects);
         extras::spawn_weather();
         render_pill(pill);
         let _ = ShowWindow(pill, SW_SHOWNOACTIVATE);
