@@ -497,8 +497,6 @@ unsafe fn tick_inner() {
     }
     let expanding = expand_step();
     let minute = GetLocalTime().wMinute;
-    if reloaded {
-    }
     let fm = focus_monitor();
     let moved = with(|s| (fm.left, fm.top) != (s.pill_mon.left, s.pill_mon.top));
     if !busy && (reloaded || expanding || moved || minute != last) {
