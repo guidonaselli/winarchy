@@ -1,14 +1,17 @@
+use crate::tools::Out;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader};
 
 const URL: &str = "https://api.openai.com/v1/responses";
-const MAX_ROUNDS: usize = 4;
+const MAX_ROUNDS: usize = 8;
 const MAX_HISTORY: usize = 24;
 
-pub const INSTRUCTIONS: &str = "You are Winarchy, a voice assistant living in the user's Windows desktop. \
+pub const INSTRUCTIONS: &str = "You are Winarchy, a general-purpose voice assistant on the user's Windows 11 PC, who trusts you with it. \
 The user talks to you by voice and you answer by voice: reply in Spanish (rioplatense), in one or two short, \
-natural sentences, with no lists, markdown or emojis. Use the tools to act on the desktop when asked; \
-after acting, confirm briefly. If you cannot do something, say so plainly.";
+natural sentences, with no lists, markdown or emojis. Do what is asked: use run_powershell for anything the \
+dedicated tools do not cover, and look_at_screen when asked about what is on screen. Only act on what the \
+user asked; before anything destructive or irreversible (deleting, overwriting, sending, paying) confirm \
+first out loud. After acting, confirm briefly; if you cannot do something, say so plainly.";
 
 pub struct Llm {
     pub model: String,
@@ -51,7 +54,7 @@ impl Llm {
     }
 
     /// Un turno de voz: transmite oraciones a `say` y ejecuta tools con `act`; devuelve el texto final.
-    pub fn turn(&mut self, token: &str, user: &str, tools: &[Value], say: &mut dyn FnMut(&str), act: &mut dyn FnMut(&str, &Value) -> String) -> Result<String, String> {
+    pub fn turn(&mut self, token: &str, user: &str, tools: &[Value], say: &mut dyn FnMut(&str), act: &mut dyn FnMut(&str, &Value) -> Out) -> Result<String, String> {
         self.history.push(json!({"role": "user", "content": user}));
         let mut spoken = String::new();
         for _ in 0..MAX_ROUNDS {
@@ -95,13 +98,18 @@ impl Llm {
             }
             if calls.is_empty() {
                 self.history.push(json!({"role": "assistant", "content": spoken.trim()}));
+                // Las capturas pesan: solo viven durante el turno que las pidió.
+                self.history.retain(|m| !m["content"].is_array());
                 return Ok(spoken.trim().to_string());
             }
             for c in calls {
                 let args: Value = serde_json::from_str(c["arguments"].as_str().unwrap_or("{}")).unwrap_or(Value::Null);
                 let out = act(c["name"].as_str().unwrap_or(""), &args);
                 self.history.push(json!({"type": "function_call", "call_id": c["call_id"], "name": c["name"], "arguments": c["arguments"]}));
-                self.history.push(json!({"type": "function_call_output", "call_id": c["call_id"], "output": out}));
+                self.history.push(json!({"type": "function_call_output", "call_id": c["call_id"], "output": out.text}));
+                if let Some(url) = out.image {
+                    self.history.push(json!({"role": "user", "content": [{"type": "input_image", "image_url": url}]}));
+                }
             }
         }
         Err("too many tool rounds".into())

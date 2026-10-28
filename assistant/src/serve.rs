@@ -184,7 +184,11 @@ fn turn(g: u64, pcm: &[f32], tx: &Sender<Ev>, stx: &Sender<(u64, Option<String>)
             }
             let _ = stx.send((g, Some(s.to_string())));
         },
-        &mut |name, args| tools::run(name, args, env),
+        &mut |name, args| {
+            let r = tools::run(name, args, env);
+            log(&format!("tool {name} {args} -> {}", r.text.chars().take(200).collect::<String>()));
+            r
+        },
     )?;
     debug("llm done");
     let _ = stx.send((g, None));
@@ -215,7 +219,7 @@ pub fn ask(text: &str) -> Result<(), String> {
         },
         &mut |name, args| {
             let r = tools::run(name, args, &env);
-            println!("[tool] {name} {args} -> {r}");
+            println!("[tool] {name} {args} -> {}", r.text);
             r
         },
     )?;
