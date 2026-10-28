@@ -50,7 +50,7 @@ function Install-WinarchyAssistantRuntime {
         if ($LASTEXITCODE -ne 0) { throw 'Could not create the Python environment.' }
     }
     $hasGpu = [bool](Get-Command nvidia-smi -ErrorAction SilentlyContinue)
-    $packages = @(@("faster-whisper", "piper-tts") + $(if ($hasGpu) { "nvidia-cublas-cu12", "nvidia-cudnn-cu12" }) | Where-Object { $_ })
+    $packages = @(@("faster-whisper", "piper-tts", "edge-tts", "miniaudio") + $(if ($hasGpu) { "nvidia-cublas-cu12", "nvidia-cudnn-cu12" }) | Where-Object { $_ })
     Write-WinarchyInfo "Installing speech packages ($($packages -join ', '))..."
     & $py -m pip install --quiet --disable-pip-version-check @packages
     if ($LASTEXITCODE -ne 0) { throw 'pip could not install the speech packages.' }

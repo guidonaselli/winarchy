@@ -76,10 +76,12 @@ pub fn run() -> Result<(), String> {
         }
     });
 
-    // Un solo hilo habla, en orden; lo que quedó de un turno cancelado se descarta por su generación.
+    // Un hilo sintetiza y otro reproduce, en orden: la frase siguiente se sintetiza mientras suena la actual.
+    // Lo que quedó de un turno cancelado se descarta por su generación.
     let (stx, srx) = channel::<(u64, Option<String>)>();
+    let (wtx, wrx) = channel::<(u64, Option<std::path::PathBuf>)>();
     {
-        let (tx, generation) = (tx.clone(), generation.clone());
+        let generation = generation.clone();
         std::thread::spawn(move || {
             for (g, sentence) in srx {
                 if g != generation.load(Ordering::SeqCst) {
@@ -87,10 +89,27 @@ pub fn run() -> Result<(), String> {
                 }
                 match sentence {
                     Some(text) => match tts.synth(&text) {
-                        Ok(wav) if g == generation.load(Ordering::SeqCst) => tts::play(&wav),
-                        Ok(_) => {}
+                        Ok(wav) => {
+                            let _ = wtx.send((g, Some(wav)));
+                        }
                         Err(e) => log(&format!("tts: {e}")),
                     },
+                    None => {
+                        let _ = wtx.send((g, None));
+                    }
+                }
+            }
+        });
+    }
+    {
+        let (tx, generation) = (tx.clone(), generation.clone());
+        std::thread::spawn(move || {
+            for (g, wav) in wrx {
+                if g != generation.load(Ordering::SeqCst) {
+                    continue;
+                }
+                match wav {
+                    Some(wav) => tts::play(&wav),
                     None => {
                         let _ = tx.send(Ev::Done(g));
                     }
