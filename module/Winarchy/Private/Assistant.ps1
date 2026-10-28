@@ -31,11 +31,17 @@ function Install-WinarchyAssistantRelease {
     finally { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
 }
 
+function Get-WinarchyAssistantVoice {
+    <# Voz local de respaldo según el idioma del asistente (WINARCHY_LANG o el regional de Windows; solo es/en). #>
+    $lang = if ($env:WINARCHY_LANG) { $env:WINARCHY_LANG } else { (Get-Culture).TwoLetterISOLanguageName }
+    if ($lang -like 'es*') { 'es_AR-daniela-high' } else { 'en_US-lessac-high' }
+}
+
 function Get-WinarchyAssistantDir { Join-Path (Get-WinarchyStateDir) 'assistant' }
 
 function Test-WinarchyAssistantRuntime {
     $dir = Get-WinarchyAssistantDir
-    (Test-Path (Join-Path $dir 'venv\Scripts\python.exe')) -and (Test-Path (Join-Path $dir 'es_AR-daniela-high.onnx'))
+    (Test-Path (Join-Path $dir 'venv\Scripts\python.exe')) -and (Test-Path (Join-Path $dir "$(Get-WinarchyAssistantVoice).onnx"))
 }
 
 function Install-WinarchyAssistantRuntime {
@@ -54,9 +60,10 @@ function Install-WinarchyAssistantRuntime {
     Write-WinarchyInfo "Installing speech packages ($($packages -join ', '))..."
     & $py -m pip install --quiet --disable-pip-version-check @packages
     if ($LASTEXITCODE -ne 0) { throw 'pip could not install the speech packages.' }
-    if (-not (Test-Path (Join-Path $dir 'es_AR-daniela-high.onnx'))) {
-        Write-WinarchyInfo 'Downloading the voice (es_AR-daniela-high)...'
-        & $py -m piper.download_voices es_AR-daniela-high --data-dir $dir
+    $voice = Get-WinarchyAssistantVoice
+    if (-not (Test-Path (Join-Path $dir "$voice.onnx"))) {
+        Write-WinarchyInfo "Downloading the voice ($voice)..."
+        & $py -m piper.download_voices $voice --data-dir $dir
         if ($LASTEXITCODE -ne 0) { throw 'Could not download the voice.' }
     }
 }

@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use windows::Win32::Globalization::GetUserDefaultLocaleName;
 
 enum Ev {
     Pipe(pipe::Msg),
@@ -15,6 +16,7 @@ enum Ev {
 }
 
 struct Config {
+    lang: &'static str,
     python: PathBuf,
     stt_script: PathBuf,
     tts_script: PathBuf,
@@ -23,14 +25,37 @@ struct Config {
     effort: String,
 }
 
+/// `es` solo si el idioma pedido (o el regional de Windows) es español; cualquier otro cae en inglés.
+fn lang_of(locale: &str) -> &'static str {
+    if locale.to_lowercase().starts_with("es") {
+        "es"
+    } else {
+        "en"
+    }
+}
+
+fn locale() -> String {
+    let mut b = [0u16; 85];
+    let n = unsafe { GetUserDefaultLocaleName(&mut b) };
+    String::from_utf16_lossy(&b[..(n.max(1) as usize - 1)])
+}
+
 fn config(root: &std::path::Path) -> Config {
     let var = |k: &str| std::env::var(k).ok();
     let state = root.join("state").join("assistant");
+    let lang = lang_of(&var("WINARCHY_LANG").unwrap_or_else(locale));
+    let (piper, edge) = if lang == "es" { ("es_AR-daniela-high", "es-UY-ValentinaNeural") } else { ("en_US-lessac-high", "en-US-AvaNeural") };
+    // Los sidecars heredan el entorno: así comparten el idioma y la voz sin más plomería.
+    std::env::set_var("WINARCHY_LANG", lang);
+    if var("WINARCHY_EDGE_VOICE").is_none() {
+        std::env::set_var("WINARCHY_EDGE_VOICE", edge);
+    }
     Config {
+        lang,
         python: var("WINARCHY_PY").map(PathBuf::from).unwrap_or_else(|| state.join("venv").join("Scripts").join("python.exe")),
         stt_script: root.join("assistant").join("stt").join("server.py"),
         tts_script: root.join("assistant").join("stt").join("tts_server.py"),
-        voice: var("WINARCHY_VOICE").map(PathBuf::from).unwrap_or_else(|| state.join("es_AR-daniela-high.onnx")),
+        voice: var("WINARCHY_VOICE").map(PathBuf::from).unwrap_or_else(|| state.join(format!("{piper}.onnx"))),
         model: var("WINARCHY_MODEL").unwrap_or_else(|| "gpt-6-luna".into()),
         effort: var("WINARCHY_EFFORT").unwrap_or_else(|| "low".into()),
     }
@@ -62,7 +87,7 @@ pub fn run() -> Result<(), String> {
     let defs = tools::definitions(&env.themes);
     let stt = Arc::new(Mutex::new(stt::Stt::spawn(&cfg.python, &cfg.stt_script)?));
     let mut tts = tts::Tts::spawn(&cfg.python, &cfg.tts_script, &cfg.voice)?;
-    let llm = Arc::new(Mutex::new(llm::Llm::new(&cfg.model, &cfg.effort)));
+    let llm = Arc::new(Mutex::new(llm::Llm::new(&cfg.model, &cfg.effort, llm::instructions(cfg.lang))));
     let env = Arc::new(env);
     let generation = Arc::new(AtomicU64::new(0));
 
@@ -219,7 +244,7 @@ pub fn ask(text: &str) -> Result<(), String> {
     let env = tools::env();
     let cfg = config(&env.root);
     let mut tts = tts::Tts::spawn(&cfg.python, &cfg.tts_script, &cfg.voice)?;
-    let mut llm = llm::Llm::new(&cfg.model, &cfg.effort);
+    let mut llm = llm::Llm::new(&cfg.model, &cfg.effort, llm::instructions(cfg.lang));
     let token = auth::token()?;
     let t0 = Instant::now();
     let (mut first_text, mut first_audio) = (None, None);
@@ -244,4 +269,17 @@ pub fn ask(text: &str) -> Result<(), String> {
     )?;
     println!("texto en {:?}, primer audio en {:?}, total {:.2}s :: {out}", first_text, first_audio, t0.elapsed().as_secs_f32());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lang_of;
+
+    #[test]
+    fn only_spanish_locales_are_spanish() {
+        assert_eq!(lang_of("es-AR"), "es");
+        assert_eq!(lang_of("ES"), "es");
+        assert_eq!(lang_of("en-US"), "en");
+        assert_eq!(lang_of("pt-BR"), "en");
+    }
 }

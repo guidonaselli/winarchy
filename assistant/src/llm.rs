@@ -7,15 +7,27 @@ const MAX_ROUNDS: usize = 8;
 const MAX_HISTORY: usize = 24;
 
 pub const INSTRUCTIONS: &str = "You are Winarchy, a general-purpose voice assistant on the user's Windows 11 PC, who trusts you with it. \
-The user talks to you by voice and you answer by voice: reply in Spanish (rioplatense), in one or two short, \
-natural sentences, with no lists, markdown or emojis. A speech engine reads your text, so spell out numbers, units, symbols and acronyms as they are spoken (\"ciento treinta y cinco gigas\", not \"135 GB\"). The voice is Spanish and mangles English names, so respell them as a Spanish reader would say them (\"Tresh\" for Thresh, \"Kaisa\" for Kai'Sa). Do what is asked: use run_powershell for anything the \
+The user talks to you by voice and you answer by voice: reply in {reply}, in one or two short, \
+natural sentences, with no lists, markdown or emojis. A speech engine reads your text, so spell out numbers, units, symbols and acronyms as they are spoken (\"one hundred thirty-five gigabytes\", not \"135 GB\"). Do what is asked: use run_powershell for anything the \
 dedicated tools do not cover, and look_at_screen when asked about what is on screen. Only act on what the \
 user asked; before anything destructive or irreversible (deleting, overwriting, sending, paying) confirm \
 first out loud. Never guess what you see: if a name or detail is too small to read, zoom in with a region before answering, and if it is still unclear, say so. After acting, confirm briefly; if you cannot do something, say so plainly.";
 
+const SPANISH_NAMES: &str = " The voice is Spanish and mangles English names, so respell them as a Spanish reader would say them (\"Tresh\" for Thresh, \"Kaisa\" for Kai'Sa).";
+
+/// Instrucciones del modelo en el idioma del usuario (`es` o `en`).
+pub fn instructions(lang: &str) -> String {
+    if lang == "es" {
+        format!("{}{SPANISH_NAMES}", INSTRUCTIONS.replace("{reply}", "Spanish (rioplatense)"))
+    } else {
+        INSTRUCTIONS.replace("{reply}", "English")
+    }
+}
+
 pub struct Llm {
     pub model: String,
     pub effort: String,
+    instructions: String,
     history: Vec<Value>,
 }
 
@@ -39,8 +51,8 @@ pub fn take_sentences(buf: &mut String, eager: bool) -> Vec<String> {
 }
 
 impl Llm {
-    pub fn new(model: &str, effort: &str) -> Self {
-        Self { model: model.into(), effort: effort.into(), history: Vec::new() }
+    pub fn new(model: &str, effort: &str, instructions: String) -> Self {
+        Self { model: model.into(), effort: effort.into(), instructions, history: Vec::new() }
     }
 
     fn trim(&mut self) {
@@ -59,7 +71,7 @@ impl Llm {
         let mut spoken = String::new();
         for _ in 0..MAX_ROUNDS {
             self.trim();
-            let mut body = json!({"model": self.model, "instructions": INSTRUCTIONS, "input": self.history, "tools": tools, "store": false, "stream": true});
+            let mut body = json!({"model": self.model, "instructions": self.instructions, "input": self.history, "tools": tools, "store": false, "stream": true});
             if !self.effort.is_empty() {
                 body["reasoning"] = json!({"effort": self.effort});
             }
@@ -147,8 +159,15 @@ mod tests {
     }
 
     #[test]
+    fn instructions_follow_the_language() {
+        assert!(instructions("es").contains("Spanish (rioplatense)"));
+        assert!(instructions("en").contains("reply in English"));
+        assert!(!instructions("en").contains("Tresh"));
+    }
+
+    #[test]
     fn trim_never_leaves_an_orphan_tool_output() {
-        let mut l = Llm::new("m", "");
+        let mut l = Llm::new("m", "", String::new());
         l.history.push(json!({"type": "function_call_output", "call_id": "1", "output": "ok"}));
         l.history.push(json!({"role": "user", "content": "hola"}));
         l.trim();

@@ -4,7 +4,7 @@ import asyncio, json, os, sys, tempfile, wave
 import edge_tts, miniaudio
 from piper import PiperVoice
 
-EDGE_VOICE = os.environ.get("WINARCHY_EDGE_VOICE", "es-AR-ElenaNeural")
+EDGE_VOICE = os.environ.get("WINARCHY_EDGE_VOICE", "es-UY-ValentinaNeural")
 EDGE = os.environ.get("WINARCHY_TTS", "edge") != "piper"
 EDGE_RATE = 24000
 
