@@ -139,7 +139,6 @@ function Build-WinarchyThemeContext {
     $ctx = ConvertTo-WinarchyFlatContext -Data $script:ThemeDefaults
     foreach ($kv in (ConvertTo-WinarchyFlatContext -Data $Theme).GetEnumerator()) { $ctx[$kv.Key] = $kv.Value }
     $ctx['computed.theme_dir'] = Split-Path $ThemeDir -Leaf
-    $ctx['computed.work_area_top'] = if ((Get-WinarchyActiveBar) -eq 'native') { 34 } else { 0 }
     # Raíz del repo con forward slashes: apto para rutas dentro de JSON generado
     $ctx['computed.root'] = (Get-WinarchyRoot) -replace '\\', '/'
     $ctx['computed.game_ignore_rules'] = Get-WinarchyGameIgnoreRulesJson
