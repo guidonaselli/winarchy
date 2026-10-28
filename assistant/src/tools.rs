@@ -1,8 +1,10 @@
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
-/// Lista cerrada de acciones: cada una se traduce a argv fijos, nunca a un string de shell.
+/// Acciones del escritorio (argv fijos) más `run_powershell` y `look_at_screen`, que le dan alcance general.
 pub fn definitions(themes: &[String]) -> Vec<Value> {
     vec![
         json!({"type": "function", "name": "focus_workspace", "description": "Go to workspace N (1-10) of the monitor under the mouse.",
@@ -13,6 +15,10 @@ pub fn definitions(themes: &[String]) -> Vec<Value> {
             "parameters": {"type": "object", "properties": {}, "additionalProperties": false}}),
         json!({"type": "function", "name": "set_theme", "description": "Switch the desktop theme.",
             "parameters": {"type": "object", "properties": {"name": {"type": "string", "enum": themes}}, "required": ["name"], "additionalProperties": false}}),
+        json!({"type": "function", "name": "run_powershell", "description": "Run a PowerShell command on the user's PC (full user permissions) and return its output. Use it for anything else: open apps or URLs, files, system info, git, installs. Times out after 60 s.",
+            "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"], "additionalProperties": false}}),
+        json!({"type": "function", "name": "look_at_screen", "description": "Take a screenshot of the monitor with the focused window and look at it. Only when the user asks about what is on screen. Small details (names, portraits, text) may be unreadable: call it again with a region (fractions 0-1 of the monitor: x,y from the top-left, w,h size) to zoom in before answering.",
+            "parameters": {"type": "object", "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "w": {"type": "number"}, "h": {"type": "number"}}, "additionalProperties": false}}),
     ]
 }
 
@@ -46,6 +52,15 @@ pub fn plan(name: &str, args: &Value, e: &Env) -> Result<Vec<Vec<String>>, Strin
             Some(d @ ("next" | "previous")) => Ok(vec![vec![k, "cycle-workspace".into(), d.into()]]),
             _ => Err("direction must be next or previous".into()),
         },
+        "run_powershell" => {
+            let c = args["command"].as_str().filter(|c| !c.trim().is_empty()).ok_or("command is required")?;
+            Ok(vec![s(&["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", c])])
+        }
+        "look_at_screen" => {
+            let r = region(args)?;
+            let script = format!("$f={},{},{},{};{SCREENSHOT}", r[0], r[1], r[2], r[3]);
+            Ok(vec![s(&["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", &script])])
+        }
         "open_terminal" => Ok(vec![s(&["cmd", "/c", "start", "", "wezterm-gui"])]),
         "set_theme" => {
             let t = args["name"].as_str().filter(|t| e.themes.iter().any(|x| x == t)).ok_or("unknown theme")?;
@@ -55,19 +70,91 @@ pub fn plan(name: &str, args: &Value, e: &Env) -> Result<Vec<Vec<String>>, Strin
     }
 }
 
-pub fn run(name: &str, args: &Value, e: &Env) -> String {
+const SCREENSHOT: &str = "Add-Type -AssemblyName System.Windows.Forms,System.Drawing;\
+Add-Type 'using System;using System.Runtime.InteropServices;public class W{[DllImport(\"user32.dll\")]public static extern bool SetProcessDPIAware();[DllImport(\"user32.dll\")]public static extern IntPtr GetForegroundWindow();}';\
+[W]::SetProcessDPIAware()|Out-Null;\
+$m=[Windows.Forms.Screen]::FromHandle([W]::GetForegroundWindow()).Bounds;\
+$c=New-Object Drawing.Rectangle ([int]($m.X+$m.Width*$f[0])),([int]($m.Y+$m.Height*$f[1])),([int]($m.Width*$f[2])),([int]($m.Height*$f[3]));\
+$s=New-Object Drawing.Bitmap $c.Width,$c.Height;\
+[Drawing.Graphics]::FromImage($s).CopyFromScreen($c.Location,[Drawing.Point]::Empty,$c.Size);\
+$w=[Math]::Min(2560,$c.Width);$o=New-Object Drawing.Bitmap $s,$w,([int]($c.Height*$w/$c.Width));\
+$t=New-Object IO.MemoryStream;$o.Save($t,[Drawing.Imaging.ImageFormat]::Jpeg);\
+[Convert]::ToBase64String($t.ToArray())";
+
+/// Región como fracciones (x, y, ancho, alto) del monitor; sin ella, el monitor entero.
+fn region(args: &Value) -> Result<[f64; 4], String> {
+    let g = |k: &str, d: f64| args[k].as_f64().unwrap_or(d);
+    let r = [g("x", 0.0), g("y", 0.0), g("w", 1.0), g("h", 1.0)];
+    let ok = r[0] >= 0.0 && r[1] >= 0.0 && r[2] >= 0.02 && r[3] >= 0.02 && r[0] + r[2] <= 1.0001 && r[1] + r[3] <= 1.0001;
+    if ok { Ok(r) } else { Err("region must stay inside 0-1 (x,y,w,h) and be at least 0.02 wide and tall".into()) }
+}
+
+const TIMEOUT: Duration = Duration::from_secs(60);
+const MAX_OUT: usize = 4000;
+
+/// Resultado de una herramienta: texto para el modelo y, si hubo captura, la imagen como data URL.
+pub struct Out {
+    pub text: String,
+    pub image: Option<String>,
+}
+
+fn err(m: String) -> Out {
+    Out { text: format!("error: {m}"), image: None }
+}
+
+fn drain(r: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<String> {
+    std::thread::spawn(move || {
+        let mut b = Vec::new();
+        if let Some(mut r) = r {
+            let _ = r.read_to_end(&mut b);
+        }
+        String::from_utf8_lossy(&b).into_owned()
+    })
+}
+
+fn exec(c: &[String]) -> Result<(bool, String), String> {
+    let mut child = Command::new(&c[0]).args(&c[1..]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| e.to_string())?;
+    let (o, e) = (drain(child.stdout.take()), drain(child.stderr.take()));
+    let t0 = Instant::now();
+    let status = loop {
+        if let Some(st) = child.try_wait().map_err(|e| e.to_string())? {
+            break st;
+        }
+        if t0.elapsed() > TIMEOUT {
+            let _ = child.kill();
+            return Err("timed out after 60 s".into());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let (o, e) = (o.join().unwrap_or_default(), e.join().unwrap_or_default());
+    Ok((status.success(), format!("{o}{e}")))
+}
+
+pub fn run(name: &str, args: &Value, e: &Env) -> Out {
     let cmds = match plan(name, args, e) {
         Ok(c) => c,
-        Err(m) => return format!("error: {m}"),
+        Err(m) => return err(m),
     };
+    let mut text = String::new();
     for c in cmds {
-        match Command::new(&c[0]).args(&c[1..]).status() {
-            Ok(st) if st.success() => {}
-            Ok(st) => return format!("error: exit {st}"),
-            Err(x) => return format!("error: {x}"),
+        match exec(&c) {
+            Ok((true, out)) => text = out,
+            Ok((false, out)) => return err(format!("failed: {}", clip(&out))),
+            Err(x) => return err(x),
         }
     }
-    "ok".into()
+    if name == "look_at_screen" {
+        return Out { text: "screenshot attached".into(), image: Some(format!("data:image/jpeg;base64,{}", text.trim())) };
+    }
+    Out { text: if text.trim().is_empty() { "ok".into() } else { clip(&text) }, image: None }
+}
+
+fn clip(s: &str) -> String {
+    let s = s.trim();
+    if s.chars().count() <= MAX_OUT {
+        return s.to_string();
+    }
+    format!("{}…[truncated]", s.chars().take(MAX_OUT).collect::<String>())
 }
 
 #[cfg(test)]
@@ -95,5 +182,29 @@ mod tests {
         assert!(plan("set_theme", &json!({"name": "nord & calc"}), &env()).is_err());
         assert!(plan("close_window", &json!({}), &env()).is_err());
         assert!(plan("shell", &json!({"cmd": "calc"}), &env()).is_err());
+    }
+
+    #[test]
+    fn powershell_needs_a_command_and_passes_it_as_one_argument() {
+        let p = plan("run_powershell", &json!({"command": "Get-Date; calc"}), &env()).unwrap();
+        assert_eq!(p[0].last().unwrap(), "Get-Date; calc");
+        assert!(plan("run_powershell", &json!({"command": "  "}), &env()).is_err());
+    }
+
+    #[test]
+    fn screen_region_is_bounded() {
+        assert!(plan("look_at_screen", &json!({}), &env()).is_ok());
+        assert!(plan("look_at_screen", &json!({"x": 0.3, "y": 0.8, "w": 0.4, "h": 0.2}), &env()).is_ok());
+        assert!(plan("look_at_screen", &json!({"x": 0.8, "w": 0.4}), &env()).is_err());
+        assert!(plan("look_at_screen", &json!({"w": 0.0}), &env()).is_err());
+    }
+
+    #[test]
+    fn output_is_captured_and_clipped() {
+        let o = run("run_powershell", &json!({"command": "'hola'"}), &env());
+        assert_eq!(o.text, "hola");
+        let o = run("run_powershell", &json!({"command": "'x' * 5000"}), &env());
+        assert!(o.text.ends_with("[truncated]"));
+        assert!(run("run_powershell", &json!({"command": "exit 3"}), &env()).text.starts_with("error"));
     }
 }

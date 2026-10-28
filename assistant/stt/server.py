@@ -19,13 +19,17 @@ def read(path):
     with wave.open(path) as w:
         return np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768
 
-HINT = "Winarchy: abrí una terminal, pasá al workspace dos, cambiá el tema, komorebi, WezTerm."
+LANG = os.environ.get("WINARCHY_LANG", "es")
+HINT = {
+    "es": "Winarchy: abrí una terminal, pasá al workspace dos, cambiá el tema, komorebi, WezTerm.",
+    "en": "Winarchy: open a terminal, go to workspace two, change the theme, komorebi, WezTerm.",
+}[LANG]
 
-list(model.transcribe(np.zeros(16000, np.float32), language="es", beam_size=5, initial_prompt=HINT)[0])
+list(model.transcribe(np.zeros(16000, np.float32), language=LANG, beam_size=5, initial_prompt=HINT)[0])
 print(json.dumps({"ready": True}), flush=True)
 for line in sys.stdin:
     try:
-        segs, _ = model.transcribe(read(line.strip()), language="es", beam_size=5, initial_prompt=HINT)
+        segs, _ = model.transcribe(read(line.strip()), language=LANG, beam_size=5, initial_prompt=HINT)
         print(json.dumps({"text": " ".join(s.text for s in segs).strip()}), flush=True)
     except Exception as e:
         print(json.dumps({"error": str(e)}), flush=True)
