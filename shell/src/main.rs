@@ -282,7 +282,15 @@ unsafe fn render_pill(pill: HWND) {
     let animate = animations_enabled();
     if assist != spirit::Assist::Idle {
         if theme.pet {
-            spirit::paint(pixels, width, pad / 2, h, &spirit::shapes(assist, if animate { assist_t } else { 0.0 }), (ar, ag, ab));
+            let (mut cur, mut r) = (POINT::default(), RECT::default());
+            let look = if animate && GetCursorPos(&mut cur).is_ok() && GetWindowRect(pill, &mut r).is_ok() {
+                let reach = 220.0 * scale;
+                let (cx, cy) = ((r.left + pad / 2 + h / 2) as f32, (r.top + h / 2) as f32);
+                (((cur.x as f32 - cx) / reach).clamp(-1.0, 1.0), ((cur.y as f32 - cy) / reach).clamp(-1.0, 1.0))
+            } else {
+                (0.0, 0.0)
+            };
+            spirit::paint(pixels, width, pad / 2, h, assist, if animate { assist_t } else { 0.0 }, look, (ar, ag, ab));
         }
         SetTimer(strip, TIMER_SPIRIT, if animate { 33 } else { 250 }, None);
     } else {

@@ -86,7 +86,7 @@ That means Winarchy optimizes for:
 - **Winarchy Island (the default bar)**
   - a Dynamic-Island-style pill with workspace dots and a clock, over a thin strip per monitor;
     it expands on hover or `SUPER+I` into CPU/RAM/GPU, media, weather and more
-  - the assistant orb shows in the pill only while it listens, thinks or speaks; `{"pet": false}` in
+  - Espectro, the assistant's spirit (a dark, glowing-eyed creature tinted with your theme's accent), shows in the pill only while the assistant listens, thinks or speaks; its eyes follow the mouse and its face changes with each state; `{"pet": false}` in
     `config/shell/user.json` hides it (that file survives `theme set` and updates)
   - the voice assistant (`winarchy assistant on`) speaks Spanish or English, taken from your Windows regional
     format or `WINARCHY_LANG=es|en`; it can run PowerShell and look at your screen when you ask. Speech uses
