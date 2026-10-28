@@ -17,8 +17,8 @@ pub fn definitions(themes: &[String]) -> Vec<Value> {
             "parameters": {"type": "object", "properties": {"name": {"type": "string", "enum": themes}}, "required": ["name"], "additionalProperties": false}}),
         json!({"type": "function", "name": "run_powershell", "description": "Run a PowerShell command on the user's PC (full user permissions) and return its output. Use it for anything else: open apps or URLs, files, system info, git, installs. Times out after 60 s.",
             "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"], "additionalProperties": false}}),
-        json!({"type": "function", "name": "look_at_screen", "description": "Take a screenshot of the monitor with the focused window and look at it. Only when the user asks about what is on screen.",
-            "parameters": {"type": "object", "properties": {}, "additionalProperties": false}}),
+        json!({"type": "function", "name": "look_at_screen", "description": "Take a screenshot of the monitor with the focused window and look at it. Only when the user asks about what is on screen. Small details (names, portraits, text) may be unreadable: call it again with a region (fractions 0-1 of the monitor: x,y from the top-left, w,h size) to zoom in before answering.",
+            "parameters": {"type": "object", "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "w": {"type": "number"}, "h": {"type": "number"}}, "additionalProperties": false}}),
     ]
 }
 
@@ -56,7 +56,11 @@ pub fn plan(name: &str, args: &Value, e: &Env) -> Result<Vec<Vec<String>>, Strin
             let c = args["command"].as_str().filter(|c| !c.trim().is_empty()).ok_or("command is required")?;
             Ok(vec![s(&["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", c])])
         }
-        "look_at_screen" => Ok(vec![s(&["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", SCREENSHOT])]),
+        "look_at_screen" => {
+            let r = region(args)?;
+            let script = format!("$f={},{},{},{};{SCREENSHOT}", r[0], r[1], r[2], r[3]);
+            Ok(vec![s(&["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", &script])])
+        }
         "open_terminal" => Ok(vec![s(&["cmd", "/c", "start", "", "wezterm-gui"])]),
         "set_theme" => {
             let t = args["name"].as_str().filter(|t| e.themes.iter().any(|x| x == t)).ok_or("unknown theme")?;
@@ -69,12 +73,21 @@ pub fn plan(name: &str, args: &Value, e: &Env) -> Result<Vec<Vec<String>>, Strin
 const SCREENSHOT: &str = "Add-Type -AssemblyName System.Windows.Forms,System.Drawing;\
 Add-Type 'using System;using System.Runtime.InteropServices;public class W{[DllImport(\"user32.dll\")]public static extern bool SetProcessDPIAware();[DllImport(\"user32.dll\")]public static extern IntPtr GetForegroundWindow();}';\
 [W]::SetProcessDPIAware()|Out-Null;\
-$b=[Windows.Forms.Screen]::FromHandle([W]::GetForegroundWindow()).Bounds;\
-$s=New-Object Drawing.Bitmap $b.Width,$b.Height;\
-[Drawing.Graphics]::FromImage($s).CopyFromScreen($b.Location,[Drawing.Point]::Empty,$b.Size);\
-$w=[Math]::Min(2560,$b.Width);$o=New-Object Drawing.Bitmap $s,$w,([int]($b.Height*$w/$b.Width));\
-$m=New-Object IO.MemoryStream;$o.Save($m,[Drawing.Imaging.ImageFormat]::Jpeg);\
-[Convert]::ToBase64String($m.ToArray())";
+$m=[Windows.Forms.Screen]::FromHandle([W]::GetForegroundWindow()).Bounds;\
+$c=New-Object Drawing.Rectangle ([int]($m.X+$m.Width*$f[0])),([int]($m.Y+$m.Height*$f[1])),([int]($m.Width*$f[2])),([int]($m.Height*$f[3]));\
+$s=New-Object Drawing.Bitmap $c.Width,$c.Height;\
+[Drawing.Graphics]::FromImage($s).CopyFromScreen($c.Location,[Drawing.Point]::Empty,$c.Size);\
+$w=[Math]::Min(2560,$c.Width);$o=New-Object Drawing.Bitmap $s,$w,([int]($c.Height*$w/$c.Width));\
+$t=New-Object IO.MemoryStream;$o.Save($t,[Drawing.Imaging.ImageFormat]::Jpeg);\
+[Convert]::ToBase64String($t.ToArray())";
+
+/// Región como fracciones (x, y, ancho, alto) del monitor; sin ella, el monitor entero.
+fn region(args: &Value) -> Result<[f64; 4], String> {
+    let g = |k: &str, d: f64| args[k].as_f64().unwrap_or(d);
+    let r = [g("x", 0.0), g("y", 0.0), g("w", 1.0), g("h", 1.0)];
+    let ok = r[0] >= 0.0 && r[1] >= 0.0 && r[2] >= 0.02 && r[3] >= 0.02 && r[0] + r[2] <= 1.0001 && r[1] + r[3] <= 1.0001;
+    if ok { Ok(r) } else { Err("region must stay inside 0-1 (x,y,w,h) and be at least 0.02 wide and tall".into()) }
+}
 
 const TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_OUT: usize = 4000;
@@ -176,6 +189,14 @@ mod tests {
         let p = plan("run_powershell", &json!({"command": "Get-Date; calc"}), &env()).unwrap();
         assert_eq!(p[0].last().unwrap(), "Get-Date; calc");
         assert!(plan("run_powershell", &json!({"command": "  "}), &env()).is_err());
+    }
+
+    #[test]
+    fn screen_region_is_bounded() {
+        assert!(plan("look_at_screen", &json!({}), &env()).is_ok());
+        assert!(plan("look_at_screen", &json!({"x": 0.3, "y": 0.8, "w": 0.4, "h": 0.2}), &env()).is_ok());
+        assert!(plan("look_at_screen", &json!({"x": 0.8, "w": 0.4}), &env()).is_err());
+        assert!(plan("look_at_screen", &json!({"w": 0.0}), &env()).is_err());
     }
 
     #[test]
