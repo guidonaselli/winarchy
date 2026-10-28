@@ -72,7 +72,7 @@ Add-Type 'using System;using System.Runtime.InteropServices;public class W{[DllI
 $b=[Windows.Forms.Screen]::FromHandle([W]::GetForegroundWindow()).Bounds;\
 $s=New-Object Drawing.Bitmap $b.Width,$b.Height;\
 [Drawing.Graphics]::FromImage($s).CopyFromScreen($b.Location,[Drawing.Point]::Empty,$b.Size);\
-$w=[Math]::Min(1600,$b.Width);$o=New-Object Drawing.Bitmap $s,$w,([int]($b.Height*$w/$b.Width));\
+$w=[Math]::Min(2560,$b.Width);$o=New-Object Drawing.Bitmap $s,$w,([int]($b.Height*$w/$b.Width));\
 $m=New-Object IO.MemoryStream;$o.Save($m,[Drawing.Imaging.ImageFormat]::Jpeg);\
 [Convert]::ToBase64String($m.ToArray())";
 
