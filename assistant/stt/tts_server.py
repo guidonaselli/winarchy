@@ -10,8 +10,11 @@ def synth(text, path):
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(voice.config.sample_rate)
+        # el dispositivo tarda en despertar y recorta el inicio: colchón de silencio antes y después
+        w.writeframes(bytes(2 * voice.config.sample_rate * 3 // 10))
         for chunk in voice.synthesize(text):
             w.writeframes(chunk.audio_int16_bytes)
+        w.writeframes(bytes(2 * voice.config.sample_rate // 5))
 
 synth("Hola.", os.path.join(out_dir, "warm.wav"))
 print(json.dumps({"ready": True}), flush=True)
