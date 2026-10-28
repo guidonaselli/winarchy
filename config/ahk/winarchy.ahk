@@ -140,6 +140,12 @@ CloseWindow() {
 ; Resize: grab near an edge or corner, the drop distance becomes a resize-edge.
 WindowDrag(move, held := 0) {
     global DragReleased
+    ; AHK loses the Win key-up while an elevated or anti-cheat window has focus; without this
+    ; every click stays swallowed as Super+drag.
+    if !GetKeyState('LWin', 'P') && !GetKeyState('RWin', 'P') {
+        Send('{Blind}{LWin up}{RWin up}' (move ? '{LButton down}' : '{RButton down}'))
+        return
+    }
     CoordMode('Mouse', 'Screen')
     MouseGetPos(&x, &y, &under)
     hwnd := DllCall('user32\GetAncestor', 'ptr', under, 'uint', 2, 'ptr')
