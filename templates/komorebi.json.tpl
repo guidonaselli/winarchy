@@ -20,9 +20,9 @@
   "transparency": false,
   "transparency_alpha": 225,
   "animation": {
-    "enabled": false,
+    "enabled": true,
     "style": "EaseOutCubic",
-    "duration": 200,
+    "duration": 150,
     "fps": 60
   },
   "stackbar": {

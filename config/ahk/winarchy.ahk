@@ -214,20 +214,37 @@ DragMove(hwnd, x0, y0, held) {
 DragResize(hwnd, x0, y0, held) {
     WinGetPos(&wx, &wy, &ww, &wh, hwnd)
     col := Min(Max((x0 - wx) * 3 // ww, 0), 2), row := Min(Max((y0 - wy) * 3 // wh, 0), 2)
-    while held()
-        Sleep(10)
+    skipX := col = 1 && row != 1, skipY := row = 1 && col != 1
+    DllCall('winmm\timeBeginPeriod', 'uint', 1)
+    px := x0, py := y0
+    while held() {                                  ; live preview: the window follows the grabbed edge
+        MouseGetPos(&x, &y)
+        if (x != px || y != py) {
+            px := x, py := y
+            dx := skipX ? 0 : x - x0, dy := skipY ? 0 : y - y0
+            nx := col = 0 ? wx + dx : wx, nw := Max(col = 0 ? ww - dx : ww + dx, 200)
+            ny := row = 0 ? wy + dy : wy, nh := Max(row = 0 ? wh - dy : wh + dy, 150)
+            DllCall('user32\SetWindowPos', 'ptr', hwnd, 'ptr', 0, 'int', nx, 'int', ny, 'int', nw, 'int', nh, 'uint', 0x14)   ; NOZORDER | NOACTIVATE
+        }
+        Sleep(1)
+    }
+    DllCall('winmm\timeEndPeriod', 'uint', 1)
     MouseGetPos(&x, &y)
     dx := x - x0, dy := y - y0
     K := (cmd) => RunWait('"' KomorebicExe '" ' cmd, , 'Hide')
-    for axis in [[dx, col = 0 ? 'left' : 'right', col = 1 && row != 1], [dy, row = 0 ? 'up' : 'down', row = 1 && col != 1]] {
+    committed := false
+    for axis in [[dx, col = 0 ? 'left' : 'right', skipX], [dy, row = 0 ? 'up' : 'down', skipY]] {
         d := axis[1], edge := axis[2]
         if axis[3] || Abs(d) < 20
             continue
+        committed := true
         grows := (edge = 'left' || edge = 'up') ? d < 0 : d > 0
         K('resize-delta ' Abs(d) * 2)               ; komorebi moves the shared edge by half the delta
         K('resize-edge ' edge (grows ? ' increase' : ' decrease'))
     }
     K('resize-delta 50')
+    if !committed
+        DllCall('user32\SetWindowPos', 'ptr', hwnd, 'ptr', 0, 'int', wx, 'int', wy, 'int', ww, 'int', wh, 'uint', 0x14)
 }
 
 ; ShareX directo: como Komorebic(), evita el spawn de pwsh + Import-Module completo del
