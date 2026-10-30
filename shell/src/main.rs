@@ -319,6 +319,11 @@ unsafe fn render_pill(pill: HWND) {
             }
         }
     }
+    if lay.pin.w > 0 {
+        SelectObject(mem, glyphs);
+        draw_text(mem, "\u{E718}", lay.place(lay.pin), if with(|s| s.pinned) { colorref(&theme.accent) } else { muted_c }, DT_CENTER | DT_VCENTER);
+    }
+    SelectObject(mem, font);
     SetTextColor(mem, fg_c);
     let clock = lay.place(lay.clock);
     let _ = TextOutW(mem, clock.x, clock.y + (bar_h - ext.cy) / 2, &text);
@@ -709,22 +714,19 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
             return LRESULT(0);
         }
         WM_LBUTTONUP => {
-            let strip = with(|s| s.strip);
             match hit() {
                 Some(Hit::Workspace(i)) => komorebi::focus_workspace(i),
                 Some(Hit::Prev) => extras::media_control(extras::MediaCmd::Prev),
                 Some(Hit::Toggle) => extras::media_control(extras::MediaCmd::Toggle),
                 Some(Hit::Next) => extras::media_control(extras::MediaCmd::Next),
-                Some(Hit::Surface) => {
-                    let pinned = with(|s| {
+                Some(Hit::Pin) => {
+                    with(|s| {
                         s.pinned = !s.pinned;
-                        s.pinned
+                        s.expand_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(EXPAND_SECS));
                     });
-                    if pinned {
-                        let _ = PostMessageW(strip, WM_EXPAND, WPARAM(0), LPARAM(0));
-                    }
+                    render_pill(h);
                 }
-                None => {}
+                Some(Hit::Surface) | None => {}
             }
             return LRESULT(0);
         }

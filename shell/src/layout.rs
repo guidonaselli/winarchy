@@ -49,6 +49,7 @@ pub enum Hit {
     Prev,
     Toggle,
     Next,
+    Pin,
     Surface,
 }
 
@@ -106,6 +107,7 @@ pub struct Layout {
     pub label: R,
     pub clock: R,
     pub progress: R,
+    pub pin: R,
     pub panel: Option<PanelRects>,
 }
 
@@ -174,10 +176,13 @@ impl Layout {
             .collect::<Vec<_>>();
         let lead_end = pad + lead_w(s, i.orb, i.dots);
         let clock = R::new(i.width - pad - i.clock_w, 0, i.clock_w, bar);
-        let label = R::new(lead_end, 0, clock.x - sep - lead_end, bar);
+        // El botón de pin solo existe con el panel abierto y le quita sitio a la etiqueta.
+        let pin = if i.panel.is_some() { R::new(clock.x - sep - bar, 0, bar, bar) } else { R::default() };
+        let label_end = if i.panel.is_some() { pin.x } else { clock.x } - sep;
+        let label = R::new(lead_end, 0, label_end - lead_end, bar);
         let progress = R::new(pad, bar + px(2, s), i.width - 2 * pad, px(2, s));
         let panel = i.panel.map(|shape| Self::panel_rects(s, i, shape, bar));
-        Layout { width: i.width, height: i.height, flip: i.flip, bar_h: bar, orb, dots, label, clock, progress, panel }
+        Layout { width: i.width, height: i.height, flip: i.flip, bar_h: bar, orb, dots, label, clock, progress, pin, panel }
     }
 
     fn panel_rects(s: f32, i: &Inputs, shape: PanelShape, bar: i32) -> PanelRects {
@@ -231,6 +236,9 @@ impl Layout {
             return None;
         }
         let y = if self.flip { self.height - 1 - y } else { y };
+        if self.pin.w > 0 && self.pin.contains(x, y) {
+            return Some(Hit::Pin);
+        }
         if let Some(p) = &self.panel {
             for (r, h) in [(p.prev, Hit::Prev), (p.toggle, Hit::Toggle), (p.next, Hit::Next)] {
                 if r.contains(x, y) {
@@ -275,6 +283,7 @@ mod tests {
         let d = &l.dots[1];
         assert_eq!(l.hit(d.r.x + 1, 5), Some(Hit::Workspace(2)));
         assert_eq!(l.hit(l.clock.x + 1, 5), Some(Hit::Surface));
+        assert_eq!(l.pin.w, 0, "sin panel no hay botón de pin");
         assert_eq!(l.hit(-1, 5), None);
     }
 
@@ -289,6 +298,8 @@ mod tests {
         let c = &p.chips[1];
         assert_eq!(l.hit(c.r.x + 2, c.r.y + 2), Some(Hit::Workspace(1)));
         assert_eq!(l.hit(p.title.x + 2, p.title.y + 2), Some(Hit::Surface));
+        assert_eq!(l.hit(l.pin.x + 2, l.pin.y + 2), Some(Hit::Pin));
+        assert!(l.pin.x + l.pin.w <= l.clock.x && l.label.x + l.label.w <= l.pin.x);
     }
 
     #[test]
