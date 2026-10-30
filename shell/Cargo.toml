@@ -8,7 +8,7 @@ license = "MIT"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 windows = { version = "0.58", features = [
-  "Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem",
+  "Win32_Foundation", "Win32_Globalization", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem",
   "Win32_System_IO", "Win32_System_LibraryLoader", "Win32_System_Pipes", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Power", "UI_Notifications", "Media_Control", "UI_Notifications_Management", "Foundation_Collections", "ApplicationModel", "Foundation", "Win32_System_Com", "Win32_System_Performance",
   "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_Networking_NetworkListManager",
   "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging",

@@ -135,8 +135,9 @@ pub fn online() -> Option<bool> {
 }
 
 // Flags que escribe Winarchy en state\ (game mode, stay awake, update); un archivo presente = activo.
-pub fn flags(state_dir: &std::path::Path) -> Vec<&'static str> {
-    [("game-mode.flag", "GAME"), ("stay-awake.flag", "AWAKE"), ("update-available.flag", "UPDATE")]
+pub fn flags(state_dir: &std::path::Path) -> Vec<crate::i18n::K> {
+    use crate::i18n::K;
+    [("game-mode.flag", K::FlagGame), ("stay-awake.flag", K::FlagAwake), ("update-available.flag", K::FlagUpdate)]
         .into_iter()
         .filter(|(f, _)| state_dir.join(f).exists())
         .map(|(_, l)| l)
@@ -158,9 +159,9 @@ mod tests {
         let d = std::env::temp_dir().join("ws-flags-test");
         let _ = std::fs::create_dir_all(&d);
         let _ = std::fs::remove_file(d.join("stay-awake.flag"));
-        assert!(!flags(&d).contains(&"AWAKE"));
+        assert!(!flags(&d).contains(&crate::i18n::K::FlagAwake));
         std::fs::write(d.join("stay-awake.flag"), "").unwrap();
-        assert!(flags(&d).contains(&"AWAKE"));
+        assert!(flags(&d).contains(&crate::i18n::K::FlagAwake));
     }
 
     #[test]

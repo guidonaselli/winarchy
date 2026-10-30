@@ -93,6 +93,7 @@ That means Winarchy optimizes for:
     `position = bottom` the notch sits on the bottom edge instead
   - the weather comes from Open-Meteo (no key); set your place with `{"location": {"lat": -34.6, "lon": -58.4}}`
     in `config/shell/user.json` (without it, the shell falls back to the location YASB cached, if any)
+  - all island text is translated (English/Spanish): it follows `WINARCHY_LANG=es|en` or the Windows language; new texts go in `shell/src/i18n.rs`
   - Espectro, the assistant's spirit (a dark, glowing-eyed creature tinted with your theme's accent), shows in the pill only while the assistant listens, thinks or speaks; its eyes follow the mouse and its face changes with each state; `{"pet": false}` in
     `config/shell/user.json` hides it (that file survives `theme set` and updates)
   - the voice assistant (`winarchy assistant on`) speaks Spanish or English, taken from your Windows regional

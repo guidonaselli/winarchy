@@ -1,3 +1,4 @@
+use crate::i18n::{t_in, Lang, K};
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -40,25 +41,26 @@ pub fn parse_weather(body: &str, lat: f64, lon: f64) -> Option<Weather> {
 }
 
 // Códigos WMO de Open-Meteo, agrupados.
-fn condition(code: u32) -> &'static str {
-    match code {
-        0 => "Clear",
-        1 | 2 => "Partly cloudy",
-        3 => "Overcast",
-        45 | 48 => "Fog",
-        51..=57 => "Drizzle",
-        61..=67 => "Rain",
-        71..=77 => "Snow",
-        80..=82 => "Showers",
-        85 | 86 => "Snow showers",
-        95..=99 => "Thunderstorm",
-        _ => "",
-    }
+fn condition(code: u32, lang: Lang) -> &'static str {
+    let k = match code {
+        0 => K::CondClear,
+        1 | 2 => K::CondPartlyCloudy,
+        3 => K::CondOvercast,
+        45 | 48 => K::CondFog,
+        51..=57 => K::CondDrizzle,
+        61..=67 => K::CondRain,
+        71..=77 => K::CondSnow,
+        80..=82 => K::CondShowers,
+        85 | 86 => K::CondSnowShowers,
+        95..=99 => K::CondThunderstorm,
+        _ => return "",
+    };
+    t_in(k, lang)
 }
 
 impl Weather {
-    pub fn title(&self) -> String {
-        format!("{}°  {}", self.temp, self.code.map(condition).unwrap_or("")).trim_end().to_string()
+    pub fn title(&self, lang: Lang) -> String {
+        format!("{}°  {}", self.temp, self.code.map(|c| condition(c, lang)).unwrap_or("")).trim_end().to_string()
     }
 
     pub fn range(&self) -> String {
@@ -66,9 +68,12 @@ impl Weather {
     }
 
     // Dos líneas cortas: la fuente de la isla es ancha y una sola no entra en el panel.
-    pub fn detail(&self) -> [String; 2] {
+    pub fn detail(&self, lang: Lang) -> [String; 2] {
         let join = |p: [Option<String>; 2]| p.into_iter().flatten().collect::<Vec<_>>().join("  ·  ");
-        [join([self.feels.map(|f| format!("Feels {f}°")), self.rain.map(|r| format!("Rain {r}%"))]), join([self.humidity.map(|h| format!("Humidity {h}%")), self.wind.map(|w| format!("Wind {w} km/h"))])]
+        [
+            join([self.feels.map(|f| format!("{} {f}°", t_in(K::Feels, lang))), self.rain.map(|r| format!("{} {r}%", t_in(K::Rain, lang)))]),
+            join([self.humidity.map(|h| format!("{} {h}%", t_in(K::Humidity, lang))), self.wind.map(|w| format!("{} {w} km/h", t_in(K::Wind, lang)))]),
+        ]
     }
 
     pub fn url(&self) -> String {
@@ -153,16 +158,18 @@ mod tests {
     fn parses_the_full_open_meteo_answer() {
         let w = parse_weather(BODY, -34.6, -58.4).unwrap();
         assert_eq!((w.temp, w.feels, w.humidity, w.wind, w.min, w.max, w.rain), (15, Some(13), Some(60), Some(12), Some(9), Some(19), Some(30)));
-        assert_eq!(w.title(), "15°  Partly cloudy");
+        assert_eq!(w.title(Lang::En), "15°  Partly cloudy");
+        assert_eq!(w.title(Lang::Es), "15°  Algo nublado");
         assert_eq!(w.range(), "9° / 19°");
-        assert_eq!(w.detail(), ["Feels 13°  ·  Rain 30%".to_string(), "Humidity 60%  ·  Wind 12 km/h".to_string()]);
+        assert_eq!(w.detail(Lang::En), ["Feels 13°  ·  Rain 30%".to_string(), "Humidity 60%  ·  Wind 12 km/h".to_string()]);
+        assert_eq!(w.detail(Lang::Es), ["Sensación 13°  ·  Lluvia 30%".to_string(), "Humedad 60%  ·  Viento 12 km/h".to_string()]);
         assert_eq!(w.url(), "https://wttr.in/-34.6000,-58.4000");
     }
 
     #[test]
     fn tolerates_missing_optional_fields_and_rejects_garbage() {
         let w = parse_weather(r#"{"current":{"temperature_2m":3.0}}"#, 0.0, 0.0).unwrap();
-        assert_eq!((w.title().as_str(), w.range().as_str(), w.detail()), ("3°", "", [String::new(), String::new()]));
+        assert_eq!((w.title(Lang::En).as_str(), w.range().as_str(), w.detail(Lang::En)), ("3°", "", [String::new(), String::new()]));
         assert!(parse_weather("{}", 0.0, 0.0).is_none());
         assert!(parse_weather("no json", 0.0, 0.0).is_none());
     }

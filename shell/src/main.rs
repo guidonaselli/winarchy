@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod extras;
+mod i18n;
 mod layout;
 mod metrics;
 mod komorebi;
@@ -11,6 +12,7 @@ mod theme;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::time::SystemTime;
+use i18n::{lang, t as tr, K};
 use layout::{px, Hit, Inputs, Layout, PanelShape, R};
 use theme::{rgb, Theme};
 use windows::core::{w, PCWSTR};
@@ -77,8 +79,25 @@ struct State {
 struct Panel {
     media: Option<extras::Media>,
     weather: Option<extras::Weather>,
-    meters: Vec<(&'static str, u32, String)>,
+    meters: Vec<(Meter, u32, String)>,
     notes: String,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Meter {
+    Cpu,
+    Ram,
+    Vol,
+}
+
+impl Meter {
+    fn name(self) -> &'static str {
+        tr(match self {
+            Meter::Cpu => K::Cpu,
+            Meter::Ram => K::Ram,
+            Meter::Vol => K::Vol,
+        })
+    }
 }
 
 impl Panel {
@@ -341,17 +360,17 @@ unsafe fn render_pill(pill: HWND) {
         }
         if let Some(w) = &p.weather {
             SelectObject(mem, font);
-            draw_text(mem, &w.title(), lay.place(pr.weather_title), fg_c, DT_BOTTOM);
+            draw_text(mem, &w.title(lang()), lay.place(pr.weather_title), fg_c, DT_BOTTOM);
             draw_text(mem, &w.range(), lay.place(pr.weather_range), fg_c, DT_BOTTOM | DT_RIGHT);
             SelectObject(mem, small);
-            let [d1, d2] = w.detail();
+            let [d1, d2] = w.detail(lang());
             draw_text(mem, &d1, lay.place(pr.weather_detail), muted_c, DT_TOP);
             draw_text(mem, &d2, lay.place(pr.weather_detail2), muted_c, DT_TOP);
         }
         SelectObject(mem, small);
         let track = tint(bg, fg, 0.12);
         for (m, (name, pct, value)) in pr.meters.iter().zip(&p.meters) {
-            draw_text(mem, name, lay.place(m.label), muted_c, DT_VCENTER);
+            draw_text(mem, name.name(), lay.place(m.label), muted_c, DT_VCENTER);
             draw_text(mem, value, lay.place(m.value), fg_c, DT_VCENTER | DT_RIGHT);
             let t = lay.place(m.track);
             fill_round(pixels, width, height, t, t.h / 2, track, bg);
@@ -476,7 +495,7 @@ fn expand_step() -> bool {
             s.last_vol = vol;
             if let (true, Some((v, muted))) = (changed, vol) {
                 s.osd_until = Some(now + std::time::Duration::from_secs(2));
-                *pipe::ISLAND.lock().unwrap() = Some(pipe::Island { title: if muted { "MUTE".into() } else { "VOL".into() }, detail: format!("{v}%"), progress: Some(v as f64 / 100.0) });
+                *pipe::ISLAND.lock().unwrap() = Some(pipe::Island { title: if muted { tr(K::MuteOsd).into() } else { tr(K::Vol).into() }, detail: format!("{v}%"), progress: Some(v as f64 / 100.0) });
                 return Some(true);
             }
             match s.osd_until {
@@ -499,28 +518,28 @@ fn expand_step() -> bool {
             let cpu = sampler.cpu().map(|c| c.round() as u32);
             let ram = metrics::ram_percent();
             let mut meters = Vec::new();
-            let mut meter = |name: &'static str, v: Option<u32>| meters.extend(v.map(|v| (name, v, format!("{v}%"))));
-            meter("CPU", cpu);
-            meter("RAM", ram);
+            let mut meter = |kind: Meter, v: Option<u32>| meters.extend(v.map(|v| (kind, v, format!("{v}%"))));
+            meter(Meter::Cpu, cpu);
+            meter(Meter::Ram, ram);
             if let Some((v, muted)) = metrics::volume() {
-                meters.push(("VOL", if muted { 0 } else { v }, if muted { "mute".into() } else { format!("{v}%") }));
+                meters.push((Meter::Vol, if muted { 0 } else { v }, if muted { tr(K::MuteValue).into() } else { format!("{v}%") }));
             }
             // widgets.md: solo lo que cambia algo; el clima va al final.
             let mut notes = Vec::new();
             if let Some(g) = sampler.gpu().filter(|g| *g > 50.0) {
-                notes.push(format!("GPU {g:.0}%"));
+                notes.push(format!("{} {g:.0}%", tr(K::Gpu)));
             }
             if let Some((b, ac)) = metrics::battery().filter(|(b, ac)| !ac || *b < 20) {
-                notes.push(format!("BAT {b}%{}", if ac { "+" } else { "" }));
+                notes.push(format!("{} {b}%{}", tr(K::Battery), if ac { "+" } else { "" }));
             }
             if let Some(n) = metrics::notification_count().filter(|n| *n > 0) {
-                notes.push(format!("NOTIF {n}"));
+                notes.push(format!("{} {n}", tr(K::Notifications)));
             }
             if metrics::online() == Some(false) {
-                notes.push("NET off".into());
+                notes.push(tr(K::NetOff).into());
             }
             let state_dir = theme_path.ancestors().nth(3).map(|r| r.join("state")).unwrap_or_default();
-            notes.extend(metrics::flags(&state_dir).into_iter().map(String::from));
+            notes.extend(metrics::flags(&state_dir).into_iter().map(|k| tr(k).to_string()));
             let media = extras::media();
             let weather = extras::WEATHER.lock().unwrap().clone();
             with(|s| {
@@ -657,8 +676,8 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
                 (ws, lay)
             });
             let title = match (ws_changed, layout_changed, cur) {
-                (true, _, Some(n)) => Some(format!("WS {}", n + 1)),
-                (_, true, _) => Some(format!("LAYOUT {layout}")),
+                (true, _, Some(n)) => Some(format!("{} {}", tr(K::Workspace), n + 1)),
+                (_, true, _) => Some(format!("{} {layout}", tr(K::Layout))),
                 _ => None,
             };
             if let Some(title) = title {
@@ -748,11 +767,11 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                 }
                 Some(Hit::Meter(i, fraction)) => {
                     match (with(|s| s.panel.as_ref().and_then(|p| p.meters.get(i)).map(|m| m.0)), fraction) {
-                        (Some("VOL"), Some(f)) => {
+                        (Some(Meter::Vol), Some(f)) => {
                             let _ = metrics::set_volume((f * 100.0).round() as u32);
                             tick(with(|s| s.strip));
                         }
-                        (Some("VOL"), None) => {}
+                        (Some(Meter::Vol), None) => {}
                         _ => shell_open("taskmgr.exe"),
                     }
                 }
