@@ -33,15 +33,43 @@ pub fn spawn_weather() {
     });
 }
 
-// "♪ Título - Artista" de la primera sesión multimedia que esté reproduciendo.
-pub fn media() -> Option<String> {
-    use windows::Media::Control::{GlobalSystemMediaTransportControlsSessionManager as Mgr, GlobalSystemMediaTransportControlsSessionPlaybackStatus as St};
-    let sessions = Mgr::RequestAsync().ok()?.get().ok()?.GetSessions().ok()?;
-    let s = sessions.into_iter().find(|s| s.GetPlaybackInfo().and_then(|i| i.PlaybackStatus()).is_ok_and(|st| st == St::Playing))?;
+#[derive(Clone)]
+pub struct Media {
+    pub title: String,
+    pub artist: String,
+    pub playing: bool,
+}
+
+#[derive(Clone, Copy)]
+pub enum MediaCmd {
+    Prev,
+    Toggle,
+    Next,
+}
+
+fn media_session() -> Option<windows::Media::Control::GlobalSystemMediaTransportControlsSession> {
+    use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager as Mgr;
+    Mgr::RequestAsync().ok()?.get().ok()?.GetCurrentSession().ok()
+}
+
+// Sesión multimedia actual del sistema, sonando o en pausa.
+pub fn media() -> Option<Media> {
+    use windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus as St;
+    let s = media_session()?;
     let p = s.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
-    let (t, a) = (p.Title().ok()?.to_string(), p.Artist().ok()?.to_string());
-    let line = if a.is_empty() { t } else { format!("{t} - {a}") };
-    Some(if line.chars().count() > 40 { line.chars().take(39).chain(std::iter::once('…')).collect::<String>() } else { line }).map(|l| format!("♪ {l}"))
+    let title = p.Title().ok()?.to_string();
+    let playing = s.GetPlaybackInfo().and_then(|i| i.PlaybackStatus()).is_ok_and(|st| st == St::Playing);
+    (!title.is_empty()).then(|| Media { title, artist: p.Artist().map(|a| a.to_string()).unwrap_or_default(), playing })
+}
+
+pub fn media_control(cmd: MediaCmd) {
+    let Some(s) = media_session() else { return };
+    let _ = match cmd {
+        MediaCmd::Prev => s.TrySkipPreviousAsync(),
+        MediaCmd::Toggle => s.TryTogglePlayPauseAsync(),
+        MediaCmd::Next => s.TrySkipNextAsync(),
+    }
+    .and_then(|op| op.get());
 }
 
 #[cfg(test)]

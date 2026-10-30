@@ -88,13 +88,33 @@ pub fn battery() -> Option<(u8, bool)> {
     (p.BatteryFlag & 128 == 0 && p.BatteryLifePercent <= 100).then_some((p.BatteryLifePercent, p.ACLineStatus == 1))
 }
 
-// Requiere COM inicializado en el hilo que llama.
-pub fn volume() -> Option<(u32, bool)> {
+fn endpoint() -> Option<IAudioEndpointVolume> {
     unsafe {
         let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
         let dev = en.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
-        let vol: IAudioEndpointVolume = dev.Activate(CLSCTX_ALL, None).ok()?;
-        Some(((vol.GetMasterVolumeLevelScalar().ok()? * 100.0).round() as u32, vol.GetMute().ok()?.as_bool()))
+        dev.Activate(CLSCTX_ALL, None).ok()
+    }
+}
+
+// Requiere COM inicializado en el hilo que llama (igual que `adjust_volume` y `toggle_mute`).
+pub fn volume() -> Option<(u32, bool)> {
+    let vol = endpoint()?;
+    unsafe { Some(((vol.GetMasterVolumeLevelScalar().ok()? * 100.0).round() as u32, vol.GetMute().ok()?.as_bool())) }
+}
+
+pub fn adjust_volume(delta_percent: i32) -> Option<()> {
+    let vol = endpoint()?;
+    unsafe {
+        let level = (vol.GetMasterVolumeLevelScalar().ok()? + delta_percent as f32 / 100.0).clamp(0.0, 1.0);
+        vol.SetMasterVolumeLevelScalar(level, std::ptr::null()).ok()
+    }
+}
+
+pub fn toggle_mute() -> Option<()> {
+    let vol = endpoint()?;
+    unsafe {
+        let muted = vol.GetMute().ok()?.as_bool();
+        vol.SetMute(windows::Win32::Foundation::BOOL::from(!muted), std::ptr::null()).ok()
     }
 }
 
