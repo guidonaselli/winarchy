@@ -110,6 +110,14 @@ pub fn adjust_volume(delta_percent: i32) -> Option<()> {
     }
 }
 
+pub fn set_volume(percent: u32) -> Option<()> {
+    let vol = endpoint()?;
+    unsafe {
+        vol.SetMute(windows::Win32::Foundation::BOOL::from(false), std::ptr::null()).ok()?;
+        vol.SetMasterVolumeLevelScalar(percent.min(100) as f32 / 100.0, std::ptr::null()).ok()
+    }
+}
+
 pub fn toggle_mute() -> Option<()> {
     let vol = endpoint()?;
     unsafe {

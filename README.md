@@ -86,9 +86,13 @@ That means Winarchy optimizes for:
 - **Winarchy Island (the default bar)**
   - a notch glued to the screen edge (flat on the edge, rounded below) with workspace dots and a clock;
     it opens on hover (120 ms) or `SUPER+I` into a panel with media controls, CPU/RAM/volume meters,
-    workspace chips and only the notes that matter (battery, notifications, game mode, weather)
-  - click a workspace dot or chip to switch to it, click the panel to pin it open, scroll over it for
-    volume, middle-click to mute; with `position = bottom` the notch sits on the bottom edge instead
+    workspace chips, the weather and only the notes that matter (battery, notifications, game mode)
+  - click a workspace dot or chip to switch to it, the pin button to keep the panel open (it stays until
+    you press it again), the weather row to open the forecast in your browser, the VOL bar to set the
+    volume, CPU or RAM to open Task Manager; scroll over it for volume, middle-click to mute; with
+    `position = bottom` the notch sits on the bottom edge instead
+  - the weather comes from Open-Meteo (no key); set your place with `{"location": {"lat": -34.6, "lon": -58.4}}`
+    in `config/shell/user.json` (without it, the shell falls back to the location YASB cached, if any)
   - Espectro, the assistant's spirit (a dark, glowing-eyed creature tinted with your theme's accent), shows in the pill only while the assistant listens, thinks or speaks; its eyes follow the mouse and its face changes with each state; `{"pet": false}` in
     `config/shell/user.json` hides it (that file survives `theme set` and updates)
   - the voice assistant (`winarchy assistant on`) speaks Spanish or English, taken from your Windows regional

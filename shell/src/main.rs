@@ -76,13 +76,14 @@ struct State {
 #[derive(Clone)]
 struct Panel {
     media: Option<extras::Media>,
+    weather: Option<extras::Weather>,
     meters: Vec<(&'static str, u32, String)>,
     notes: String,
 }
 
 impl Panel {
     fn shape(&self) -> PanelShape {
-        PanelShape { media: self.media.is_some(), meters: self.meters.len() }
+        PanelShape { media: self.media.is_some(), weather: self.weather.is_some(), meters: self.meters.len() }
     }
 }
 
@@ -338,6 +339,15 @@ unsafe fn render_pill(pill: HWND) {
                 draw_text(mem, g, lay.place(r), fg_c, DT_CENTER | DT_VCENTER);
             }
         }
+        if let Some(w) = &p.weather {
+            SelectObject(mem, font);
+            draw_text(mem, &w.title(), lay.place(pr.weather_title), fg_c, DT_BOTTOM);
+            draw_text(mem, &w.range(), lay.place(pr.weather_range), fg_c, DT_BOTTOM | DT_RIGHT);
+            SelectObject(mem, small);
+            let [d1, d2] = w.detail();
+            draw_text(mem, &d1, lay.place(pr.weather_detail), muted_c, DT_TOP);
+            draw_text(mem, &d2, lay.place(pr.weather_detail2), muted_c, DT_TOP);
+        }
         SelectObject(mem, small);
         let track = tint(bg, fg, 0.12);
         for (m, (name, pct, value)) in pr.meters.iter().zip(&p.meters) {
@@ -511,11 +521,11 @@ fn expand_step() -> bool {
             }
             let state_dir = theme_path.ancestors().nth(3).map(|r| r.join("state")).unwrap_or_default();
             notes.extend(metrics::flags(&state_dir).into_iter().map(String::from));
-            notes.extend(extras::WEATHER.lock().unwrap().clone());
             let media = extras::media();
+            let weather = extras::WEATHER.lock().unwrap().clone();
             with(|s| {
                 s.sampler = sampler;
-                s.panel = Some(Panel { media, meters, notes: notes.join("  ·  ") });
+                s.panel = Some(Panel { media, weather, meters, notes: notes.join("  ·  ") });
             });
             true
         }
@@ -683,6 +693,11 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
     }
 }
 
+unsafe fn shell_open(target: &str) {
+    let t = widestr(target);
+    let _ = ShellExecuteW(None, w!("open"), PCWSTR(t.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
+}
+
 unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let hit = || with(|s| s.layout.hit((lp.0 & 0xFFFF) as i16 as i32, ((lp.0 >> 16) & 0xFFFF) as i16 as i32));
     match m {
@@ -725,6 +740,21 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                         s.expand_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(EXPAND_SECS));
                     });
                     render_pill(h);
+                }
+                Some(Hit::Weather) => {
+                    if let Some(url) = with(|s| s.panel.as_ref().and_then(|p| p.weather.as_ref()).map(|w| w.url())) {
+                        shell_open(&url);
+                    }
+                }
+                Some(Hit::Meter(i, fraction)) => {
+                    match (with(|s| s.panel.as_ref().and_then(|p| p.meters.get(i)).map(|m| m.0)), fraction) {
+                        (Some("VOL"), Some(f)) => {
+                            let _ = metrics::set_volume((f * 100.0).round() as u32);
+                            tick(with(|s| s.strip));
+                        }
+                        (Some("VOL"), None) => {}
+                        _ => shell_open("taskmgr.exe"),
+                    }
                 }
                 Some(Hit::Surface) | None => {}
             }
@@ -781,9 +811,9 @@ fn main() {
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, layout::bar_h(scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path, scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig() })
+            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path: theme_path.clone(), scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig() })
         });
-        extras::spawn_weather();
+        extras::spawn_weather(theme_path);
         render_pill(pill);
         let _ = ShowWindow(pill, SW_SHOWNOACTIVATE);
         SetTimer(strip, TIMER_TICK, 1000, None);

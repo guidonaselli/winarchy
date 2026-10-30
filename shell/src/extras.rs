@@ -5,31 +5,102 @@ use std::time::Duration;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-pub static WEATHER: Mutex<Option<String>> = Mutex::new(None);
-
-pub fn weather_text(body: &str) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(body).ok()?;
-    Some(format!("{:.0}°C", v["current"]["temperature_2m"].as_f64()?))
+#[derive(Clone, Debug, PartialEq)]
+pub struct Weather {
+    pub temp: i32,
+    pub feels: Option<i32>,
+    pub humidity: Option<u32>,
+    pub wind: Option<u32>,
+    pub code: Option<u32>,
+    pub min: Option<i32>,
+    pub max: Option<i32>,
+    pub rain: Option<u32>,
+    pub lat: f64,
+    pub lon: f64,
 }
 
-// shortcut: toma la ubicación del caché de YASB, sin su archivo no hay clima; mover a config propia al retirar YASB.
-fn coords() -> Option<(f64, f64)> {
+pub static WEATHER: Mutex<Option<Weather>> = Mutex::new(None);
+
+pub fn parse_weather(body: &str, lat: f64, lon: f64) -> Option<Weather> {
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    let (c, d) = (&v["current"], &v["daily"]);
+    let round = |x: &serde_json::Value| x.as_f64().map(|f| f.round() as i32);
+    Some(Weather {
+        temp: round(&c["temperature_2m"])?,
+        feels: round(&c["apparent_temperature"]),
+        humidity: round(&c["relative_humidity_2m"]).map(|h| h.max(0) as u32),
+        wind: round(&c["wind_speed_10m"]).map(|w| w.max(0) as u32),
+        code: c["weather_code"].as_u64().map(|c| c as u32),
+        min: round(&d["temperature_2m_min"][0]),
+        max: round(&d["temperature_2m_max"][0]),
+        rain: round(&d["precipitation_probability_max"][0]).map(|r| r.max(0) as u32),
+        lat,
+        lon,
+    })
+}
+
+// Códigos WMO de Open-Meteo, agrupados.
+fn condition(code: u32) -> &'static str {
+    match code {
+        0 => "Clear",
+        1 | 2 => "Partly cloudy",
+        3 => "Overcast",
+        45 | 48 => "Fog",
+        51..=57 => "Drizzle",
+        61..=67 => "Rain",
+        71..=77 => "Snow",
+        80..=82 => "Showers",
+        85 | 86 => "Snow showers",
+        95..=99 => "Thunderstorm",
+        _ => "",
+    }
+}
+
+impl Weather {
+    pub fn title(&self) -> String {
+        format!("{}°  {}", self.temp, self.code.map(condition).unwrap_or("")).trim_end().to_string()
+    }
+
+    pub fn range(&self) -> String {
+        self.min.zip(self.max).map(|(lo, hi)| format!("{lo}° / {hi}°")).unwrap_or_default()
+    }
+
+    // Dos líneas cortas: la fuente de la isla es ancha y una sola no entra en el panel.
+    pub fn detail(&self) -> [String; 2] {
+        let join = |p: [Option<String>; 2]| p.into_iter().flatten().collect::<Vec<_>>().join("  ·  ");
+        [join([self.feels.map(|f| format!("Feels {f}°")), self.rain.map(|r| format!("Rain {r}%"))]), join([self.humidity.map(|h| format!("Humidity {h}%")), self.wind.map(|w| format!("Wind {w} km/h"))])]
+    }
+
+    pub fn url(&self) -> String {
+        format!("https://wttr.in/{:.4},{:.4}", self.lat, self.lon)
+    }
+}
+
+// La ubicación propia (`location` en user.json) manda; la caché de YASB es el respaldo de quien ya lo tenía.
+pub fn pick_coords(configured: Option<(f64, f64)>, cached: Option<(f64, f64)>) -> Option<(f64, f64)> {
+    configured.or(cached).filter(|(lat, lon)| (-90.0..=90.0).contains(lat) && (-180.0..=180.0).contains(lon))
+}
+
+fn yasb_coords() -> Option<(f64, f64)> {
     let p = PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("YASB").join("weather.json");
     let v: serde_json::Value = serde_json::from_slice(&std::fs::read(p).ok()?).ok()?;
     Some((v["weather"]["latitude"].as_f64()?, v["weather"]["longitude"].as_f64()?))
 }
 
-// Open-Meteo vía curl.exe (viene con Windows 11): sin dependencia HTTP; una consulta cada 30 min.
-pub fn spawn_weather() {
-    std::thread::spawn(|| loop {
-        if let Some((lat, lon)) = coords() {
-            let url = format!("https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m");
+// Open-Meteo vía curl.exe (viene con Windows 11): sin dependencia HTTP ni clave; una consulta cada 30 min, cada minuto mientras falle.
+pub fn spawn_weather(theme_path: PathBuf) {
+    std::thread::spawn(move || loop {
+        let configured = crate::theme::Theme::load(&theme_path).and_then(|t| t.location).map(|l| (l.lat, l.lon));
+        let mut wait = 60;
+        if let Some((lat, lon)) = pick_coords(configured, yasb_coords()) {
+            let url = format!("https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=1");
             let out = std::process::Command::new("curl.exe").args(["-s", "--max-time", "10", &url]).creation_flags(CREATE_NO_WINDOW).output();
-            if let Some(t) = out.ok().and_then(|o| weather_text(&String::from_utf8_lossy(&o.stdout))) {
-                *WEATHER.lock().unwrap() = Some(t);
+            if let Some(w) = out.ok().and_then(|o| parse_weather(&String::from_utf8_lossy(&o.stdout), lat, lon)) {
+                *WEATHER.lock().unwrap() = Some(w);
+                wait = 1800;
             }
         }
-        std::thread::sleep(Duration::from_secs(1800));
+        std::thread::sleep(Duration::from_secs(wait));
     });
 }
 
@@ -76,9 +147,31 @@ pub fn media_control(cmd: MediaCmd) {
 mod tests {
     use super::*;
 
+    const BODY: &str = r#"{"current":{"temperature_2m":14.5,"apparent_temperature":12.6,"relative_humidity_2m":60,"wind_speed_10m":11.7,"weather_code":2},"daily":{"temperature_2m_max":[19.2],"temperature_2m_min":[9.4],"precipitation_probability_max":[30]}}"#;
+
     #[test]
-    fn parses_open_meteo_current_temperature() {
-        assert_eq!(weather_text(r#"{"current":{"temperature_2m":14.5}}"#).as_deref(), Some("14°C"));
-        assert!(weather_text("{}").is_none());
+    fn parses_the_full_open_meteo_answer() {
+        let w = parse_weather(BODY, -34.6, -58.4).unwrap();
+        assert_eq!((w.temp, w.feels, w.humidity, w.wind, w.min, w.max, w.rain), (15, Some(13), Some(60), Some(12), Some(9), Some(19), Some(30)));
+        assert_eq!(w.title(), "15°  Partly cloudy");
+        assert_eq!(w.range(), "9° / 19°");
+        assert_eq!(w.detail(), ["Feels 13°  ·  Rain 30%".to_string(), "Humidity 60%  ·  Wind 12 km/h".to_string()]);
+        assert_eq!(w.url(), "https://wttr.in/-34.6000,-58.4000");
+    }
+
+    #[test]
+    fn tolerates_missing_optional_fields_and_rejects_garbage() {
+        let w = parse_weather(r#"{"current":{"temperature_2m":3.0}}"#, 0.0, 0.0).unwrap();
+        assert_eq!((w.title().as_str(), w.range().as_str(), w.detail()), ("3°", "", [String::new(), String::new()]));
+        assert!(parse_weather("{}", 0.0, 0.0).is_none());
+        assert!(parse_weather("no json", 0.0, 0.0).is_none());
+    }
+
+    #[test]
+    fn own_location_beats_the_yasb_cache_and_is_range_checked() {
+        assert_eq!(pick_coords(Some((1.0, 2.0)), Some((3.0, 4.0))), Some((1.0, 2.0)));
+        assert_eq!(pick_coords(None, Some((3.0, 4.0))), Some((3.0, 4.0)));
+        assert_eq!(pick_coords(None, None), None);
+        assert_eq!(pick_coords(Some((95.0, 0.0)), None), None);
     }
 }

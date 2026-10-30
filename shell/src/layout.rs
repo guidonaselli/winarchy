@@ -10,6 +10,7 @@ const SEP_DIP: i32 = 12;
 const CORNER_DIP: i32 = 14;
 pub const PANEL_W_DIP: i32 = 300;
 const MEDIA_DIP: i32 = 34;
+const WEATHER_DIP: i32 = 46;
 const BTN_DIP: i32 = 28;
 const METER_DIP: i32 = 14;
 const METER_GAP_DIP: i32 = 8;
@@ -50,6 +51,9 @@ pub enum Hit {
     Toggle,
     Next,
     Pin,
+    Weather,
+    // Fila de medidor: índice y, si el clic cayó sobre la barra, su fracción 0..1.
+    Meter(usize, Option<f32>),
     Surface,
 }
 
@@ -71,6 +75,11 @@ pub struct Meter {
 pub struct PanelRects {
     pub title: R,
     pub artist: R,
+    pub weather: R,
+    pub weather_title: R,
+    pub weather_range: R,
+    pub weather_detail: R,
+    pub weather_detail2: R,
     pub prev: R,
     pub toggle: R,
     pub next: R,
@@ -82,6 +91,7 @@ pub struct PanelRects {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PanelShape {
     pub media: bool,
+    pub weather: bool,
     pub meters: usize,
 }
 
@@ -138,8 +148,9 @@ pub fn bar_width(scale: f32, orb: bool, dots: &[(usize, bool)], label_w: i32, cl
 pub fn panel_height(scale: f32, shape: PanelShape) -> i32 {
     let gap = px(SECTION_GAP_DIP, scale);
     let media = if shape.media { px(MEDIA_DIP, scale) + gap } else { 0 };
+    let weather = if shape.weather { px(WEATHER_DIP, scale) + gap } else { 0 };
     let meters = if shape.meters > 0 { shape.meters as i32 * px(METER_DIP, scale) + (shape.meters as i32 - 1) * px(METER_GAP_DIP, scale) + gap } else { 0 };
-    px(PANEL_TOP_DIP, scale) + media + meters + px(CHIP_H_DIP, scale) + px(PANEL_BOTTOM_DIP, scale)
+    px(PANEL_TOP_DIP, scale) + media + weather + meters + px(CHIP_H_DIP, scale) + px(PANEL_BOTTOM_DIP, scale)
 }
 
 // Radio de las esquinas de abajo; nunca mayor que la mitad de la altura.
@@ -203,6 +214,20 @@ impl Layout {
             }
             y += mh + gap;
         }
+        if shape.weather {
+            let (wh, line) = (px(WEATHER_DIP, s), px(14, s));
+            let title_h = wh - 2 * line;
+            p.weather = R::new(pad, y, right - pad, wh);
+            p.weather_title = R::new(pad, y, right - pad - px(90, s), title_h);
+            p.weather_range = R::new(right - px(90, s), y, px(90, s), title_h);
+            p.weather_detail = R::new(pad, y + title_h, right - pad, line);
+            p.weather_detail2 = R::new(pad, y + title_h + line, right - pad, line);
+            if i.flip {
+                std::mem::swap(&mut p.weather_title.y, &mut p.weather_detail2.y);
+                p.weather_range.y = p.weather_title.y;
+            }
+            y += wh + gap;
+        }
         let (mh, label_w, g) = (px(METER_DIP, s), px(34, s), px(METER_GAP_DIP, s));
         for _ in 0..shape.meters {
             let track_h = px(4, s);
@@ -248,6 +273,15 @@ impl Layout {
             if let Some(c) = p.chips.iter().find(|c| c.r.contains(x, y)) {
                 return Some(Hit::Workspace(c.ws));
             }
+            if p.weather.w > 0 && p.weather.contains(x, y) {
+                return Some(Hit::Weather);
+            }
+            for (n, m) in p.meters.iter().enumerate() {
+                if R::new(m.label.x, m.label.y, m.value.x + m.value.w - m.label.x, m.label.h).contains(x, y) {
+                    let on_track = x >= m.track.x && x < m.track.x + m.track.w;
+                    return Some(Hit::Meter(n, on_track.then(|| (x - m.track.x) as f32 / m.track.w.max(1) as f32)));
+                }
+            }
         }
         let slack = self.dots.first().map_or(0, |d| d.r.h);
         self.dots
@@ -289,7 +323,7 @@ mod tests {
 
     #[test]
     fn panel_controls_and_chips_are_hit() {
-        let shape = PanelShape { media: true, meters: 3 };
+        let shape = PanelShape { media: true, weather: true, meters: 3 };
         let l = inputs(false, Some(shape), &[(0, true), (1, false)]);
         let p = l.panel.as_ref().unwrap();
         assert_eq!(l.hit(p.toggle.x + 2, p.toggle.y + 2), Some(Hit::Toggle));
@@ -299,12 +333,20 @@ mod tests {
         assert_eq!(l.hit(c.r.x + 2, c.r.y + 2), Some(Hit::Workspace(1)));
         assert_eq!(l.hit(p.title.x + 2, p.title.y + 2), Some(Hit::Surface));
         assert_eq!(l.hit(l.pin.x + 2, l.pin.y + 2), Some(Hit::Pin));
+        assert_eq!(l.hit(p.weather.x + 2, p.weather.y + 2), Some(Hit::Weather));
+        let m = &p.meters[1];
+        assert_eq!(l.hit(m.label.x + 1, m.label.y + 1), Some(Hit::Meter(1, None)));
+        assert_eq!(l.hit(m.track.x, m.track.y), Some(Hit::Meter(1, Some(0.0))));
+        match l.hit(m.track.x + m.track.w / 2, m.track.y) {
+            Some(Hit::Meter(1, Some(f))) => assert!((f - 0.5).abs() < 0.02),
+            other => panic!("{other:?}"),
+        }
         assert!(l.pin.x + l.pin.w <= l.clock.x && l.label.x + l.label.w <= l.pin.x);
     }
 
     #[test]
     fn flip_mirrors_hit_testing_and_placement() {
-        let shape = PanelShape { media: true, meters: 2 };
+        let shape = PanelShape { media: true, weather: true, meters: 2 };
         let l = inputs(true, Some(shape), &[(0, true)]);
         let p = l.panel.as_ref().unwrap();
         let placed = l.place(p.toggle);
@@ -316,12 +358,12 @@ mod tests {
     fn everything_stays_inside_the_box_at_any_scale() {
         for scale in [1.0, 1.5, 2.0] {
             let dots = [(0, false), (1, true), (2, false)];
-            let shape = Some(PanelShape { media: true, meters: 3 });
+            let shape = Some(PanelShape { media: true, weather: true, meters: 3 });
             let width = px(PANEL_W_DIP, scale);
             let height = bar_h(scale) + panel_height(scale, shape.unwrap());
             let l = Layout::new(&Inputs { scale, width, height, flip: false, clock_w: px(40, scale), orb: true, dots: &dots, panel: shape });
             let p = l.panel.as_ref().unwrap();
-            let rects = [p.title, p.artist, p.prev, p.toggle, p.next, p.notes, l.clock].into_iter().chain(p.chips.iter().map(|c| c.r)).chain(p.meters.iter().flat_map(|m| [m.label, m.track, m.value]));
+            let rects = [p.title, p.artist, p.weather, p.weather_title, p.weather_range, p.weather_detail, p.weather_detail2, p.prev, p.toggle, p.next, p.notes, l.clock].into_iter().chain(p.chips.iter().map(|c| c.r)).chain(p.meters.iter().flat_map(|m| [m.label, m.track, m.value]));
             for r in rects {
                 assert!(r.x >= 0 && r.w >= 0 && r.x + r.w <= width && r.y >= 0 && r.y + r.h <= height, "{r:?} fuera de {width}x{height} a {scale}");
             }
@@ -331,8 +373,9 @@ mod tests {
 
     #[test]
     fn panel_grows_with_its_sections() {
-        let base = panel_height(1.0, PanelShape { media: false, meters: 0 });
-        assert!(panel_height(1.0, PanelShape { media: true, meters: 0 }) > base);
-        assert!(panel_height(1.0, PanelShape { media: false, meters: 2 }) > base);
+        let base = panel_height(1.0, PanelShape { media: false, weather: false, meters: 0 });
+        assert!(panel_height(1.0, PanelShape { media: true, weather: false, meters: 0 }) > base);
+        assert!(panel_height(1.0, PanelShape { media: false, weather: false, meters: 2 }) > base);
+        assert!(panel_height(1.0, PanelShape { media: false, weather: true, meters: 0 }) > base);
     }
 }
