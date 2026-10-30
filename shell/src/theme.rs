@@ -13,6 +13,14 @@ pub struct Theme {
     pub position: String,
     #[serde(default = "on")]
     pub pet: bool,
+    #[serde(default)]
+    pub location: Option<Location>,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+pub struct Location {
+    pub lat: f64,
+    pub lon: f64,
 }
 
 fn on() -> bool {
@@ -31,6 +39,7 @@ impl Default for Theme {
             font_size: 13,
             position: "top".into(),
             pet: true,
+            location: None,
         }
     }
 }
@@ -95,6 +104,18 @@ mod tests {
         assert_eq!(t.font_size, 12);
         assert_eq!(t.position, "top");
         assert!(t.pet);
+    }
+
+    #[test]
+    fn user_json_can_set_the_weather_location() {
+        let d = std::env::temp_dir().join("ws-theme-location");
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("theme.json"), r##"{"background":"#000000","opacity":1.0,"foreground":"#ffffff","accent":"#ff0000","muted":"#111111","font_family":"A","font_size":12,"position":"top"}"##).unwrap();
+        assert!(Theme::load(&d.join("theme.json")).unwrap().location.is_none());
+        std::fs::write(d.join("user.json"), r#"{"location":{"lat":-34.6,"lon":-58.4}}"#).unwrap();
+        let l = Theme::load(&d.join("theme.json")).unwrap().location.unwrap();
+        assert_eq!((l.lat, l.lon), (-34.6, -58.4));
     }
 
     #[test]

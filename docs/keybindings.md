@@ -16,7 +16,7 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 | `SUPER+M` | Music (Spotify, fallback YT Music webapp) |
 | `SUPER+O` | Obsidian |
 | `SUPER+K` | Keybindings list: searchable, auto-generated from winarchy.ahk, themed, on the active monitor |
-| `SUPER+I` | Native shell only (`winarchy bar use native`): expands the island with CPU and RAM for a few seconds |
+| `SUPER+I` | Native shell only (`winarchy bar use native`): opens the island panel (media, CPU/RAM/volume, workspaces) for a few seconds |
 | `SUPER+CapsLock` (hold) | Push-to-talk to the voice assistant: speak while held, release to send (only with `winarchy assistant on`) |
 
 ## Menu (popup, Omarchy-style)

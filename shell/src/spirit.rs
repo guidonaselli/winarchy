@@ -25,10 +25,10 @@ impl Assist {
     pub fn label(self) -> &'static str {
         match self {
             Self::Idle => "",
-            Self::Listening => "Escuchando",
-            Self::Thinking => "Pensando",
-            Self::Speaking => "Hablando",
-            Self::Error => "Error",
+            Self::Listening => crate::i18n::t(crate::i18n::K::Listening),
+            Self::Thinking => crate::i18n::t(crate::i18n::K::Thinking),
+            Self::Speaking => crate::i18n::t(crate::i18n::K::Speaking),
+            Self::Error => crate::i18n::t(crate::i18n::K::Error),
         }
     }
 }

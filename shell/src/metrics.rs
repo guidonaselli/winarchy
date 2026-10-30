@@ -88,13 +88,41 @@ pub fn battery() -> Option<(u8, bool)> {
     (p.BatteryFlag & 128 == 0 && p.BatteryLifePercent <= 100).then_some((p.BatteryLifePercent, p.ACLineStatus == 1))
 }
 
-// Requiere COM inicializado en el hilo que llama.
-pub fn volume() -> Option<(u32, bool)> {
+fn endpoint() -> Option<IAudioEndpointVolume> {
     unsafe {
         let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
         let dev = en.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
-        let vol: IAudioEndpointVolume = dev.Activate(CLSCTX_ALL, None).ok()?;
-        Some(((vol.GetMasterVolumeLevelScalar().ok()? * 100.0).round() as u32, vol.GetMute().ok()?.as_bool()))
+        dev.Activate(CLSCTX_ALL, None).ok()
+    }
+}
+
+// Requiere COM inicializado en el hilo que llama (igual que `adjust_volume` y `toggle_mute`).
+pub fn volume() -> Option<(u32, bool)> {
+    let vol = endpoint()?;
+    unsafe { Some(((vol.GetMasterVolumeLevelScalar().ok()? * 100.0).round() as u32, vol.GetMute().ok()?.as_bool())) }
+}
+
+pub fn adjust_volume(delta_percent: i32) -> Option<()> {
+    let vol = endpoint()?;
+    unsafe {
+        let level = (vol.GetMasterVolumeLevelScalar().ok()? + delta_percent as f32 / 100.0).clamp(0.0, 1.0);
+        vol.SetMasterVolumeLevelScalar(level, std::ptr::null()).ok()
+    }
+}
+
+pub fn set_volume(percent: u32) -> Option<()> {
+    let vol = endpoint()?;
+    unsafe {
+        vol.SetMute(windows::Win32::Foundation::BOOL::from(false), std::ptr::null()).ok()?;
+        vol.SetMasterVolumeLevelScalar(percent.min(100) as f32 / 100.0, std::ptr::null()).ok()
+    }
+}
+
+pub fn toggle_mute() -> Option<()> {
+    let vol = endpoint()?;
+    unsafe {
+        let muted = vol.GetMute().ok()?.as_bool();
+        vol.SetMute(windows::Win32::Foundation::BOOL::from(!muted), std::ptr::null()).ok()
     }
 }
 
@@ -107,8 +135,9 @@ pub fn online() -> Option<bool> {
 }
 
 // Flags que escribe Winarchy en state\ (game mode, stay awake, update); un archivo presente = activo.
-pub fn flags(state_dir: &std::path::Path) -> Vec<&'static str> {
-    [("game-mode.flag", "GAME"), ("stay-awake.flag", "AWAKE"), ("update-available.flag", "UPDATE")]
+pub fn flags(state_dir: &std::path::Path) -> Vec<crate::i18n::K> {
+    use crate::i18n::K;
+    [("game-mode.flag", K::FlagGame), ("stay-awake.flag", K::FlagAwake), ("update-available.flag", K::FlagUpdate)]
         .into_iter()
         .filter(|(f, _)| state_dir.join(f).exists())
         .map(|(_, l)| l)
@@ -130,9 +159,9 @@ mod tests {
         let d = std::env::temp_dir().join("ws-flags-test");
         let _ = std::fs::create_dir_all(&d);
         let _ = std::fs::remove_file(d.join("stay-awake.flag"));
-        assert!(!flags(&d).contains(&"AWAKE"));
+        assert!(!flags(&d).contains(&crate::i18n::K::FlagAwake));
         std::fs::write(d.join("stay-awake.flag"), "").unwrap();
-        assert!(flags(&d).contains(&"AWAKE"));
+        assert!(flags(&d).contains(&crate::i18n::K::FlagAwake));
     }
 
     #[test]

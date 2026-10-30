@@ -36,6 +36,10 @@ pub fn parse(event: &Value) -> Option<Workspaces> {
     Some(Workspaces { occupied, focused, layout })
 }
 
+pub fn focus_workspace(index: usize) {
+    let _ = std::process::Command::new("komorebic.exe").args(["focus-workspace", &index.to_string()]).creation_flags(CREATE_NO_WINDOW).spawn();
+}
+
 // Hilo propio: un suscriptor que no lee degrada a komorebi (probe 1.4), así que nunca se lee desde la UI.
 pub fn spawn(on_change: impl Fn() + Send + 'static) {
     std::thread::spawn(move || loop {
