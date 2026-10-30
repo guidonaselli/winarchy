@@ -524,7 +524,7 @@ fn expand_step() -> bool {
             if let Some((v, muted)) = metrics::volume() {
                 meters.push((Meter::Vol, if muted { 0 } else { v }, if muted { tr(K::MuteValue).into() } else { format!("{v}%") }));
             }
-            // widgets.md: solo lo que cambia algo; el clima va al final.
+            // solo lo que cambia algo; el clima va al final.
             let mut notes = Vec::new();
             if let Some(g) = sampler.gpu().filter(|g| *g > 50.0) {
                 notes.push(format!("{} {g:.0}%", tr(K::Gpu)));
@@ -786,7 +786,8 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
             return LRESULT(0);
         }
         WM_MOUSEWHEEL => {
-            let _ = metrics::adjust_volume(((wp.0 >> 16) as i16 as i32) / 60);
+            let delta = (wp.0 >> 16) as i16 as i32;
+            let _ = metrics::adjust_volume(delta.signum() * (delta.abs() / 60).max(1));
             tick(with(|s| s.strip));
             return LRESULT(0);
         }
