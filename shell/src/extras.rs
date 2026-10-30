@@ -145,7 +145,7 @@ pub fn media_control(cmd: MediaCmd) {
         MediaCmd::Toggle => s.TryTogglePlayPauseAsync(),
         MediaCmd::Next => s.TrySkipNextAsync(),
     }
-    .and_then(|op| op.get());
+    .map(drop);
 }
 
 #[cfg(test)]

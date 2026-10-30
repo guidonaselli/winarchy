@@ -772,7 +772,8 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                             tick(with(|s| s.strip));
                         }
                         (Some(Meter::Vol), None) => {}
-                        _ => shell_open("taskmgr.exe"),
+                        (Some(Meter::Cpu | Meter::Ram), _) => shell_open("taskmgr.exe"),
+                        (None, _) => {}
                     }
                 }
                 Some(Hit::Surface) | None => {}
