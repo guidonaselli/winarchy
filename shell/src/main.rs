@@ -193,6 +193,10 @@ fn fill_round(pixels: &mut [u32], stride: i32, rows: i32, r: R, rad: i32, col: (
 }
 
 unsafe fn draw_text(mem: HDC, s: &str, r: R, color: COLORREF, flags: DRAW_TEXT_FORMAT) {
+    // DrawTextW con un slice vacío (puntero colgante) viola el acceso dentro de user32.
+    if s.is_empty() {
+        return;
+    }
     let mut text: Vec<u16> = s.encode_utf16().collect();
     let mut rc = RECT { left: r.x, top: r.y, right: r.x + r.w, bottom: r.y + r.h };
     SetTextColor(mem, color);
@@ -875,5 +879,21 @@ mod tests {
     fn segments_dim_keys_and_separators() {
         let seg = super::segments("CPU 26%  RAM 9% · el SEXO FE");
         assert_eq!(seg.iter().map(|(_, d)| *d).collect::<Vec<_>>(), [true, false, false, true, false, true, false, false, false]);
+    }
+}
+
+#[cfg(test)]
+mod draw_tests {
+    use super::*;
+    #[test]
+    fn empty_text_is_skipped_not_drawn() {
+        unsafe {
+            let mem = CreateCompatibleDC(None);
+            let bmp = CreateCompatibleBitmap(GetDC(None), 100, 50);
+            SelectObject(mem, bmp);
+            for fl in [DT_VCENTER, DT_BOTTOM, DT_TOP, DT_BOTTOM | DT_RIGHT, DT_VCENTER | DT_RIGHT, DT_CENTER | DT_VCENTER] {
+                draw_text(mem, "", layout::R { x: 0, y: 0, w: 50, h: 20 }, COLORREF(0), fl);
+            }
+        }
     }
 }
