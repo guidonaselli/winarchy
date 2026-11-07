@@ -40,6 +40,33 @@ if FileExist(StateDir "\assistant.enabled") && !ProcessExist("winarchy-assistant
 ; PID propio para que `winarchy doctor` nos detecte sin depender de WMI/CIM
 try FileOpen(StateDir "\ahk.pid", "w").Write(DllCall("GetCurrentProcessId"))
 
+; --- Watchdog de modificadores ------------------------------------------------
+; Evita que Win/Alt/Ctrl queden trabados lógicamente si un cambio de foco, una
+; ventana con privilegios o un hook sintético tragan el evento key-up.
+#InstallKeybdHook
+SetTimer(ReconcileModifiers, 200)
+
+ReconcileModifiers() {
+    toRelease := ''
+    if GetKeyState('LWin') && !GetKeyState('LWin', 'P')
+        toRelease .= '{LWin up}'
+    if GetKeyState('RWin') && !GetKeyState('RWin', 'P')
+        toRelease .= '{RWin up}'
+    if GetKeyState('LAlt') && !GetKeyState('LAlt', 'P')
+        toRelease .= '{LAlt up}'
+    if GetKeyState('RAlt') && !GetKeyState('RAlt', 'P')
+        toRelease .= '{RAlt up}'
+    if GetKeyState('LCtrl') && !GetKeyState('LCtrl', 'P')
+        toRelease .= '{LCtrl up}'
+    if GetKeyState('RCtrl') && !GetKeyState('RCtrl', 'P')
+        toRelease .= '{RCtrl up}'
+    if (toRelease != '')
+        Send('{Blind}' toRelease)
+}
+
+; Fallback instantáneo: presionar Escape limpia modificadores fantasma
+~*Esc::ReconcileModifiers()
+
 ; --- Config de usuario ---------------------------------------------------------
 ; true  = Win sola abre el menú Inicio (comportamiento nativo de Windows)
 ; false = Win sola es solo modificador (no abre nada)
@@ -282,7 +309,7 @@ ToggleFlow() {
         return 0
     if ProcessExist('Flow.Launcher.exe') {
         wasVisible := WinExist(FlowWindow)
-        Send('!{Space}')
+        Send('{Blind}{LWin up}{RWin up}!{Space}')
         if wasVisible
             return 0
         hwnd := WinWait(FlowWindow, , 2)
@@ -315,7 +342,7 @@ ToggleFlowScoped(prefix) {
     if !ToggleFlow()
         return
     Sleep(50)
-    Send('^a')
+    Send('{Blind}{LWin up}{RWin up}^a')
     SendText(prefix)
 }
 

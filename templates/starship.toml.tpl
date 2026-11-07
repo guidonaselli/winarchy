@@ -17,7 +17,7 @@ error_symbol = "[❯](bold {{colors.color1}})"
 [directory]
 style = "bold {{colors.accent_ui}}"
 truncation_length = 4
-truncate_to_repo = true
+truncate_to_repo = false
 format = " [$path]($style)[$read_only]($read_only_style) "
 
 [git_branch]
@@ -27,6 +27,7 @@ format = "[$symbol$branch]($style) "
 [git_status]
 style = "{{colors.color3}}"
 format = "([$all_status$ahead_behind]($style) )"
+ignore_submodules = true
 
 [git_state]
 style = "bold {{colors.color1}}"
