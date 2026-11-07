@@ -27,13 +27,21 @@ if (Get-Module PSReadLine) {
 }
 
 # --- Aliases modernos: eza / bat --------------------------------------------------
-if (Get-Command eza -CommandType Application -ErrorAction SilentlyContinue) {
+$script:winarchyPaths = [System.Environment]::GetEnvironmentVariable('PATH').Split(';')
+function script:Test-WinarchyBin([string]$Name) {
+    foreach ($p in $script:winarchyPaths) {
+        if ($p -and [System.IO.File]::Exists([System.IO.Path]::Combine($p, "$Name.exe"))) { return $true }
+    }
+    return $false
+}
+
+if (Test-WinarchyBin 'eza') {
     function ls { eza --group-directories-first --icons @args }
     function ll { eza -l --group-directories-first --icons --git @args }
     function la { eza -la --group-directories-first --icons --git @args }
     function lt { eza --tree --level=2 --icons @args }
 }
-if (Get-Command bat -CommandType Application -ErrorAction SilentlyContinue) {
+if (Test-WinarchyBin 'bat') {
     Set-Alias -Name cat -Value bat -Option AllScope -Force
 }
 
@@ -43,19 +51,17 @@ if (Get-Command bat -CommandType Application -ErrorAction SilentlyContinue) {
 # profile: hacerlo dentro de la función perdería las definiciones del init).
 function script:Get-WinarchyToolInit {
     param([string]$Tool, [string[]]$InitArgs)
-    # puede haber múltiples instalaciones (choco/scoop/winget): tomar la primera
+    $cacheDir = Join-Path $PSScriptRoot '..\..\state\pwsh-init'
+    $cache = Join-Path $cacheDir "$Tool.ps1"
+    if ([System.IO.File]::Exists($cache)) {
+        return $cache
+    }
     $exe = Get-Command $Tool -CommandType Application -ErrorAction SilentlyContinue |
         Select-Object -First 1
     if (-not $exe) { return $null }
     try {
-        $cacheDir = Join-Path $PSScriptRoot '..\..\state\pwsh-init'
-        $cache = Join-Path $cacheDir "$Tool.ps1"
-        $stale = -not (Test-Path $cache) -or
-            ((Get-Item $cache).LastWriteTimeUtc -lt (Get-Item $exe.Source).LastWriteTimeUtc)
-        if ($stale) {
-            New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
-            & $exe.Source @InitArgs | Set-Content -Path $cache -Encoding utf8NoBOM
-        }
+        [System.IO.Directory]::CreateDirectory($cacheDir) | Out-Null
+        & $exe.Source @InitArgs | Set-Content -Path $cache -Encoding utf8NoBOM
         return $cache
     }
     catch { return $null }
@@ -65,17 +71,27 @@ function script:Get-WinarchyToolInit {
 $winarchyInit = Get-WinarchyToolInit -Tool zoxide -InitArgs @('init', 'powershell')
 if ($winarchyInit) { try { . $winarchyInit } catch { } }
 
-# --- PSFzf: Ctrl+R historial difuso, Ctrl+T archivos -------------------------------
-# Lazy: importar PSFzf cuesta ~300 ms, así que se difiere al primer Ctrl+R/Ctrl+T.
-if (Get-Command fzf -CommandType Application -ErrorAction SilentlyContinue) {
+# --- fzf: Ctrl+R historial difuso, Ctrl+T archivos --------------------------------
+# Invocación directa a fzf.exe: 0 ms de overhead al inicio y sin el freeze (~460 ms) de PSFzf.
+if (Test-WinarchyBin 'fzf') {
     try {
-        Set-PSReadLineKeyHandler -Key 'Ctrl+r' -ScriptBlock {
-            if (-not (Get-Module PSFzf)) { Import-Module PSFzf -ErrorAction Stop }
-            Invoke-FzfPsReadlineHandlerHistory
-        }
         Set-PSReadLineKeyHandler -Key 'Ctrl+t' -ScriptBlock {
-            if (-not (Get-Module PSFzf)) { Import-Module PSFzf -ErrorAction Stop }
-            Invoke-FzfPsReadlineHandlerProvider
+            $selected = (& fzf.exe)
+            if ($selected) {
+                [Microsoft.PowerShell.PSConsoleReadLine]::Insert(" `"$selected`" ")
+            }
+        }
+        Set-PSReadLineKeyHandler -Key 'Ctrl+r' -ScriptBlock {
+            $histFile = (Get-PSReadLineOption).HistorySavePath
+            if ([System.IO.File]::Exists($histFile)) {
+                $cur = [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState()[0]
+                $queryArg = if ($cur) { @('-q', $cur) } else { @() }
+                $chosen = [System.IO.File]::ReadAllLines($histFile) | & fzf.exe --tac --no-sort @queryArg
+                if ($chosen) {
+                    [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
+                    [Microsoft.PowerShell.PSConsoleReadLine]::Insert($chosen)
+                }
+            }
         }
     }
     catch { }
@@ -88,6 +104,6 @@ if ($winarchyInit) { try { . $winarchyInit } catch { } }
 
 # --- Override del usuario (puede redefinir todo lo anterior) -------------------------
 $winarchyUserProfile = Join-Path $PSScriptRoot 'user.ps1'
-if (Test-Path $winarchyUserProfile) {
+if ([System.IO.File]::Exists($winarchyUserProfile)) {
     try { . $winarchyUserProfile } catch { Write-Warning "winarchy user.ps1: $($_.Exception.Message)" }
 }

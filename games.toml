@@ -38,16 +38,16 @@ exe = "upc.exe"                       # Ubisoft Connect
 exe = "rustdesk.exe"                  # escritorio remoto: la sesión no debe tilearse
 
 # --- Utilidades / ventanitas que conviene flotar -----------------------------
-[[games]]
+[[launchers]]
 exe = "faceitclient.exe"             # ventanita mini del cliente FACEIT
 
-[[games]]
+[[launchers]]
 exe = "blitz.exe"                    # overlay/coach de LoL y Valorant
 
-[[games]]
+[[launchers]]
 exe = "Moonlight.exe"
 
-[[games]]
+[[launchers]]
 exe = "SnippingTool.exe"
 
 # --- FPS / shooters competitivos ---------------------------------------------
