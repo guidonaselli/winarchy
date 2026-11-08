@@ -21,6 +21,10 @@ const CHIP_GAP_DIP: i32 = 6;
 const PANEL_TOP_DIP: i32 = 4;
 const PANEL_BOTTOM_DIP: i32 = 14;
 const PROGRESS_BAND_DIP: i32 = 6;
+const CAL_HEAD_DIP: i32 = 22;
+const CAL_WEEK_DIP: i32 = 14;
+const CAL_CELL_DIP: i32 = 24;
+const AGENDA_LINE_DIP: i32 = 17;
 
 pub fn px(dip: i32, scale: f32) -> i32 {
     (dip as f32 * scale).round() as i32
@@ -54,6 +58,11 @@ pub enum Hit {
     Weather,
     // Fila de medidor: índice y, si el clic cayó sobre la barra, su fracción 0..1.
     Meter(usize, Option<f32>),
+    Clock,
+    CalPrev,
+    CalNext,
+    // Celda de la grilla del mes, por índice.
+    CalCell(usize),
     Surface,
 }
 
@@ -86,13 +95,22 @@ pub struct PanelRects {
     pub meters: Vec<Meter>,
     pub chips: Vec<Item>,
     pub notes: R,
+    pub cal_title: R,
+    pub cal_prev: R,
+    pub cal_next: R,
+    pub cal_heads: Vec<R>,
+    pub cal_cells: Vec<R>,
+    pub agenda: Vec<R>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct PanelShape {
     pub media: bool,
     pub weather: bool,
     pub meters: usize,
+    // Panel del reloj: filas de la grilla del mes (0 = no es ese panel) y líneas de agenda.
+    pub cal_rows: usize,
+    pub agenda: usize,
 }
 
 pub struct Inputs<'a> {
@@ -125,6 +143,11 @@ pub fn bar_h(scale: f32) -> i32 {
     px(BAR_DIP, scale)
 }
 
+// Sitio que le quita a la etiqueta el botón de pin, que existe solo con el panel abierto.
+pub fn pin_w(scale: f32) -> i32 {
+    bar_h(scale) + px(SEP_DIP, scale)
+}
+
 pub fn progress_band(scale: f32) -> i32 {
     px(PROGRESS_BAND_DIP, scale)
 }
@@ -146,6 +169,10 @@ pub fn bar_width(scale: f32, orb: bool, dots: &[(usize, bool)], label_w: i32, cl
 }
 
 pub fn panel_height(scale: f32, shape: PanelShape) -> i32 {
+    if shape.cal_rows > 0 {
+        let fixed = CAL_HEAD_DIP + 2 + CAL_WEEK_DIP + 2 + SECTION_GAP_DIP + PANEL_TOP_DIP + PANEL_BOTTOM_DIP;
+        return px(fixed, scale) + shape.cal_rows as i32 * px(CAL_CELL_DIP, scale) + shape.agenda as i32 * px(AGENDA_LINE_DIP, scale);
+    }
     let gap = px(SECTION_GAP_DIP, scale);
     let media = if shape.media { px(MEDIA_DIP, scale) + gap } else { 0 };
     let weather = if shape.weather { px(WEATHER_DIP, scale) + gap } else { 0 };
@@ -211,7 +238,34 @@ impl Layout {
         Layout { width: i.width, height: i.height, flip: i.flip, bar_h: bar, orb, dots, label, clock, progress, pin, panel }
     }
 
+    fn calendar_rects(s: f32, i: &Inputs, shape: PanelShape, bar: i32) -> PanelRects {
+        let (pad, gap) = (px(PAD_DIP, s), px(SECTION_GAP_DIP, s));
+        let right = i.width - pad;
+        let (head, week, cell, line, btn) = (px(CAL_HEAD_DIP, s), px(CAL_WEEK_DIP, s), px(CAL_CELL_DIP, s), px(AGENDA_LINE_DIP, s), px(BTN_DIP, s));
+        let col = ((right - pad) / 7).max(0);
+        let x0 = pad + (right - pad - 7 * col) / 2;
+        let mut y = bar + px(PANEL_TOP_DIP, s);
+        let mut p = PanelRects { cal_title: R::new(pad, y, right - pad - 2 * btn, head), cal_prev: R::new(right - 2 * btn, y, btn, head), cal_next: R::new(right - btn, y, btn, head), ..Default::default() };
+        y += head + 2;
+        p.cal_heads = (0..7).map(|c| R::new(x0 + c * col, y, col, week)).collect();
+        y += week + 2;
+        p.cal_cells = (0..shape.cal_rows * 7).map(|n| R::new(x0 + (n % 7) as i32 * col, y + (n / 7) as i32 * cell, col, cell)).collect();
+        y += shape.cal_rows as i32 * cell + gap;
+        p.agenda = (0..shape.agenda).map(|n| R::new(pad, y + n as i32 * line, right - pad, line)).collect();
+        if i.flip {
+            // El orden visual (título arriba, agenda abajo) no cambia al pegar la isla abajo: se espeja dentro del panel.
+            let total = panel_height(s, shape);
+            for r in [&mut p.cal_title, &mut p.cal_prev, &mut p.cal_next].into_iter().chain(&mut p.cal_heads).chain(&mut p.cal_cells).chain(&mut p.agenda) {
+                r.y = 2 * bar + total - r.y - r.h;
+            }
+        }
+        p
+    }
+
     fn panel_rects(s: f32, i: &Inputs, shape: PanelShape, bar: i32) -> PanelRects {
+        if shape.cal_rows > 0 {
+            return Self::calendar_rects(s, i, shape, bar);
+        }
         let (pad, gap) = (px(PAD_DIP, s), px(SECTION_GAP_DIP, s));
         let right = i.width - pad;
         let mut y = bar + px(PANEL_TOP_DIP, s);
@@ -279,7 +333,19 @@ impl Layout {
         if self.pin.w > 0 && self.pin.contains(x, y) {
             return Some(Hit::Pin);
         }
+        let reach = self.bar_h / 4;
+        if R::new(self.clock.x - reach, 0, self.clock.w + 2 * reach, self.bar_h).contains(x, y) {
+            return Some(Hit::Clock);
+        }
         if let Some(p) = &self.panel {
+            for (r, h) in [(p.cal_prev, Hit::CalPrev), (p.cal_next, Hit::CalNext)] {
+                if r.w > 0 && r.contains(x, y) {
+                    return Some(h);
+                }
+            }
+            if let Some(n) = p.cal_cells.iter().position(|c| c.contains(x, y)) {
+                return Some(Hit::CalCell(n));
+            }
             for (r, h) in [(p.prev, Hit::Prev), (p.toggle, Hit::Toggle), (p.next, Hit::Next)] {
                 if r.contains(x, y) {
                     return Some(h);
@@ -344,14 +410,14 @@ mod tests {
         let l = inputs(false, None, &[(0, true), (2, false)]);
         let d = &l.dots[1];
         assert_eq!(l.hit(d.r.x + 1, 5), Some(Hit::Workspace(2)));
-        assert_eq!(l.hit(l.clock.x + 1, 5), Some(Hit::Surface));
+        assert_eq!(l.hit(l.clock.x + 1, 5), Some(Hit::Clock));
         assert_eq!(l.pin.w, 0, "sin panel no hay botón de pin");
         assert_eq!(l.hit(-1, 5), None);
     }
 
     #[test]
     fn panel_controls_and_chips_are_hit() {
-        let shape = PanelShape { media: true, weather: true, meters: 3 };
+        let shape = PanelShape { media: true, weather: true, meters: 3, ..Default::default() };
         let l = inputs(false, Some(shape), &[(0, true), (1, false)]);
         let p = l.panel.as_ref().unwrap();
         assert_eq!(l.hit(p.toggle.x + 2, p.toggle.y + 2), Some(Hit::Toggle));
@@ -374,7 +440,7 @@ mod tests {
 
     #[test]
     fn flip_mirrors_hit_testing_and_placement() {
-        let shape = PanelShape { media: true, weather: true, meters: 2 };
+        let shape = PanelShape { media: true, weather: true, meters: 2, ..Default::default() };
         let l = inputs(true, Some(shape), &[(0, true)]);
         let p = l.panel.as_ref().unwrap();
         let placed = l.place(p.toggle);
@@ -386,7 +452,7 @@ mod tests {
     fn everything_stays_inside_the_box_at_any_scale() {
         for scale in [1.0, 1.5, 2.0] {
             let dots = [(0, false), (1, true), (2, false)];
-            let shape = Some(PanelShape { media: true, weather: true, meters: 3 });
+            let shape = Some(PanelShape { media: true, weather: true, meters: 3, ..Default::default() });
             let width = px(PANEL_W_DIP, scale);
             let height = bar_h(scale) + panel_height(scale, shape.unwrap());
             let l = Layout::new(&Inputs { scale, width, height, flip: false, clock_w: px(40, scale), orb: true, dots: &dots, panel: shape });
@@ -400,10 +466,36 @@ mod tests {
     }
 
     #[test]
+    fn calendar_panel_hits_cells_and_stays_inside_in_both_orientations() {
+        for (scale, flip) in [(1.0, false), (1.0, true), (1.5, true)] {
+            let shape = PanelShape { cal_rows: 5, agenda: 3, ..Default::default() };
+            let width = px(PANEL_W_DIP, scale);
+            let height = bar_h(scale) + panel_height(scale, shape);
+            let l = Layout::new(&Inputs { scale, width, height, flip, clock_w: px(40, scale), orb: false, dots: &[(0, true)], panel: Some(shape) });
+            let p = l.panel.as_ref().unwrap();
+            assert_eq!((p.cal_cells.len(), p.cal_heads.len(), p.agenda.len()), (35, 7, 3));
+            for (n, c) in p.cal_cells.iter().enumerate() {
+                let r = l.place(*c);
+                assert_eq!(l.hit(r.x + 2, r.y + 2), Some(Hit::CalCell(n)), "celda {n} flip={flip}");
+            }
+            let n = l.place(p.cal_next);
+            assert_eq!(l.hit(n.x + 2, n.y + 2), Some(Hit::CalNext));
+            let pv = l.place(p.cal_prev);
+            assert_eq!(l.hit(pv.x + 2, pv.y + 2), Some(Hit::CalPrev));
+            for r in [p.cal_title, p.cal_prev, p.cal_next].into_iter().chain(p.cal_heads.iter().copied()).chain(p.cal_cells.iter().copied()).chain(p.agenda.iter().copied()) {
+                let r = l.place(r);
+                assert!(r.x >= 0 && r.x + r.w <= width && r.y >= 0 && r.y + r.h <= height, "{r:?} fuera de {width}x{height}");
+            }
+            let (first, last) = (l.place(p.cal_title), l.place(*p.agenda.last().unwrap()));
+            assert!(first.y < last.y, "el título queda arriba de la agenda en flip={flip}");
+        }
+    }
+
+    #[test]
     fn panel_grows_with_its_sections() {
-        let base = panel_height(1.0, PanelShape { media: false, weather: false, meters: 0 });
-        assert!(panel_height(1.0, PanelShape { media: true, weather: false, meters: 0 }) > base);
-        assert!(panel_height(1.0, PanelShape { media: false, weather: false, meters: 2 }) > base);
-        assert!(panel_height(1.0, PanelShape { media: false, weather: true, meters: 0 }) > base);
+        let base = panel_height(1.0, PanelShape { media: false, weather: false, meters: 0, ..Default::default() });
+        assert!(panel_height(1.0, PanelShape { media: true, weather: false, meters: 0, ..Default::default() }) > base);
+        assert!(panel_height(1.0, PanelShape { media: false, weather: false, meters: 2, ..Default::default() }) > base);
+        assert!(panel_height(1.0, PanelShape { media: false, weather: true, meters: 0, ..Default::default() }) > base);
     }
 }

@@ -15,6 +15,8 @@ pub struct Theme {
     pub pet: bool,
     #[serde(default)]
     pub location: Option<Location>,
+    #[serde(default)]
+    pub calendar: Vec<String>,
 }
 
 #[derive(Deserialize, Clone, Copy)]
@@ -40,6 +42,7 @@ impl Default for Theme {
             position: "top".into(),
             pet: true,
             location: None,
+            calendar: Vec::new(),
         }
     }
 }

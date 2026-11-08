@@ -58,6 +58,27 @@ messages! {
     CondShowers => ("Showers", "Chubascos"),
     CondSnowShowers => ("Snow showers", "Chubascos de nieve"),
     CondThunderstorm => ("Thunderstorm", "Tormenta"),
+    NoEvents => ("No events", "Sin eventos"),
+    AllDay => ("All day", "Todo el día"),
+    NoCalendar => ("Add a calendar URL in user.json", "Agregá la URL del calendario en user.json"),
+    More => ("more", "más"),
+    Now => ("now", "ahora"),
+}
+
+pub const MONTHS: [[&str; 12]; 2] = [
+    ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+    ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"],
+];
+
+// Iniciales de lunes a domingo.
+pub const WEEKDAYS: [[&str; 7]; 2] = [["M", "T", "W", "T", "F", "S", "S"], ["L", "M", "M", "J", "V", "S", "D"]];
+
+pub fn month_name(m: u32, lang: Lang) -> &'static str {
+    MONTHS[lang as usize][m as usize - 1]
+}
+
+pub fn weekday_initial(wd: usize, lang: Lang) -> &'static str {
+    WEEKDAYS[lang as usize][wd]
 }
 
 // `es` solo si el idioma pedido (o el regional de Windows) es español; cualquier otro cae en inglés.

@@ -1,7 +1,9 @@
 #![windows_subsystem = "windows"]
 
+mod calendar;
 mod extras;
 mod i18n;
+mod ics;
 mod layout;
 mod metrics;
 mod komorebi;
@@ -75,6 +77,10 @@ struct State {
     layout_sig: Vec<(i32, i32, i32, i32, u32)>,
     fade: f32,
     was_open: bool,
+    clock_open: bool,
+    cal_ym: (i64, u32),
+    cal_sel: i64,
+    countdown: Option<String>,
 }
 
 // Contenido del panel expandido; se rearma en cada tick mientras la isla está abierta.
@@ -84,6 +90,86 @@ struct Panel {
     weather: Option<extras::Weather>,
     meters: Vec<(Meter, u32, String)>,
     notes: String,
+    cal: Option<CalView>,
+}
+
+// Panel del reloj: mes con marcas de días con eventos y la agenda del día elegido.
+#[derive(Clone)]
+struct CalView {
+    title: String,
+    rows: usize,
+    cells: Vec<Option<u32>>,
+    today: Option<u32>,
+    sel: Option<u32>,
+    marks: Vec<bool>,
+    agenda: Vec<String>,
+}
+
+const AGENDA_LINES: usize = 3;
+
+fn day_in_month(days: i64, (y, m): (i64, u32)) -> Option<u32> {
+    let (dy, dm, dd) = calendar::civil_from_days(days);
+    ((dy, dm) == (y, m)).then_some(dd)
+}
+
+// Día que se elige al abrir un mes: hoy si es el actual, si no el 1.
+fn default_sel((y, m): (i64, u32)) -> i64 {
+    let today = calendar::now_local().0;
+    if day_in_month(today, (y, m)).is_some() { today } else { calendar::days_from_civil(y, m, 1) }
+}
+
+fn short(s: &str, max: usize) -> String {
+    if s.chars().count() <= max { s.to_string() } else { format!("{}…", s.chars().take(max - 1).collect::<String>()) }
+}
+
+fn calendar_view(ym: (i64, u32), sel: i64, configured: bool) -> CalView {
+    use calendar::{days_from_civil, days_in_month, MIN_DAY};
+    let (rows, cells) = calendar::month_grid(ym.0, ym.1);
+    let first = days_from_civil(ym.0, ym.1, 1);
+    let dim = days_in_month(ym.0, ym.1) as i64;
+    let feed = ics::FEED.lock().unwrap();
+    let mut marks = vec![false; 32];
+    for e in feed.occurrences(first * MIN_DAY, (first + dim) * MIN_DAY) {
+        for d in e.start.div_euclid(MIN_DAY).max(first)..=(e.end - 1).max(e.start).div_euclid(MIN_DAY).min(first + dim - 1) {
+            marks[(d - first + 1) as usize] = true;
+        }
+    }
+    let day_events = feed.occurrences(sel * MIN_DAY, (sel + 1) * MIN_DAY);
+    let line = |e: &ics::Event| {
+        let when = if e.all_day { tr(K::AllDay).to_string() } else { let m = e.start.rem_euclid(MIN_DAY); format!("{:02}:{:02}", m / 60, m % 60) };
+        format!("{when}  {}", short(&e.title, 34))
+    };
+    let agenda = match (configured, day_events.len()) {
+        (false, _) => vec![tr(K::NoCalendar).to_string()],
+        (true, 0) => vec![tr(K::NoEvents).to_string()],
+        (true, n) if n <= AGENDA_LINES => day_events.iter().map(line).collect(),
+        (true, n) => day_events.iter().take(AGENDA_LINES - 1).map(line).chain(std::iter::once(format!("+{} {}", n - (AGENDA_LINES - 1), tr(K::More)))).collect(),
+    };
+    CalView {
+        title: format!("{} {}", i18n::month_name(ym.1, lang()), ym.0),
+        rows,
+        cells,
+        today: day_in_month(calendar::now_local().0, ym),
+        sel: day_in_month(sel, ym),
+        marks,
+        agenda,
+    }
+}
+
+fn clock_view() -> Option<CalView> {
+    let (open, ym, sel, configured) = with(|s| (s.clock_open, s.cal_ym, s.cal_sel, !s.theme.calendar.is_empty()));
+    open.then(|| calendar_view(ym, sel, configured))
+}
+
+// Aviso en la barra cuando una reunión empieza en <= 15 min.
+fn countdown() -> Option<String> {
+    use calendar::MIN_DAY;
+    let (day, min) = calendar::now_local();
+    let now = day * MIN_DAY + min as i64;
+    let feed = ics::FEED.lock().unwrap();
+    let e = feed.occurrences(now, now + 16).into_iter().find(|e| !e.all_day && e.start >= now && e.start <= now + 15)?;
+    let left = e.start - now;
+    Some(if left == 0 { format!("{} · {}", short(&e.title, 28), tr(K::Now)) } else { format!("{} · {left} min", short(&e.title, 28)) })
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -105,7 +191,7 @@ impl Meter {
 
 impl Panel {
     fn shape(&self) -> PanelShape {
-        PanelShape { media: self.media.is_some(), weather: self.weather.is_some(), meters: self.meters.len() }
+        PanelShape { media: self.media.is_some(), weather: self.weather.is_some(), meters: self.meters.len(), cal_rows: self.cal.as_ref().map_or(0, |c| c.rows), agenda: if self.cal.is_some() { AGENDA_LINES } else { 0 } }
     }
 }
 
@@ -235,7 +321,8 @@ unsafe fn render_pill(pill: HWND) {
     let mut ext = SIZE::default();
     let _ = GetTextExtentPoint32W(mem, &text, &mut ext);
     let (assist, assist_t) = spirit::current();
-    let island = pipe::ISLAND.lock().unwrap().clone().or_else(|| (assist != spirit::Assist::Idle).then(|| pipe::Island { title: assist.label().into(), ..Default::default() }));
+    let island = pipe::ISLAND.lock().unwrap().clone().or_else(|| (assist != spirit::Assist::Idle).then(|| pipe::Island { title: assist.label().into(), ..Default::default() }))
+        .or_else(|| with(|s| s.countdown.clone()).map(|title| pipe::Island { title, ..Default::default() }));
     let label: Vec<u16> = island.as_ref().map(|i| if i.detail.is_empty() { i.title.clone() } else { format!("{}  {}", i.title, i.detail) }).unwrap_or_default().encode_utf16().collect();
     let mut lext = SIZE::default();
     if !label.is_empty() {
@@ -246,7 +333,7 @@ unsafe fn render_pill(pill: HWND) {
     let orb = assist != spirit::Assist::Idle && theme.pet;
     let progress = island.as_ref().and_then(|i| i.progress);
     let live_panel = with(|s| s.panel.clone());
-    let need_raw = layout::bar_width(scale, orb, &dots, lext.cx, ext.cx);
+    let need_raw = layout::bar_width(scale, orb, &dots, lext.cx, ext.cx) + if live_panel.is_some() { layout::pin_w(scale) } else { 0 };
     let widest = need_raw.max(if live_panel.is_some() { px(layout::PANEL_W_DIP, scale) } else { 0 });
     let need = widest.min(px(PILL_MAX_W, scale)).min((mon.right - mon.left) * 3 / 4);
     let base = layout::bar_width(scale, orb, &dots, 0, ext.cx);
@@ -388,6 +475,38 @@ unsafe fn render_pill(pill: HWND) {
             let t = lay.place(m.track);
             fill_round(pixels, width, height, t, t.h / 2, track, bg);
             fill_round(pixels, width, height, R { w: t.w * (*pct).min(100) as i32 / 100, ..t }, t.h / 2, accent, track);
+        }
+        if let Some(cv) = &p.cal {
+            SelectObject(mem, font);
+            draw_text(mem, &cv.title, lay.place(pr.cal_title), fg_c, DT_VCENTER);
+            SelectObject(mem, glyphs);
+            draw_text(mem, "\u{E76B}", lay.place(pr.cal_prev), muted_c, DT_CENTER | DT_VCENTER);
+            draw_text(mem, "\u{E76C}", lay.place(pr.cal_next), muted_c, DT_CENTER | DT_VCENTER);
+            SelectObject(mem, small);
+            for (i, r) in pr.cal_heads.iter().enumerate() {
+                draw_text(mem, i18n::weekday_initial(i, lang()), lay.place(*r), muted_c, DT_CENTER | DT_VCENTER);
+            }
+            let (sel_bg, dot) = (tint(bg, fg, 0.14), px(3, scale));
+            for (r, day) in pr.cal_cells.iter().zip(&cv.cells) {
+                let Some(day) = *day else { continue };
+                let r = lay.place(*r);
+                let d = (r.h - 2).min(r.w - 2);
+                let disc = R { x: r.x + (r.w - d) / 2, y: r.y + (r.h - d) / 2, w: d, h: d };
+                let is_today = cv.today == Some(day);
+                if is_today {
+                    fill_round(pixels, width, height, disc, d / 2, accent, bg);
+                } else if cv.sel == Some(day) {
+                    fill_round(pixels, width, height, disc, d / 2, sel_bg, bg);
+                }
+                draw_text(mem, &day.to_string(), r, if is_today { bg_c } else { fg_c }, DT_CENTER | DT_VCENTER);
+                if cv.marks[day as usize] {
+                    let dot_r = R { x: r.x + (r.w - dot) / 2, y: disc.y + disc.h - dot - 1, w: dot, h: dot };
+                    fill_round(pixels, width, height, dot_r, dot / 2, if is_today { bg } else { accent }, if is_today { accent } else if cv.sel == Some(day) { sel_bg } else { bg });
+                }
+            }
+            for (line, r) in cv.agenda.iter().zip(&pr.agenda) {
+                draw_text(mem, line, lay.place(*r), fg_c, DT_VCENTER);
+            }
         }
         let chip_bg = tint(bg, fg, 0.07);
         for c in &pr.chips {
@@ -541,6 +660,10 @@ fn expand_step() -> bool {
     }
     match until {
         Some(t) if t > now => {
+            if let Some(cal) = clock_view() {
+                with(|s| s.panel = Some(Panel { media: None, weather: None, meters: Vec::new(), notes: String::new(), cal: Some(cal) }));
+                return true;
+            }
             let (mut sampler, theme_path) = with(|s| (std::mem::take(&mut s.sampler), s.theme_path.clone()));
             let cpu = sampler.cpu().map(|c| c.round() as u32);
             let ram = metrics::ram_percent();
@@ -571,7 +694,7 @@ fn expand_step() -> bool {
             let weather = extras::WEATHER.lock().unwrap().clone();
             with(|s| {
                 s.sampler = sampler;
-                s.panel = Some(Panel { media, weather, meters, notes: notes.join("  ·  ") });
+                s.panel = Some(Panel { media, weather, meters, notes: notes.join("  ·  "), cal: None });
             });
             true
         }
@@ -598,6 +721,8 @@ unsafe fn tick(_strip: HWND) {
 
 unsafe fn tick_inner() {
     let (pill, hidden, last) = with(|s| (s.pill, s.hidden, s.last_minute));
+    let countdown = countdown();
+    with(|s| s.countdown = countdown);
     let busy = fullscreen_busy();
     if busy != hidden {
         let _ = ShowWindow(pill, if busy { SW_HIDE } else { SW_SHOWNOACTIVATE });
@@ -685,6 +810,7 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
                 if !s.pinned {
                     s.expand_until = None;
                     s.panel = None;
+                    s.clock_open = false;
                 }
                 s.pill
             });
@@ -787,6 +913,35 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                     });
                     render_pill(h);
                 }
+                Some(Hit::Clock) => {
+                    with(|s| {
+                        s.clock_open = !s.clock_open;
+                        s.fade = 0.0;
+                        if s.clock_open {
+                            let today = calendar::now_local().0;
+                            let (y, m, _) = calendar::civil_from_days(today);
+                            s.cal_ym = (y, m);
+                            s.cal_sel = today;
+                        }
+                        s.expand_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(EXPAND_SECS));
+                    });
+                    tick(with(|s| s.strip));
+                }
+                Some(Hit::CalPrev | Hit::CalNext) => {
+                    let delta = if matches!(hit(), Some(Hit::CalPrev)) { -1 } else { 1 };
+                    with(|s| {
+                        s.cal_ym = calendar::shift_month(s.cal_ym.0, s.cal_ym.1, delta);
+                        s.cal_sel = default_sel(s.cal_ym);
+                    });
+                    tick(with(|s| s.strip));
+                }
+                Some(Hit::CalCell(n)) => {
+                    let day = with(|s| s.panel.as_ref().and_then(|p| p.cal.as_ref()).and_then(|c| c.cells.get(n).copied().flatten()));
+                    if let Some(d) = day {
+                        with(|s| s.cal_sel = calendar::days_from_civil(s.cal_ym.0, s.cal_ym.1, d));
+                        tick(with(|s| s.strip));
+                    }
+                }
                 Some(Hit::Weather) => {
                     if let Some(url) = with(|s| s.panel.as_ref().and_then(|p| p.weather.as_ref()).map(|w| w.url())) {
                         shell_open(&url);
@@ -861,8 +1016,9 @@ fn main() {
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, layout::bar_h(scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path: theme_path.clone(), scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig(), fade: 1.0, was_open: false })
+            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path: theme_path.clone(), scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig(), fade: 1.0, was_open: false, clock_open: false, cal_ym: (1970, 1), cal_sel: 0, countdown: None })
         });
+        ics::spawn_feed(theme_path.clone());
         extras::spawn_weather(theme_path);
         render_pill(pill);
         let _ = ShowWindow(pill, SW_SHOWNOACTIVATE);
