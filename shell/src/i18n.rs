@@ -34,6 +34,7 @@ messages! {
     Ram => ("RAM", "RAM"),
     Gpu => ("GPU", "GPU"),
     Vol => ("VOL", "VOL"),
+    Bri => ("BRI", "BRI"),
     MuteOsd => ("MUTE", "SILENCIO"),
     MuteValue => ("mute", "silencio"),
     Battery => ("BAT", "BAT"),

@@ -1,5 +1,6 @@
 #![windows_subsystem = "windows"]
 
+mod brightness;
 mod calendar;
 mod extras;
 mod i18n;
@@ -32,6 +33,7 @@ const WM_CMD_QUIT: u32 = WM_APP + 3;
 const WM_WORKSPACES: u32 = WM_APP + 4;
 const WM_EXPAND: u32 = WM_APP + 5;
 const WM_COLLAPSE: u32 = WM_APP + 6;
+const WM_BRIGHTNESS: u32 = WM_APP + 7;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const EXPAND_SECS: u64 = 6;
 const TIMER_TICK: usize = 1;
@@ -177,6 +179,7 @@ enum Meter {
     Cpu,
     Ram,
     Vol,
+    Bri,
 }
 
 impl Meter {
@@ -185,6 +188,7 @@ impl Meter {
             Meter::Cpu => K::Cpu,
             Meter::Ram => K::Ram,
             Meter::Vol => K::Vol,
+            Meter::Bri => K::Bri,
         })
     }
 }
@@ -684,6 +688,10 @@ fn expand_step() -> bool {
             if let Some((v, muted)) = metrics::volume() {
                 meters.push((Meter::Vol, if muted { 0 } else { v }, if muted { tr(K::MuteValue).into() } else { format!("{v}%") }));
             }
+            brightness::refresh_if_stale();
+            if let Some(b) = brightness::level() {
+                meters.push((Meter::Bri, b, format!("{b}%")));
+            }
             // solo lo que cambia algo; el clima va al final.
             let mut notes = Vec::new();
             if let Some(g) = sampler.gpu().filter(|g| *g > 50.0) {
@@ -802,6 +810,10 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             LRESULT(0)
         }
         WM_TIMER => {
+            tick(h);
+            LRESULT(0)
+        }
+        WM_BRIGHTNESS => {
             tick(h);
             LRESULT(0)
         }
@@ -964,7 +976,8 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                             let _ = metrics::set_volume((f * 100.0).round() as u32);
                             tick(with(|s| s.strip));
                         }
-                        (Some(Meter::Vol), None) => {}
+                        (Some(Meter::Vol | Meter::Bri), None) => {}
+                        (Some(Meter::Bri), Some(f)) => brightness::set((f * 100.0).round() as u32),
                         (Some(Meter::Cpu | Meter::Ram), _) => shell_open("taskmgr.exe"),
                         (None, _) => {}
                     }
@@ -980,8 +993,22 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
         }
         WM_MOUSEWHEEL => {
             let delta = (wp.0 >> 16) as i16 as i32;
-            let _ = metrics::adjust_volume(delta.signum() * (delta.abs() / 60).max(1));
-            tick(with(|s| s.strip));
+            let mut r = RECT::default();
+            // La rueda trae coordenadas de pantalla: sobre el medidor BRI mueve el brillo, en cualquier otro lado el volumen.
+            let over_brightness = GetWindowRect(h, &mut r).is_ok()
+                && with(|s| {
+                    let (x, y) = ((lp.0 & 0xFFFF) as i16 as i32 - r.left, ((lp.0 >> 16) & 0xFFFF) as i16 as i32 - r.top);
+                    match (s.layout.hit(x, y), s.panel.as_ref()) {
+                        (Some(Hit::Meter(i, _)), Some(p)) => p.meters.get(i).is_some_and(|m| m.0 == Meter::Bri),
+                        _ => false,
+                    }
+                });
+            if over_brightness {
+                brightness::adjust(delta.signum() * (delta.abs() / 120).max(1));
+            } else {
+                let _ = metrics::adjust_volume(delta.signum() * (delta.abs() / 60).max(1));
+                tick(with(|s| s.strip));
+            }
             return LRESULT(0);
         }
         WM_SETCURSOR => {
@@ -1036,6 +1063,9 @@ fn main() {
         SetTimer(strip, TIMER_TICK, 1000, None);
 
         let target = strip.0 as isize;
+        brightness::init(move || {
+            let _ = PostMessageW(HWND(target as *mut _), WM_BRIGHTNESS, WPARAM(0), LPARAM(0));
+        });
         pipe::serve(move |c| {
             let m = match c {
                 pipe::Command::Reload => WM_CMD_RELOAD,
