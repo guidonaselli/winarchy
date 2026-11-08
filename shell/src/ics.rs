@@ -46,6 +46,7 @@ struct Raw {
     title: String,
     rule: Option<Rule>,
     exdates: Vec<i64>,
+    is_override: bool,
 }
 
 #[derive(Clone, Default, Debug)]
@@ -108,12 +109,13 @@ fn parse_rule(value: &str, utc_offset: i64) -> Option<Rule> {
                 rule.byday = v
                     .split(',')
                     .filter_map(|d| {
-                        let (n, code) = d.split_at(d.len().checked_sub(2)?);
+                        let (n, code) = d.split_at(d.len().checked_sub(2).filter(|i| d.is_char_boundary(*i))?);
                         let wd = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"].iter().position(|c| *c == code)? as u32;
                         Some((if n.is_empty() { 0 } else { n.parse().ok()? }, wd))
                     })
                     .collect();
             }
+            "BYMONTH" | "BYSETPOS" | "BYMONTHDAY" | "BYYEARDAY" | "BYWEEKNO" => return None,
             _ => {}
         }
     }
@@ -126,13 +128,14 @@ impl Feed {
         let mut cur: Option<(Raw, bool, Option<i64>)> = None;
         for line in unfold(text) {
             if line == "BEGIN:VEVENT" {
-                cur = Some((Raw { uid: String::new(), start: 0, end: 0, all_day: false, title: String::new(), rule: None, exdates: Vec::new() }, false, None));
+                cur = Some((Raw { uid: String::new(), start: 0, end: 0, all_day: false, title: String::new(), rule: None, exdates: Vec::new(), is_override: false }, false, None));
                 continue;
             }
             if line == "END:VEVENT" {
                 if let Some((mut raw, cancelled, rid)) = cur.take() {
                     if let Some(rid) = rid {
                         feed.overridden.insert((raw.uid.clone(), rid));
+                        raw.is_override = true;
                     }
                     if !cancelled && raw.start != 0 {
                         if raw.end <= raw.start {
@@ -175,12 +178,12 @@ impl Feed {
         for r in &self.raw {
             let dur = r.end - r.start;
             let starts = match &r.rule {
-                Some(rule) => rule_starts(r.start, rule, to),
+                Some(rule) => rule_starts(r.start, rule, from, to),
                 None => vec![r.start],
             };
             for s in starts {
                 let end = s + dur;
-                if s < to && end.max(s + 1) > from && !r.exdates.contains(&s) && !self.overridden.contains(&(r.uid.clone(), s)) {
+                if s < to && end.max(s + 1) > from && !r.exdates.contains(&s) && (r.is_override || !self.overridden.contains(&(r.uid.clone(), s))) {
                     out.push(Event { start: s, end, all_day: r.all_day, title: r.title.clone() });
                 }
             }
@@ -190,11 +193,14 @@ impl Feed {
     }
 }
 
-fn rule_starts(start: i64, rule: &Rule, to: i64) -> Vec<i64> {
+fn rule_starts(start: i64, rule: &Rule, from: i64, to: i64) -> Vec<i64> {
     let (base, tod) = (start.div_euclid(MIN_DAY), start.rem_euclid(MIN_DAY));
     let (y0, m0, d0) = civil_from_days(base);
     let (mut out, mut n) = (Vec::new(), 0u32);
-    for k in 0..MAX_STEPS {
+    // Sin COUNT no hace falta contar desde el inicio: se arranca una vuelta antes de `from`.
+    let unit = rule.interval * if rule.freq == Freq::Weekly { 7 } else { 1 };
+    let k0 = if rule.count.is_none() && matches!(rule.freq, Freq::Daily | Freq::Weekly) { ((from.div_euclid(MIN_DAY) - base) / unit - 1).max(0) } else { 0 };
+    for k in k0..k0 + MAX_STEPS {
         let step = k * rule.interval;
         let mut days: Vec<i64> = match rule.freq {
             Freq::Daily => vec![base + step],
@@ -219,6 +225,7 @@ fn rule_starts(start: i64, rule: &Rule, to: i64) -> Vec<i64> {
                 }
             }
         };
+        days.retain(|d| *d >= base);
         days.sort_unstable();
         days.dedup();
         for d in days {
@@ -236,6 +243,26 @@ fn rule_starts(start: i64, rule: &Rule, to: i64) -> Vec<i64> {
     out
 }
 
+// La URL secreta va por stdin (`-K -`): en la línea de comandos la vería cualquier proceso local.
+fn download(url: &str) -> Option<String> {
+    use std::io::Write;
+    use std::process::Stdio;
+    if url.contains(['\r', '\n']) {
+        return None;
+    }
+    let mut child = std::process::Command::new("curl.exe")
+        .args(["-sL", "--fail", "--max-time", "20", "--proto", "=https", "--proto-redir", "=https", "--max-filesize", "20000000", "-K", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .ok()?;
+    let line = format!("url = \"{}\"\n", url.replace('\\', "\\\\").replace('"', "\\\""));
+    child.stdin.take()?.write_all(line.as_bytes()).ok()?;
+    let out = child.wait_with_output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
 // Baja los feeds de `user.json` ("calendar": [urls]) con curl.exe cada 15 min; cada minuto mientras no haya URL o falle.
 pub fn spawn_feed(theme_path: std::path::PathBuf) {
     std::thread::spawn(move || loop {
@@ -246,16 +273,14 @@ pub fn spawn_feed(theme_path: std::path::PathBuf) {
             let mut merged = Feed::default();
             let mut ok = true;
             for url in &urls {
-                let out = std::process::Command::new("curl.exe").args(["-sL", "--fail", "--max-time", "20", url]).creation_flags(CREATE_NO_WINDOW).output();
-                match out {
-                    Ok(o) if o.status.success() => merged.merge(Feed::parse(&String::from_utf8_lossy(&o.stdout), offset)),
+                match download(url) {
+                    Some(body) if body.contains("BEGIN:VCALENDAR") => merged.merge(Feed::parse(&body, offset)),
                     _ => ok = false,
                 }
             }
-            if ok || !merged.is_empty() {
-                *FEED.lock().unwrap() = merged;
-            }
+            // Un feed caído o una página de login no deben borrar lo que ya se tenía.
             if ok {
+                *FEED.lock().unwrap() = merged;
                 wait = 900;
             }
         } else {
@@ -338,6 +363,31 @@ mod tests {
         let e = f.occurrences(day(2026, 11, 1), day(2026, 12, 1));
         assert_eq!(e.len(), 3);
         assert!(e.iter().all(|e| e.title == "Corta"));
+    }
+
+    #[test]
+    fn edited_instance_at_the_same_time_is_kept_once() {
+        let f = feed(&format!(
+            "{}\r\n{}",
+            vevent("UID:j\r\nDTSTART:20261102T120000\r\nSUMMARY:Sync\r\nRRULE:FREQ=DAILY;COUNT=3"),
+            vevent("UID:j\r\nRECURRENCE-ID:20261103T120000\r\nDTSTART:20261103T120000\r\nSUMMARY:Sync editado")
+        ));
+        let e = f.occurrences(day(2026, 11, 3), day(2026, 11, 4));
+        assert_eq!(e.iter().map(|e| e.title.as_str()).collect::<Vec<_>>(), ["Sync editado"]);
+    }
+
+    #[test]
+    fn hostile_or_unsupported_rules_do_not_panic_or_misexpand() {
+        let f = feed(&vevent("UID:k\r\nDTSTART:20261102T120000\r\nSUMMARY:x\r\nRRULE:FREQ=WEEKLY;BYDAY=éa"));
+        assert!(f.occurrences(day(2026, 11, 1), day(2027, 1, 1)).len() > 1, "sin BYDAY válido sigue siendo semanal desde DTSTART");
+        let y = feed(&vevent("UID:l\r\nDTSTART:20200510T090000\r\nSUMMARY:Dia de la madre\r\nRRULE:FREQ=YEARLY;BYMONTH=5;BYDAY=2SU"));
+        assert_eq!(y.occurrences(day(2020, 1, 1), day(2027, 1, 1)).len(), 1, "regla no soportada: solo la primera ocurrencia, no una fecha inventada");
+    }
+
+    #[test]
+    fn old_daily_series_still_show_today() {
+        let f = feed(&vevent("UID:m\r\nDTSTART:20100101T080000\r\nSUMMARY:Vieja\r\nRRULE:FREQ=DAILY"));
+        assert_eq!(f.occurrences(day(2026, 11, 8), day(2026, 11, 9)).len(), 1);
     }
 
     #[test]

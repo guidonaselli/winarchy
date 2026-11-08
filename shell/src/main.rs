@@ -83,6 +83,7 @@ struct State {
     cal_ym: (i64, u32),
     cal_sel: i64,
     countdown: Option<String>,
+    countdown_minute: u16,
 }
 
 // Contenido del panel expandido; se rearma en cada tick mientras la isla está abierta.
@@ -739,8 +740,14 @@ unsafe fn tick(_strip: HWND) {
 
 unsafe fn tick_inner() {
     let (pill, hidden, last) = with(|s| (s.pill, s.hidden, s.last_minute));
-    let countdown = countdown();
-    with(|s| s.countdown = countdown);
+    let minute_now = GetLocalTime().wMinute;
+    if with(|s| s.countdown_minute != minute_now) {
+        let countdown = countdown();
+        with(|s| {
+            s.countdown = countdown;
+            s.countdown_minute = minute_now;
+        });
+    }
     let busy = fullscreen_busy();
     if busy != hidden {
         let _ = ShowWindow(pill, if busy { SW_HIDE } else { SW_SHOWNOACTIVATE });
@@ -1054,7 +1061,7 @@ fn main() {
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, layout::bar_h(scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path: theme_path.clone(), scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig(), fade: 1.0, was_open: false, clock_open: false, cal_ym: (1970, 1), cal_sel: 0, countdown: None })
+            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path: theme_path.clone(), scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig(), fade: 1.0, was_open: false, clock_open: false, cal_ym: (1970, 1), cal_sel: 0, countdown: None, countdown_minute: 99 })
         });
         ics::spawn_feed(theme_path.clone());
         extras::spawn_weather(theme_path);

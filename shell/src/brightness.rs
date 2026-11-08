@@ -11,6 +11,9 @@ use std::time::{Duration, Instant};
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const STALE: Duration = Duration::from_secs(4);
 const STEP: i32 = 5;
+const MIN_PERCENT: u32 = 5;
+const MAX_PENDING: i32 = 50;
+const TIMEOUT: Duration = Duration::from_secs(8);
 const CLI: &str = "PowerToys.PowerDisplay.CLI.exe";
 
 struct Shared {
@@ -55,9 +58,25 @@ fn parse_levels(json: &str) -> Vec<(u32, u32)> {
         .collect()
 }
 
+// Con tope de tiempo: un CLI colgado (DDC/CI lento) no puede dejar el worker ocupado para siempre.
 fn run(args: &[String]) -> Option<String> {
-    let out = std::process::Command::new(exe()?).arg("--json").args(args).creation_flags(CREATE_NO_WINDOW).output().ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    use std::io::Read;
+    let mut child = std::process::Command::new(exe()?).arg("--json").args(args).stdout(std::process::Stdio::piped()).creation_flags(CREATE_NO_WINDOW).spawn().ok()?;
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut out = String::new();
+                child.stdout.take()?.read_to_string(&mut out).ok()?;
+                return status.success().then_some(out);
+            }
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                return None;
+            }
+        }
+    }
 }
 
 fn args(a: &[&str]) -> Vec<String> {
@@ -144,14 +163,15 @@ pub fn refresh_if_stale() {
 // `notches` con signo: cada uno mueve STEP puntos.
 pub fn adjust(notches: i32) {
     let mut s = SHARED.lock().unwrap();
-    s.pending += notches * STEP;
+    s.pending = (s.pending + notches * STEP).clamp(-MAX_PENDING, MAX_PENDING);
     s.last = Some(Instant::now());
     kick(&mut s);
 }
 
 pub fn set(percent: u32) {
     let mut s = SHARED.lock().unwrap();
-    s.set_to = Some(percent.min(100));
+    // Nunca 0 %: en algunos paneles apaga la retroiluminación y la pantalla queda ilegible.
+    s.set_to = Some(percent.clamp(MIN_PERCENT, 100));
     s.last = Some(Instant::now());
     kick(&mut s);
 }

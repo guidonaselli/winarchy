@@ -15,7 +15,7 @@ pub struct Theme {
     pub pet: bool,
     #[serde(default)]
     pub location: Option<Location>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "urls")]
     pub calendar: Vec<String>,
 }
 
@@ -23,6 +23,15 @@ pub struct Theme {
 pub struct Location {
     pub lat: f64,
     pub lon: f64,
+}
+
+// Una URL suelta o una lista; cualquier otra cosa se ignora en vez de invalidar todo el theme.
+fn urls<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    Ok(match serde_json::Value::deserialize(d)? {
+        serde_json::Value::String(s) => vec![s],
+        serde_json::Value::Array(a) => a.into_iter().filter_map(|v| v.as_str().map(String::from)).collect(),
+        _ => Vec::new(),
+    })
 }
 
 fn on() -> bool {
@@ -119,6 +128,15 @@ mod tests {
         std::fs::write(d.join("user.json"), r#"{"location":{"lat":-34.6,"lon":-58.4}}"#).unwrap();
         let l = Theme::load(&d.join("theme.json")).unwrap().location.unwrap();
         assert_eq!((l.lat, l.lon), (-34.6, -58.4));
+    }
+
+    #[test]
+    fn a_malformed_calendar_never_invalidates_the_theme() {
+        let base = r##"{"background":"#000000","opacity":1.0,"foreground":"#ffffff","accent":"#ff0000","muted":"#111111","font_family":"A","font_size":12,"position":"top","calendar":CAL}"##;
+        for (cal, want) in [(r#""https://a/b.ics""#, 1), (r#"["https://a","https://b"]"#, 2), ("42", 0), (r#"[1,"https://a"]"#, 1)] {
+            let t: Theme = serde_json::from_str(&base.replace("CAL", cal)).unwrap();
+            assert_eq!(t.calendar.len(), want, "{cal}");
+        }
     }
 
     #[test]
