@@ -158,6 +158,21 @@ pub fn corner(scale: f32, height: i32) -> i32 {
     px(CORNER_DIP, scale).min(height / 2)
 }
 
+// Suavizado de entrada/salida (smoothstep) para el fade del contenido.
+pub fn ease(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+// Mezcla un píxel RGB hacia `base` con factor `f` (1 = píxel intacto, 0 = solo fondo); no toca el alfa.
+pub fn blend_toward(p: u32, base: (u8, u8, u8), f: f32) -> u32 {
+    let ch = |shift: u32, b: u8| {
+        let c = ((p >> shift) & 0xFF) as f32;
+        ((b as f32 + (c - b as f32) * f).round().clamp(0.0, 255.0) as u32) << shift
+    };
+    (p & 0xFF00_0000) | ch(16, base.0) | ch(8, base.1) | ch(0, base.2)
+}
+
 // Cobertura 0..1 del notch: esquinas de arriba rectas (pegadas al borde), las de abajo redondeadas.
 pub fn notch_coverage(x: f32, y: f32, w: f32, h: f32, r: f32, flip: bool) -> f32 {
     let y = if flip { h - y } else { y };
@@ -309,6 +324,19 @@ mod tests {
         assert!(notch_coverage(0.5, h - 0.5, w, h, r, false) < 0.1);
         assert!(notch_coverage(0.5, 0.5, w, h, r, true) < 0.1);
         assert_eq!(notch_coverage(0.5, h - 0.5, w, h, r, true), 1.0);
+    }
+
+    #[test]
+    fn fade_blends_between_background_and_pixel() {
+        let base = (10, 20, 30);
+        let p = 0x00C8_C8C8;
+        assert_eq!(blend_toward(p, base, 1.0), p);
+        assert_eq!(blend_toward(p, base, 0.0), 10 << 16 | 20 << 8 | 30);
+        let half = blend_toward(p, base, 0.5);
+        assert_eq!((half >> 16) & 0xFF, 105);
+        assert_eq!(ease(0.0), 0.0);
+        assert_eq!(ease(1.0), 1.0);
+        assert!(ease(0.25) < 0.25 && ease(0.75) > 0.75);
     }
 
     #[test]

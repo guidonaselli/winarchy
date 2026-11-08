@@ -40,6 +40,7 @@ const TIMER_HOVER: usize = 5;
 const FLASH_MS: u32 = 800;
 const HOVER_MS: u32 = 120;
 const PILL_MAX_W: i32 = 1400;
+const FADE_SECS: f32 = 0.18;
 
 struct State {
     theme: Theme,
@@ -72,6 +73,8 @@ struct State {
     layout: Layout,
     pill_mon: RECT,
     layout_sig: Vec<(i32, i32, i32, i32, u32)>,
+    fade: f32,
+    was_open: bool,
 }
 
 // Contenido del panel expandido; se rearma en cada tick mientras la isla está abierta.
@@ -248,6 +251,12 @@ unsafe fn render_pill(pill: HWND) {
     let need = widest.min(px(PILL_MAX_W, scale)).min((mon.right - mon.left) * 3 / 4);
     let base = layout::bar_width(scale, orb, &dots, 0, ext.cx);
     let (width, height, animating, strip, label, panel) = with(|s| {
+        if live_panel.is_some() != s.was_open {
+            s.was_open = live_panel.is_some();
+            if s.was_open {
+                s.fade = 0.0;
+            }
+        }
         if let Some(p) = &live_panel {
             s.panel_shown = Some(p.clone());
         }
@@ -273,7 +282,7 @@ unsafe fn render_pill(pill: HWND) {
         if live_panel.is_none() && height as f32 <= s.target_h + 1.0 {
             s.panel_shown = None;
         }
-        (width, height, (s.cur_w - s.target_w).abs() > 0.5 || (s.cur_h - s.target_h).abs() > 0.5, s.strip, s.last_label.clone(), s.panel_shown.clone())
+        (width, height, (s.cur_w - s.target_w).abs() > 0.5 || (s.cur_h - s.target_h).abs() > 0.5 || s.fade < 1.0, s.strip, s.last_label.clone(), s.panel_shown.clone())
     });
     if animating {
         SetTimer(strip, TIMER_ANIM, 8, None);
@@ -388,6 +397,18 @@ unsafe fn render_pill(pill: HWND) {
         }
         draw_text(mem, &p.notes, lay.place(pr.notes), muted_c, DT_VCENTER | DT_RIGHT);
     }
+    let fade = layout::ease(with(|s| s.fade));
+    if fade < 1.0 && panel.is_some() {
+        let (y0, y1) = if flip { (0, height - bar_h) } else { (bar_h, height) };
+        for y in y0.max(0)..y1.max(0) {
+            for x in 0..width {
+                let i = (y * width + x) as usize;
+                if mask[i] >= 1.0 {
+                    pixels[i] = layout::blend_toward(pixels[i], bg, fade);
+                }
+            }
+        }
+    }
     // GDI no escribe alfa: dentro de la isla el texto debe quedar opaco.
     for (p, a) in pixels.iter_mut().zip(&mask) {
         if *a >= 1.0 {
@@ -439,10 +460,12 @@ unsafe fn spring_step(strip: HWND) {
         s.anim_last = Some(now);
         let w = spring(&mut s.cur_w, &mut s.vel, s.target_w, dt);
         let h = spring(&mut s.cur_h, &mut s.vel_h, s.target_h, dt);
-        if w && h {
+        s.fade = (s.fade + dt / FADE_SECS).min(1.0);
+        let settled = w && h && s.fade >= 1.0;
+        if settled {
             s.anim_last = None;
         }
-        (s.pill, w && h)
+        (s.pill, settled)
     });
     if settled {
         let _ = KillTimer(strip, TIMER_ANIM);
@@ -823,6 +846,8 @@ fn main() {
         let inst = GetModuleHandleW(PCWSTR::null()).unwrap();
         let scale = GetDpiForSystem() as f32 / 96.0;
         let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
+        // SetTimer de 8 ms rinde ~15 ms con la resolución por defecto: 1 ms hace real la animación.
+        windows::Win32::Media::timeBeginPeriod(1);
         let theme = Theme::load(&theme_path).unwrap_or_default();
 
         let arrow = LoadCursorW(None, IDC_ARROW).unwrap_or_default();
@@ -836,7 +861,7 @@ fn main() {
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, layout::bar_h(scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path: theme_path.clone(), scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig() })
+            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path: theme_path.clone(), scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig(), fade: 1.0, was_open: false })
         });
         extras::spawn_weather(theme_path);
         render_pill(pill);
