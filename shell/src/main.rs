@@ -2,6 +2,7 @@
 
 mod brightness;
 mod calendar;
+mod world;
 mod extras;
 mod i18n;
 mod ics;
@@ -106,6 +107,7 @@ struct CalView {
     sel: Option<u32>,
     marks: Vec<bool>,
     agenda: Vec<String>,
+    world: String,
 }
 
 const AGENDA_LINES: usize = 3;
@@ -125,7 +127,7 @@ fn short(s: &str, max: usize) -> String {
     if s.chars().count() <= max { s.to_string() } else { format!("{}…", s.chars().take(max - 1).collect::<String>()) }
 }
 
-fn calendar_view(ym: (i64, u32), sel: i64, configured: bool) -> CalView {
+fn calendar_view(ym: (i64, u32), sel: i64, configured: bool, world: String) -> CalView {
     use calendar::{days_from_civil, days_in_month, MIN_DAY};
     let (rows, cells) = calendar::month_grid(ym.0, ym.1);
     let first = days_from_civil(ym.0, ym.1, 1);
@@ -156,12 +158,13 @@ fn calendar_view(ym: (i64, u32), sel: i64, configured: bool) -> CalView {
         sel: day_in_month(sel, ym),
         marks,
         agenda,
+        world,
     }
 }
 
 fn clock_view() -> Option<CalView> {
-    let (open, ym, sel, configured) = with(|s| (s.clock_open, s.cal_ym, s.cal_sel, !s.theme.calendar.is_empty()));
-    open.then(|| calendar_view(ym, sel, configured))
+    let (open, ym, sel, configured, clocks) = with(|s| (s.clock_open, s.cal_ym, s.cal_sel, !s.theme.calendar.is_empty(), s.theme.clocks.clone()));
+    open.then(|| calendar_view(ym, sel, configured, world::line(&clocks)))
 }
 
 // Aviso en la barra cuando una reunión empieza en <= 15 min.
@@ -196,7 +199,7 @@ impl Meter {
 
 impl Panel {
     fn shape(&self) -> PanelShape {
-        PanelShape { media: self.media.is_some(), weather: self.weather.is_some(), meters: self.meters.len(), cal_rows: self.cal.as_ref().map_or(0, |c| c.rows), agenda: if self.cal.is_some() { AGENDA_LINES } else { 0 } }
+        PanelShape { media: self.media.is_some(), weather: self.weather.is_some(), meters: self.meters.len(), cal_rows: self.cal.as_ref().map_or(0, |c| c.rows), agenda: if self.cal.is_some() { AGENDA_LINES } else { 0 }, world: self.cal.as_ref().is_some_and(|c| !c.world.is_empty()) }
     }
 }
 
@@ -519,6 +522,7 @@ unsafe fn render_pill(pill: HWND) {
             for (line, r) in cv.agenda.iter().zip(&pr.agenda) {
                 draw_text(mem, line, lay.place(*r), fg_c, DT_VCENTER);
             }
+            draw_text(mem, &cv.world, lay.place(pr.world), muted_c, DT_VCENTER);
         }
         let chip_bg = tint(bg, fg, 0.07);
         for c in &pr.chips {

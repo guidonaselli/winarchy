@@ -98,6 +98,8 @@ That means Winarchy optimizes for:
     your calendar → "Secret address in iCal format") with `{"calendar": ["https://…/basic.ics"]}` in `config/shell/user.json`
     (refreshed every 15 min; events in other time zones are read as local time). A meeting starting within 15 min
     shows a countdown in the bar. The current temperature sits next to the dots (click it to open the forecast)
+  - world clock: list cities in `config/shell/user.json` as `{"clocks": [{"city": "NYC", "tz": "Eastern Standard Time"}]}` (Windows zone names, see `tzutil /l`);
+    one row with their time appears at the bottom of the clock panel, `+1d`/`-1d` when it is another day there. Without `clocks` nothing is shown
   - brightness: when PowerToys PowerDisplay is installed, a BRI meter appears in the panel (average of all monitors);
     scroll over it to change every monitor by 5 points, click the bar to set them all. Without PowerToys it is hidden
   - all island text is translated (English/Spanish): it follows `WINARCHY_LANG=es|en` or the Windows language; new texts go in `shell/src/i18n.rs`

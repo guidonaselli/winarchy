@@ -102,6 +102,7 @@ pub struct PanelRects {
     pub cal_heads: Vec<R>,
     pub cal_cells: Vec<R>,
     pub agenda: Vec<R>,
+    pub world: R,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
@@ -112,6 +113,8 @@ pub struct PanelShape {
     // Panel del reloj: filas de la grilla del mes (0 = no es ese panel) y líneas de agenda.
     pub cal_rows: usize,
     pub agenda: usize,
+    // Fila de relojes de otras ciudades bajo la agenda.
+    pub world: bool,
 }
 
 pub struct Inputs<'a> {
@@ -174,7 +177,8 @@ pub fn bar_width(scale: f32, orb: bool, temp_w: i32, dots: &[(usize, bool)], lab
 pub fn panel_height(scale: f32, shape: PanelShape) -> i32 {
     if shape.cal_rows > 0 {
         let fixed = CAL_HEAD_DIP + 2 + CAL_WEEK_DIP + 2 + SECTION_GAP_DIP + PANEL_TOP_DIP + PANEL_BOTTOM_DIP;
-        return px(fixed, scale) + shape.cal_rows as i32 * px(CAL_CELL_DIP, scale) + shape.agenda as i32 * px(AGENDA_LINE_DIP, scale);
+        let world = if shape.world { px(AGENDA_LINE_DIP + SECTION_GAP_DIP, scale) } else { 0 };
+        return px(fixed, scale) + shape.cal_rows as i32 * px(CAL_CELL_DIP, scale) + shape.agenda as i32 * px(AGENDA_LINE_DIP, scale) + world;
     }
     let gap = px(SECTION_GAP_DIP, scale);
     let media = if shape.media { px(MEDIA_DIP, scale) + gap } else { 0 };
@@ -256,10 +260,13 @@ impl Layout {
         p.cal_cells = (0..shape.cal_rows * 7).map(|n| R::new(x0 + (n % 7) as i32 * col, y + (n / 7) as i32 * cell, col, cell)).collect();
         y += shape.cal_rows as i32 * cell + gap;
         p.agenda = (0..shape.agenda).map(|n| R::new(pad, y + n as i32 * line, right - pad, line)).collect();
+        if shape.world {
+            p.world = R::new(pad, y + shape.agenda as i32 * line + gap, right - pad, line);
+        }
         if i.flip {
             // El orden visual (título arriba, agenda abajo) no cambia al pegar la isla abajo: se espeja dentro del panel.
             let total = panel_height(s, shape);
-            for r in [&mut p.cal_title, &mut p.cal_prev, &mut p.cal_next].into_iter().chain(&mut p.cal_heads).chain(&mut p.cal_cells).chain(&mut p.agenda) {
+            for r in [&mut p.cal_title, &mut p.cal_prev, &mut p.cal_next, &mut p.world].into_iter().chain(&mut p.cal_heads).chain(&mut p.cal_cells).chain(&mut p.agenda) {
                 r.y = 2 * bar + total - r.y - r.h;
             }
         }
@@ -486,7 +493,7 @@ mod tests {
     #[test]
     fn calendar_panel_hits_cells_and_stays_inside_in_both_orientations() {
         for (scale, flip) in [(1.0, false), (1.0, true), (1.5, true)] {
-            let shape = PanelShape { cal_rows: 5, agenda: 3, ..Default::default() };
+            let shape = PanelShape { cal_rows: 5, agenda: 3, world: true, ..Default::default() };
             let width = px(PANEL_W_DIP, scale);
             let height = bar_h(scale) + panel_height(scale, shape);
             let l = Layout::new(&Inputs { scale, width, height, flip, clock_w: px(40, scale), orb: false, temp_w: 0, dots: &[(0, true)], panel: Some(shape) });
@@ -500,7 +507,7 @@ mod tests {
             assert_eq!(l.hit(n.x + 2, n.y + 2), Some(Hit::CalNext));
             let pv = l.place(p.cal_prev);
             assert_eq!(l.hit(pv.x + 2, pv.y + 2), Some(Hit::CalPrev));
-            for r in [p.cal_title, p.cal_prev, p.cal_next].into_iter().chain(p.cal_heads.iter().copied()).chain(p.cal_cells.iter().copied()).chain(p.agenda.iter().copied()) {
+            for r in [p.cal_title, p.cal_prev, p.cal_next, p.world].into_iter().chain(p.cal_heads.iter().copied()).chain(p.cal_cells.iter().copied()).chain(p.agenda.iter().copied()) {
                 let r = l.place(r);
                 assert!(r.x >= 0 && r.x + r.w <= width && r.y >= 0 && r.y + r.h <= height, "{r:?} fuera de {width}x{height}");
             }

@@ -17,6 +17,22 @@ pub struct Theme {
     pub location: Option<Location>,
     #[serde(default, deserialize_with = "urls")]
     pub calendar: Vec<String>,
+    #[serde(default, deserialize_with = "clocks")]
+    pub clocks: Vec<ClockCfg>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct ClockCfg {
+    pub city: String,
+    pub tz: String,
+}
+
+// Las entradas mal formadas se descartan una por una: un error de tipeo no invalida el theme.
+fn clocks<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<ClockCfg>, D::Error> {
+    Ok(match serde_json::Value::deserialize(d)? {
+        serde_json::Value::Array(a) => a.into_iter().filter_map(|v| serde_json::from_value(v).ok()).collect(),
+        _ => Vec::new(),
+    })
 }
 
 #[derive(Deserialize, Clone, Copy)]
@@ -52,6 +68,7 @@ impl Default for Theme {
             pet: true,
             location: None,
             calendar: Vec::new(),
+            clocks: Vec::new(),
         }
     }
 }
