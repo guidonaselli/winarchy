@@ -61,6 +61,12 @@ function Add-WinarchyWindowRulesToKomorebiJson {
             $workspace | Add-Member -NotePropertyName $key -NotePropertyValue @($rule)
         }
     }
+    foreach ($saved in @(Import-WinarchyWorkspaceLayouts)) {
+        if (-not $map.ContainsKey($saved.Monitor)) { continue }
+        $monitor = $config.monitors[$map[$saved.Monitor]]
+        if (-not $monitor -or $saved.Workspace -ge @($monitor.workspaces).Count) { continue }
+        $monitor.workspaces[$saved.Workspace] | Add-Member -NotePropertyName layout -NotePropertyValue $saved.Layout -Force
+    }
     $config | ConvertTo-Json -Depth 50
 }
 
@@ -97,6 +103,33 @@ function Get-WinarchyWindowPlacements {
     # Sin envolver en `, @(...)`: eso preserva el array al asignar pero lo pasa como un
     # unico elemento al pipear. Los llamadores envuelven con @().
     $out
+}
+
+function Get-WinarchyLiveWorkspaceLayouts {
+    <# Layout de cada workspace vivo que no sea el de fábrica (BSP). Los Custom se ignoran:
+       no hay forma de volcarlos a un nombre. #>
+    param([Parameter(Mandatory)]$State)
+    foreach ($monitor in $State.monitors.elements) {
+        $index = -1
+        foreach ($workspace in $monitor.workspaces.elements) {
+            $index++
+            $name = $workspace.layout.PSObject.Properties['Default']?.Value
+            if ($monitor.device_id -and $name -and $name -ne 'BSP') {
+                [pscustomobject]@{ Monitor = $monitor.device_id; Workspace = $index; Layout = $name }
+            }
+        }
+    }
+}
+
+function Import-WinarchyWorkspaceLayouts {
+    $path = Get-WinarchyWindowPrefsPath
+    if (-not (Test-Path $path)) { return }
+    $data = Import-WinarchyToml -Path $path
+    if (-not $data.ContainsKey('workspaces')) { return }
+    foreach ($entry in $data['workspaces']) {
+        if (-not $entry['monitor'] -or -not $entry['layout']) { continue }
+        [pscustomobject]@{ Monitor = $entry['monitor']; Workspace = [int]$entry['workspace']; Layout = $entry['layout'] }
+    }
 }
 
 function Get-WinarchyMonitorIndexMap {
@@ -150,7 +183,9 @@ function Import-WinarchyWindowPrefs {
 }
 
 function Export-WinarchyWindowPrefs {
-    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Pref)
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Pref, [object[]]$Layout)
+    # sin -Layout se conservan los guardados: quien solo toca ventanas no debe borrarlos
+    if (-not $PSBoundParameters.ContainsKey('Layout')) { $Layout = @(Import-WinarchyWorkspaceLayouts) }
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add('# Preferencias de ubicación de ventanas de ESTA máquina.')
     $lines.Add('# Se captura con `winarchy layout save` y se reproduce con `winarchy layout apply`.')
@@ -158,6 +193,7 @@ function Export-WinarchyWindowPrefs {
     $lines.Add('# `pin = true` fija la ventana permanentemente en vez de solo al abrirla.')
     $lines.Add('# `slot` es la posición del tile dentro del workspace (0 = el primero); solo se guarda y')
     $lines.Add('# se aplica en apps con `pin = true`. El resto se ubica al abrir y nadie las reordena.')
+    $lines.Add('# `[[workspaces]]` guarda el layout de teselado de los workspaces que no usan BSP.')
     foreach ($p in ($Pref | Sort-Object Exe)) {
         $lines.Add('')
         $lines.Add('[[windows]]')
@@ -168,7 +204,24 @@ function Export-WinarchyWindowPrefs {
         if ($null -ne $p.Slot) { $lines.Add("slot = $($p.Slot)") }
         if ($p.Pin) { $lines.Add('pin = true') }
     }
+    foreach ($l in ($Layout | Sort-Object Monitor, Workspace)) {
+        $lines.Add('')
+        $lines.Add('[[workspaces]]')
+        $lines.Add("monitor = `"$($l.Monitor)`"")
+        $lines.Add("workspace = $($l.Workspace)")
+        $lines.Add("layout = `"$($l.Layout)`"")
+    }
     Set-WinarchyFileAtomic -Path (Get-WinarchyWindowPrefsPath) -Value ($lines -join "`r`n")
+}
+
+function Save-WinarchyWorkspaceLayouts {
+    <# Layouts a guardar: los vivos reemplazan a los de los monitores conectados; los de
+       monitores desconectados se conservan. Con -Keep (captura de una sola app) no se toca nada. #>
+    param([Parameter(Mandatory)]$State, [switch]$Keep)
+    $saved = @(Import-WinarchyWorkspaceLayouts)
+    if ($Keep) { return $saved }
+    $map = Get-WinarchyMonitorIndexMap -State $State
+    @($saved | Where-Object { -not $map.ContainsKey($_.Monitor) }) + @(Get-WinarchyLiveWorkspaceLayouts -State $State)
 }
 
 function Save-WinarchyWindowLayout {
@@ -209,7 +262,8 @@ function Save-WinarchyWindowLayout {
         $prefs += $placement
     }
     $null = Resolve-WinarchySlotConflicts -Pref $prefs -Live (Get-WinarchyLiveSlotKeys -State $state)
-    Export-WinarchyWindowPrefs -Pref $prefs
+    $layouts = @(Save-WinarchyWorkspaceLayouts -State $state -Keep:([bool]$Exe))
+    Export-WinarchyWindowPrefs -Pref $prefs -Layout $layouts
     Write-WinarchyOk "Layout saved: $added new, $updated updated ($($prefs.Count) total) → $(Get-WinarchyWindowPrefsPath)"
     Write-WinarchyInfo 'Apply it with: winarchy layout apply'
 }
@@ -218,7 +272,7 @@ function Invoke-WinarchyLayoutApply {
     <# Regenera komorebi.json con las preferencias adentro y lo recarga. #>
     param([switch]$Quiet)
     $prefs = @(Import-WinarchyWindowPrefs)
-    if ($prefs.Count -eq 0) {
+    if ($prefs.Count -eq 0 -and @(Import-WinarchyWorkspaceLayouts).Count -eq 0) {
         if (-not $Quiet) { Write-WinarchyInfo 'No saved window preferences.' }
         return
     }
@@ -240,7 +294,8 @@ function Invoke-WinarchyLayoutApply {
 function Get-WinarchyWindowLayout {
     <# Preferencias guardadas, marcando las que no resuelven a un monitor conectado. #>
     $prefs = @(Import-WinarchyWindowPrefs)
-    if ($prefs.Count -eq 0) {
+    $layouts = @(Import-WinarchyWorkspaceLayouts)
+    if ($prefs.Count -eq 0 -and $layouts.Count -eq 0) {
         Write-WinarchyInfo "No saved preferences. Arrange your windows and run: winarchy layout save"
         return
     }
@@ -254,6 +309,10 @@ function Get-WinarchyWindowLayout {
         $pin = if ($pref.Pin) { ' [pinned]' } else { '' }
         $slot = if ($null -ne $pref.Slot) { ", slot $($pref.Slot)" } else { '' }
         Write-Host ("  {0,-34} {1}, workspace {2}{3}{4}{5}" -f $pref.Exe, $where, $pref.Workspace, $name, $slot, $pin)
+    }
+    foreach ($l in ($layouts | Sort-Object Monitor, Workspace)) {
+        $where = if ($map.ContainsKey($l.Monitor)) { "monitor $($map[$l.Monitor])" } else { 'monitor NOT CONNECTED' }
+        Write-Host ("  {0,-34} {1}, workspace {2}" -f "layout $($l.Layout)", $where, $l.Workspace)
     }
 }
 

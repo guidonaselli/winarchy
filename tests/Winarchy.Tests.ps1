@@ -882,6 +882,45 @@ Describe 'Window placement' {
         }
     }
 
+    It 'persists non-default workspace layouts and keeps them when only windows are saved' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            New-Item -ItemType Directory -Path (Join-Path $TestDrive 'config') -Force | Out-Null
+            $state = [pscustomobject]@{ monitors = [pscustomobject]@{ elements = @(
+                [pscustomobject]@{ device_id = 'AAA1'; workspaces = [pscustomobject]@{ elements = @(
+                    [pscustomobject]@{ name = '1'; layout = [pscustomobject]@{ Default = 'Grid' } }
+                    [pscustomobject]@{ name = '2'; layout = [pscustomobject]@{ Default = 'BSP' } }
+                    [pscustomobject]@{ name = '3'; layout = [pscustomobject]@{ Custom = @() } }) } }) } }
+            $live = @(Get-WinarchyLiveWorkspaceLayouts -State $state)
+            $live.Count | Should -Be 1
+            $live[0].Layout | Should -Be 'Grid'
+            Export-WinarchyWindowPrefs -Pref @() -Layout (@($live) + [pscustomobject]@{ Monitor = 'GONE'; Workspace = 4; Layout = 'Columns' })
+            Export-WinarchyWindowPrefs -Pref @([pscustomobject]@{ Exe = 'a.exe'; Monitor = 'AAA1'; Workspace = 0; WorkspaceName = '1'; Slot = $null; Pin = $false })
+            $back = @(Import-WinarchyWorkspaceLayouts)
+            $back.Count | Should -Be 2
+            # un monitor desconectado conserva el suyo; el conectado se reemplaza por lo vivo
+            $merged = @(Save-WinarchyWorkspaceLayouts -State $state)
+            ($merged | Where-Object Monitor -eq 'GONE').Layout | Should -Be 'Columns'
+            ($merged | Where-Object Monitor -eq 'AAA1').Layout | Should -Be 'Grid'
+        }
+    }
+
+    It 'writes saved layouts into the generated komorebi.json only for connected monitors' {
+        InModuleScope Winarchy {
+            Mock Test-WinarchyProcess { $true }
+            Mock Get-WinarchyKomorebiState { [pscustomobject]@{ monitors = [pscustomobject]@{ elements = @([pscustomobject]@{ device_id = 'AAA1' }) } } }
+            Mock Import-WinarchyWindowPrefs { }
+            Mock Import-WinarchyWorkspaceLayouts {
+                [pscustomobject]@{ Monitor = 'AAA1'; Workspace = 1; Layout = 'Columns' }
+                [pscustomobject]@{ Monitor = 'GONE'; Workspace = 0; Layout = 'Rows' }
+            }
+            $json = '{"monitors":[{"workspaces":[{"name":"1","layout":"BSP"},{"name":"2","layout":"BSP"}]}]}'
+            $out = Add-WinarchyWindowRulesToKomorebiJson -Json $json | ConvertFrom-Json
+            $out.monitors[0].workspaces[0].layout | Should -Be 'BSP'
+            $out.monitors[0].workspaces[1].layout | Should -Be 'Columns'
+        }
+    }
+
     It 'round-trips preferences through the repo TOML parser' {
         InModuleScope Winarchy {
             Mock Get-WinarchyRoot { $TestDrive }
