@@ -25,7 +25,6 @@ const CAL_HEAD_DIP: i32 = 22;
 const CAL_WEEK_DIP: i32 = 14;
 const CAL_CELL_DIP: i32 = 24;
 const AGENDA_LINE_DIP: i32 = 17;
-const ICON_DIP: i32 = 14;
 
 pub fn px(dip: i32, scale: f32) -> i32 {
     (dip as f32 * scale).round() as i32
@@ -60,7 +59,7 @@ pub enum Hit {
     // Fila de medidor: índice y, si el clic cayó sobre la barra, su fracción 0..1.
     Meter(usize, Option<f32>),
     Clock,
-    LayoutIcon,
+    Temp,
     CalPrev,
     CalNext,
     // Celda de la grilla del mes, por índice.
@@ -122,7 +121,7 @@ pub struct Inputs<'a> {
     pub flip: bool,
     pub clock_w: i32,
     pub orb: bool,
-    pub icon: bool,
+    pub temp_w: i32,
     pub dots: &'a [(usize, bool)],
     pub panel: Option<PanelShape>,
 }
@@ -134,7 +133,7 @@ pub struct Layout {
     pub flip: bool,
     pub bar_h: i32,
     pub orb: R,
-    pub icon: R,
+    pub temp: R,
     pub dots: Vec<Item>,
     pub label: R,
     pub clock: R,
@@ -161,15 +160,15 @@ fn dots_w(scale: f32, dots: &[(usize, bool)]) -> i32 {
     w + px(GAP_DIP, scale) * (dots.len() as i32 - 1).max(0)
 }
 
-fn lead_w(scale: f32, orb: bool, icon: bool, dots: &[(usize, bool)]) -> i32 {
+fn lead_w(scale: f32, orb: bool, temp_w: i32, dots: &[(usize, bool)]) -> i32 {
     let orb_w = if orb { bar_h(scale) } else { 0 };
-    orb_w + if dots.is_empty() { 0 } else { dots_w(scale, dots) + px(SEP_DIP, scale) } + if icon { px(ICON_DIP, scale) + px(SEP_DIP, scale) } else { 0 }
+    orb_w + if dots.is_empty() { 0 } else { dots_w(scale, dots) + px(SEP_DIP, scale) } + if temp_w > 0 { temp_w + px(SEP_DIP, scale) } else { 0 }
 }
 
 // Ancho natural de la barra: margen, orbe, puntos, etiqueta opcional y reloj.
-pub fn bar_width(scale: f32, orb: bool, icon: bool, dots: &[(usize, bool)], label_w: i32, clock_w: i32) -> i32 {
+pub fn bar_width(scale: f32, orb: bool, temp_w: i32, dots: &[(usize, bool)], label_w: i32, clock_w: i32) -> i32 {
     let label = if label_w > 0 { label_w + px(SEP_DIP, scale) } else { 0 };
-    px(PAD_DIP, scale) * 2 + lead_w(scale, orb, icon, dots) + label + clock_w
+    px(PAD_DIP, scale) * 2 + lead_w(scale, orb, temp_w, dots) + label + clock_w
 }
 
 pub fn panel_height(scale: f32, shape: PanelShape) -> i32 {
@@ -204,20 +203,6 @@ pub fn blend_toward(p: u32, base: (u8, u8, u8), f: f32) -> u32 {
     (p & 0xFF00_0000) | ch(16, base.0) | ch(8, base.1) | ch(0, base.2)
 }
 
-// Ventanas de cada layout de komorebi como rectángulos (x, y, w, h) en 0..1; la primera es la principal.
-pub fn layout_cells(name: &str) -> &'static [(f32, f32, f32, f32)] {
-    match name {
-        "Columns" => &[(0.0, 0.0, 0.34, 1.0), (0.34, 0.0, 0.33, 1.0), (0.67, 0.0, 0.33, 1.0)],
-        "Rows" => &[(0.0, 0.0, 1.0, 0.34), (0.0, 0.34, 1.0, 0.33), (0.0, 0.67, 1.0, 0.33)],
-        "VerticalStack" => &[(0.0, 0.0, 0.5, 1.0), (0.5, 0.0, 0.5, 0.5), (0.5, 0.5, 0.5, 0.5)],
-        "RightMainVerticalStack" => &[(0.5, 0.0, 0.5, 1.0), (0.0, 0.0, 0.5, 0.5), (0.0, 0.5, 0.5, 0.5)],
-        "HorizontalStack" => &[(0.0, 0.0, 1.0, 0.5), (0.0, 0.5, 0.5, 0.5), (0.5, 0.5, 0.5, 0.5)],
-        "UltrawideVerticalStack" => &[(0.25, 0.0, 0.5, 1.0), (0.0, 0.0, 0.25, 0.5), (0.0, 0.5, 0.25, 0.5), (0.75, 0.0, 0.25, 1.0)],
-        "Grid" => &[(0.0, 0.0, 0.5, 0.5), (0.5, 0.0, 0.5, 0.5), (0.0, 0.5, 0.5, 0.5), (0.5, 0.5, 0.5, 0.5)],
-        _ => &[(0.0, 0.0, 0.5, 1.0), (0.5, 0.0, 0.5, 0.5), (0.5, 0.5, 0.25, 0.5), (0.75, 0.5, 0.25, 0.5)],
-    }
-}
-
 // Cobertura 0..1 del notch: esquinas de arriba rectas (pegadas al borde), las de abajo redondeadas.
 pub fn notch_coverage(x: f32, y: f32, w: f32, h: f32, r: f32, flip: bool) -> f32 {
     let y = if flip { h - y } else { y };
@@ -245,9 +230,8 @@ impl Layout {
                 it
             })
             .collect::<Vec<_>>();
-        let lead_end = pad + lead_w(s, i.orb, i.icon, i.dots);
-        let icon_side = px(ICON_DIP, s);
-        let icon = if i.icon { R::new(lead_end - sep - icon_side, (bar - icon_side) / 2, icon_side, icon_side) } else { R::default() };
+        let lead_end = pad + lead_w(s, i.orb, i.temp_w, i.dots);
+        let temp = if i.temp_w > 0 { R::new(lead_end - sep - i.temp_w, 0, i.temp_w, bar) } else { R::default() };
         let clock = R::new(i.width - pad - i.clock_w, 0, i.clock_w, bar);
         // El botón de pin solo existe con el panel abierto y le quita sitio a la etiqueta.
         let pin = if i.panel.is_some() { R::new(clock.x - sep - bar, 0, bar, bar) } else { R::default() };
@@ -255,7 +239,7 @@ impl Layout {
         let label = R::new(lead_end, 0, label_end - lead_end, bar);
         let progress = R::new(pad, bar + px(2, s), i.width - 2 * pad, px(2, s));
         let panel = i.panel.map(|shape| Self::panel_rects(s, i, shape, bar));
-        Layout { width: i.width, height: i.height, flip: i.flip, bar_h: bar, orb, icon, dots, label, clock, progress, pin, panel }
+        Layout { width: i.width, height: i.height, flip: i.flip, bar_h: bar, orb, temp, dots, label, clock, progress, pin, panel }
     }
 
     fn calendar_rects(s: f32, i: &Inputs, shape: PanelShape, bar: i32) -> PanelRects {
@@ -354,8 +338,8 @@ impl Layout {
             return Some(Hit::Pin);
         }
         let reach = self.bar_h / 4;
-        if self.icon.w > 0 && R::new(self.icon.x - reach, 0, self.icon.w + 2 * reach, self.bar_h).contains(x, y) {
-            return Some(Hit::LayoutIcon);
+        if self.temp.w > 0 && R::new(self.temp.x - reach, 0, self.temp.w + 2 * reach, self.bar_h).contains(x, y) {
+            return Some(Hit::Temp);
         }
         if R::new(self.clock.x - reach, 0, self.clock.w + 2 * reach, self.bar_h).contains(x, y) {
             return Some(Hit::Clock);
@@ -401,9 +385,9 @@ mod tests {
     use super::*;
 
     fn inputs(flip: bool, panel: Option<PanelShape>, dots: &[(usize, bool)]) -> Layout {
-        let width = bar_width(1.0, false, false, dots, 0, 40).max(PANEL_W_DIP);
+        let width = bar_width(1.0, false, 0, dots, 0, 40).max(PANEL_W_DIP);
         let height = bar_h(1.0) + panel.map_or(0, |p| panel_height(1.0, p));
-        Layout::new(&Inputs { scale: 1.0, width, height, flip, clock_w: 40, orb: false, icon: false, dots, panel })
+        Layout::new(&Inputs { scale: 1.0, width, height, flip, clock_w: 40, orb: false, temp_w: 0, dots, panel })
     }
 
     #[test]
@@ -429,24 +413,14 @@ mod tests {
     }
 
     #[test]
-    fn every_layout_icon_tiles_the_unit_square() {
-        for name in ["BSP", "Columns", "Rows", "VerticalStack", "RightMainVerticalStack", "HorizontalStack", "UltrawideVerticalStack", "Grid", "desconocido"] {
-            let cells = layout_cells(name);
-            let area: f32 = cells.iter().map(|c| c.2 * c.3).sum();
-            assert!((area - 1.0).abs() < 0.02, "{name}: área {area}");
-            assert!(cells.iter().all(|c| c.0 >= 0.0 && c.1 >= 0.0 && c.0 + c.2 <= 1.001 && c.1 + c.3 <= 1.001), "{name} se sale del cuadrado");
-        }
-    }
-
-    #[test]
-    fn layout_icon_sits_after_the_dots_and_is_hit() {
+    fn temperature_sits_after_the_dots_and_is_hit() {
         let dots = [(0, true), (1, false)];
-        let width = bar_width(1.0, false, true, &dots, 0, 40);
-        let l = Layout::new(&Inputs { scale: 1.0, width, height: bar_h(1.0), flip: false, clock_w: 40, orb: false, icon: true, dots: &dots, panel: None });
-        assert!(l.icon.x >= l.dots[1].r.x + l.dots[1].r.w && l.icon.x + l.icon.w <= l.label.x + 1);
-        assert_eq!(l.hit(l.icon.x + 1, l.icon.y + 1), Some(Hit::LayoutIcon));
-        let none = Layout::new(&Inputs { scale: 1.0, width, height: bar_h(1.0), flip: false, clock_w: 40, orb: false, icon: false, dots: &dots, panel: None });
-        assert_eq!(none.icon.w, 0);
+        let width = bar_width(1.0, false, 30, &dots, 0, 40);
+        let l = Layout::new(&Inputs { scale: 1.0, width, height: bar_h(1.0), flip: false, clock_w: 40, orb: false, temp_w: 30, dots: &dots, panel: None });
+        assert!(l.temp.x >= l.dots[1].r.x + l.dots[1].r.w && l.temp.x + l.temp.w <= l.label.x + 1);
+        assert_eq!(l.hit(l.temp.x + 1, l.temp.y + 1), Some(Hit::Temp));
+        let none = Layout::new(&Inputs { scale: 1.0, width, height: bar_h(1.0), flip: false, clock_w: 40, orb: false, temp_w: 0, dots: &dots, panel: None });
+        assert_eq!(none.temp.w, 0);
     }
 
     #[test]
@@ -499,7 +473,7 @@ mod tests {
             let shape = Some(PanelShape { media: true, weather: true, meters: 3, ..Default::default() });
             let width = px(PANEL_W_DIP, scale);
             let height = bar_h(scale) + panel_height(scale, shape.unwrap());
-            let l = Layout::new(&Inputs { scale, width, height, flip: false, clock_w: px(40, scale), orb: true, icon: false, dots: &dots, panel: shape });
+            let l = Layout::new(&Inputs { scale, width, height, flip: false, clock_w: px(40, scale), orb: true, temp_w: 0, dots: &dots, panel: shape });
             let p = l.panel.as_ref().unwrap();
             let rects = [p.title, p.artist, p.weather, p.weather_title, p.weather_range, p.weather_detail, p.weather_detail2, p.prev, p.toggle, p.next, p.notes, l.clock].into_iter().chain(p.chips.iter().map(|c| c.r)).chain(p.meters.iter().flat_map(|m| [m.label, m.track, m.value]));
             for r in rects {
@@ -515,7 +489,7 @@ mod tests {
             let shape = PanelShape { cal_rows: 5, agenda: 3, ..Default::default() };
             let width = px(PANEL_W_DIP, scale);
             let height = bar_h(scale) + panel_height(scale, shape);
-            let l = Layout::new(&Inputs { scale, width, height, flip, clock_w: px(40, scale), orb: false, icon: false, dots: &[(0, true)], panel: Some(shape) });
+            let l = Layout::new(&Inputs { scale, width, height, flip, clock_w: px(40, scale), orb: false, temp_w: 0, dots: &[(0, true)], panel: Some(shape) });
             let p = l.panel.as_ref().unwrap();
             assert_eq!((p.cal_cells.len(), p.cal_heads.len(), p.agenda.len()), (35, 7, 3));
             for (n, c) in p.cal_cells.iter().enumerate() {

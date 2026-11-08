@@ -168,6 +168,11 @@ impl Feed {
         self.overridden.extend(other.overridden);
     }
 
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
+        self.raw.is_empty()
+    }
+
     // Eventos que tocan [from, to), ordenados por inicio.
     pub fn occurrences(&self, from: i64, to: i64) -> Vec<Event> {
         let mut out = Vec::new();

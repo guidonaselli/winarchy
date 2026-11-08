@@ -338,11 +338,14 @@ unsafe fn render_pill(pill: HWND) {
     let orb = assist != spirit::Assist::Idle && theme.pet;
     let progress = island.as_ref().and_then(|i| i.progress);
     let live_panel = with(|s| s.panel.clone());
-    let icon = !focused_ws.layout.is_empty();
-    let need_raw = layout::bar_width(scale, orb, icon, &dots, lext.cx, ext.cx) + if live_panel.is_some() { layout::pin_w(scale) } else { 0 };
+    let temp = extras::WEATHER.lock().unwrap().as_ref().map(|w| format!("{}°", w.temp)).unwrap_or_default();
+    let temp_u16: Vec<u16> = temp.encode_utf16().collect();
+    let mut text_ext = SIZE::default();
+    let temp_w = if temp.is_empty() { 0 } else { let _ = GetTextExtentPoint32W(mem, &temp_u16, &mut text_ext); text_ext.cx };
+    let need_raw = layout::bar_width(scale, orb, temp_w, &dots, lext.cx, ext.cx) + if live_panel.is_some() { layout::pin_w(scale) } else { 0 };
     let widest = need_raw.max(if live_panel.is_some() { px(layout::PANEL_W_DIP, scale) } else { 0 });
     let need = widest.min(px(PILL_MAX_W, scale)).min((mon.right - mon.left) * 3 / 4);
-    let base = layout::bar_width(scale, orb, icon, &dots, 0, ext.cx);
+    let base = layout::bar_width(scale, orb, temp_w, &dots, 0, ext.cx);
     let (width, height, animating, strip, label, panel) = with(|s| {
         if live_panel.is_some() != s.was_open {
             s.was_open = live_panel.is_some();
@@ -386,7 +389,7 @@ unsafe fn render_pill(pill: HWND) {
     if lext.cx == 0 && !label.is_empty() {
         let _ = GetTextExtentPoint32W(mem, &label, &mut lext);
     }
-    let lay = Layout::new(&Inputs { scale, width, height, flip, clock_w: ext.cx, orb, icon, dots: &dots, panel: panel.as_ref().map(Panel::shape) });
+    let lay = Layout::new(&Inputs { scale, width, height, flip, clock_w: ext.cx, orb, temp_w, dots: &dots, panel: panel.as_ref().map(Panel::shape) });
     let bmi = BITMAPINFO { bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: width, biHeight: -height, biPlanes: 1, biBitCount: 32, ..Default::default() }, ..Default::default() };
     let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
     let dib = CreateDIBSection(mem, &bmi, DIB_RGB_COLORS, &mut bits, None, 0).unwrap();
@@ -403,15 +406,6 @@ unsafe fn render_pill(pill: HWND) {
     }
     for d in &lay.dots {
         fill_round(pixels, width, height, lay.place(d.r), d.r.h / 2, if d.focused { accent } else { muted }, bg);
-    }
-    if icon {
-        let r = lay.place(lay.icon);
-        let inset = px(1, scale).max(1);
-        for (n, c) in layout::layout_cells(&focused_ws.layout).iter().enumerate() {
-            let side = r.w as f32;
-            let cell = R { x: r.x + (c.0 * side) as i32 + inset / 2, y: r.y + (c.1 * side) as i32 + inset / 2, w: (c.2 * side) as i32 - inset, h: (c.3 * side) as i32 - inset };
-            fill_round(pixels, width, height, cell, px(2, scale).min(cell.h / 2), if n == 0 { fg } else { muted }, bg);
-        }
     }
     let animate = animations_enabled();
     if assist != spirit::Assist::Idle {
@@ -437,6 +431,9 @@ unsafe fn render_pill(pill: HWND) {
     }
     SetBkMode(mem, TRANSPARENT);
     let (fg_c, muted_c, bg_c) = (colorref(&theme.foreground), colorref(&theme.muted), colorref(&theme.background));
+    if temp_w > 0 {
+        draw_text(mem, &temp, lay.place(lay.temp), muted_c, DT_CENTER | DT_VCENTER);
+    }
     if !label.is_empty() && lay.label.w > 0 {
         let clip = lay.place(lay.label);
         if need_raw > need && width >= need {
@@ -942,7 +939,11 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                     });
                     render_pill(h);
                 }
-                Some(Hit::LayoutIcon) => komorebi::cycle_layout(),
+                Some(Hit::Temp) => {
+                    if let Some(w) = extras::WEATHER.lock().unwrap().as_ref() {
+                        shell_open(&w.url());
+                    }
+                }
                 Some(Hit::Clock) => {
                     with(|s| {
                         s.clock_open = !s.clock_open;

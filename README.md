@@ -97,7 +97,7 @@ That means Winarchy optimizes for:
   - click the clock for a month calendar with the day's agenda; add read-only ICS feeds (Google Calendar: Settings →
     your calendar → "Secret address in iCal format") with `{"calendar": ["https://…/basic.ics"]}` in `config/shell/user.json`
     (refreshed every 15 min; events in other time zones are read as local time). A meeting starting within 15 min
-    shows a countdown in the bar. The small layout icon next to the dots shows komorebi's layout; click it to cycle
+    shows a countdown in the bar. The current temperature sits next to the dots (click it to open the forecast)
   - brightness: when PowerToys PowerDisplay is installed, a BRI meter appears in the panel (average of all monitors);
     scroll over it to change every monitor by 5 points, click the bar to set them all. Without PowerToys it is hidden
   - all island text is translated (English/Spanish): it follows `WINARCHY_LANG=es|en` or the Windows language; new texts go in `shell/src/i18n.rs`
