@@ -94,6 +94,12 @@ That means Winarchy optimizes for:
   - the weather comes from Open-Meteo (no key); set your place with `{"location": {"lat": -34.6, "lon": -58.4}}`
     in `config/shell/user.json` (without it, the shell falls back to the location YASB cached, if any)
     (an out-of-range location is ignored, and edits apply within ~30 min; clicking CPU/RAM opens Task Manager, which asks for UAC)
+  - click the clock for a month calendar with the day's agenda; add read-only ICS feeds (Google Calendar: Settings →
+    your calendar → "Secret address in iCal format") with `{"calendar": ["https://…/basic.ics"]}` in `config/shell/user.json`
+    (refreshed every 15 min; events in other time zones are read as local time). A meeting starting within 15 min
+    shows a countdown in the bar. The small layout icon next to the dots shows komorebi's layout; click it to cycle
+  - brightness: when PowerToys PowerDisplay is installed, a BRI meter appears in the panel (average of all monitors);
+    scroll over it to change every monitor by 5 points, click the bar to set them all. Without PowerToys it is hidden
   - all island text is translated (English/Spanish): it follows `WINARCHY_LANG=es|en` or the Windows language; new texts go in `shell/src/i18n.rs`
   - Espectro, the assistant's spirit (a dark, glowing-eyed creature tinted with your theme's accent), shows in the pill only while the assistant listens, thinks or speaks; its eyes follow the mouse and its face changes with each state; `{"pet": false}` in
     `config/shell/user.json` hides it (that file survives `theme set` and updates)
