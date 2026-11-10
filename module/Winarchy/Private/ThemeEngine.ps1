@@ -747,8 +747,9 @@ function Invoke-WinarchyReload {
     $root = Get-WinarchyRoot
     $env:KOMOREBI_CONFIG_HOME = Join-Path $root 'config\komorebi'
     $env:YASB_CONFIG_HOME = Join-Path $root 'config\yasb'
-    if (Test-WinarchyProcess 'komorebi') { komorebic reload-configuration 2>$null | Out-Null }
-    else { Start-WinarchyKomorebi }
+    if (-not (Test-WinarchyProcess 'komorebi')) { Start-WinarchyKomorebi }
+    # -Light corre solo (sync de accent, cambio de barra): ahí nunca se reinicia komorebi
+    elseif ($Light -or -not (Repair-WinarchyKomorebiMonitors)) { komorebic reload-configuration 2>$null | Out-Null }
     # YASB: reinicio limpio (kill + start) en vez de `yasbc reload`. El hot-reload de
     # YASB re-suscribe su widget de komorebi al named pipe pero deja viva la suscripción
     # anterior; con >1 reactor vivo las barras pelean el foco y mandan FocusWorkspaceNumber(0),

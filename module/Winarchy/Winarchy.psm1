@@ -73,6 +73,8 @@ function Show-WinarchyHelp {
                               Windhawk + curated mods (invasive: asks first; elevated shell)
     extras remove windhawk    Remove the curated mods (and Windhawk if no other mods remain)
     reload                    Reload komorebi, YASB, AHK and Flow
+    heal-monitors             Restart komorebi if it lost track of a monitor (runs by itself
+                              when a display is plugged, unplugged or powered back on)
     doctor                    Stack diagnostics (green/red + suggested fix)
 
 '@
@@ -301,6 +303,13 @@ function Invoke-Winarchy {
             }
         }
         'reload' { Invoke-WinarchyReload; Write-WinarchyOk 'Stack reloaded.' }
+        'heal-monitors' {
+            # la barra se suscribe al komorebi que acaba de morir: se la relanza
+            if (Repair-WinarchyKomorebiMonitors -Throttled) {
+                Invoke-WinarchyReload -Light
+                exit 3   # AHK avisa por el tray
+            }
+        }
         'doctor' { exit (Invoke-WinarchyDoctor) }
         default {
             Write-WinarchyErr "Unknown subcommand: $cmd"

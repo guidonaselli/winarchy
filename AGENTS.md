@@ -18,6 +18,10 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
 - El reconciliador de slots (`scripts/Start-WindowSlots.ps1`) es lo único que reordena
   containers solo: corrige cuando aparece una ventana y aprende cuando la movés vos. No
   registra hotkeys ni tray propio.
+- komorebi puede perder un monitor cuando una pantalla se apaga y se prende (queda uno duplicado
+  y falta el real); solo un reinicio lo recupera. `winarchy heal-monitors` lo detecta y reinicia:
+  AHK lo corre ante `WM_DISPLAYCHANGE` (nunca por polling, y lo pospone con un juego en primer
+  plano) y `winarchy reload` lo incluye. Nunca matar komorebi a la fuerza: deja ventanas ocultas.
 - `config/windows.toml` (ubicación de ventanas) es dato de la máquina, no del producto:
   gitignored y nunca con apps hardcodeadas en el repo. Sus reglas se inyectan DENTRO del
   komorebi.json generado; no usar `komorebic workspace-rule` por runtime, que un reload

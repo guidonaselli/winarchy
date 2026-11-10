@@ -43,7 +43,7 @@ try FileOpen(StateDir "\ahk.pid", "w").Write(DllCall("GetCurrentProcessId"))
 ; --- Watchdog de modificadores ------------------------------------------------
 ; Evita que Win/Alt/Ctrl queden trabados lógicamente si un cambio de foco, una
 ; ventana con privilegios o un hook sintético tragan el evento key-up.
-#InstallKeybdHook
+InstallKeybdHook()
 SetTimer(ReconcileModifiers, 200)
 
 ReconcileModifiers() {
@@ -61,7 +61,7 @@ ReconcileModifiers() {
     if GetKeyState('RCtrl') && !GetKeyState('RCtrl', 'P')
         toRelease .= '{RCtrl up}'
     if (toRelease != '')
-        Send('{Blind}' toRelease)
+        Send('{Blind}{vkE8}' toRelease)   ; vkE8 enmascara: un Win/Alt-up a secas abre Inicio o la barra de menú
 }
 
 ; Fallback instantáneo: presionar Escape limpia modificadores fantasma
@@ -113,19 +113,57 @@ FocusWorkspace(index) {
     Komorebic('focus-workspace ' index)
 }
 
+; Estado vivo de komorebi como objeto JS; `first` es un comando de komorebic a correr antes.
+KomorebiState(first := '') {
+    global KomorebicExe
+    tmp := A_Temp '\winarchy-state.json'
+    RunWait(A_ComSpec ' /c "' (first ? '"' KomorebicExe '" ' first ' & ' : '') '"' KomorebicExe '" state > "' tmp '""', , 'Hide')
+    doc := ComObject('htmlfile')
+    doc.write('<meta http-equiv="X-UA-Compatible" content="IE=edge">')
+    return doc.parentWindow.JSON.parse(FileRead(tmp))
+}
+
+; Como Hyprland `l/r/u/d`: corre `cmd <índice>` sobre el monitor más cercano de ese lado del
+; enfocado; si de ese lado no hay ninguno, no hace nada.
+MonitorToward(dir, cmd) {
+    try {
+        mons := KomorebiState().monitors
+        cur := mons.elements.%mons.focused%.size   ; right/bottom son ancho/alto
+        cx := cur.left + cur.right / 2, cy := cur.top + cur.bottom / 2
+        best := -1, bestDist := 0
+        Loop mons.elements.length {
+            i := A_Index - 1
+            if (i = mons.focused)
+                continue
+            s := mons.elements.%i%.size
+            dx := s.left + s.right / 2 - cx, dy := s.top + s.bottom / 2 - cy
+            along := dir = 'l' ? -dx : dir = 'r' ? dx : dir = 'u' ? -dy : dy
+            across := (dir = 'l' || dir = 'r') ? Abs(dy) : Abs(dx)
+            if (along <= 0 || across > along)   ; fuera del cono de 45° de esa dirección
+                continue
+            if (best < 0 || along < bestDist)
+                best := i, bestDist := along
+        }
+        if (best >= 0)
+            Komorebic(cmd ' ' best)
+    }
+}
+
+; komorebi solo tiene un paso de resize global (50): se cambia para este resize y se restaura.
+ResizeStep(args, delta) {
+    global KomorebicExe
+    for cmd in ['resize-delta ' delta, 'resize-axis ' args, 'resize-delta 50']
+        RunWait('"' KomorebicExe '" ' cmd, , 'Hide')
+}
+
 ; Como Hyprland `e+1`: salta los workspaces vacios. wrap=false (la rueda) se detiene en los extremos.
 CycleOccupied(dir, wrap := true) {
-    global KomorebicExe
     static last := 0
     if (A_TickCount - last < 120)   ; una rueda libre manda varios eventos por gesto
         return
     last := A_TickCount
-    tmp := A_Temp '\winarchy-state.json'
     try {
-        RunWait(A_ComSpec ' /c ""' KomorebicExe '" focus-monitor-at-cursor & "' KomorebicExe '" state > "' tmp '""', , 'Hide')
-        doc := ComObject('htmlfile')
-        doc.write('<meta http-equiv="X-UA-Compatible" content="IE=edge">')
-        state := doc.parentWindow.JSON.parse(FileRead(tmp))
+        state := KomorebiState('focus-monitor-at-cursor')
         wss := state.monitors.elements.%state.monitors.focused%.workspaces
         n := wss.elements.length, cur := wss.focused
         Loop n - 1 {
@@ -309,7 +347,7 @@ ToggleFlow() {
         return 0
     if ProcessExist('Flow.Launcher.exe') {
         wasVisible := WinExist(FlowWindow)
-        Send('{Blind}{LWin up}{RWin up}!{Space}')
+        Send('!{Space}')   ; sin {Blind}: un Win-up crudo con Win apretada abre el menú Inicio
         if wasVisible
             return 0
         hwnd := WinWait(FlowWindow, , 2)
@@ -342,7 +380,7 @@ ToggleFlowScoped(prefix) {
     if !ToggleFlow()
         return
     Sleep(50)
-    Send('{Blind}{LWin up}{RWin up}^a')
+    Send('^a')
     SendText(prefix)
 }
 
@@ -521,6 +559,24 @@ YasbWatch() {
     YasbRelaunches.Push(A_TickCount)
     EnvSet('YASB_CONFIG_HOME', RepoRoot '\config\yasb')
     Run('"' YasbcExe '" start', , 'Hide')
+}
+
+; --- Monitor watchdog -------------------------------------------------------------
+; komorebi can lose a monitor when a display powers off and on, and only a restart brings it
+; back. No polling: WM_DISPLAYCHANGE, checked once komorebi had time to reconcile the burst.
+OnMessage(0x7E, (*) => SetTimer(HealMonitors, -20000))
+
+HealMonitors() {
+    global GameModeActive, GameFlag, WinarchyPs1
+    if GameModeActive || FileExist(GameFlag) {   ; restarting the tiler under a running game steals its focus
+        SetTimer(HealMonitors, -60000)
+        return
+    }
+    code := RunWait('pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "' WinarchyPs1 '" heal-monitors', , 'Hide')
+    if (code = 3)
+        TrayTip('komorebi lost track of a monitor and was restarted; windows were regrouped.', 'Winarchy')
+    else if (code != 0)
+        TrayTip('komorebi lost track of a monitor and could not be restarted. Run: winarchy doctor', 'Winarchy')
 }
 
 ; --- Menu items (palette menu and tray share them) ---------------------------------
@@ -1229,6 +1285,7 @@ AccentWatch() {
 #Space::ToggleFlow()                             ; launcher (Flow)
 #s::ToggleFlowScoped('f ')                       ; search files (Everything)
 #b::Run(DefaultBrowser())                        ; browser
+#+b::Run(DefaultBrowser())
 #e::Run('explorer.exe')                          ; file explorer
 ; Win+N stays with Windows (notification center; the YASB bell mirrors it)
 #m::LaunchMusic()                                ; music (Spotify / YT Music)
@@ -1254,14 +1311,17 @@ AccentWatch() {
 
 ; --- Windows -------------------------------------------------------------------
 #w::CloseWindow()                                ; close window
+#q::CloseWindow()
 #f::Komorebic('toggle-monocle')                  ; monocle (fill the workspace)
 #+f::Komorebic('toggle-maximize')                ; maximize
+#!f::Komorebic('toggle-maximize')
 #t::Komorebic('toggle-float')                    ; float / tile
 #p::Komorebic('toggle-pause')                    ; pause tiling
 #r::Komorebic('retile')                          ; retile
 #+r::Winarchy('reload')                          ; reload the whole stack
 #+Enter::Komorebic('promote')                    ; promote to the largest tile
 #+l::Komorebic('cycle-layout next')              ; next layout
+#!+l::Komorebic('cycle-layout previous')         ; previous layout
 #Tab::CycleOccupied(1)                           ; next occupied workspace
 #+Tab::CycleOccupied(-1)                         ; previous occupied workspace
 #^Tab::Komorebic('focus-last-workspace')         ; back to the workspace you came from
@@ -1275,6 +1335,8 @@ AccentWatch() {
 #Home::Komorebic('quick-load-resize')            ; restore tile sizes
 #+d::Komorebic('toggle-transparency')            ; dim unfocused windows
 #^w::ToggleStayAwake()                           ; stay awake
+#^i::ToggleStayAwake()
+#^e::Send('#;')                                  ; emoji picker (Win+. is the monitor hotkey here)
 #^m::Komorebic('minimize')                       ; minimize
 #^f::Komorebic('toggle-workspace-layer')         ; switch tiling / floating layer
 #^l::Komorebic('toggle-lock')                    ; lock the tile in place
@@ -1303,14 +1365,34 @@ AccentWatch() {
 #!u::Komorebic('unstack')                        ; take the window out of the stack
 #^s::Komorebic('stack-all')                      ; stack the whole workspace
 #^u::Komorebic('unstack-all')                    ; unstack the whole container
+#!g::Komorebic('unstack')
 #!,::Komorebic('cycle-stack previous')           ; previous tab
 #!.::Komorebic('cycle-stack next')               ; next tab
+#!+Tab::Komorebic('cycle-stack previous')
+#!Tab::Komorebic('cycle-stack next')
+#^Left::Komorebic('cycle-stack previous')
+#^Right::Komorebic('cycle-stack next')
+#!WheelUp::Komorebic('cycle-stack previous')
+#!WheelDown::Komorebic('cycle-stack next')
+#!1::Komorebic('focus-stack-window 0')           ; go to tab N of the stack
+#!2::Komorebic('focus-stack-window 1')
+#!3::Komorebic('focus-stack-window 2')
+#!4::Komorebic('focus-stack-window 3')
+#!5::Komorebic('focus-stack-window 4')
 
 ; --- Resize --------------------------------------------------------------------
 #=::Komorebic('resize-axis horizontal increase') ; wider
 #-::Komorebic('resize-axis horizontal decrease') ; narrower
 #+=::Komorebic('resize-axis vertical increase')  ; taller
 #+-::Komorebic('resize-axis vertical decrease')  ; shorter
+#!=::ResizeStep('horizontal increase', 15)       ; wider, a little
+#!-::ResizeStep('horizontal decrease', 15)       ; narrower, a little
+#!+=::ResizeStep('vertical increase', 15)        ; taller, a little
+#!+-::ResizeStep('vertical decrease', 15)        ; shorter, a little
+#^=::ResizeStep('horizontal increase', 150)      ; wider, a lot
+#^-::ResizeStep('horizontal decrease', 150)      ; narrower, a lot
+#^+=::ResizeStep('vertical increase', 150)       ; taller, a lot
+#^+-::ResizeStep('vertical decrease', 150)       ; shorter, a lot
 
 ; --- Workspaces (komorebi, not Windows virtual desktops) -------------------------
 #1::FocusWorkspace(0)                            ; go to workspace N of the monitor under the cursor
@@ -1346,6 +1428,17 @@ AccentWatch() {
 #^9::Komorebic('send-to-workspace 8')
 #^0::Komorebic('send-to-workspace 9')
 
+#+!1::Komorebic('send-to-workspace 0')
+#+!2::Komorebic('send-to-workspace 1')
+#+!3::Komorebic('send-to-workspace 2')
+#+!4::Komorebic('send-to-workspace 3')
+#+!5::Komorebic('send-to-workspace 4')
+#+!6::Komorebic('send-to-workspace 5')
+#+!7::Komorebic('send-to-workspace 6')
+#+!8::Komorebic('send-to-workspace 7')
+#+!9::Komorebic('send-to-workspace 8')
+#+!0::Komorebic('send-to-workspace 9')
+
 ; --- Monitors ------------------------------------------------------------------
 #,::Komorebic('cycle-monitor previous')    ; focus previous monitor
 #.::Komorebic('cycle-monitor next')        ; focus next monitor
@@ -1355,6 +1448,16 @@ AccentWatch() {
 #^.::Komorebic('cycle-send-to-monitor next')     ; send window to next monitor, stay here
 #!+,::Komorebic('cycle-move-workspace-to-monitor previous')  ; move workspace to previous monitor
 #!+.::Komorebic('cycle-move-workspace-to-monitor next')      ; move workspace to next monitor
+#+^Left::MonitorToward('l', 'move-to-monitor')               ; move window to the monitor on that side
+#+^Right::MonitorToward('r', 'move-to-monitor')
+#+^Up::MonitorToward('u', 'move-to-monitor')
+#+^Down::MonitorToward('d', 'move-to-monitor')
+#+!Left::MonitorToward('l', 'move-workspace-to-monitor')     ; move workspace to the monitor on that side
+#+!Right::MonitorToward('r', 'move-workspace-to-monitor')
+#+!Up::MonitorToward('u', 'move-workspace-to-monitor')
+#+!Down::MonitorToward('d', 'move-workspace-to-monitor')
+^!Tab::Komorebic('cycle-monitor next')                       ; focus next monitor
+^!+Tab::Komorebic('cycle-monitor previous')                  ; focus previous monitor
 
 ; --- Capture (ShareX) ------------------------------------------------------------
 #+s::Sharex('RectangleRegion')                   ; region
@@ -1364,6 +1467,8 @@ AccentWatch() {
 #+g::Sharex('ScreenRecorderGIF')                 ; record as GIF
 #^v::Sharex('StopScreenRecording')               ; stop recording
 #^o::Sharex('OCR')                               ; text from screen (OCR)
+#^PrintScreen::Sharex('OCR')
+#PrintScreen::Sharex('ScreenColorPicker')        ; colour picker
 #^q::Sharex('QRCodeScanRegion')                  ; scan QR code
 
 ; --- Themes --------------------------------------------------------------------

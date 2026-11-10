@@ -55,6 +55,10 @@ function Invoke-WinarchyDoctor {
             $(if ($shellCount -eq 0) { 'status bar down' } elseif ($shellCount -eq 1) { 'status bar' } else { "$shellCount winarchy-shell processes" }) `
             'winarchy reload'
     }
+    if (Test-WinarchyProcess 'komorebi') {
+        Add-Check 'komorebi sees every monitor' (Test-WinarchyMonitorHealth) `
+            'one komorebi monitor per connected display' 'winarchy reload'
+    }
     # Primero por PID file (winarchy.ahk lo escribe al arrancar; CommandLine depende
     # de WMI/CIM, que no está disponible en todos los entornos)
     $ahkAlive = $false

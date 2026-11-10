@@ -10,7 +10,7 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 | `SUPER+Return` | WezTerm (the default terminal) |
 | `SUPER+Space` | Flow Launcher — applications and Winarchy's own commands in one search |
 | `SUPER+S` | File search — Flow scoped to Everything (`f ` prefix), replaces Windows Search |
-| `SUPER+B` | Default browser |
+| `SUPER+B` or `SUPER+Shift+B` | Default browser |
 | `SUPER+E` | File explorer |
 | `SUPER+N` | Notification center (Windows native — not intercepted, so YASB's bell works) |
 | `SUPER+M` | Music (Spotify, fallback YT Music webapp) |
@@ -45,9 +45,9 @@ manual app list: Flow already indexes installed programs.
 ## Windows
 | Keybinding | Action |
 |---|---|
-| `SUPER+W` | Close window |
+| `SUPER+W` or `SUPER+Q` | Close window |
 | `SUPER+F` | Toggle monocle (logical fullscreen) |
-| `SUPER+Shift+F` | Toggle maximize |
+| `SUPER+Shift+F` or `SUPER+Alt+F` | Toggle maximize |
 | `SUPER+T` | Toggle float |
 | `SUPER+P` | Pause/resume tiling |
 | `SUPER+R` | Force re-tile |
@@ -60,6 +60,8 @@ manual app list: Flow already indexes installed programs.
 | `SUPER+Shift+←/→/↑/↓` | Move window within the layout |
 | `SUPER+=` / `SUPER+-` | Horizontal resize +/- |
 | `SUPER+Shift+=` / `SUPER+Shift+-` | Vertical resize +/- |
+| `SUPER+Alt+=` / `SUPER+Alt+-`, `SUPER+Alt+Shift+=` / `SUPER+Alt+Shift+-` | The same resizes in small steps |
+| `SUPER+Ctrl+=` / `SUPER+Ctrl+-`, `SUPER+Ctrl+Shift+=` / `SUPER+Ctrl+Shift+-` | The same resizes in big steps |
 | `SUPER+LButton` (drag) | Move the window under the cursor; drop it on another tile to swap |
 | `SUPER+RButton` (drag) | Resize: grab near an edge or corner and drag (the centre grows right and down) |
 
@@ -68,22 +70,31 @@ manual app list: Flow already indexes installed programs.
 | Key | Action |
 |---|---|
 | `SUPER+Alt+←/→/↑/↓` | Stack the focused window onto its neighbour |
-| `SUPER+Alt+u` | Unstack the focused window |
+| `SUPER+Alt+u` or `SUPER+Alt+G` | Unstack the focused window |
 | `SUPER+Ctrl+S` / `SUPER+Ctrl+U` | Stack every window in the workspace / unstack the whole container |
 | `SUPER+Alt+,` / `SUPER+Alt+.` | Previous / next tab in the stack |
+| `SUPER+Alt+Shift+Tab` / `SUPER+Alt+Tab`, `SUPER+Ctrl+←` / `SUPER+Ctrl+→`, `SUPER+Alt+WheelUp` / `SUPER+Alt+WheelDown` | Previous / next tab in the stack (Omarchy's group keys) |
+| `SUPER+Alt+1..5` | Go to tab N of the stack |
 
 ## Workspaces (komorebi, per monitor)
 | Keybinding | Action |
 |---|---|
 | `SUPER+1..0` | Go to workspace N (1–10) of the monitor under the cursor |
 | `SUPER+Shift+1..0` | Move window to workspace N |
+| `SUPER+Ctrl+1..0` or `SUPER+Shift+Alt+1..0` | Send window to workspace N without following it |
 | `SUPER+Tab` / `SUPER+Shift+Tab` | Next / previous occupied workspace (empty ones are skipped, wraps around) |
 | `SUPER+Ctrl+Tab` | Back to the workspace you came from |
 | `SUPER+WheelUp` / `SUPER+WheelDown` | Scroll to the next / previous occupied workspace (stops at the ends) |
-| `SUPER+,` / `SUPER+.` | Focus previous / next monitor |
+| `SUPER+,` / `SUPER+.` or `Ctrl+Alt+Shift+Tab` / `Ctrl+Alt+Tab` | Focus previous / next monitor |
 | `SUPER+Shift+,` / `SUPER+Shift+.` | Move window to previous / next monitor |
+| `SUPER+Shift+Ctrl+Arrow` | Move window to the monitor on that side (nothing happens if there is none) |
 | `SUPER+Ctrl+,` / `SUPER+Ctrl+.` | Send window to previous / next monitor without following it |
 | `SUPER+Alt+Shift+,` / `SUPER+Alt+Shift+.` | Move the whole workspace to the previous / next monitor |
+| `SUPER+Shift+Alt+Arrow` | Move the whole workspace to the monitor on that side |
+
+If komorebi loses track of a monitor after a display is powered off and on, Winarchy restarts it by
+itself (`winarchy heal-monitors`, also part of `winarchy reload`). The restart regroups the windows of
+each monitor on its visible workspace.
 
 ## Screenshots and screen recording (ShareX)
 | Keybinding | Action |
@@ -95,7 +106,8 @@ manual app list: Flow already indexes installed programs.
 | `SUPER+Shift+G` | GIF recording |
 | `SUPER+Ctrl+V` | Stop the running recording |
 | `SUPER+Ctrl+Q` | Decode a QR code from a screen region |
-| `SUPER+Ctrl+O` | Read text from a screen region (OCR) |
+| `SUPER+Ctrl+O` or `SUPER+Ctrl+PrintScreen` | Read text from a screen region (OCR) |
+| `SUPER+PrintScreen` | Colour picker |
 
 The bar's tools drawer (the chevron left of the clock) has the same capture
 actions as buttons, plus a colour picker.
@@ -124,7 +136,7 @@ control panels — `W` is `N` here because `SUPER+Ctrl+W` is stay awake.
 | `SUPER+Ctrl+Return` | Focus the window at the top of the tree |
 | `SUPER+Shift+H` / `SUPER+Shift+J` | Mirror the layout left/right or up/down |
 | `SUPER+Shift+Z` | Stop tiling this workspace |
-| `SUPER+Shift+L` | Cycle to the next layout (BSP, columns, rows, grid, scrolling, …) |
+| `SUPER+Shift+L` / `SUPER+Alt+Shift+L` | Cycle to the next / previous layout (BSP, columns, rows, grid, scrolling, …) |
 | `SUPER+Alt+Space` → Tiling → Layout | Pick any layout (BSP, grid, columns, rows, the stacks, scrolling) |
 | `SUPER+Alt+Home` | Remember the current tile sizes |
 | `SUPER+Home` | Restore the remembered tile sizes |
@@ -132,8 +144,8 @@ control panels — `W` is `N` here because `SUPER+Ctrl+W` is stay awake.
 | `SUPER+Ctrl+L` | Lock the container so new windows do not displace it |
 | `SUPER+Ctrl+M` | Minimize the focused window |
 | `SUPER+Ctrl+F` | Switch between the tiling and floating layers |
-| `SUPER+Ctrl+W` | Keep the machine awake (toggle) |
-| `SUPER+Ctrl+1`–`0` | Send the window to workspace N without following it |
+| `SUPER+Ctrl+W` or `SUPER+Ctrl+I` | Keep the machine awake (toggle) |
+| `SUPER+Ctrl+E` | Emoji picker |
 
 ## Terminal (WezTerm, internal — not global hotkeys)
 WezTerm registers **no** global hotkeys: AHK stays the sole owner of those. Everything

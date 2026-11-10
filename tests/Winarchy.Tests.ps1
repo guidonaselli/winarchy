@@ -3245,3 +3245,170 @@ Describe 'Invoke-WinarchyAssistant' {
         $ahk | Should -Match '(?s)#HotIf AssistantReady\(\)\s*\r?\n#CapsLock::AssistantPtt\(\)'
     }
 }
+
+Describe 'Monitor health' {
+    BeforeAll {
+        $script:HealthyJson = '[{"id":2296521,"name":"DISPLAY1","device":"SAC2763","device_id":"SAC2763-5&51cf543&1&UID4355","serial_number_id":"0000000000000","size":{"left":0,"top":0,"right":2560,"bottom":1440}},{"id":131233,"name":"DISPLAY2","device":"MSI3BA4","device_id":"MSI3BA4-5&51cf543&1&UID4353","serial_number_id":"808470350","size":{"left":-1920,"top":0,"right":1920,"bottom":1080}}]'
+        $script:CorruptJson = '[{"id":2296521,"name":"DISPLAY1","device":"SAC2763","device_id":"SAC2763-5&51cf543&1&UID4355","serial_number_id":null,"size":{"left":0,"top":0,"right":2560,"bottom":1440}},{"id":65697,"name":"DISPLAY1","device":"UNKNOWN","device_id":"UNKNOWN","serial_number_id":null,"size":{"left":0,"top":0,"right":2560,"bottom":1440}}]'
+    }
+
+    Context 'Test-WinarchyKomorebiMonitors' {
+        It 'accepts one monitor per screen with distinct origins' {
+            InModuleScope Winarchy -Parameters @{ Json = $script:HealthyJson } {
+                param($Json)
+                Test-WinarchyKomorebiMonitors -Monitors @($Json | ConvertFrom-Json) -ScreenCount 2 | Should -BeTrue
+            }
+        }
+        It 'rejects two monitors sharing an origin' {
+            InModuleScope Winarchy -Parameters @{ Json = $script:CorruptJson } {
+                param($Json)
+                Test-WinarchyKomorebiMonitors -Monitors @($Json | ConvertFrom-Json) -ScreenCount 2 | Should -BeFalse
+            }
+        }
+        It 'rejects a monitor count that differs from the screen count' {
+            InModuleScope Winarchy -Parameters @{ Json = $script:HealthyJson } {
+                param($Json)
+                Test-WinarchyKomorebiMonitors -Monitors @($Json | ConvertFrom-Json) -ScreenCount 3 | Should -BeFalse
+            }
+        }
+        It 'accepts a single monitor on a single screen' {
+            InModuleScope Winarchy -Parameters @{ Json = $script:HealthyJson } {
+                param($Json)
+                Test-WinarchyKomorebiMonitors -Monitors @(($Json | ConvertFrom-Json)[0]) -ScreenCount 1 | Should -BeTrue
+            }
+        }
+    }
+
+    Context 'Test-WinarchyMonitorHealth' {
+        It 'reports healthy when the monitor query throws' {
+            InModuleScope Winarchy {
+                Mock Get-WinarchyKomorebiMonitors { throw 'komorebi is not running' }
+                Mock Get-WinarchyScreenCount { 2 }
+                Test-WinarchyMonitorHealth | Should -BeTrue
+            }
+        }
+    }
+
+    Context 'Repair-WinarchyKomorebiMonitors' {
+        BeforeEach {
+            InModuleScope Winarchy -Parameters @{ Healthy = $script:HealthyJson; Corrupt = $script:CorruptJson } {
+                param($Healthy, $Corrupt)
+                $script:stopped = $false
+                $script:calls = 0
+                $script:corrupt = @($Corrupt | ConvertFrom-Json)
+                $script:healthy = @($Healthy | ConvertFrom-Json)
+                $state = Join-Path $TestDrive ('state-' + [guid]::NewGuid())
+                New-Item -ItemType Directory -Path $state | Out-Null
+                $script:stateDir = $state
+                Mock Get-WinarchyStateDir { $script:stateDir }
+                Mock Get-WinarchyGameModeFlag { Join-Path $script:stateDir 'game-mode' }
+                Mock Get-WinarchyScreenCount { 2 }
+                Mock Start-Sleep { }
+                Mock Write-WinarchyOk { }
+                Mock Write-WinarchyWarn { }
+                Mock Test-WinarchyProcess { -not $script:stopped }
+                Mock Start-WinarchyKomorebi { $script:stopped = $false }
+                Mock Invoke-WinarchyKomorebic {
+                    if ($Arguments[0] -eq 'stop') { $script:stopped = $true }
+                    if ($Arguments[0] -eq 'state') { '{}' }
+                }
+                Mock Get-WinarchyKomorebiMonitors { $script:corrupt }
+            }
+        }
+
+        It 'does nothing when the monitor map is healthy' {
+            InModuleScope Winarchy {
+                Mock Get-WinarchyKomorebiMonitors { $script:healthy }
+                Repair-WinarchyKomorebiMonitors | Should -BeFalse
+                Should -Invoke Invoke-WinarchyKomorebic -Times 0 -ParameterFilter { $Arguments[0] -eq 'stop' }
+                Should -Invoke Start-WinarchyKomorebi -Times 0
+            }
+        }
+
+        It 'does nothing when the map is only transiently unhealthy' {
+            InModuleScope Winarchy {
+                Mock Get-WinarchyKomorebiMonitors { $script:calls++; if ($script:calls -eq 1) { $script:corrupt } else { $script:healthy } }
+                Repair-WinarchyKomorebiMonitors | Should -BeFalse
+                Should -Invoke Invoke-WinarchyKomorebic -Times 0 -ParameterFilter { $Arguments[0] -eq 'stop' }
+            }
+        }
+
+        It 'stops and starts komorebi when the map stays unhealthy' {
+            InModuleScope Winarchy {
+                Repair-WinarchyKomorebiMonitors | Should -BeTrue
+                Should -Invoke Invoke-WinarchyKomorebic -Times 1 -ParameterFilter { $Arguments[0] -eq 'stop' }
+                Should -Invoke Start-WinarchyKomorebi -Times 1
+            }
+        }
+
+        It 'does not restart while game mode is on' {
+            InModuleScope Winarchy {
+                Set-Content -Path (Get-WinarchyGameModeFlag) -Value '1'
+                Repair-WinarchyKomorebiMonitors | Should -BeFalse
+                Should -Invoke Invoke-WinarchyKomorebic -Times 0 -ParameterFilter { $Arguments[0] -eq 'stop' }
+            }
+        }
+
+        It 'throttles a second restart within five minutes only when asked' {
+            InModuleScope Winarchy {
+                Repair-WinarchyKomorebiMonitors -Throttled | Should -BeTrue
+                Repair-WinarchyKomorebiMonitors -Throttled | Should -BeFalse
+                Should -Invoke Start-WinarchyKomorebi -Times 1
+                Repair-WinarchyKomorebiMonitors | Should -BeTrue
+                Should -Invoke Start-WinarchyKomorebi -Times 2
+            }
+        }
+
+        It 'throws without starting komorebi when it does not exit after stop' {
+            InModuleScope Winarchy {
+                Mock Test-WinarchyProcess { $true }
+                $script:now = [datetime]'2026-01-01'
+                Mock Get-Date { $script:now = $script:now.AddSeconds(4); $script:now }
+                { Repair-WinarchyKomorebiMonitors } | Should -Throw '*did not stop*'
+                Should -Invoke Start-WinarchyKomorebi -Times 0
+            }
+        }
+    }
+
+    Context 'Invoke-WinarchyReload' {
+        BeforeEach {
+            InModuleScope Winarchy {
+                Mock Get-WinarchyRoot { $TestDrive }
+                Mock Test-WinarchyProcess { $true }
+                Mock Get-WinarchyActiveBar { 'native' }
+                Mock Get-WinarchyShellExe { $null }
+                Mock Start-Process { }
+                Mock Stop-Process { }
+                Mock Start-WinarchyWindowSlots { }
+                Mock Get-WinarchyAhkExe { $null }
+                if (-not (Get-Command komorebic -ErrorAction SilentlyContinue)) { function komorebic { } }
+                Mock komorebic { }
+            }
+        }
+
+        It 'skips reload-configuration when komorebi was just restarted' {
+            InModuleScope Winarchy {
+                Mock Repair-WinarchyKomorebiMonitors { $true }
+                Invoke-WinarchyReload
+                Should -Invoke komorebic -Times 0 -ParameterFilter { $args[0] -eq 'reload-configuration' }
+            }
+        }
+
+        It 'reloads the configuration when komorebi was not restarted' {
+            InModuleScope Winarchy {
+                Mock Repair-WinarchyKomorebiMonitors { $false }
+                Invoke-WinarchyReload
+                Should -Invoke komorebic -Times 1 -ParameterFilter { $args[0] -eq 'reload-configuration' }
+            }
+        }
+
+        It 'never repairs monitors on a light reload' {
+            InModuleScope Winarchy {
+                Mock Repair-WinarchyKomorebiMonitors { $true }
+                Invoke-WinarchyReload -Light
+                Should -Invoke Repair-WinarchyKomorebiMonitors -Times 0
+                Should -Invoke komorebic -Times 1 -ParameterFilter { $args[0] -eq 'reload-configuration' }
+            }
+        }
+    }
+}
