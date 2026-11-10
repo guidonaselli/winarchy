@@ -1318,7 +1318,7 @@ AccentWatch() {
 ; --- Clipboard ------------------------------------------------------------------
 #a::Send('^a')                                   ; select all
 #c::Send(InTerminal() ? '^+c' : '^c')            ; copy
-#v::Send(InTerminal() ? '^+v' : '^v')            ; paste
+$#v::Send(InTerminal() ? '^+v' : '^v')           ; paste ($: SUPER+Ctrl+V sends Win+V and must not land here)
 #x::Send('^x')                                   ; cut
 #^v::Send('#v')                                  ; clipboard history
 
