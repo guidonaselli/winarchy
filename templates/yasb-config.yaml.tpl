@@ -59,7 +59,7 @@ bars:
 
 widgets:
   # Logo arriba-izquierda: abre el mismo menú principal de winarchy.ahk
-  # (Apps/Themes/System/...) que SUPER+Alt+Space y el botón ☰ de la derecha.
+  # (Apps/Themes/System/...) que SUPER+Space y el botón ☰ de la derecha.
   # Toca el flag show-menu.flag que AHK levanta con su watcher (YASB no puede
   # llamar funciones de AHK directo).
   home:
@@ -545,7 +545,7 @@ widgets:
       hide_icons: ["ShareX"]
 
   # Esquina derecha, estilo Omarchy: abre el menu principal de winarchy.ahk
-  # (Apps/Themes/System/...), el mismo que SUPER+Alt+Space y el right-click del
+  # (Apps/Themes/System/...), el mismo que SUPER+Space y el right-click del
   # tray. YASB es un proceso separado y no puede llamar funciones de AHK
   # directo: el click toca un flag (mismo patron que game_mode) que AHK levanta
   # con su propio watcher.

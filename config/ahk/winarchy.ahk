@@ -395,6 +395,11 @@ DefaultBrowser() {
     return 'msedge.exe'
 }
 
+; terminals keep Ctrl+C / Ctrl+V for the shell: their clipboard is on Ctrl+Shift
+InTerminal() {
+    return WinActive('ahk_exe wezterm-gui.exe') || WinActive('ahk_exe WindowsTerminal.exe')
+}
+
 WebApp(url) {
     ; ventana propia sin chrome de browser (--app=, Chromium); Firefox abre pestaña
     Run('"' DefaultBrowser() '" --app=' url)
@@ -585,7 +590,7 @@ OnOff(flag) => Chr(0xB7) ' ' (FileExist(flag) ? 'on' : 'off')
 WinarchyMenuItems() {
     global GameFlag, AwakeFlag
     return [
-        {text:'Apps',          hint:'SUPER+Space',        action:(*)=>ToggleFlowScoped('app ')},
+        {text:'Apps',          hint:'SUPER+Alt+Space',    action:(*)=>ToggleFlowScoped('app ')},
         {text:'Themes',                                   sub: WinarchyThemeItems()},
         {text:'Capture',                                  sub: WinarchyCaptureItems()},
         {text:'Tiling',                                   sub: WinarchyTilingItems()},
@@ -594,7 +599,7 @@ WinarchyMenuItems() {
         {text:'Keybindings',   hint:'SUPER+K',            action:(*)=>ToggleKeyOverlay()},
         {text:'Reload stack',  hint:'SUPER+Shift+R',      action:(*)=>Winarchy('reload')},
         {text:'Game mode ' OnOff(GameFlag),               action:(*)=>ToggleGameMode()},
-        {text:'Stay awake ' OnOff(AwakeFlag), hint:'SUPER+Ctrl+W', action:(*)=>ToggleStayAwake()},
+        {text:'Stay awake ' OnOff(AwakeFlag), hint:'SUPER+Ctrl+I', action:(*)=>ToggleStayAwake()},
         {text:'Doctor',                                   action:(*)=>WinarchyTerminal('doctor')},
         {text:'Check for updates',                        action:(*)=>WinarchyTerminal('update')},
         {text:'System',        hint:'SUPER+Esc',          sub: WinarchySysItems()},
@@ -653,7 +658,7 @@ WinarchyCaptureItems() {
         {text:'Scrolling capture',                            action:(*)=>Winarchy('screenshot scrolling')},
         {text:'Record screen',          hint:'SUPER+Shift+V', action:(*)=>Winarchy('screenshot record')},
         {text:'Record as GIF',          hint:'SUPER+Shift+G', action:(*)=>Winarchy('screenshot record-gif')},
-        {text:'Stop recording',         hint:'SUPER+Ctrl+V',  action:(*)=>Winarchy('screenshot stop')},
+        {text:'Stop recording',         hint:'SUPER+Ctrl+Shift+V', action:(*)=>Winarchy('screenshot stop')},
         {text:'Text from screen (OCR)', hint:'SUPER+Ctrl+O',  action:(*)=>Winarchy('screenshot ocr')},
         {text:'Scan QR code',           hint:'SUPER+Ctrl+Q',  action:(*)=>Winarchy('screenshot qr')},
         {text:'Color picker',                                 action:(*)=>Winarchy('screenshot color')},
@@ -1282,18 +1287,19 @@ AccentWatch() {
 
 ; --- Apps ---------------------------------------------------------------------
 #Enter::Wezterm()                                ; terminal
-#Space::ToggleFlow()                             ; launcher (Flow)
+#!Space::ToggleFlow()                            ; launcher (Flow)
 #s::ToggleFlowScoped('f ')                       ; search files (Everything)
-#b::Run(DefaultBrowser())                        ; browser
+#+Enter::Run(DefaultBrowser())                   ; browser
 #+b::Run(DefaultBrowser())
-#e::Run('explorer.exe')                          ; file explorer
+#+f::Run('explorer.exe')                         ; file explorer
 ; Win+N stays with Windows (notification center; the YASB bell mirrors it)
-#m::LaunchMusic()                                ; music (Spotify / YT Music)
-#o::LaunchObsidian()                             ; Obsidian
+#+m::LaunchMusic()                               ; music (Spotify / YT Music)
+#+o::LaunchObsidian()                            ; Obsidian
+#+q::Run('calc.exe')                             ; calculator
 #^+a::Winarchy('agent launch')                   ; coding agent
 
 ; --- Menus ----------------------------------------------------------------------
-#!Space::ShowMainMenu()                          ; Winarchy menu
+#Space::ShowMainMenu()                           ; Winarchy menu
 #Esc::ShowSystemMenu()                           ; system / power menu
 #k::ToggleKeyOverlay()                           ; this keybindings list
 #i::ShellIsland('island.expand')                 ; native shell: show CPU / RAM in the island
@@ -1302,24 +1308,31 @@ AccentWatch() {
 #HotIf
 
 ; --- Webapps --------------------------------------------------------------------
-#a::WebApp('https://chatgpt.com')                ; ChatGPT
-#+a::WebApp('https://claude.ai')                 ; Claude
-#y::WebApp('https://youtube.com')                ; YouTube
-#x::WebApp('https://x.com')                      ; X
-#c::WebApp('https://calendar.google.com')        ; Google Calendar
-#g::WebApp('https://web.whatsapp.com')           ; WhatsApp
+#+a::WebApp('https://chatgpt.com')               ; ChatGPT
+#+!a::WebApp('https://claude.ai')                ; Claude
+#+y::WebApp('https://youtube.com')               ; YouTube
+#+x::WebApp('https://x.com')                     ; X
+#+c::WebApp('https://calendar.google.com')       ; Google Calendar
+#+!g::WebApp('https://web.whatsapp.com')         ; WhatsApp
+
+; --- Clipboard ------------------------------------------------------------------
+#a::Send('^a')                                   ; select all
+#c::Send(InTerminal() ? '^+c' : '^c')            ; copy
+#v::Send(InTerminal() ? '^+v' : '^v')            ; paste
+#x::Send('^x')                                   ; cut
+#^v::Send('#v')                                  ; clipboard history
 
 ; --- Windows -------------------------------------------------------------------
 #w::CloseWindow()                                ; close window
 #q::CloseWindow()
 #f::Komorebic('toggle-monocle')                  ; monocle (fill the workspace)
-#+f::Komorebic('toggle-maximize')                ; maximize
-#!f::Komorebic('toggle-maximize')
+#!f::Komorebic('toggle-maximize')                ; maximize
+#m::Komorebic('minimize')                        ; minimize
 #t::Komorebic('toggle-float')                    ; float / tile
 #p::Komorebic('toggle-pause')                    ; pause tiling
 #r::Komorebic('retile')                          ; retile
 #+r::Winarchy('reload')                          ; reload the whole stack
-#+Enter::Komorebic('promote')                    ; promote to the largest tile
+#^+Enter::Komorebic('promote')                   ; promote to the largest tile
 #+l::Komorebic('cycle-layout next')              ; next layout
 #!+l::Komorebic('cycle-layout previous')         ; previous layout
 #Tab::CycleOccupied(1)                           ; next occupied workspace
@@ -1334,12 +1347,11 @@ AccentWatch() {
 #!Home::Komorebic('quick-save-resize')           ; save tile sizes
 #Home::Komorebic('quick-load-resize')            ; restore tile sizes
 #+d::Komorebic('toggle-transparency')            ; dim unfocused windows
-#^w::ToggleStayAwake()                           ; stay awake
-#^i::ToggleStayAwake()
+#^i::ToggleStayAwake()                           ; stay awake
 #^e::Send('#;')                                  ; emoji picker (Win+. is the monitor hotkey here)
-#^m::Komorebic('minimize')                       ; minimize
 #^f::Komorebic('toggle-workspace-layer')         ; switch tiling / floating layer
-#^l::Komorebic('toggle-lock')                    ; lock the tile in place
+#^+l::Komorebic('toggle-lock')                   ; lock the tile in place
+#^l::DllCall('LockWorkStation')                  ; lock the session
 
 ; --- Mouse ---------------------------------------------------------------------
 #LButton::WindowDrag(true)                       ; drag to move the window under the cursor
@@ -1465,7 +1477,7 @@ AccentWatch() {
 #+p::Sharex('PrintScreen')                       ; full screen
 #+v::Sharex('ScreenRecorder')                    ; record screen
 #+g::Sharex('ScreenRecorderGIF')                 ; record as GIF
-#^v::Sharex('StopScreenRecording')               ; stop recording
+#^+v::Sharex('StopScreenRecording')              ; stop recording
 #^o::Sharex('OCR')                               ; text from screen (OCR)
 #^PrintScreen::Sharex('OCR')
 #PrintScreen::Sharex('ScreenColorPicker')        ; colour picker
@@ -1474,7 +1486,9 @@ AccentWatch() {
 ; --- Themes --------------------------------------------------------------------
 #+t::Winarchy('theme next')                      ; next theme
 #^t::Winarchy('theme gallery')                   ; theme gallery
+#+^Space::Winarchy('theme gallery')
 #^Space::Winarchy('background next')             ; next background
+#^w::Winarchy('background next')
 
 ; --- System settings -------------------------------------------------------------
 #^a::Run('explorer.exe ms-settings:sound')       ; sound

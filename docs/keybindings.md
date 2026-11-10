@@ -8,13 +8,14 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 | Keybinding | Action |
 |---|---|
 | `SUPER+Return` | WezTerm (the default terminal) |
-| `SUPER+Space` | Flow Launcher — applications and Winarchy's own commands in one search |
+| `SUPER+Alt+Space` | Flow Launcher — applications and Winarchy's own commands in one search |
 | `SUPER+S` | File search — Flow scoped to Everything (`f ` prefix), replaces Windows Search |
-| `SUPER+B` or `SUPER+Shift+B` | Default browser |
-| `SUPER+E` | File explorer |
+| `SUPER+Shift+Return` or `SUPER+Shift+B` | Default browser |
+| `SUPER+Shift+F` | File explorer (`SUPER+E` also works: it is Windows' native shortcut, not intercepted) |
 | `SUPER+N` | Notification center (Windows native — not intercepted, so YASB's bell works) |
-| `SUPER+M` | Music (Spotify, fallback YT Music webapp) |
-| `SUPER+O` | Obsidian |
+| `SUPER+Shift+M` | Music (Spotify, fallback YT Music webapp) |
+| `SUPER+Shift+O` | Obsidian |
+| `SUPER+Shift+Q` | Calculator |
 | `SUPER+K` | Keybindings list: searchable, auto-generated from winarchy.ahk, themed, on the active monitor |
 | `SUPER+I` | Native shell only (`winarchy bar use native`): opens the island panel (media, CPU/RAM/volume, workspaces) for a few seconds |
 | `SUPER+CapsLock` (hold) | Push-to-talk to the voice assistant: speak while held, release to send (only with `winarchy assistant on`) |
@@ -22,36 +23,50 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 ## Menu (popup, Omarchy-style)
 | Keybinding | Action |
 |---|---|
-| `SUPER+Alt+Space` | Winarchy menu (Apps/Themes/Reload/Game mode/Doctor/Update/System/Quit) — same content as right-clicking the tray icon, or the rightmost button on the YASB bar |
+| `SUPER+Space` | Winarchy menu (Apps/Themes/Reload/Game mode/Doctor/Update/System/Quit) — same content as right-clicking the tray icon, or the rightmost button on the YASB bar |
 | `SUPER+Esc` | System / power submenu directly (Screensaver/Lock/Sleep/Hibernate/Sign out/Restart/Shut down) |
 
 The menu's **Apps** entry opens Flow Launcher pre-scoped to the `Program` plugin
 (action keyword `app`), and `SUPER+S` pre-scoped to the `Explorer` plugin's
 file search on the Everything engine (action keyword `f`, files only). `Set-WinarchyFlowKeywords` adds both
-additively — the default `*` stays, so plain `SUPER+Space` keeps searching
+additively — the default `*` stays, so plain `SUPER+Alt+Space` keeps searching
 everything. This mirrors Omarchy's Walker-based Apps list without curating a
 manual app list: Flow already indexes installed programs.
 
 ## Webapps (browser `--app=` windows, tileable)
 | Keybinding | Action |
 |---|---|
-| `SUPER+A` | ChatGPT |
-| `SUPER+Shift+A` | Claude |
-| `SUPER+Y` | YouTube |
-| `SUPER+X` | X |
-| `SUPER+C` | Google Calendar |
-| `SUPER+G` | WhatsApp Web |
+| `SUPER+Shift+A` | ChatGPT |
+| `SUPER+Alt+Shift+A` | Claude |
+| `SUPER+Shift+Y` | YouTube |
+| `SUPER+Shift+X` | X |
+| `SUPER+Shift+C` | Google Calendar |
+| `SUPER+Alt+Shift+G` | WhatsApp Web |
+
+## Clipboard
+| Keybinding | Action |
+|---|---|
+| `SUPER+A` | Select all |
+| `SUPER+C` | Copy |
+| `SUPER+V` | Paste |
+| `SUPER+X` | Cut |
+| `SUPER+Ctrl+V` | Clipboard history (Windows' own Win+V panel) |
+
+In WezTerm and Windows Terminal, copy and paste send `Ctrl+Shift+C` / `Ctrl+Shift+V`,
+so `Ctrl+C` still interrupts.
 
 ## Windows
 | Keybinding | Action |
 |---|---|
 | `SUPER+W` or `SUPER+Q` | Close window |
 | `SUPER+F` | Toggle monocle (logical fullscreen) |
-| `SUPER+Shift+F` or `SUPER+Alt+F` | Toggle maximize |
+| `SUPER+Alt+F` | Toggle maximize |
+| `SUPER+M` | Minimize the focused window |
 | `SUPER+T` | Toggle float |
 | `SUPER+P` | Pause/resume tiling |
 | `SUPER+R` | Force re-tile |
 | `SUPER+Shift+R` | Reload the whole stack (`winarchy reload`) |
+| `SUPER+Ctrl+L` | Lock the Windows session |
 
 ## Focus and movement
 | Keybinding | Action |
@@ -104,7 +119,7 @@ each monitor on its visible workspace.
 | `SUPER+Shift+P` | Full screen capture |
 | `SUPER+Shift+V` | Screen recording |
 | `SUPER+Shift+G` | GIF recording |
-| `SUPER+Ctrl+V` | Stop the running recording |
+| `SUPER+Ctrl+Shift+V` | Stop the running recording |
 | `SUPER+Ctrl+Q` | Decode a QR code from a screen region |
 | `SUPER+Ctrl+O` or `SUPER+Ctrl+PrintScreen` | Read text from a screen region (OCR) |
 | `SUPER+PrintScreen` | Colour picker |
@@ -115,7 +130,7 @@ actions as buttons, plus a colour picker.
 ## System panels
 The bar widgets open their own richer popups on click (per-app audio mixer, device
 pickers). These go to the native Windows panels, and mirror Quattro's `SUPER+CTRL`
-control panels — `W` is `N` here because `SUPER+Ctrl+W` is stay awake.
+control panels. `SUPER+Ctrl+W` is the background switcher, as in Omarchy, so Network is on `N`.
 
 | Keybinding | Action |
 |---|---|
@@ -129,22 +144,21 @@ control panels — `W` is `N` here because `SUPER+Ctrl+W` is stay awake.
 | Keybinding | Action |
 |---|---|
 | `SUPER+Shift+T` | Next theme (`winarchy theme next`) |
-| `SUPER+Ctrl+T` | Theme gallery (`winarchy theme gallery`) |
-| `SUPER+Ctrl+Space` | Next background of the active theme (`winarchy background next`) |
+| `SUPER+Ctrl+T` or `SUPER+Ctrl+Shift+Space` | Theme gallery (`winarchy theme gallery`) |
+| `SUPER+Ctrl+Space` or `SUPER+Ctrl+W` | Next background of the active theme (`winarchy background next`) |
 | `SUPER+Ctrl+Shift+A` | Launch the preferred coding agent (`winarchy agent launch`) |
-| `SUPER+Shift+Return` | Promote the focused window to the largest tile |
+| `SUPER+Ctrl+Shift+Return` | Promote the focused window to the largest tile |
 | `SUPER+Ctrl+Return` | Focus the window at the top of the tree |
 | `SUPER+Shift+H` / `SUPER+Shift+J` | Mirror the layout left/right or up/down |
 | `SUPER+Shift+Z` | Stop tiling this workspace |
 | `SUPER+Shift+L` / `SUPER+Alt+Shift+L` | Cycle to the next / previous layout (BSP, columns, rows, grid, scrolling, …) |
-| `SUPER+Alt+Space` → Tiling → Layout | Pick any layout (BSP, grid, columns, rows, the stacks, scrolling) |
+| `SUPER+Space` → Tiling → Layout | Pick any layout (BSP, grid, columns, rows, the stacks, scrolling) |
 | `SUPER+Alt+Home` | Remember the current tile sizes |
 | `SUPER+Home` | Restore the remembered tile sizes |
 | `SUPER+Shift+D` | Dim unfocused windows (toggle transparency) |
-| `SUPER+Ctrl+L` | Lock the container so new windows do not displace it |
-| `SUPER+Ctrl+M` | Minimize the focused window |
+| `SUPER+Ctrl+Shift+L` | Lock the container so new windows do not displace it |
 | `SUPER+Ctrl+F` | Switch between the tiling and floating layers |
-| `SUPER+Ctrl+W` or `SUPER+Ctrl+I` | Keep the machine awake (toggle) |
+| `SUPER+Ctrl+I` | Keep the machine awake (toggle) |
 | `SUPER+Ctrl+E` | Emoji picker |
 
 ## Terminal (WezTerm, internal — not global hotkeys)
@@ -189,9 +203,8 @@ the `SUPER+K` overlay under "User", or under your own `; --- Section ---` header
 
 ## Reserved by Windows (not overridden)
 - `Win+L` — lock (not interceptable; design decision).
-- `Win+V` — native clipboard history.
-- `Win+G` is WhatsApp outside games; in game-mode all SUPER hotkeys are suspended,
-  so Game Bar gets `Win+G` back exactly when it is useful.
+- `Win+V` is overridden by universal paste; the native clipboard history moved to `SUPER+Ctrl+V`.
+- In game-mode all SUPER hotkeys are suspended, so Game Bar keeps `Win+G`.
 
 ## Elevated windows (known limit)
 AHK runs un-elevated, and Windows (UIPI) does not let it see keys while an elevated
@@ -202,10 +215,13 @@ as soon as a non-elevated window is focused. AHK is not elevated on purpose: eve
 it launches would inherit admin rights.
 
 ## Differences vs Omarchy
-- `SUPER+Space` opens Flow unscoped (in Omarchy it opens Walker, apps-only); the
-  apps-only equivalent lives in the menu's **Apps** entry instead, to avoid
-  changing the existing `SUPER+Space` search behavior. Windows' native keyboard
-  layout switcher on `Win+Space` is **overridden** — use the language bar if needed.
+- The layout follows Omarchy 4.5: `SUPER+Space` is the menu and `SUPER+Alt+Space` the
+  launcher. Here the launcher is Flow unscoped (apps plus Winarchy's commands), not an
+  apps-only list; the apps-only view lives in the menu's **Apps** entry instead. Windows'
+  native keyboard layout switcher on `Win+Space` is **overridden** — use the language bar if needed.
+- Keys Omarchy 4.5 assigns to things Winarchy does not have (Maps, Photos, Signal, Docker,
+  Omawrite, Activity on `SUPER+Shift+S/P/G/D/W/T`) keep Winarchy's own actions (ShareX
+  captures, dim, next theme). `SUPER+L` is Windows' lock, so cycling layouts stays on `SUPER+Shift+L`.
 - The main menu and system/power submenu are native AHK popup menus (Windows
   context-menu styling), not a custom-themed translucent box like Omarchy's.
 - Notifications: native Windows system (no mako equivalent).
