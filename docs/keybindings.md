@@ -8,7 +8,7 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 | Keybinding | Action |
 |---|---|
 | `SUPER+Return` | WezTerm (the default terminal) |
-| `SUPER+Alt+Space` | Flow Launcher — applications and Winarchy's own commands in one search |
+| `SUPER+Space` | Flow Launcher — applications and Winarchy's own commands in one search |
 | `SUPER+S` | File search — Flow scoped to Everything (`f ` prefix), replaces Windows Search |
 | `SUPER+Shift+Return` or `SUPER+Shift+B` | Default browser |
 | `SUPER+Shift+F` | File explorer (`SUPER+E` also works: it is Windows' native shortcut, not intercepted) |
@@ -23,13 +23,13 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 ## Menu (popup, Omarchy-style)
 | Keybinding | Action |
 |---|---|
-| `SUPER+Space` | Winarchy menu (Apps/Themes/Reload/Game mode/Doctor/Update/System/Quit) — same content as right-clicking the tray icon, or the rightmost button on the YASB bar |
+| `SUPER+Alt+Space` | Winarchy menu (Apps/Themes/Reload/Game mode/Doctor/Update/System/Quit) — same content as right-clicking the tray icon, or the rightmost button on the YASB bar |
 | `SUPER+Esc` | System / power submenu directly (Screensaver/Lock/Sleep/Hibernate/Sign out/Restart/Shut down) |
 
 The menu's **Apps** entry opens Flow Launcher pre-scoped to the `Program` plugin
 (action keyword `app`), and `SUPER+S` pre-scoped to the `Explorer` plugin's
 file search on the Everything engine (action keyword `f`, files only). `Set-WinarchyFlowKeywords` adds both
-additively — the default `*` stays, so plain `SUPER+Alt+Space` keeps searching
+additively — the default `*` stays, so plain `SUPER+Space` keeps searching
 everything. This mirrors Omarchy's Walker-based Apps list without curating a
 manual app list: Flow already indexes installed programs.
 
@@ -152,7 +152,7 @@ control panels. `SUPER+Ctrl+W` is the background switcher, as in Omarchy, so Net
 | `SUPER+Shift+H` / `SUPER+Shift+J` | Mirror the layout left/right or up/down |
 | `SUPER+Shift+Z` | Stop tiling this workspace |
 | `SUPER+Shift+L` / `SUPER+Alt+Shift+L` | Cycle to the next / previous layout (BSP, columns, rows, grid, scrolling, …) |
-| `SUPER+Space` → Tiling → Layout | Pick any layout (BSP, grid, columns, rows, the stacks, scrolling) |
+| `SUPER+Alt+Space` → Tiling → Layout | Pick any layout (BSP, grid, columns, rows, the stacks, scrolling) |
 | `SUPER+Alt+Home` | Remember the current tile sizes |
 | `SUPER+Home` | Restore the remembered tile sizes |
 | `SUPER+Shift+D` | Dim unfocused windows (toggle transparency) |
@@ -215,9 +215,10 @@ as soon as a non-elevated window is focused. AHK is not elevated on purpose: eve
 it launches would inherit admin rights.
 
 ## Differences vs Omarchy
-- The layout follows Omarchy 4.5: `SUPER+Space` is the menu and `SUPER+Alt+Space` the
-  launcher. Here the launcher is Flow unscoped (apps plus Winarchy's commands), not an
-  apps-only list; the apps-only view lives in the menu's **Apps** entry instead. Windows'
+- The layout follows Omarchy 4.5, except the launcher pair: Omarchy's `SUPER+Space` menu
+  holds apps and settings in one place, and here that role is Flow unscoped (apps plus
+  Winarchy's commands), so Flow stays on `SUPER+Space` and the nested menu on
+  `SUPER+Alt+Space`; the apps-only view lives in the menu's **Apps** entry. Windows'
   native keyboard layout switcher on `Win+Space` is **overridden** — use the language bar if needed.
 - Keys Omarchy 4.5 assigns to things Winarchy does not have (Maps, Photos, Signal, Docker,
   Omawrite, Activity on `SUPER+Shift+S/P/G/D/W/T`) keep Winarchy's own actions (ShareX

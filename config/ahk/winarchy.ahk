@@ -590,7 +590,7 @@ OnOff(flag) => Chr(0xB7) ' ' (FileExist(flag) ? 'on' : 'off')
 WinarchyMenuItems() {
     global GameFlag, AwakeFlag
     return [
-        {text:'Apps',          hint:'SUPER+Alt+Space',    action:(*)=>ToggleFlowScoped('app ')},
+        {text:'Apps',          hint:'SUPER+Space',        action:(*)=>ToggleFlowScoped('app ')},
         {text:'Themes',                                   sub: WinarchyThemeItems()},
         {text:'Capture',                                  sub: WinarchyCaptureItems()},
         {text:'Tiling',                                   sub: WinarchyTilingItems()},
@@ -1287,7 +1287,7 @@ AccentWatch() {
 
 ; --- Apps ---------------------------------------------------------------------
 #Enter::Wezterm()                                ; terminal
-#!Space::ToggleFlow()                            ; launcher (Flow)
+#Space::ToggleFlow()                             ; launcher (Flow)
 #s::ToggleFlowScoped('f ')                       ; search files (Everything)
 #+Enter::Run(DefaultBrowser())                   ; browser
 #+b::Run(DefaultBrowser())
@@ -1299,7 +1299,7 @@ AccentWatch() {
 #^+a::Winarchy('agent launch')                   ; coding agent
 
 ; --- Menus ----------------------------------------------------------------------
-#Space::ShowMainMenu()                           ; Winarchy menu
+#!Space::ShowMainMenu()                          ; Winarchy menu
 #Esc::ShowSystemMenu()                           ; system / power menu
 #k::ToggleKeyOverlay()                           ; this keybindings list
 #i::ShellIsland('island.expand')                 ; native shell: show CPU / RAM in the island

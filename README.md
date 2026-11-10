@@ -129,8 +129,8 @@ That means Winarchy optimizes for:
     - optional app adapters
 
 - **One launcher for apps and commands**
-  - `SUPER+Alt+Space` searches Winarchy's own commands alongside your applications
-  - `SUPER+Space` keeps the nested menu for browsing rather than typing
+  - `SUPER+Space` searches Winarchy's own commands alongside your applications
+  - `SUPER+Alt+Space` keeps the nested menu for browsing rather than typing
 
 - **Atomic theme application with rollback**
   - changes are staged
