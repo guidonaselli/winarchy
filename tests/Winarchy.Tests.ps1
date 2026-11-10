@@ -3371,6 +3371,13 @@ Describe 'Monitor health' {
     }
 
     Context 'Invoke-WinarchyReload' {
+        BeforeAll {
+            $script:envBefore = @{ K = $env:KOMOREBI_CONFIG_HOME; Y = $env:YASB_CONFIG_HOME }
+        }
+        AfterAll {
+            $env:KOMOREBI_CONFIG_HOME = $script:envBefore.K
+            $env:YASB_CONFIG_HOME = $script:envBefore.Y
+        }
         BeforeEach {
             InModuleScope Winarchy {
                 Mock Get-WinarchyRoot { $TestDrive }
