@@ -2,6 +2,7 @@
 
 mod apps;
 mod dock;
+mod dock_menu;
 mod brightness;
 mod calendar;
 mod world;

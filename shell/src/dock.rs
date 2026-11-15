@@ -450,7 +450,7 @@ fn signature(d: &Dock) -> u64 {
     h.finish()
 }
 
-fn blend(dst: &mut u32, src: u32) {
+pub(crate) fn blend(dst: &mut u32, src: u32) {
     let sa = src >> 24;
     if sa == 255 {
         *dst = src;
@@ -462,12 +462,12 @@ fn blend(dst: &mut u32, src: u32) {
     *dst = ch(sa, d >> 24) << 24 | ch((src >> 16) & 255, (d >> 16) & 255) << 16 | ch((src >> 8) & 255, (d >> 8) & 255) << 8 | ch(src & 255, d & 255);
 }
 
-fn premul(col: (u8, u8, u8), alpha: f32) -> u32 {
+pub(crate) fn premul(col: (u8, u8, u8), alpha: f32) -> u32 {
     let p = |c: u8| (c as f32 * alpha) as u32;
     ((alpha * 255.0) as u32) << 24 | p(col.0) << 16 | p(col.1) << 8 | p(col.2)
 }
 
-fn fill_round_a(buf: &mut [u32], stride: i32, rows: i32, r: R, rad: i32, col: (u8, u8, u8), alpha: f32) {
+pub(crate) fn fill_round_a(buf: &mut [u32], stride: i32, rows: i32, r: R, rad: i32, col: (u8, u8, u8), alpha: f32) {
     let rad = (rad as f32).min(r.w as f32 / 2.0).min(r.h as f32 / 2.0);
     for y in r.y.max(0)..(r.y + r.h).min(rows) {
         for x in r.x.max(0)..(r.x + r.w).min(stride) {
@@ -781,10 +781,7 @@ unsafe fn click(idx: usize) {
     let target = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), d.last_active.get(&i.key).copied(), i.pin.clone())));
     let Some((wins, last, pin)) = target else { return };
     if wins.is_empty() {
-        if let Some(p) = pin {
-            let wide: Vec<u16> = p.encode_utf16().chain(std::iter::once(0)).collect();
-            let _ = ShellExecuteW(None, w!("open"), PCWSTR(wide.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
-        }
+        pin.iter().for_each(|p| crate::dock_menu::launch(p));
         return;
     }
     let fg = GetForegroundWindow().0 as isize;
@@ -836,6 +833,9 @@ unsafe fn hide_tip() {
 
 // Tooltip propio (ventana layered chica): el texto se dibuja con GDI sobre negro y su luminancia pasa a alfa.
 unsafe fn show_tip(idx: usize) {
+    if crate::dock_menu::is_open() {
+        return;
+    }
     let Some(text) = tip_text(idx) else { return hide_tip() };
     let (tip, theme, scale, bar, cell, bottom) = with(|d| (d.tip, d.theme.clone(), d.scale, d.layout.bar, d.layout.cells.get(idx).copied(), d.theme.position != "bottom"));
     let Some(cell) = cell else { return hide_tip() };
@@ -876,10 +876,7 @@ unsafe fn show_tip(idx: usize) {
         }
     }
     let mon = with(|d| d.mon);
-    let cx = bar.x + cell.x + cell.w / 2;
-    let x = (cx - w / 2).clamp(mon.0, (mon.2 - w).max(mon.0));
-    let gap = px(8, scale);
-    let y = if bottom { bar.y - h - gap } else { bar.y + bar.h + gap };
+    let (x, y) = crate::dock_menu::popup_pos(bar.x + cell.x + cell.w / 2, bar, w, h, bottom, px(8, scale), mon);
     let (pos, sz, src) = (POINT { x, y }, SIZE { cx: w, cy: h }, POINT::default());
     let bf = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: 1 };
     let _ = UpdateLayeredWindow(tip, None, Some(&pos), Some(&sz), mem, Some(&src), COLORREF(0), Some(&bf), ULW_ALPHA);
@@ -976,6 +973,40 @@ unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
             });
             render();
             hide_tip();
+            LRESULT(0)
+        }
+        WM_RBUTTONUP => {
+            let (x, y) = xy(lp);
+            let hit = with(|d| match hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y) {
+                Some(Hit::Item(i)) => d.items.get(i).map(|it| {
+                    let cell = d.layout.cells[i];
+                    crate::dock_menu::Ctx {
+                        theme: d.theme.clone(),
+                        scale: d.scale,
+                        cx: d.layout.bar.x + cell.x + cell.w / 2,
+                        bar: d.layout.bar,
+                        bottom: d.theme.position != "bottom",
+                        mon: d.mon,
+                        wins: it.wins.clone(),
+                        last: d.last_active.get(&it.key).copied(),
+                        launch: it.pin.clone().or_else(|| Some(it.exe.clone()).filter(|e| !e.is_empty())),
+                    }
+                }),
+                _ => None,
+            });
+            if let Some(ctx) = hit {
+                hide_tip();
+                crate::dock_menu::show(ctx);
+            }
+            LRESULT(0)
+        }
+        WM_MBUTTONUP => {
+            let (x, y) = xy(lp);
+            let path = with(|d| match hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y) {
+                Some(Hit::Item(i)) => d.items.get(i).and_then(|it| it.pin.clone().or_else(|| Some(it.exe.clone()).filter(|e| !e.is_empty()))),
+                _ => None,
+            });
+            path.iter().for_each(|p| crate::dock_menu::launch(p));
             LRESULT(0)
         }
         WM_LBUTTONUP => {
