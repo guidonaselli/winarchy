@@ -59,9 +59,11 @@ function Get-WinarchyDockWorkAreaOffset {
     $dpi = (Get-ItemProperty 'HKCU:\Control Panel\Desktop\WindowMetrics' -ErrorAction SilentlyContinue).AppliedDPI
     if (-not $dpi) { $dpi = 96 }
     $dockEdge = if ((Get-WinarchyBarPosition) -eq 'top') { 'bottom' } else { 'top' }
+    # Mismo redondeo que `px()` de shell/src/layout.rs (mitad hacia afuera de cero), por dip y luego suma: redondear el total difiere hasta 1 px.
+    $px = { param($dip) [int][math]::Round($dip * $dpi / 96, [MidpointRounding]::AwayFromZero) }
     [pscustomobject]@{
-        Top    = if ($dockEdge -eq 'top') { [int][math]::Round(54 * $dpi / 96) } else { 0 }
-        Bottom = if ($dockEdge -eq 'bottom') { [int][math]::Round(56 * $dpi / 96) } else { 2 }
+        Top    = if ($dockEdge -eq 'top') { (& $px 48) + (& $px 6) } else { 0 }
+        Bottom = if ($dockEdge -eq 'bottom') { (& $px 48) + (& $px 6) + (& $px 2) } else { 2 }
     }
 }
 
