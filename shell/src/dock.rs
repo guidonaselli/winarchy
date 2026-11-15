@@ -140,6 +140,7 @@ struct Dock {
     hidden: bool,
     pending_focus: Option<isize>,
     pins: Vec<(String, String)>,
+    ident: HashMap<isize, (String, Option<String>)>,
     pins_stamp: Option<std::time::SystemTime>,
     shell_msg: u32,
     created_msg: u32,
@@ -187,6 +188,7 @@ pub fn init(theme: &Theme) -> Option<HWND> {
             hidden: false,
             pending_focus: None,
             pins: load_pins(),
+            ident: HashMap::new(),
             pins_stamp: pins_stamp(),
             shell_msg: RegisterWindowMessageW(w!("SHELLHOOK")),
             created_msg: RegisterWindowMessageW(w!("TaskbarCreated")),
@@ -317,8 +319,12 @@ unsafe fn refresh() {
     let (own, shell) = (GetCurrentProcessId(), GetShellWindow());
     let fg = GetForegroundWindow().0 as isize;
     let mut groups: Vec<Item> = Vec::new();
-    for h in all.into_iter().filter(|h| is_eligible(*h, own, shell)) {
-        let (exe, aumid) = (exe_of(h), aumid_of(h));
+    let eligible: Vec<HWND> = all.into_iter().filter(|h| is_eligible(*h, own, shell)).collect();
+    // exe y AUMID no cambian en la vida de la ventana: se piden una vez y no en cada refresco.
+    let mut ident = with(|d| std::mem::take(&mut d.ident));
+    ident.retain(|k, _| eligible.iter().any(|h| h.0 as isize == *k));
+    for h in eligible {
+        let (exe, aumid) = ident.entry(h.0 as isize).or_insert_with(|| (exe_of(h), aumid_of(h))).clone();
         let key = apps::group_key(aumid.as_deref(), &exe);
         let id = h.0 as isize;
         let cloaked = is_cloaked(h);
@@ -332,6 +338,7 @@ unsafe fn refresh() {
         }
     }
     with(|d| {
+        d.ident = ident;
         d.order.retain(|k| groups.iter().any(|g| &g.key == k));
         for g in &groups {
             if !d.order.contains(&g.key) {
