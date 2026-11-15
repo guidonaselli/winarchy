@@ -8,5 +8,6 @@
   "muted": "{{colors.color8}}",
   "font_family": "{{bar.font_family}}",
   "font_size": {{bar.font_size}},
-  "position": "{{computed.bar_position}}"
+  "position": "{{computed.bar_position}}",
+  "dock": {{computed.dock}}
 }

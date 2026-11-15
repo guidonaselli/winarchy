@@ -7,7 +7,7 @@
   "default_container_padding": 2,
   "mouse_follows_focus": false,
   "alt_focus_hack": false,
-  "global_work_area_offset": { "left": 0, "top": 0, "right": 0, "bottom": 2 },
+  "global_work_area_offset": { "left": 0, "top": {{computed.work_top}}, "right": 0, "bottom": {{computed.work_bottom}} },
   "border": true,
   "border_style": "Rounded",
   "border_width": 1,

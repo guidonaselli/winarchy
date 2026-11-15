@@ -3151,7 +3151,7 @@ Describe 'native shell guardrails' {
         $src = Get-ChildItem (Join-Path (Split-Path $PSScriptRoot -Parent) 'shell\src') -Filter *.rs -Recurse
         $src | Should -Not -BeNullOrEmpty
         foreach ($f in $src) {
-            (Get-Content $f.FullName -Raw) | Should -Not -Match 'RegisterHotKey|SetWindowsHookEx|WH_KEYBOARD'
+            (Get-Content $f.FullName -Raw) | Should -Not -Match 'RegisterHotKey|SetWindowsHookEx|WH_KEYBOARD|SHAppBarMessage'
         }
     }
 
@@ -3169,6 +3169,100 @@ Describe 'native shell guardrails' {
     It 'points the YASB watchdog at state\bar so it does not relaunch YASB under the native bar' {
         $root = Split-Path $PSScriptRoot -Parent
         (Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw) | Should -Match ([regex]::Escape('BarFile := StateDir "\bar"'))
+    }
+}
+
+Describe 'Bar dock' {
+    BeforeAll {
+        $script:DockBackup = InModuleScope Winarchy { Test-Path (Get-WinarchyBarDockPath) }
+    }
+
+    AfterAll {
+        InModuleScope Winarchy -Parameters @{ Had = $script:DockBackup } {
+            param($Had)
+            if ($Had) { Set-Content (Get-WinarchyBarDockPath) -Value '' -NoNewline } else { Remove-Item (Get-WinarchyBarDockPath) -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    It 'reserves what dock.rs draws: bar + margin, plus 2 px of native strip only at the bottom' {
+        $rs = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'shell\src\dock.rs') -Raw
+        $bar = [int][regex]::Match($rs, 'BAR_DIP: i32 = (\d+)').Groups[1].Value
+        $margin = [int][regex]::Match($rs, 'const MARGIN_DIP: i32 = (\d+)').Groups[1].Value
+        InModuleScope Winarchy -Parameters @{ Bar = $bar; Margin = $margin } {
+            param($Bar, $Margin)
+            Mock Get-ItemProperty { [pscustomobject]@{ AppliedDPI = 96 } }
+            Mock Get-WinarchyBarPosition { 'top' }
+            (Get-WinarchyDockWorkAreaOffset).Bottom | Should -Be ($Bar + $Margin + 2)
+            Mock Get-WinarchyBarPosition { 'bottom' }
+            (Get-WinarchyDockWorkAreaOffset).Top | Should -Be ($Bar + $Margin)
+        }
+    }
+
+    It 'scales the reserve with the system DPI' {
+        InModuleScope Winarchy {
+            Mock Get-ItemProperty { [pscustomobject]@{ AppliedDPI = 144 } }
+            Mock Get-WinarchyBarPosition { 'top' }
+            (Get-WinarchyDockWorkAreaOffset).Bottom | Should -Be 84
+        }
+    }
+
+    It 'has no dock under YASB even with the switch on' {
+        InModuleScope Winarchy {
+            Set-Content (Get-WinarchyBarDockPath) -Value '' -NoNewline
+            Mock Get-WinarchyActiveBar { 'yasb' }
+            Test-WinarchyBarDock | Should -BeFalse
+            Mock Get-WinarchyActiveBar { 'native' }
+            Test-WinarchyBarDock | Should -BeTrue
+        }
+    }
+
+    It 'renders the offset and the shell flag from the tokens' {
+        InModuleScope Winarchy {
+            $root = Get-WinarchyRoot
+            $tpl = Join-Path $root 'templates\komorebi.json.tpl'
+            $ctx = @{}
+            foreach ($m in [regex]::Matches((Get-Content $tpl -Raw), '\{\{([^}]+)\}\}')) { $ctx[$m.Groups[1].Value] = 'x' }
+            $ctx['computed.work_top'] = 0
+            $ctx['computed.work_bottom'] = 56
+            $komorebi = Invoke-WinarchyTemplate -TemplatePath $tpl -Context $ctx
+            $komorebi | Should -Match '"bottom": 56 \}'
+            $shellTpl = Join-Path $root 'templates\shell-theme.json.tpl'
+            $shellCtx = @{}
+            foreach ($m in [regex]::Matches((Get-Content $shellTpl -Raw), '\{\{([^}]+)\}\}')) { $shellCtx[$m.Groups[1].Value] = '1' }
+            $shellCtx['computed.dock'] = 'true'
+            $shell = Invoke-WinarchyTemplate -TemplatePath $shellTpl -Context $shellCtx
+            ($shell | ConvertFrom-Json).dock | Should -BeTrue
+        }
+    }
+
+    It 'bar dock on|off flips the switch and re-renders the theme' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyCurrentTheme { 'tokyo-night' }
+            Mock Set-WinarchyTheme {}
+            Mock Get-WinarchyActiveBar { 'native' }
+            Set-WinarchyBarDock -Mode on
+            Test-Path (Get-WinarchyBarDockPath) | Should -BeTrue
+            Set-WinarchyBarDock -Mode off
+            Test-Path (Get-WinarchyBarDockPath) | Should -BeFalse
+            Should -Invoke Set-WinarchyTheme -Times 2
+        }
+    }
+
+    It 'switching bars re-renders komorebi only while the dock switch is on' {
+        InModuleScope Winarchy {
+            Mock Install-WinarchyYasb {}
+            Mock Test-WinarchyTask { $false }
+            Mock Invoke-WinarchyReload {}
+            Mock Update-WinarchyKomorebiRules {}
+            Mock Set-WinarchyFileAtomic {}
+            Mock Get-Command { [pscustomobject]@{ Name = 'yasbc' } } -ParameterFilter { $Name -eq 'yasbc' }
+            Remove-Item (Get-WinarchyBarDockPath) -Force -ErrorAction SilentlyContinue
+            Set-WinarchyBar -Name yasb
+            Should -Invoke Update-WinarchyKomorebiRules -Times 0
+            Set-Content (Get-WinarchyBarDockPath) -Value '' -NoNewline
+            Set-WinarchyBar -Name yasb
+            Should -Invoke Update-WinarchyKomorebiRules -Times 1
+        }
     }
 }
 

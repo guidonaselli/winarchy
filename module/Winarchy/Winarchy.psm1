@@ -24,6 +24,7 @@ function Show-WinarchyHelp {
     background set <file>     Apply one of them
     background next           Cycle to the next background
     bar position [top|bottom] Where the bar sits (no arg: show current)
+    bar dock <on|off>         Taskbar-style dock of open apps in the native shell
     bar transparent [on|off]  See through the bar (no arg: toggle)
     assistant on|off|status   Voice assistant (hold Right Ctrl+Space to talk); on installs its local speech
                               runtime and signs in with ChatGPT; also: assistant login|logout
@@ -209,7 +210,12 @@ function Invoke-Winarchy {
                     if ($which -notin 'yasb', 'native') { throw 'Usage: winarchy bar use <yasb|native>' }
                     Set-WinarchyBar -Name $which
                 }
-                default { throw "Unknown subcommand: bar $sub (position|transparent|use)" }
+                'dock' {
+                    $mode = if ($rest.Count -ge 2) { $rest[1].ToLower() } else { '' }
+                    if ($mode -notin 'on', 'off') { throw 'Usage: winarchy bar dock <on|off>' }
+                    Set-WinarchyBarDock -Mode $mode
+                }
+                default { throw "Unknown subcommand: bar $sub (position|transparent|use|dock)" }
             }
         }
         'assistant' { Invoke-WinarchyAssistant -Sub $(if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'status' }) }

@@ -46,3 +46,32 @@ function Set-WinarchyBarPosition {
     if ($theme) { Set-WinarchyTheme -Name $theme }
     else { Write-WinarchyOk "Bar position: $Position (applies on the next `winarchy theme set`)." }
 }
+
+function Get-WinarchyBarDockPath { Join-Path (Get-WinarchyStateDir) 'bar-dock' }
+
+function Test-WinarchyBarDock {
+    <# El dock es de la shell nativa: con YASB no hay dock aunque el interruptor esté prendido. #>
+    (Get-WinarchyActiveBar) -eq 'native' -and (Test-Path (Get-WinarchyBarDockPath))
+}
+
+function Get-WinarchyDockWorkAreaOffset {
+    <# Lo que komorebi reserva para el dock, en px. Espeja BAR_DIP + MARGIN_DIP (+2 de la franja de la taskbar nativa, solo abajo) de shell/src/dock.rs. #>
+    $dpi = (Get-ItemProperty 'HKCU:\Control Panel\Desktop\WindowMetrics' -ErrorAction SilentlyContinue).AppliedDPI
+    if (-not $dpi) { $dpi = 96 }
+    $dockEdge = if ((Get-WinarchyBarPosition) -eq 'top') { 'bottom' } else { 'top' }
+    [pscustomobject]@{
+        Top    = if ($dockEdge -eq 'top') { [int][math]::Round(54 * $dpi / 96) } else { 0 }
+        Bottom = if ($dockEdge -eq 'bottom') { [int][math]::Round(56 * $dpi / 96) } else { 2 }
+    }
+}
+
+function Set-WinarchyBarDock {
+    param([Parameter(Mandatory)][ValidateSet('on', 'off')][string]$Mode)
+    $path = Get-WinarchyBarDockPath
+    if ($Mode -eq 'on') { Set-WinarchyFileAtomic -Path $path -Value 'on' }
+    elseif (Test-Path $path) { Remove-Item $path -Force }
+    if ($Mode -eq 'on' -and (Get-WinarchyActiveBar) -ne 'native') { Write-WinarchyWarn 'The dock needs the native shell: run `winarchy bar use native`.' }
+    $theme = Get-WinarchyCurrentTheme
+    if ($theme) { Set-WinarchyTheme -Name $theme }
+    else { Write-WinarchyOk "Dock: $Mode (applies on the next `winarchy theme set`)." }
+}

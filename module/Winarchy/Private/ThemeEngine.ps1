@@ -145,6 +145,11 @@ function Build-WinarchyThemeContext {
     $ctx['computed.bar_position'] = Get-WinarchyBarPosition
     $ctx['computed.bar_background'] = Get-WinarchyBarBackground -Hex $Theme['colors']['background']
     $ctx['computed.bar_opacity'] = if (Test-WinarchyBarTransparent) { '0.72' } else { '1' }
+    $dockOn = Test-WinarchyBarDock
+    $offset = if ($dockOn) { Get-WinarchyDockWorkAreaOffset }
+    $ctx['computed.dock'] = if (Test-Path (Get-WinarchyBarDockPath)) { 'true' } else { 'false' }
+    $ctx['computed.work_top'] = if ($offset) { $offset.Top } else { 0 }
+    $ctx['computed.work_bottom'] = if ($offset) { $offset.Bottom } else { 2 }
     # La traslucidez sobre fondo claro degrada la legibilidad: solo los themes oscuros.
     $ctx['computed.terminal_opacity'] = if ($Theme['mode'] -eq 'light') { '1.0' } else { '0.95' }
     # auto-accent puede traer un accent tan oscuro (o claro) como el background:
