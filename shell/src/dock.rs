@@ -319,8 +319,6 @@ pub fn set_theme(theme: &Theme) {
     with(|d| {
         d.theme = theme.clone();
         d.motion = motion_enabled(theme);
-        d.icons.clear();
-        d.asked.clear();
         d.sig = 0;
     });
     unsafe { refresh() }
@@ -335,6 +333,8 @@ fn motion_enabled(t: &Theme) -> bool {
     t.dock_motion && on.as_bool()
 }
 
+static NATIVE_HIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 unsafe fn for_native_taskbars(f: impl Fn(HWND)) {
     for class in [w!("Shell_TrayWnd"), w!("Shell_SecondaryTrayWnd")] {
         let mut prev = HWND::default();
@@ -347,6 +347,7 @@ unsafe fn for_native_taskbars(f: impl Fn(HWND)) {
 
 // Oculta la taskbar nativa (principal y secundarias): la bandeja de íconos queda inaccesible salvo `show_tray`.
 unsafe fn set_native_taskbar(hide: bool) {
+    NATIVE_HIDDEN.store(hide, std::sync::atomic::Ordering::Relaxed);
     for_native_taskbars(|h| {
         if hide != !IsWindowVisible(h).as_bool() {
             let _ = ShowWindow(h, if hide { SW_HIDE } else { SW_SHOWNA });
@@ -354,8 +355,15 @@ unsafe fn set_native_taskbar(hide: bool) {
     });
 }
 
-// Sin recordar quién la ocultó: una shell anterior matada a la fuerza no pudo devolverla, y una taskbar visible no se toca.
+// Solo si esta shell la ocultó: una oculta por otra herramienta no se toca.
 pub fn restore_native_taskbar() {
+    if NATIVE_HIDDEN.load(std::sync::atomic::Ordering::Relaxed) {
+        unsafe { set_native_taskbar(false) }
+    }
+}
+
+// Al arrancar: una shell anterior matada a la fuerza no pudo devolverla.
+pub fn restore_native_taskbar_at_start() {
     unsafe { set_native_taskbar(false) }
 }
 
@@ -368,7 +376,8 @@ unsafe fn is_elevated(h: HWND) -> bool {
     use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
     let mut pid = 0u32;
     GetWindowThreadProcessId(h, Some(&mut pid));
-    let Ok(p) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return true };
+    // Sin proceso que abrir no hay nada que bloquear; un token que no se abre con el proceso abierto es el caso típico de uno elevado.
+    let Ok(p) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return false };
     let mut tok = HANDLE::default();
     let mut elevated = true;
     if OpenProcessToken(p, TOKEN_QUERY, &mut tok).is_ok() {
@@ -1164,7 +1173,7 @@ unsafe fn menu_ctx(idx: usize, picker: bool) -> Option<crate::dock_menu::Ctx> {
             tray: d.theme.hide_native_taskbar,
         })
     })?;
-    ctx.closable = !ctx.wins.iter().any(|w| is_elevated(HWND(*w as *mut _)));
+    ctx.closable = ctx.wins.iter().any(|w| !is_elevated(HWND(*w as *mut _)));
     ctx.active = Some(GetForegroundWindow().0 as isize);
     ctx.titles = window_titles(&ctx.wins);
     Some(ctx)

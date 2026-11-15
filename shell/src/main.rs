@@ -1059,7 +1059,9 @@ fn main() {
     let theme_path = std::env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| root.join("config").join("shell").join("theme.json"));
     let prev_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |i| {
-        dock::restore_native_taskbar();
+        if std::thread::current().name() == Some("main") {
+            dock::restore_native_taskbar();
+        }
         prev_hook(i);
     }));
     unsafe {
@@ -1092,8 +1094,9 @@ fn main() {
         if dock_on {
             let state_dir = with(|s| s.theme_path.ancestors().nth(3).map(|r| r.join("state")).unwrap_or_default());
             let _ = dock::init(&with(|s| s.theme.clone()), &state_dir);
-        } else {
-            dock::restore_native_taskbar();
+        }
+        if !dock_on || !with(|s| s.theme.hide_native_taskbar) {
+            dock::restore_native_taskbar_at_start();
         }
         SetTimer(strip, TIMER_TICK, 1000, None);
 

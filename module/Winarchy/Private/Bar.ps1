@@ -82,7 +82,7 @@ function Set-WinarchyBarDock {
     param([Parameter(Mandatory)][ValidateSet('on', 'float', 'off')][string]$Mode)
     $path = Get-WinarchyBarDockPath
     if ($Mode -ne 'off') { Set-WinarchyFileAtomic -Path $path -Value $(if ($Mode -eq 'float') { 'float' } else { 'on' }) }
-    elseif (Test-Path $path) { Remove-Item $path -Force }
+    elseif (Test-Path $path) { Remove-Item $path -Force; if (Test-WinarchyTaskbarHidden) { Restore-WinarchyNativeTaskbar } }
     if ($Mode -ne 'off' -and (Get-WinarchyActiveBar) -ne 'native') { Write-WinarchyWarn 'The dock needs the native shell: run `winarchy bar use native`.' }
     $theme = Get-WinarchyCurrentTheme
     if ($theme) { Set-WinarchyTheme -Name $theme }

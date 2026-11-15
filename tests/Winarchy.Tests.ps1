@@ -3208,6 +3208,7 @@ Describe 'Bar dock' {
         $margin = [int][regex]::Match($rs, 'const MARGIN_DIP: i32 = (\d+)').Groups[1].Value
         InModuleScope Winarchy -Parameters @{ Bar = $bar; Margin = $margin } {
             param($Bar, $Margin)
+            Mock Get-WinarchyDockMode { 'reserve' }
             Mock Get-ItemProperty { [pscustomobject]@{ AppliedDPI = 96 } }
             Mock Get-WinarchyBarPosition { 'top' }
             (Get-WinarchyDockWorkAreaOffset).Bottom | Should -Be ($Bar + $Margin + 2)
@@ -3218,6 +3219,7 @@ Describe 'Bar dock' {
 
     It 'scales the reserve with the system DPI' {
         InModuleScope Winarchy {
+            Mock Get-WinarchyDockMode { 'reserve' }
             Mock Get-ItemProperty { [pscustomobject]@{ AppliedDPI = 144 } }
             Mock Get-WinarchyBarPosition { 'top' }
             (Get-WinarchyDockWorkAreaOffset).Bottom | Should -Be 84
@@ -3254,6 +3256,7 @@ Describe 'Bar dock' {
     It 'hiding the native taskbar sets auto-hide, flags the shell and is undone by autohide' {
         InModuleScope Winarchy {
             Mock Set-WinarchyTaskbarAutoHide { $true }
+            Mock Restore-WinarchyNativeTaskbar {}
             Mock Test-WinarchyBarDock { $false }
             $flag = Get-WinarchyTaskbarHiddenPath
             $had = Test-Path $flag

@@ -782,7 +782,7 @@ function Invoke-WinarchyReload {
     }
     else {
         Stop-Process -Name 'winarchy-shell' -Force -ErrorAction SilentlyContinue
-        Restore-WinarchyNativeTaskbar
+        if (Test-WinarchyTaskbarHidden) { Restore-WinarchyNativeTaskbar }
     }
     if ($Light) { return }
     Start-WinarchyWindowSlots
