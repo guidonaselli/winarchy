@@ -1206,6 +1206,9 @@ pub fn clip_title(t: &str, max: usize) -> String {
 
 // Texto del tooltip: el título de la ventana a enfocar, o el nombre del anclado si no hay ventanas.
 unsafe fn tip_text(idx: usize) -> Option<String> {
+    if let Some(n) = with(|d| (d.layout.overflow > 0 && idx + 1 == d.layout.cells.len()).then_some(d.layout.overflow)) {
+        return Some(format!("+{n}"));
+    }
     let (wins, last, pin) = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), d.last_active.get(&i.key).copied(), launch_of(&d.pins, i).map(|(o, _)| o))))?;
     let target = pick_target(&wins, 0, last);
     if let Some(t) = target {
