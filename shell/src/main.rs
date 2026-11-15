@@ -1,5 +1,7 @@
 #![windows_subsystem = "windows"]
 
+#[allow(dead_code)]
+mod apps;
 mod brightness;
 mod calendar;
 mod world;
