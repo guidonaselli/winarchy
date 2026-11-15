@@ -13,6 +13,7 @@ Shell nativa opcional de Winarchy (franja reservada + isla). Se activa con `stat
 - **Ventanas**: agrupa por AppUserModelID (respaldo: exe). Clic enfoca (restaura minimizadas, cambia de workspace con `komorebic`); clic en la app que ya está al frente la minimiza; con varias ventanas el clic abre un selector con sus títulos; clic medio abre una instancia nueva. La celda "+N" abre el selector de los grupos que no entraron.
 - **Clic derecho**: abrir/nueva ventana, anclar/desanclar, cerrar y cerrar todas, y "Bandeja del sistema" si la taskbar nativa está oculta. Las ventanas elevadas no se pueden cerrar desde acá (UIPI): la entrada no aparece.
 - **Anclados**: lista propia en `state/dock-pins.json`, sembrada una vez desde la taskbar nativa.
+- **Reordenar**: arrastrar una celda sobre otra del mismo tipo (ancladas entre sí, abiertas entre sí) las intercambia; el orden de las ancladas se guarda en `state/dock-pins.json`.
 - **Atención**: una ventana que pide atención (`FlashWindow`, como un mensaje nuevo) tiñe su celda de ámbar hasta que pasa al frente o se cierra.
 - **Desborde**: la celda "+N" muestra cuántos grupos quedaron fuera y abre un selector con ellos.
 - **Motion**: hover con escala, entrada de íconos, feedback al presionar y fundido al ocultar; un timer de 16 ms solo mientras algo anima. Se apaga con `dock_motion: false` o con "efectos de animación" apagado en Windows.

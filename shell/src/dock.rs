@@ -16,7 +16,7 @@ use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTME
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::RemoteDesktop::{WTSRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION};
 use windows::Win32::System::Threading::*;
-use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT};
+use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT};
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -242,6 +242,13 @@ struct Dock {
     anim_at: std::time::Instant,
     tray_until: Option<std::time::Instant>,
     flashing: HashSet<isize>,
+    drag: Option<Drag>,
+}
+
+struct Drag {
+    key: String,
+    x0: i32,
+    moving: bool,
 }
 
 
@@ -303,6 +310,7 @@ pub fn init(theme: &Theme, state_dir: &std::path::Path) -> Option<HWND> {
             anim_at: std::time::Instant::now(),
             tray_until: None,
             flashing: HashSet::new(),
+            drag: None,
         };
         DOCK.with(|s| *s.borrow_mut() = Some(d));
         spawn_icon_worker(hwnd.0 as isize);
@@ -473,6 +481,31 @@ fn save_pins(path: &std::path::Path, pins: &[Pin]) {
     let tmp = path.with_extension("json.tmp");
     if std::fs::write(&tmp, text).is_ok() {
         let _ = std::fs::rename(&tmp, path);
+    }
+}
+
+fn move_item<T>(v: &mut Vec<T>, from: usize, to: usize) {
+    let x = v.remove(from);
+    v.insert(to, x);
+}
+
+// Arrastrar una celda sobre otra del mismo tipo (ancladas entre sí, abiertas entre sí) las intercambia de lugar.
+fn reorder(d: &mut Dock, from: &str, to: &str) -> bool {
+    let (Some(a), Some(b)) = (d.items.iter().find(|i| i.key == from), d.items.iter().find(|i| i.key == to)) else { return false };
+    match (a.pin.clone(), b.pin.clone()) {
+        (Some(pa), Some(pb)) => {
+            let (Some(ia), Some(ib)) = (d.pins.iter().position(|p| p.id == pa), d.pins.iter().position(|p| p.id == pb)) else { return false };
+            move_item(&mut d.pins, ia, ib);
+            save_pins(&d.pins_path, &d.pins);
+            d.pins_stamp = pins_stamp(&d.pins_path);
+            true
+        }
+        (None, None) => {
+            let (Some(ia), Some(ib)) = (d.order.iter().position(|k| k == from), d.order.iter().position(|k| k == to)) else { return false };
+            move_item(&mut d.order, ia, ib);
+            true
+        }
+        _ => false,
     }
 }
 
@@ -1397,6 +1430,23 @@ unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_MOUSEMOVE => {
             let (x, y) = xy(lp);
+            let dragged = with(|d| {
+                let hit = match hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y) {
+                    Some(Hit::Item(i)) => d.items.get(i).map(|it| it.key.clone()),
+                    _ => None,
+                };
+                let thresh = px(6, d.scale);
+                let Some(dr) = d.drag.as_mut() else { return false };
+                dr.moving |= (x - dr.x0).abs() > thresh;
+                let from = dr.key.clone();
+                match hit {
+                    Some(to) if dr.moving && to != from => reorder(d, &from, &to),
+                    _ => false,
+                }
+            });
+            if dragged {
+                refresh();
+            }
             let (changed, need_track) = with(|d| {
                 let idx = match hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y) {
                     Some(Hit::Item(i)) => Some(i),
@@ -1461,6 +1511,10 @@ unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                 Some(Hit::Item(i)) => Some(i),
                 _ => None,
             });
+            if let Some(i) = on_item {
+                with(|d| d.drag = d.items.get(i).map(|it| Drag { key: it.key.clone(), x0: x, moving: false }));
+                SetCapture(h);
+            }
             if on_item.is_some() && with(|d| d.motion) {
                 with(|d| d.pressed = on_item);
                 render();
@@ -1469,9 +1523,14 @@ unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
         }
         WM_LBUTTONUP => {
             let (x, y) = xy(lp);
+            let _ = ReleaseCapture();
+            let moved = with(|d| d.drag.take()).is_some_and(|dr| dr.moving);
             if with(|d| d.pressed.take()).is_some() {
                 with(|d| d.sig = 0);
                 render();
+            }
+            if moved {
+                return LRESULT(0);
             }
             match with(|d| hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y).map(|h| (h, d.layout.cells.len()))) {
                 Some((Hit::Item(i), _)) => click(i),
@@ -1527,6 +1586,15 @@ mod tests {
         let mut half = vec![0u32; 16];
         draw_icon(&mut half, 4, 4, &ic, 2.0, 2.0, 1.0, 0.5);
         assert!(half.iter().all(|p| *p == 0 || (*p >> 24) == 0x80));
+    }
+
+    #[test]
+    fn moving_an_item_shifts_the_ones_in_between() {
+        let mut v = vec![1, 2, 3, 4];
+        move_item(&mut v, 0, 2);
+        assert_eq!(v, [2, 3, 1, 4]);
+        move_item(&mut v, 3, 0);
+        assert_eq!(v, [4, 2, 3, 1]);
     }
 
     #[test]
