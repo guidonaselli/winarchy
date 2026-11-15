@@ -17,15 +17,31 @@ type MonRect = (i32, i32, i32, i32);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Act {
+    Focus(isize),
     Open,
+    Pin,
+    Unpin,
     Close,
     CloseAll,
 }
 
-pub fn acts(windows: usize, launchable: bool) -> Vec<Act> {
+// `picker`: solo la lista de ventanas (clic izquierdo en un grupo con varias). El menú contextual la antepone cuando hay más de una.
+pub fn acts(wins: &[isize], launchable: bool, pinned: bool, pinnable: bool, picker: bool) -> Vec<Act> {
+    let windows = wins.len();
     let mut v = Vec::new();
+    if picker || windows > 1 {
+        v.extend(wins.iter().map(|w| Act::Focus(*w)));
+    }
+    if picker {
+        return v;
+    }
     if launchable {
         v.push(Act::Open);
+    }
+    if pinned {
+        v.push(Act::Unpin);
+    } else if pinnable {
+        v.push(Act::Pin);
     }
     if windows > 0 {
         v.push(Act::Close);
@@ -38,8 +54,11 @@ pub fn acts(windows: usize, launchable: bool) -> Vec<Act> {
 
 fn label(a: Act, windows: usize) -> &'static str {
     t(match a {
+        Act::Focus(_) => K::MenuOpen,
         Act::Open if windows > 0 => K::MenuNewWindow,
         Act::Open => K::MenuOpen,
+        Act::Pin => K::MenuPin,
+        Act::Unpin => K::MenuUnpin,
         Act::Close => K::MenuClose,
         Act::CloseAll => K::MenuCloseAll,
     })
@@ -71,6 +90,9 @@ pub fn step(cur: Option<usize>, n: usize, down: bool) -> Option<usize> {
 }
 
 pub struct Ctx {
+    pub picker: bool,
+    pub titles: Vec<String>,
+    pub active: Option<isize>,
     pub theme: Theme,
     pub scale: f32,
     pub cx: i32,
@@ -79,7 +101,10 @@ pub struct Ctx {
     pub mon: MonRect,
     pub wins: Vec<isize>,
     pub last: Option<isize>,
-    pub launch: Option<String>,
+    pub launch: Option<(String, String)>,
+    pub key: String,
+    pub pinned: bool,
+    pub pinnable: bool,
 }
 
 struct Menu {
@@ -88,7 +113,8 @@ struct Menu {
     labels: Vec<String>,
     wins: Vec<isize>,
     target: Option<isize>,
-    launch: Option<String>,
+    launch: Option<(String, String)>,
+    key: String,
     hover: Option<usize>,
     pos: POINT,
     size: (i32, i32),
@@ -104,10 +130,12 @@ pub fn is_open() -> bool {
     MENU.with(|m| m.try_borrow().map(|m| m.is_some()).unwrap_or(true))
 }
 
-pub fn launch(path: &str) {
-    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+pub fn launch(path: &str, args: &str) {
+    let wide = |t: &str| -> Vec<u16> { t.encode_utf16().chain(std::iter::once(0)).collect() };
+    let (p, a) = (wide(path), wide(args));
     unsafe {
-        let _ = ShellExecuteW(None, w!("open"), PCWSTR(wide.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
+        let params = if args.is_empty() { PCWSTR::null() } else { PCWSTR(a.as_ptr()) };
+        let _ = ShellExecuteW(None, w!("open"), PCWSTR(p.as_ptr()), params, PCWSTR::null(), SW_SHOWNORMAL);
     }
 }
 
@@ -118,11 +146,21 @@ unsafe fn font_for(theme: &Theme, scale: f32) -> HFONT {
 
 pub unsafe fn show(c: Ctx) {
     dismiss();
-    let list = acts(c.wins.len(), c.launch.is_some());
+    let list = acts(&c.wins, c.launch.is_some(), c.pinned, c.pinnable, c.picker);
     if list.is_empty() {
         return;
     }
-    let labels: Vec<String> = list.iter().map(|a| label(*a, c.wins.len()).to_string()).collect();
+    let labels: Vec<String> = list
+        .iter()
+        .map(|a| match a {
+            Act::Focus(id) => {
+                let i = c.wins.iter().position(|w| w == id).unwrap_or(0);
+                let title = c.titles.get(i).filter(|t| !t.is_empty()).cloned().unwrap_or_else(|| "…".into());
+                format!("{}{title}", if c.active == Some(*id) { "• " } else { "   " })
+            }
+            other => label(*other, c.wins.len()).to_string(),
+        })
+        .collect();
     let (row, pad, padx) = (px(32, c.scale), px(6, c.scale), px(14, c.scale));
     let screen = GetDC(None);
     let mem = CreateCompatibleDC(screen);
@@ -146,7 +184,7 @@ pub unsafe fn show(c: Ctx) {
     let class = WNDCLASSW { lpfnWndProc: Some(menu_proc), hInstance: inst.into(), hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(), lpszClassName: w!("WinarchyShellDockMenu"), ..Default::default() };
     RegisterClassW(&class);
     let Ok(hwnd) = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED, class.lpszClassName, w!(""), WS_POPUP, x, y, w, h, None, None, inst, None) else { return };
-    let menu = Menu { hwnd, acts: list, labels, target: pick_target(&c.wins, 0, c.last), wins: c.wins, launch: c.launch, hover: None, pos: POINT { x, y }, size: (w, h), row, pad, theme: c.theme, scale: c.scale };
+    let menu = Menu { hwnd, acts: list, labels, target: pick_target(&c.wins, 0, c.last), wins: c.wins, launch: c.launch, key: c.key, hover: None, pos: POINT { x, y }, size: (w, h), row, pad, theme: c.theme, scale: c.scale };
     paint(&menu);
     MENU.with(|m| *m.borrow_mut() = Some(menu));
     let _ = ShowWindow(hwnd, SW_SHOW);
@@ -230,7 +268,9 @@ fn activate(i: usize) {
         let _ = PostMessageW(HWND(id as *mut _), WM_CLOSE, WPARAM(0), LPARAM(0));
     };
     match m.acts.get(i) {
-        Some(Act::Open) => m.launch.as_deref().into_iter().for_each(launch),
+        Some(Act::Focus(id)) => unsafe { crate::dock::focus_window(HWND(*id as *mut _)) },
+        Some(Act::Open) => m.launch.iter().for_each(|(o, a)| launch(o, a)),
+        Some(Act::Pin | Act::Unpin) => crate::dock::toggle_pin(&m.key),
         Some(Act::Close) => m.target.into_iter().for_each(close),
         Some(Act::CloseAll) => m.wins.iter().copied().for_each(close),
         None => {}
@@ -280,11 +320,16 @@ mod tests {
 
     #[test]
     fn entries_follow_the_state_of_the_cell() {
-        assert_eq!(acts(0, true), [Act::Open]);
-        assert_eq!(acts(1, true), [Act::Open, Act::Close]);
-        assert_eq!(acts(3, true), [Act::Open, Act::Close, Act::CloseAll]);
-        assert_eq!(acts(2, false), [Act::Close, Act::CloseAll]);
-        assert!(acts(0, false).is_empty());
+        assert_eq!(acts(&[], true, true, true, false), [Act::Open, Act::Unpin]);
+        assert_eq!(acts(&[1], true, false, true, false), [Act::Open, Act::Pin, Act::Close]);
+        assert_eq!(acts(&[1, 2, 3], true, false, false, false), [Act::Focus(1), Act::Focus(2), Act::Focus(3), Act::Open, Act::Close, Act::CloseAll]);
+        assert_eq!(acts(&[1, 2], false, false, false, false), [Act::Focus(1), Act::Focus(2), Act::Close, Act::CloseAll]);
+        assert!(acts(&[], false, false, false, false).is_empty());
+    }
+
+    #[test]
+    fn the_picker_lists_only_the_windows() {
+        assert_eq!(acts(&[7, 8], true, true, true, true), [Act::Focus(7), Act::Focus(8)]);
     }
 
     #[test]

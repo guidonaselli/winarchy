@@ -6,6 +6,7 @@ use crate::theme::{rgb, Theme};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::os::windows::process::CommandExt;
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::*;
@@ -82,13 +83,46 @@ pub fn focus_args(monitor: usize, workspace: usize) -> [String; 3] {
 }
 
 // Anclados primero y en su orden; un anclado cuyo exe ya corre se fusiona con ese grupo en vez de duplicarse.
-#[derive(Clone)]
+// Anclado propio del dock (`state/dock-pins.json`). `id` identifica el anclado; `open` es lo que se lanza con `args`.
+#[derive(Clone, Serialize, Deserialize)]
 struct Pin {
-    lnk: String,
+    id: String,
+    open: String,
+    #[serde(default)]
+    args: String,
+    #[serde(default)]
     exe: String,
+    #[serde(default)]
     aumid: Option<String>,
-    // Squirrel (Discord, Slack, Teams): el .lnk apunta a Update.exe y el exe real va en `--processStart X.exe`.
+    // Squirrel (Discord, Slack, Teams): se lanza Update.exe y el exe real va en `--processStart X.exe`.
+    #[serde(default)]
     launched: Option<String>,
+}
+
+// Anclado para un grupo en ejecución. UWP se lanza por AUMID; Squirrel por su Update.exe, porque la carpeta `app-X` cambia con cada versión.
+fn pin_for(it: &Item, has_update: impl Fn(&std::path::Path) -> bool) -> Option<Pin> {
+    let exe = std::path::Path::new(&it.exe);
+    let file = exe.file_name()?.to_string_lossy().into_owned();
+    let base = |open: String, args: String, exe: String, launched: Option<String>| Pin { id: it.key.clone(), open, args, exe, aumid: it.aumid.clone(), launched };
+    if file.eq_ignore_ascii_case("applicationframehost.exe") {
+        let a = it.aumid.clone()?;
+        return Some(Pin { id: it.key.clone(), open: format!(r"shell:AppsFolder\{a}"), args: String::new(), exe: String::new(), aumid: Some(a), launched: None });
+    }
+    if let Some(root) = exe.parent().filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("app-"))).and_then(|p| p.parent()) {
+        let upd = root.join("Update.exe");
+        if has_update(&upd) {
+            let u = upd.to_string_lossy().into_owned();
+            return Some(base(u.clone(), format!("--processStart {file}"), u, Some(file.to_lowercase())));
+        }
+    }
+    Some(base(it.exe.clone(), String::new(), it.exe.clone(), None))
+}
+
+fn launch_of(pins: &[Pin], it: &Item) -> Option<(String, String)> {
+    match &it.pin {
+        Some(id) => pins.iter().find(|p| &p.id == id).map(|p| (p.open.clone(), p.args.clone())),
+        None => pin_for(it, |p| p.exists()).map(|p| (p.open, p.args)),
+    }
 }
 
 fn squirrel_target(exe: &str, args: &str) -> Option<String> {
@@ -102,7 +136,7 @@ fn squirrel_target(exe: &str, args: &str) -> Option<String> {
 
 fn arrange(pins: &[Pin], mut groups: Vec<Item>) -> Vec<Item> {
     let mut out = Vec::new();
-    for Pin { lnk, exe, aumid, launched } in pins {
+    for Pin { id, exe, aumid, launched, .. } in pins {
         let same = |g: &Item| {
             (!exe.is_empty() && g.exe.eq_ignore_ascii_case(exe))
                 || launched.as_deref().is_some_and(|n| std::path::Path::new(&g.exe).file_name().is_some_and(|f| f.to_string_lossy().eq_ignore_ascii_case(n)))
@@ -111,10 +145,10 @@ fn arrange(pins: &[Pin], mut groups: Vec<Item>) -> Vec<Item> {
         match groups.iter().position(same) {
             Some(i) => {
                 let mut g = groups.remove(i);
-                g.pin = Some(lnk.clone());
+                g.pin = Some(id.clone());
                 out.push(g);
             }
-            None => out.push(Item { key: format!("pin:{}", lnk.to_lowercase()), exe: exe.clone(), aumid: aumid.clone(), wins: Vec::new(), active: false, other_ws: false, pin: Some(lnk.clone()) }),
+            None => out.push(Item { key: format!("pin:{}", id.to_lowercase()), exe: exe.clone(), aumid: aumid.clone(), wins: Vec::new(), active: false, other_ws: false, pin: Some(id.clone()) }),
         }
     }
     out.extend(groups);
@@ -164,6 +198,7 @@ struct Dock {
     pending_focus: Option<isize>,
     pins: Vec<Pin>,
     ident: HashMap<isize, (String, Option<String>, std::time::Instant)>,
+    pins_path: std::path::PathBuf,
     pins_stamp: Option<std::time::SystemTime>,
     shell_msg: u32,
     created_msg: u32,
@@ -180,7 +215,7 @@ static READY: Mutex<Vec<(String, i32, Icon)>> = Mutex::new(Vec::new());
 type Ask = (String, i32, Vec<String>);
 static ASKS: Mutex<Option<std::sync::mpsc::Sender<Ask>>> = Mutex::new(None);
 
-pub fn init(theme: &Theme) -> Option<HWND> {
+pub fn init(theme: &Theme, state_dir: &std::path::Path) -> Option<HWND> {
     unsafe {
         let inst = GetModuleHandleW(PCWSTR::null()).ok()?;
         let class = WNDCLASSW { lpfnWndProc: Some(dock_proc), hInstance: inst.into(), hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(), lpszClassName: w!("WinarchyShellDock"), ..Default::default() };
@@ -193,6 +228,7 @@ pub fn init(theme: &Theme) -> Option<HWND> {
         let tip_class = WNDCLASSW { lpfnWndProc: Some(tip_proc), hInstance: inst.into(), lpszClassName: w!("WinarchyShellDockTip"), ..Default::default() };
         RegisterClassW(&tip_class);
         let tip = CreateWindowExW(ex | WS_EX_TRANSPARENT, tip_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, 1, None, None, inst, None).ok()?;
+        let pins_path = state_dir.join("dock-pins.json");
         let d = Dock {
             hwnd,
             tip,
@@ -210,9 +246,10 @@ pub fn init(theme: &Theme) -> Option<HWND> {
             sig: 0,
             hidden: false,
             pending_focus: None,
-            pins: load_pins(),
+            pins: load_pins(&pins_path),
             ident: HashMap::new(),
-            pins_stamp: pins_stamp(),
+            pins_stamp: pins_stamp(&pins_path),
+            pins_path,
             shell_msg: RegisterWindowMessageW(w!("SHELLHOOK")),
             created_msg: RegisterWindowMessageW(w!("TaskbarCreated")),
         };
@@ -237,14 +274,54 @@ pub fn set_theme(theme: &Theme) {
     unsafe { refresh() }
 }
 
-// `.lnk` de la taskbar nativa. shortcut: sin el orden de `Taskband` (va alfabético) y sin anclados de Store (el `.lnk` no trae exe), cuando se necesite ese orden leer `Taskband\Favorites`.
-fn pins_dir() -> Option<std::path::PathBuf> {
+// `.lnk` de la taskbar nativa: solo siembran los anclados propios la primera vez.
+fn native_pins_dir() -> Option<std::path::PathBuf> {
     let appdata = std::env::var_os("APPDATA")?;
     Some(std::path::Path::new(&appdata).join(r"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"))
 }
 
-fn pins_stamp() -> Option<std::time::SystemTime> {
-    std::fs::metadata(pins_dir()?).and_then(|m| m.modified()).ok()
+fn pins_stamp(path: &std::path::Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+// Sin archivo se siembra con los de la taskbar nativa; desde ahí los anclados son del dock y la nativa no los pisa.
+fn load_pins(path: &std::path::Path) -> Vec<Pin> {
+    if let Ok(text) = std::fs::read_to_string(path) {
+        return serde_json::from_str(&text).unwrap_or_default();
+    }
+    let seeded = load_native_pins();
+    save_pins(path, &seeded);
+    seeded
+}
+
+fn save_pins(path: &std::path::Path, pins: &[Pin]) {
+    let Ok(text) = serde_json::to_string_pretty(pins) else { return };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, text).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
+}
+
+pub fn toggle_pin(key: &str) {
+    let changed = with(|d| {
+        let Some(it) = d.items.iter().find(|i| i.key == key).cloned() else { return false };
+        match &it.pin {
+            Some(id) => d.pins.retain(|p| &p.id != id),
+            None => match pin_for(&it, |p| p.exists()) {
+                Some(p) => d.pins.push(p),
+                None => return false,
+            },
+        }
+        save_pins(&d.pins_path, &d.pins);
+        d.pins_stamp = pins_stamp(&d.pins_path);
+        true
+    });
+    if changed {
+        unsafe { refresh() }
+    }
 }
 
 // `Taskband\Favorites` guarda los nombres de los `.lnk` anclados en UTF-16, en el orden de la taskbar.
@@ -294,10 +371,10 @@ fn sort_pins(files: &mut [std::path::PathBuf], order: &[String]) {
     files.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.cmp(b)));
 }
 
-fn load_pins() -> Vec<Pin> {
+fn load_native_pins() -> Vec<Pin> {
     use windows::core::Interface;
     use windows::Win32::System::Com::{CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER, STGM_READ};
-    let Some(dir) = pins_dir() else { return Vec::new() };
+    let Some(dir) = native_pins_dir() else { return Vec::new() };
     let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut files: Vec<_> = rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("lnk"))).collect();
     sort_pins(&mut files, &lnk_order(&taskband_blob()));
@@ -322,7 +399,8 @@ fn load_pins() -> Vec<Pin> {
         // File Explorer y los de Store no traen exe: se identifican por AUMID.
         if !exe.is_empty() || aumid.is_some() {
             let launched = squirrel_target(&exe, &args);
-            pins.push(Pin { lnk: f.to_string_lossy().into_owned(), exe, aumid, launched });
+            let lnk = f.to_string_lossy().into_owned();
+            pins.push(Pin { id: lnk.to_lowercase(), open: lnk, args: String::new(), exe, aumid, launched });
         }
     }
     pins
@@ -496,10 +574,12 @@ fn draw_icon(buf: &mut [u32], stride: i32, rows: i32, ic: &Icon, x0: i32, y0: i3
     }
 }
 
-fn icon_sources(i: &Item) -> Vec<String> {
+fn icon_sources(i: &Item, pins: &[Pin]) -> Vec<String> {
     let mut v = Vec::new();
-    if let Some(p) = &i.pin {
-        v.push(p.clone());
+    if let Some(p) = i.pin.as_ref().and_then(|id| pins.iter().find(|p| &p.id == id)) {
+        if !p.open.starts_with("shell:") {
+            v.push(p.open.clone());
+        }
     }
     if let Some(a) = &i.aumid {
         v.push(format!(r"shell:AppsFolder\{a}"));
@@ -518,7 +598,7 @@ fn render() {
     let size = px(ICON_DIP, scale);
     let to_ask: Vec<Ask> = with(|d| {
         let missing: Vec<&Item> = items.iter().filter(|i| !d.icons.contains_key(&(i.key.clone(), size))).collect();
-        missing.into_iter().filter(|i| d.asked.insert((i.key.clone(), size))).map(|i| (i.key.clone(), size, icon_sources(i))).collect()
+        missing.into_iter().filter(|i| d.asked.insert((i.key.clone(), size))).map(|i| (i.key.clone(), size, icon_sources(i, &d.pins))).collect()
     });
     if let Some(tx) = ASKS.lock().unwrap().as_ref() {
         for a in to_ask {
@@ -724,10 +804,11 @@ unsafe fn tick() {
         d.hidden = hide;
         ch
     });
-    let stamp = pins_stamp();
+    let pins_path = with(|d| d.pins_path.clone());
+    let stamp = pins_stamp(&pins_path);
     let pins_changed = with(|d| d.pins_stamp != stamp);
     if pins_changed {
-        let pins = load_pins();
+        let pins = load_pins(&pins_path);
         with(|d| {
             d.pins = pins;
             d.pins_stamp = stamp;
@@ -757,7 +838,7 @@ unsafe fn raise(hwnd: HWND) {
     }
 }
 
-unsafe fn focus_window(hwnd: HWND) {
+pub(crate) unsafe fn focus_window(hwnd: HWND) {
     let dock = with(|d| d.hwnd);
     if !IsWindow(hwnd).as_bool() {
         queue_refresh(dock);
@@ -778,16 +859,63 @@ unsafe fn focus_window(hwnd: HWND) {
 }
 
 unsafe fn click(idx: usize) {
-    let target = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), d.last_active.get(&i.key).copied(), i.pin.clone())));
-    let Some((wins, last, pin)) = target else { return };
+    let target = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), d.last_active.get(&i.key).copied(), launch_of(&d.pins, i))));
+    let Some((wins, last, launch)) = target else { return };
     if wins.is_empty() {
-        pin.iter().for_each(|p| crate::dock_menu::launch(p));
+        launch.iter().for_each(|(o, a)| crate::dock_menu::launch(o, a));
         return;
     }
     let fg = GetForegroundWindow().0 as isize;
-    if let Some(t) = pick_target(&wins, fg, last) {
+    if wins.len() > 1 {
+        if let Some(ctx) = menu_ctx(idx, true) {
+            hide_tip();
+            crate::dock_menu::show(ctx);
+        }
+        return;
+    }
+    // Como la taskbar de Windows: clic en la app que ya está al frente la minimiza.
+    let h = HWND(wins[0] as *mut _);
+    if wins[0] == fg && !IsIconic(h).as_bool() {
+        let _ = ShowWindowAsync(h, SW_MINIMIZE);
+    } else if let Some(t) = pick_target(&wins, fg, last) {
         focus_window(HWND(t as *mut _));
     }
+}
+
+// Datos del menú de una celda. Los títulos se leen fuera del préstamo del estado.
+unsafe fn menu_ctx(idx: usize, picker: bool) -> Option<crate::dock_menu::Ctx> {
+    let mut ctx = with(|d| {
+        let it = d.items.get(idx)?;
+        let cell = *d.layout.cells.get(idx)?;
+        Some(crate::dock_menu::Ctx {
+            picker,
+            titles: Vec::new(),
+            active: None,
+            theme: d.theme.clone(),
+            scale: d.scale,
+            cx: d.layout.bar.x + cell.x + cell.w / 2,
+            bar: d.layout.bar,
+            bottom: d.theme.position != "bottom",
+            mon: d.mon,
+            wins: it.wins.clone(),
+            last: d.last_active.get(&it.key).copied(),
+            key: it.key.clone(),
+            pinned: it.pin.is_some(),
+            pinnable: pin_for(it, |p| p.exists()).is_some(),
+            launch: launch_of(&d.pins, it),
+        })
+    })?;
+    ctx.active = Some(GetForegroundWindow().0 as isize);
+    ctx.titles = ctx
+        .wins
+        .iter()
+        .map(|w| {
+            let mut buf = [0u16; 256];
+            let n = GetWindowTextW(HWND(*w as *mut _), &mut buf).max(0) as usize;
+            clip_title(&String::from_utf16_lossy(&buf[..n]), 48)
+        })
+        .collect();
+    Some(ctx)
 }
 
 fn xy(lp: LPARAM) -> (i32, i32) {
@@ -812,7 +940,7 @@ pub fn clip_title(t: &str, max: usize) -> String {
 
 // Texto del tooltip: el título de la ventana a enfocar, o el nombre del anclado si no hay ventanas.
 unsafe fn tip_text(idx: usize) -> Option<String> {
-    let (wins, last, pin) = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), d.last_active.get(&i.key).copied(), i.pin.clone())))?;
+    let (wins, last, pin) = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), d.last_active.get(&i.key).copied(), launch_of(&d.pins, i).map(|(o, _)| o))))?;
     let target = pick_target(&wins, 0, last);
     if let Some(t) = target {
         let h = HWND(t as *mut _);
@@ -977,36 +1105,21 @@ unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
         }
         WM_RBUTTONUP => {
             let (x, y) = xy(lp);
-            let hit = with(|d| match hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y) {
-                Some(Hit::Item(i)) => d.items.get(i).map(|it| {
-                    let cell = d.layout.cells[i];
-                    crate::dock_menu::Ctx {
-                        theme: d.theme.clone(),
-                        scale: d.scale,
-                        cx: d.layout.bar.x + cell.x + cell.w / 2,
-                        bar: d.layout.bar,
-                        bottom: d.theme.position != "bottom",
-                        mon: d.mon,
-                        wins: it.wins.clone(),
-                        last: d.last_active.get(&it.key).copied(),
-                        launch: it.pin.clone().or_else(|| Some(it.exe.clone()).filter(|e| !e.is_empty())),
-                    }
-                }),
-                _ => None,
-            });
-            if let Some(ctx) = hit {
-                hide_tip();
-                crate::dock_menu::show(ctx);
+            if let Some(Hit::Item(i)) = with(|d| hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y)) {
+                if let Some(ctx) = menu_ctx(i, false) {
+                    hide_tip();
+                    crate::dock_menu::show(ctx);
+                }
             }
             LRESULT(0)
         }
         WM_MBUTTONUP => {
             let (x, y) = xy(lp);
-            let path = with(|d| match hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y) {
-                Some(Hit::Item(i)) => d.items.get(i).and_then(|it| it.pin.clone().or_else(|| Some(it.exe.clone()).filter(|e| !e.is_empty()))),
+            let target = with(|d| match hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y) {
+                Some(Hit::Item(i)) => d.items.get(i).and_then(|it| launch_of(&d.pins, it)),
                 _ => None,
             });
-            path.iter().for_each(|p| crate::dock_menu::launch(p));
+            target.iter().for_each(|(o, a)| crate::dock_menu::launch(o, a));
             LRESULT(0)
         }
         WM_LBUTTONUP => {
@@ -1080,14 +1193,14 @@ mod tests {
 
     #[test]
     fn a_running_pin_merges_with_its_group_and_leads_the_list() {
-        let pins = vec![Pin { lnk: "a.lnk".into(), exe: r"C:\X\Tool.exe".into(), aumid: None, launched: None }];
+        let pins = vec![Pin { id: "a.lnk".into(), open: "a.lnk".into(), args: String::new(), exe: r"C:\X\Tool.exe".into(), aumid: None, launched: None }];
         let out = arrange(&pins, vec![item("exe:other", r"C:\o.exe"), item("exe:tool", r"c:\x\tool.EXE")]);
         assert_eq!((out[0].key.as_str(), out[0].pin.as_deref(), out.len()), ("exe:tool", Some("a.lnk"), 2));
     }
 
     #[test]
     fn a_pin_without_exe_merges_by_aumid() {
-        let pins = vec![Pin { lnk: "e.lnk".into(), exe: String::new(), aumid: Some("Microsoft.Windows.Explorer".into()), launched: None }];
+        let pins = vec![Pin { id: "e.lnk".into(), open: "e.lnk".into(), args: String::new(), exe: String::new(), aumid: Some("Microsoft.Windows.Explorer".into()), launched: None }];
         let mut g = item("aumid:microsoft.windows.explorer", r"C:\Windows\explorer.exe");
         g.aumid = Some("microsoft.windows.explorer".into());
         let out = arrange(&pins, vec![item("exe:o", "o.exe"), g]);
@@ -1098,14 +1211,29 @@ mod tests {
     fn a_squirrel_pin_merges_with_the_real_exe() {
         assert_eq!(squirrel_target(r"C:\U\Discord\Update.exe", "--processStart Discord.exe").as_deref(), Some("discord.exe"));
         assert_eq!(squirrel_target(r"C:\U\Tool.exe", "--processStart Discord.exe"), None);
-        let pins = vec![Pin { lnk: "d.lnk".into(), exe: r"C:\U\Discord\Update.exe".into(), aumid: None, launched: Some("discord.exe".into()) }];
+        let pins = vec![Pin { id: "d.lnk".into(), open: "d.lnk".into(), args: String::new(), exe: r"C:\U\Discord\Update.exe".into(), aumid: None, launched: Some("discord.exe".into()) }];
         let out = arrange(&pins, vec![item("exe:d", r"C:\U\Discord\app-1\Discord.exe")]);
         assert_eq!((out.len(), out[0].wins.len()), (1, 1));
     }
 
     #[test]
+    fn pins_launch_uwp_by_aumid_and_squirrel_through_update_exe() {
+        let mut uwp = item("aumid:calc", r"C:\Windows\System32\ApplicationFrameHost.exe");
+        uwp.aumid = Some("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App".into());
+        let p = pin_for(&uwp, |_| false).unwrap();
+        assert_eq!((p.open.as_str(), p.exe.as_str()), (r"shell:AppsFolder\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App", ""));
+        let sq = item("exe:discord", r"C:\U\Discord\app-1.0.9\Discord.exe");
+        let p = pin_for(&sq, |u| u.ends_with("Update.exe")).unwrap();
+        assert_eq!((p.args.as_str(), p.launched.as_deref()), ("--processStart Discord.exe", Some("discord.exe")));
+        assert!(p.open.ends_with("Update.exe"));
+        let plain = pin_for(&item("exe:t", r"C:\T\Tool.exe"), |_| false).unwrap();
+        assert_eq!((plain.open.as_str(), plain.args.as_str()), (r"C:\T\Tool.exe", ""));
+        assert!(pin_for(&item("exe:none", ""), |_| false).is_none());
+    }
+
+    #[test]
     fn a_pin_without_windows_stays_as_a_launcher() {
-        let pins = vec![Pin { lnk: "b.lnk".into(), exe: r"C:\gone.exe".into(), aumid: None, launched: None }];
+        let pins = vec![Pin { id: "b.lnk".into(), open: "b.lnk".into(), args: String::new(), exe: r"C:\gone.exe".into(), aumid: None, launched: None }];
         let out = arrange(&pins, vec![item("exe:o", "o.exe")]);
         assert!(out[0].wins.is_empty() && out[0].pin.as_deref() == Some("b.lnk") && out[1].key == "exe:o");
     }

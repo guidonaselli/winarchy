@@ -41,6 +41,8 @@ messages! {
     Notifications => ("NOTIF", "NOTIF"),
     MenuOpen => ("Open", "Abrir"),
     MenuNewWindow => ("New window", "Nueva ventana"),
+    MenuPin => ("Pin to dock", "Anclar al dock"),
+    MenuUnpin => ("Unpin from dock", "Desanclar del dock"),
     MenuClose => ("Close window", "Cerrar ventana"),
     MenuCloseAll => ("Close all windows", "Cerrar todas las ventanas"),
     NetOff => ("NET off", "SIN RED"),

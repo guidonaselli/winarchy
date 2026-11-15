@@ -1080,7 +1080,8 @@ fn main() {
         let _ = ShowWindow(pill, SW_SHOWNOACTIVATE);
         let dock_on = with(|s| s.theme.dock);
         if dock_on {
-            let _ = dock::init(&with(|s| s.theme.clone()));
+            let state_dir = with(|s| s.theme_path.ancestors().nth(3).map(|r| r.join("state")).unwrap_or_default());
+            let _ = dock::init(&with(|s| s.theme.clone()), &state_dir);
         }
         SetTimer(strip, TIMER_TICK, 1000, None);
 
