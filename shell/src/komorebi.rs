@@ -82,6 +82,25 @@ pub fn spawn(on_change: impl Fn() + Send + 'static) {
     });
 }
 
+// El mapa de ventanas solo llega con el próximo evento: se siembra con el estado actual para no perder las ocultas por komorebi.
+fn seed_windows() {
+    let out = std::process::Command::new("komorebic.exe").arg("state").creation_flags(CREATE_NO_WINDOW).output();
+    let state = out.ok().and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok());
+    if let Some(map) = state.and_then(|st| parse_windows(&serde_json::json!({ "state": st }))) {
+        *WINDOWS.lock().unwrap() = Some(map);
+        notify_windows();
+    }
+}
+
+fn notify_windows() {
+    let n = NOTIFY.load(Ordering::Relaxed);
+    if n != 0 {
+        unsafe {
+            let _ = PostMessageW(HWND(n as *mut _), WM_WINDOW_MAP, WPARAM(0), LPARAM(0));
+        }
+    }
+}
+
 fn run_once(on_change: &impl Fn()) {
     let name: Vec<u16> = PIPE.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
@@ -91,6 +110,7 @@ fn run_once(on_change: &impl Fn()) {
         }
         let sub = std::process::Command::new("komorebic.exe").args(["subscribe-pipe", "winarchy-shell-komorebi"]).creation_flags(CREATE_NO_WINDOW).status();
         if sub.is_ok_and(|s| s.success()) && (ConnectNamedPipe(h, None).is_ok() || GetLastError() == ERROR_PIPE_CONNECTED) {
+            seed_windows();
             read_events(h, on_change);
         }
         let _ = DisconnectNamedPipe(h);
@@ -117,10 +137,7 @@ unsafe fn read_events(h: HANDLE, on_change: &impl Fn()) {
                 if cur.as_ref() != Some(&map) {
                     *cur = Some(map);
                     drop(cur);
-                    let n = NOTIFY.load(Ordering::Relaxed);
-                    if n != 0 {
-                        let _ = PostMessageW(HWND(n as *mut _), WM_WINDOW_MAP, WPARAM(0), LPARAM(0));
-                    }
+                    notify_windows();
                 }
             }
             if let Some(ws) = ev.as_ref().and_then(parse) {

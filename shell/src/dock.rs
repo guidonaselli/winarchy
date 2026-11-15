@@ -541,6 +541,21 @@ unsafe fn tick() {
     }
 }
 
+// Windows niega SetForegroundWindow a quien no es el foreground: se comparte la cola de entrada con él un instante.
+unsafe fn raise(hwnd: HWND) {
+    if SetForegroundWindow(hwnd).as_bool() {
+        return;
+    }
+    let fg_thread = GetWindowThreadProcessId(GetForegroundWindow(), None);
+    let me = GetCurrentThreadId();
+    let attached = fg_thread != 0 && fg_thread != me && AttachThreadInput(me, fg_thread, true).as_bool();
+    let _ = BringWindowToTop(hwnd);
+    let _ = SetForegroundWindow(hwnd);
+    if attached {
+        let _ = AttachThreadInput(me, fg_thread, false);
+    }
+}
+
 unsafe fn focus_window(hwnd: HWND) {
     let dock = with(|d| d.hwnd);
     if !IsWindow(hwnd).as_bool() {
@@ -557,9 +572,7 @@ unsafe fn focus_window(hwnd: HWND) {
             with(|d| d.pending_focus = Some(id));
             SetTimer(dock, T_FOCUS, FOCUS_DELAY_MS, None);
         }
-        _ => {
-            let _ = SetForegroundWindow(hwnd);
-        }
+        _ => raise(hwnd),
     }
 }
 
@@ -602,7 +615,7 @@ unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
             if let Some(id) = with(|d| d.pending_focus.take()) {
                 let t = HWND(id as *mut _);
                 if IsWindow(t).as_bool() {
-                    let _ = SetForegroundWindow(t);
+                    raise(t);
                 }
             }
             LRESULT(0)
