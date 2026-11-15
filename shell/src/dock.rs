@@ -224,13 +224,60 @@ fn pins_stamp() -> Option<std::time::SystemTime> {
     std::fs::metadata(pins_dir()?).and_then(|m| m.modified()).ok()
 }
 
+// `Taskband\Favorites` guarda los nombres de los `.lnk` anclados en UTF-16, en el orden de la taskbar.
+// shortcut: se buscan cadenas `*.lnk` en el blob sin parsear su formato (puede colar un byte basura delante del nombre, por eso el match es por sufijo); si Windows lo cambia, el orden vuelve a alfabético.
+fn lnk_order(blob: &[u8]) -> Vec<String> {
+    let mut found: Vec<(usize, String)> = Vec::new();
+    // las cadenas no están alineadas a 2 bytes: se recorren las dos paridades.
+    for skew in 0..2 {
+        let mut cur = String::new();
+        let mut start = 0;
+        let units = blob.get(skew..).unwrap_or(&[]).chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]]));
+        for (i, u) in units.chain(std::iter::once(0)).enumerate() {
+            match char::from_u32(u as u32).filter(|c| !c.is_control()) {
+                Some(c) => {
+                    if cur.is_empty() {
+                        start = skew + i * 2;
+                    }
+                    cur.push(c)
+                }
+                None => {
+                    if cur.to_lowercase().ends_with(".lnk") {
+                        found.push((start, cur.rsplit(['\\', '/']).next().unwrap_or("").to_lowercase()));
+                    }
+                    cur.clear();
+                }
+            }
+        }
+    }
+    found.sort();
+    found.into_iter().map(|(_, n)| n).collect()
+}
+
+fn taskband_blob() -> Vec<u8> {
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_BINARY};
+    let mut buf = vec![0u8; 16384];
+    let mut len = buf.len() as u32;
+    let rc = unsafe { RegGetValueW(HKEY_CURRENT_USER, w!(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Taskband"), w!("Favorites"), RRF_RT_REG_BINARY, None, Some(buf.as_mut_ptr() as *mut _), Some(&mut len)) };
+    if rc.is_err() {
+        return Vec::new();
+    }
+    buf.truncate(len as usize);
+    buf
+}
+
+fn sort_pins(files: &mut [std::path::PathBuf], order: &[String]) {
+    let rank = |p: &std::path::PathBuf| p.file_name().and_then(|n| order.iter().position(|o| o.ends_with(&n.to_string_lossy().to_lowercase()))).unwrap_or(usize::MAX);
+    files.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.cmp(b)));
+}
+
 fn load_pins() -> Vec<(String, String)> {
     use windows::core::Interface;
     use windows::Win32::System::Com::{CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER, STGM_READ};
     let Some(dir) = pins_dir() else { return Vec::new() };
     let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut files: Vec<_> = rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("lnk"))).collect();
-    files.sort();
+    sort_pins(&mut files, &lnk_order(&taskband_blob()));
     let mut pins = Vec::new();
     for f in files {
         let wide: Vec<u16> = f.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
@@ -957,6 +1004,23 @@ mod tests {
         let pins = vec![("b.lnk".to_string(), r"C:\gone.exe".to_string())];
         let out = arrange(&pins, vec![item("exe:o", "o.exe")]);
         assert!(out[0].wins.is_empty() && out[0].pin.as_deref() == Some("b.lnk") && out[1].key == "exe:o");
+    }
+
+    #[test]
+    fn pins_follow_the_taskband_order_and_unknowns_go_last_alphabetically() {
+        let utf16 = |t: &str| t.encode_utf16().flat_map(|u| u.to_le_bytes()).collect::<Vec<u8>>();
+        let mut blob = vec![1u8, 0, 0xFF];
+        for n in ["Helium.lnk", "File Explorer.lnk"] {
+            blob.extend(utf16(n));
+            blob.extend([0, 0, 7, 0]);
+        }
+        let order = lnk_order(&blob);
+        assert_eq!(order.len(), 2);
+        assert!(order[0].ends_with("helium.lnk") && order[1].ends_with("file explorer.lnk"));
+        let mut files: Vec<std::path::PathBuf> = ["Zed.lnk", "File Explorer.lnk", "Abc.lnk", "Helium.lnk"].iter().map(Into::into).collect();
+        sort_pins(&mut files, &order);
+        let names: Vec<_> = files.iter().map(|f| f.to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["Helium.lnk", "File Explorer.lnk", "Abc.lnk", "Zed.lnk"]);
     }
 
     #[test]
