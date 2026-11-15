@@ -58,6 +58,7 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
   degrada a komorebi) y toma sus colores de `config/shell/theme.json`, generado desde
   `templates/shell-theme.json.tpl`. El binario sale como asset del Release con SHA256 en `[shell]`
   de `versions.lock.toml` y el instalador lo verifica.
+- Dock (`winarchy bar dock on|off`, `state/bar-dock`): vive en la shell nativa, nunca registra hotkeys ni usa `SHAppBarMessage`; la reserva de komorebi sale de los tokens `computed.work_top/bottom` (espeja `BAR_DIP`+`MARGIN_DIP` de `shell/src/dock.rs`). La taskbar nativa sigue en auto-hide y aloja la bandeja.
 - Fuera de alcance: novideo_srgb, Twinkle Tray (dependen del hardware de la máquina).
 - Antes de cambios de sistema (registry, autostart): snapshot en `backups/<timestamp>/`.
 

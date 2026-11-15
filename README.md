@@ -212,6 +212,7 @@ winarchy theme set <name> | next | list
 winarchy background list | set <file> | next
 winarchy agent list | set <id> | launch
 winarchy bar position [top|bottom]
+winarchy bar dock <on|off>
 winarchy update [--core | --self]
 winarchy menu
 winarchy webapp install <name> <url> | remove <name> | list
