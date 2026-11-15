@@ -81,6 +81,23 @@ pub fn focus_args(monitor: usize, workspace: usize) -> [String; 3] {
     ["focus-monitor-workspace".into(), monitor.to_string(), workspace.to_string()]
 }
 
+// Anclados primero y en su orden; un anclado cuyo exe ya corre se fusiona con ese grupo en vez de duplicarse.
+fn arrange(pins: &[(String, String)], mut groups: Vec<Item>) -> Vec<Item> {
+    let mut out = Vec::new();
+    for (lnk, exe) in pins {
+        match groups.iter().position(|g| !exe.is_empty() && g.exe.eq_ignore_ascii_case(exe)) {
+            Some(i) => {
+                let mut g = groups.remove(i);
+                g.pin = Some(lnk.clone());
+                out.push(g);
+            }
+            None => out.push(Item { key: format!("pin:{}", lnk.to_lowercase()), exe: exe.clone(), aumid: None, wins: Vec::new(), active: false, other_ws: false, pin: Some(lnk.clone()) }),
+        }
+    }
+    out.extend(groups);
+    out
+}
+
 const WM_ICON: u32 = WM_APP + 21;
 const T_REFRESH: usize = 1;
 const T_TICK: usize = 2;
@@ -96,6 +113,7 @@ struct Item {
     wins: Vec<isize>,
     active: bool,
     other_ws: bool,
+    pin: Option<String>,
 }
 
 struct Icon {
@@ -120,6 +138,7 @@ struct Dock {
     sig: u64,
     hidden: bool,
     pending_focus: Option<isize>,
+    pins: Vec<(String, String)>,
     shell_msg: u32,
     created_msg: u32,
 }
@@ -161,6 +180,7 @@ pub fn init(theme: &Theme) -> Option<HWND> {
             sig: 0,
             hidden: false,
             pending_focus: None,
+            pins: load_pins(),
             shell_msg: RegisterWindowMessageW(w!("SHELLHOOK")),
             created_msg: RegisterWindowMessageW(w!("TaskbarCreated")),
         };
@@ -180,6 +200,36 @@ pub fn set_theme(theme: &Theme) {
         d.sig = 0;
     });
     unsafe { refresh() }
+}
+
+// `.lnk` de la taskbar nativa. shortcut: sin el orden de `Taskband` (va alfabético) y sin anclados de Store (el `.lnk` no trae exe), cuando se necesite ese orden leer `Taskband\Favorites`.
+fn load_pins() -> Vec<(String, String)> {
+    use windows::core::Interface;
+    use windows::Win32::System::Com::{CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER, STGM_READ};
+    let Some(appdata) = std::env::var_os("APPDATA") else { return Vec::new() };
+    let dir = std::path::Path::new(&appdata).join(r"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar");
+    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut files: Vec<_> = rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("lnk"))).collect();
+    files.sort();
+    let mut pins = Vec::new();
+    for f in files {
+        let wide: Vec<u16> = f.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
+        let exe = unsafe {
+            let Ok(link) = CoCreateInstance::<_, IShellLinkW>(&ShellLink, None, CLSCTX_INPROC_SERVER) else { continue };
+            let Ok(file) = link.cast::<IPersistFile>() else { continue };
+            if file.Load(PCWSTR(wide.as_ptr()), STGM_READ).is_err() {
+                continue;
+            }
+            let mut buf = [0u16; 520];
+            let _ = link.GetPath(&mut buf, std::ptr::null_mut(), 0);
+            let n = buf.iter().position(|c| *c == 0).unwrap_or(0);
+            String::from_utf16_lossy(&buf[..n])
+        };
+        if !exe.is_empty() {
+            pins.push((f.to_string_lossy().into_owned(), exe));
+        }
+    }
+    pins
 }
 
 unsafe fn register(hwnd: HWND) {
@@ -260,7 +310,7 @@ unsafe fn refresh() {
                 g.active |= id == fg;
                 g.other_ws &= cloaked;
             }
-            None => groups.push(Item { key, exe, aumid, wins: vec![id], active: id == fg, other_ws: cloaked }),
+            None => groups.push(Item { key, exe, aumid, wins: vec![id], active: id == fg, other_ws: cloaked, pin: None }),
         }
     }
     with(|d| {
@@ -275,7 +325,7 @@ unsafe fn refresh() {
         }
         let order = d.order.clone();
         groups.sort_by_key(|g| order.iter().position(|k| k == &g.key));
-        d.items = groups;
+        d.items = arrange(&d.pins, groups);
     });
     render();
 }
@@ -339,6 +389,9 @@ fn draw_icon(buf: &mut [u32], stride: i32, rows: i32, ic: &Icon, x0: i32, y0: i3
 
 fn icon_sources(i: &Item) -> Vec<String> {
     let mut v = Vec::new();
+    if let Some(p) = &i.pin {
+        v.push(p.clone());
+    }
     if let Some(a) = &i.aumid {
         v.push(format!(r"shell:AppsFolder\{a}"));
     }
@@ -407,6 +460,9 @@ fn render() {
                 match icons.get(&(item.key.clone(), size)) {
                     Some(ic) => draw_icon(buf, w, h, ic, cell.x + (cell.w - ic.w) / 2, cell.y + (cell.h - ic.h) / 2 - lift, dim),
                     None => fill_round_a(buf, w, h, R { x: cell.x + (cell.w - size) / 2, y: cell.y + (cell.h - size) / 2 - lift, w: size, h: size }, px(6, scale), fg, 0.25),
+                }
+                if item.wins.is_empty() {
+                    continue;
                 }
                 let dot = px(DOT_DIP, scale);
                 let dw = if item.active { dot * 3 } else { dot };
@@ -577,8 +633,15 @@ unsafe fn focus_window(hwnd: HWND) {
 }
 
 unsafe fn click(idx: usize) {
-    let target = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), d.last_active.get(&i.key).copied())));
-    let Some((wins, last)) = target else { return };
+    let target = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), d.last_active.get(&i.key).copied(), i.pin.clone())));
+    let Some((wins, last, pin)) = target else { return };
+    if wins.is_empty() {
+        if let Some(p) = pin {
+            let wide: Vec<u16> = p.encode_utf16().chain(std::iter::once(0)).collect();
+            let _ = ShellExecuteW(None, w!("open"), PCWSTR(wide.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
+        }
+        return;
+    }
     let fg = GetForegroundWindow().0 as isize;
     if let Some(t) = pick_target(&wins, fg, last) {
         focus_window(HWND(t as *mut _));
@@ -730,6 +793,24 @@ mod tests {
         assert_eq!(pick_target(&[1, 2], 99, Some(2)), Some(2));
         assert_eq!(pick_target(&[1, 2], 99, Some(5)), Some(1));
         assert_eq!(pick_target(&[], 99, None), None);
+    }
+
+    fn item(key: &str, exe: &str) -> Item {
+        Item { key: key.into(), exe: exe.into(), aumid: None, wins: vec![1], active: false, other_ws: false, pin: None }
+    }
+
+    #[test]
+    fn a_running_pin_merges_with_its_group_and_leads_the_list() {
+        let pins = vec![("a.lnk".to_string(), r"C:\X\Tool.exe".to_string())];
+        let out = arrange(&pins, vec![item("exe:other", r"C:\o.exe"), item("exe:tool", r"c:\x\tool.EXE")]);
+        assert_eq!((out[0].key.as_str(), out[0].pin.as_deref(), out.len()), ("exe:tool", Some("a.lnk"), 2));
+    }
+
+    #[test]
+    fn a_pin_without_windows_stays_as_a_launcher() {
+        let pins = vec![("b.lnk".to_string(), r"C:\gone.exe".to_string())];
+        let out = arrange(&pins, vec![item("exe:o", "o.exe")]);
+        assert!(out[0].wins.is_empty() && out[0].pin.as_deref() == Some("b.lnk") && out[1].key == "exe:o");
     }
 
     #[test]
