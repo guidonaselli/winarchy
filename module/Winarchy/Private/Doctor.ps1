@@ -58,7 +58,9 @@ function Invoke-WinarchyDoctor {
     if (Test-WinarchyBarDock) {
         $want = Get-WinarchyDockWorkAreaOffset
         $json = Join-Path (Get-WinarchyRoot) 'config\komorebi\komorebi.json'
-        $have = if (Test-Path $json) { (Get-Content $json -Raw | ConvertFrom-Json).global_work_area_offset }
+        $cfg = if (Test-Path $json) { Get-Content $json -Raw | ConvertFrom-Json }
+        $perMonitor = @($cfg.monitors | Where-Object { $_.PSObject.Properties['work_area_offset'] } | ForEach-Object work_area_offset) | Select-Object -First 1
+        $have = if ($perMonitor) { $perMonitor } else { $cfg.global_work_area_offset }
         Add-Check 'native taskbar in auto-hide (dock on)' (Test-WinarchyTaskbarAutoHide) `
             'the dock draws over the taskbar strip otherwise' 'winarchy taskbar autohide'
         Add-Check 'dock reserved area in komorebi' ($have -and $have.top -eq $want.Top -and $have.bottom -eq $want.Bottom) `

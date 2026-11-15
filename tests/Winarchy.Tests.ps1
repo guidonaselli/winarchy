@@ -921,6 +921,24 @@ Describe 'Window placement' {
         }
     }
 
+    It 'moves the dock reserve from the global offset to the primary monitor when there are several' {
+        InModuleScope Winarchy {
+            Mock Test-WinarchyProcess { $true }
+            Mock Test-WinarchyBarDock { $true }
+            Mock Get-WinarchyDockWorkAreaOffset { [pscustomobject]@{ Top = 0; Bottom = 56 } }
+            Mock Import-WinarchyWindowPrefs { }
+            Mock Import-WinarchyWorkspaceLayouts { }
+            Mock Get-WinarchyKomorebiState { [pscustomobject]@{ monitors = [pscustomobject]@{ elements = @(
+                [pscustomobject]@{ device_id = 'SEC'; size = [pscustomobject]@{ left = 2560; top = 0 } },
+                [pscustomobject]@{ device_id = 'PRI'; size = [pscustomobject]@{ left = 0; top = 0 } }) } } }
+            $json = '{"global_work_area_offset":{"left":0,"top":0,"right":0,"bottom":56},"monitors":[{"workspaces":[]},{"workspaces":[]}]}'
+            $out = Add-WinarchyWindowRulesToKomorebiJson -Json $json | ConvertFrom-Json
+            $out.global_work_area_offset.bottom | Should -Be 2
+            $out.monitors[1].work_area_offset.bottom | Should -Be 56
+            $out.monitors[0].PSObject.Properties['work_area_offset'] | Should -BeNullOrEmpty
+        }
+    }
+
     It 'round-trips preferences through the repo TOML parser' {
         InModuleScope Winarchy {
             Mock Get-WinarchyRoot { $TestDrive }
