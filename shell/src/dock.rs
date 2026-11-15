@@ -650,7 +650,25 @@ unsafe fn fetch_icon(source: &str, size: i32) -> Option<Icon> {
     let got = GetDIBits(dc, bmp, 0, h as u32, Some(buf.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS);
     ReleaseDC(None, dc);
     let _ = DeleteObject(bmp);
-    (got != 0).then_some(Icon { w, h, px: buf })
+    if got == 0 {
+        return None;
+    }
+    premultiply(&mut buf);
+    Some(Icon { w, h, px: buf })
+}
+
+// GetImage entrega alfa recto; el dock compone con alfa premultiplicado, y sin esto los bordes semitransparentes salen blancos.
+// Un ícono sin canal alfa (todo 0) se toma opaco.
+fn premultiply(px: &mut [u32]) {
+    if px.iter().all(|p| p >> 24 == 0) {
+        px.iter_mut().for_each(|p| *p |= 0xFF00_0000);
+        return;
+    }
+    for p in px.iter_mut() {
+        let a = *p >> 24;
+        let m = |sh: u32| (((*p >> sh) & 255) * a + 127) / 255;
+        *p = a << 24 | m(16) << 16 | m(8) << 8 | m(0);
+    }
 }
 
 unsafe fn dock_foreground(mon: MonRect) -> Option<Foreground> {
@@ -1076,6 +1094,16 @@ mod tests {
         sort_pins(&mut files, &order);
         let names: Vec<_> = files.iter().map(|f| f.to_string_lossy().into_owned()).collect();
         assert_eq!(names, ["Helium.lnk", "File Explorer.lnk", "Abc.lnk", "Zed.lnk"]);
+    }
+
+    #[test]
+    fn straight_alpha_icons_are_premultiplied_and_alphaless_ones_become_opaque() {
+        let mut half = [0x80FF_8000u32];
+        premultiply(&mut half);
+        assert_eq!(half[0], 0x8080_4000);
+        let mut flat = [0x0011_2233u32, 0];
+        premultiply(&mut flat);
+        assert_eq!(flat, [0xFF11_2233, 0xFF00_0000]);
     }
 
     #[test]
