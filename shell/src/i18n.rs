@@ -44,6 +44,7 @@ messages! {
     MenuPin => ("Pin to dock", "Anclar al dock"),
     MenuUnpin => ("Unpin from dock", "Desanclar del dock"),
     MenuClose => ("Close window", "Cerrar ventana"),
+    MenuTray => ("System tray", "Bandeja del sistema"),
     MenuCloseAll => ("Close all windows", "Cerrar todas las ventanas"),
     NetOff => ("NET off", "SIN RED"),
     Workspace => ("WS", "ESCRITORIO"),

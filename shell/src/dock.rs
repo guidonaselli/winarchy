@@ -20,13 +20,10 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TR
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-pub const ICON_DIP: i32 = 24;
 const CELL_DIP: i32 = 40;
-const GAP_DIP: i32 = 4;
 const PAD_DIP: i32 = 8;
 pub const BAR_DIP: i32 = 48;
 const MARGIN_DIP: i32 = 6;
-const CORNER_DIP: i32 = 16;
 const DOT_DIP: i32 = 4;
 const MAX_ICONS: usize = 64;
 // Altura que komorebi reserva: alto del dock + su margen + los 2 px de la franja de la taskbar nativa.
@@ -34,6 +31,36 @@ const MAX_ICONS: usize = 64;
 pub const RESERVE_DIP: i32 = BAR_DIP + MARGIN_DIP + 2;
 
 type MonRect = (i32, i32, i32, i32);
+
+// Personalización del usuario (`user.json`), acotada: la altura del dock no cambia, así que la reserva de komorebi sigue valiendo.
+pub struct Style {
+    pub icon: i32,
+    pub radius: i32,
+    pub gap: i32,
+    pub opacity: f32,
+}
+
+pub fn style(t: &Theme) -> Style {
+    Style { icon: t.dock_icon.clamp(16, 32), radius: t.dock_radius.clamp(0, 24), gap: t.dock_gap.clamp(0, 12), opacity: t.dock_opacity.unwrap_or(t.opacity).clamp(0.4, 1.0) }
+}
+
+const HOVER_MS: f32 = 120.0;
+const ENTRY_MS: f32 = 220.0;
+const FADE_MS: f32 = 160.0;
+
+pub fn approach(cur: f32, target: f32, dt_ms: f32, dur_ms: f32) -> f32 {
+    let s = dt_ms / dur_ms;
+    if target > cur {
+        (cur + s).min(target)
+    } else {
+        (cur - s).max(target)
+    }
+}
+
+pub fn ease(t: f32) -> f32 {
+    let u = 1.0 - t.clamp(0.0, 1.0);
+    1.0 - u * u * u
+}
 
 #[derive(Debug, PartialEq)]
 pub struct Layout {
@@ -49,8 +76,8 @@ pub enum Hit {
 }
 
 // El dock vive en el borde opuesto al de la isla: `bottom` es el borde del dock. `bar` va en coordenadas de pantalla, `cells` relativas a `bar`.
-pub fn layout(n: usize, scale: f32, mon: MonRect, bottom: bool) -> Layout {
-    let (cell, gap, pad) = (px(CELL_DIP, scale), px(GAP_DIP, scale), px(PAD_DIP, scale));
+pub fn layout(n: usize, scale: f32, mon: MonRect, bottom: bool, gap_dip: i32) -> Layout {
+    let (cell, gap, pad) = (px(CELL_DIP, scale), px(gap_dip, scale), px(PAD_DIP, scale));
     let max_w = (mon.2 - mon.0) * 4 / 5;
     let cap = (((max_w - 2 * pad + gap) / (cell + gap)).max(1)) as usize;
     let (shown, overflow) = if n <= cap { (n, 0) } else { (cap - 1, n - (cap - 1)) };
@@ -159,6 +186,9 @@ const WM_ICON: u32 = WM_APP + 21;
 const T_REFRESH: usize = 1;
 const T_TICK: usize = 2;
 const T_FOCUS: usize = 3;
+const T_ANIM: usize = 4;
+const ANIM_MS: u32 = 16;
+const TRAY_SECS: u64 = 12;
 const REFRESH_MS: u32 = 60;
 const FOCUS_DELAY_MS: u32 = 220;
 
@@ -202,7 +232,17 @@ struct Dock {
     pins_stamp: Option<std::time::SystemTime>,
     shell_msg: u32,
     created_msg: u32,
+    motion: bool,
+    hov: HashMap<String, f32>,
+    born: HashMap<String, f32>,
+    known: HashSet<String>,
+    seeded: bool,
+    pressed: Option<usize>,
+    vis: f32,
+    anim_at: std::time::Instant,
+    tray_until: Option<std::time::Instant>,
 }
+
 
 thread_local! { static DOCK: RefCell<Option<Dock>> = const { RefCell::new(None) }; }
 
@@ -238,7 +278,7 @@ pub fn init(theme: &Theme, state_dir: &std::path::Path) -> Option<HWND> {
             last_active: HashMap::new(),
             icons: HashMap::new(),
             asked: HashSet::new(),
-            layout: layout(0, scale, mon, theme.position != "bottom"),
+            layout: layout(0, scale, mon, theme.position != "bottom", style(theme).gap),
             hover: None,
             tracking: false,
             scale,
@@ -252,6 +292,15 @@ pub fn init(theme: &Theme, state_dir: &std::path::Path) -> Option<HWND> {
             pins_path,
             shell_msg: RegisterWindowMessageW(w!("SHELLHOOK")),
             created_msg: RegisterWindowMessageW(w!("TaskbarCreated")),
+            motion: motion_enabled(theme),
+            hov: HashMap::new(),
+            born: HashMap::new(),
+            known: HashSet::new(),
+            seeded: false,
+            pressed: None,
+            vis: 0.0,
+            anim_at: std::time::Instant::now(),
+            tray_until: None,
         };
         DOCK.with(|s| *s.borrow_mut() = Some(d));
         spawn_icon_worker(hwnd.0 as isize);
@@ -269,9 +318,120 @@ pub fn set_theme(theme: &Theme) {
     }
     with(|d| {
         d.theme = theme.clone();
+        d.motion = motion_enabled(theme);
+        d.icons.clear();
+        d.asked.clear();
         d.sig = 0;
     });
     unsafe { refresh() }
+}
+
+// El ajuste de Windows "efectos de animación" apagado manda sobre el theme.
+fn motion_enabled(t: &Theme) -> bool {
+    let mut on = windows::Win32::Foundation::BOOL(1);
+    unsafe {
+        let _ = SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, Some(&mut on as *mut _ as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
+    }
+    t.dock_motion && on.as_bool()
+}
+
+unsafe fn for_native_taskbars(f: impl Fn(HWND)) {
+    for class in [w!("Shell_TrayWnd"), w!("Shell_SecondaryTrayWnd")] {
+        let mut prev = HWND::default();
+        while let Ok(h) = FindWindowExW(None, prev, class, PCWSTR::null()) {
+            f(h);
+            prev = h;
+        }
+    }
+}
+
+// Oculta la taskbar nativa (principal y secundarias): la bandeja de íconos queda inaccesible salvo `show_tray`.
+unsafe fn set_native_taskbar(hide: bool) {
+    for_native_taskbars(|h| {
+        if hide != !IsWindowVisible(h).as_bool() {
+            let _ = ShowWindow(h, if hide { SW_HIDE } else { SW_SHOWNA });
+        }
+    });
+}
+
+// Sin recordar quién la ocultó: una shell anterior matada a la fuerza no pudo devolverla, y una taskbar visible no se toca.
+pub fn restore_native_taskbar() {
+    unsafe { set_native_taskbar(false) }
+}
+
+pub fn show_tray() {
+    with(|d| d.tray_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(TRAY_SECS)));
+    unsafe { set_native_taskbar(false) }
+}
+
+unsafe fn is_elevated(h: HWND) -> bool {
+    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    let mut pid = 0u32;
+    GetWindowThreadProcessId(h, Some(&mut pid));
+    let Ok(p) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return true };
+    let mut tok = HANDLE::default();
+    let mut elevated = true;
+    if OpenProcessToken(p, TOKEN_QUERY, &mut tok).is_ok() {
+        let (mut e, mut n) = (TOKEN_ELEVATION::default(), 0u32);
+        if GetTokenInformation(tok, TokenElevation, Some(&mut e as *mut _ as *mut _), std::mem::size_of::<TOKEN_ELEVATION>() as u32, &mut n).is_ok() {
+            elevated = e.TokenIsElevated != 0;
+        }
+        let _ = CloseHandle(tok);
+    }
+    let _ = CloseHandle(p);
+    elevated && !self_elevated()
+}
+
+fn self_elevated() -> bool {
+    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    unsafe {
+        let mut tok = HANDLE::default();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut tok).is_err() {
+            return false;
+        }
+        let (mut e, mut n) = (TOKEN_ELEVATION::default(), 0u32);
+        let ok = GetTokenInformation(tok, TokenElevation, Some(&mut e as *mut _ as *mut _), std::mem::size_of::<TOKEN_ELEVATION>() as u32, &mut n).is_ok() && e.TokenIsElevated != 0;
+        let _ = CloseHandle(tok);
+        ok
+    }
+}
+
+unsafe fn start_anim(h: HWND) {
+    with(|d| d.anim_at = std::time::Instant::now());
+    SetTimer(h, T_ANIM, ANIM_MS, None);
+}
+
+// Un cuadro: acerca cada valor a su meta y vuelve a pintar; el timer se apaga solo cuando todo llegó.
+unsafe fn anim_tick(h: HWND) {
+    let busy = with(|d| {
+        let now = std::time::Instant::now();
+        let dt = (now.duration_since(d.anim_at).as_secs_f32() * 1000.0).min(50.0);
+        d.anim_at = now;
+        let hover_key = d.hover.and_then(|i| d.items.get(i)).map(|i| i.key.clone());
+        let mut busy = false;
+        for it in &d.items {
+            let target = if Some(&it.key) == hover_key.as_ref() { 1.0 } else { 0.0 };
+            let c = d.hov.entry(it.key.clone()).or_insert(0.0);
+            let n = approach(*c, target, dt, HOVER_MS);
+            busy |= n != *c;
+            *c = n;
+        }
+        d.hov.retain(|k, _| d.items.iter().any(|i| &i.key == k));
+        for p in d.born.values_mut() {
+            *p = approach(*p, 1.0, dt, ENTRY_MS);
+        }
+        d.born.retain(|_, p| *p < 1.0);
+        busy |= !d.born.is_empty();
+        let target = if d.hidden || d.items.is_empty() { 0.0 } else { 1.0 };
+        let v = approach(d.vis, target, dt, FADE_MS);
+        busy |= v != d.vis;
+        d.vis = v;
+        busy
+    });
+    render();
+    if !busy {
+        let _ = KillTimer(h, T_ANIM);
+    }
 }
 
 // `.lnk` de la taskbar nativa: solo siembran los anclados propios la primera vez.
@@ -513,8 +673,19 @@ unsafe fn refresh() {
         let order = d.order.clone();
         groups.sort_by_key(|g| order.iter().position(|k| k == &g.key));
         d.items = arrange(&d.pins, groups);
+        let keys: Vec<String> = d.items.iter().map(|i| i.key.clone()).collect();
+        for k in keys {
+            if d.known.insert(k.clone()) && d.seeded && d.motion {
+                d.born.insert(k, 0.0);
+            }
+        }
+        d.known.retain(|k| d.items.iter().any(|i| &i.key == k));
+        d.seeded |= !d.items.is_empty();
     });
     render();
+    if with(|d| !d.born.is_empty()) {
+        start_anim(with(|d| d.hwnd));
+    }
 }
 
 fn signature(d: &Dock) -> u64 {
@@ -523,8 +694,12 @@ fn signature(d: &Dock) -> u64 {
     for i in &d.items {
         (&i.key, i.wins.len(), i.active, i.other_ws).hash(&mut h);
     }
-    (d.hover, d.icons.len(), d.scale.to_bits(), d.mon, d.hidden).hash(&mut h);
+    (d.hover, d.pressed, d.icons.len(), d.scale.to_bits(), d.mon, d.hidden, d.vis.to_bits()).hash(&mut h);
     (&d.theme.background, &d.theme.accent, &d.theme.position).hash(&mut h);
+    (d.theme.dock_icon, d.theme.dock_radius, d.theme.dock_gap, d.theme.dock_opacity.map(f32::to_bits), d.motion).hash(&mut h);
+    for i in &d.items {
+        (d.hov.get(&i.key).map(|v| v.to_bits()), d.born.get(&i.key).map(|v| v.to_bits())).hash(&mut h);
+    }
     h.finish()
 }
 
@@ -560,16 +735,32 @@ pub(crate) fn fill_round_a(buf: &mut [u32], stride: i32, rows: i32, r: R, rad: i
     }
 }
 
-fn draw_icon(buf: &mut [u32], stride: i32, rows: i32, ic: &Icon, x0: i32, y0: i32, dim: f32) {
-    for y in 0..ic.h {
-        for x in 0..ic.w {
-            let (dx, dy) = (x0 + x, y0 + y);
+// `sc` escala alrededor de (cx, cy) con muestreo bilineal (los píxeles ya están premultiplicados); a 1:1 copia texel por texel.
+fn draw_icon(buf: &mut [u32], stride: i32, rows: i32, ic: &Icon, cx: f32, cy: f32, sc: f32, dim: f32) {
+    let (w, h) = (ic.w as f32 * sc, ic.h as f32 * sc);
+    let (mut left, mut top) = (cx - w / 2.0, cy - h / 2.0);
+    if (sc - 1.0).abs() < 1e-3 {
+        left = left.round();
+        top = top.round();
+    }
+    let texel = |x: i32, y: i32| {
+        let s = ic.px[(y.clamp(0, ic.h - 1) * ic.w + x.clamp(0, ic.w - 1)) as usize];
+        [(s >> 24 & 255) as f32, (s >> 16 & 255) as f32, (s >> 8 & 255) as f32, (s & 255) as f32]
+    };
+    for dy in top.floor() as i32..(top + h).ceil() as i32 {
+        for dx in left.floor() as i32..(left + w).ceil() as i32 {
             if dx < 0 || dy < 0 || dx >= stride || dy >= rows {
                 continue;
             }
-            let s = ic.px[(y * ic.w + x) as usize];
-            let m = |sh: u32| ((((s >> sh) & 255) as f32) * dim) as u32;
-            blend(&mut buf[(dy * stride + dx) as usize], m(24) << 24 | m(16) << 16 | m(8) << 8 | m(0));
+            let (sx, sy) = ((dx as f32 + 0.5 - left) / sc - 0.5, (dy as f32 + 0.5 - top) / sc - 0.5);
+            if sx < -0.5 || sy < -0.5 || sx > ic.w as f32 - 0.5 || sy > ic.h as f32 - 0.5 {
+                continue;
+            }
+            let (x0, y0) = (sx.floor() as i32, sy.floor() as i32);
+            let (fx, fy) = (sx - x0 as f32, sy - y0 as f32);
+            let (a, b, c, d) = (texel(x0, y0), texel(x0 + 1, y0), texel(x0, y0 + 1), texel(x0 + 1, y0 + 1));
+            let m = |i: usize| (((a[i] * (1.0 - fx) + b[i] * fx) * (1.0 - fy) + (c[i] * (1.0 - fx) + d[i] * fx) * fy) * dim).round() as u32;
+            blend(&mut buf[(dy * stride + dx) as usize], m(0) << 24 | m(1) << 16 | m(2) << 8 | m(3));
         }
     }
 }
@@ -591,11 +782,12 @@ fn icon_sources(i: &Item, pins: &[Pin]) -> Vec<String> {
 }
 
 fn render() {
-    let (hwnd, theme, items, layout_, hover, scale, hidden) = with(|d| {
-        d.layout = layout(d.items.len(), d.scale, d.mon, d.theme.position != "bottom");
-        (d.hwnd, d.theme.clone(), d.items.clone(), Layout { bar: d.layout.bar, cells: d.layout.cells.clone(), overflow: d.layout.overflow }, d.hover, d.scale, d.hidden)
+    let (hwnd, theme, items, layout_, hover, scale, hidden, motion, pressed) = with(|d| {
+        d.layout = layout(d.items.len(), d.scale, d.mon, d.theme.position != "bottom", style(&d.theme).gap);
+        (d.hwnd, d.theme.clone(), d.items.clone(), Layout { bar: d.layout.bar, cells: d.layout.cells.clone(), overflow: d.layout.overflow }, d.hover, d.scale, d.hidden, d.motion, d.pressed)
     });
-    let size = px(ICON_DIP, scale);
+    let st = style(&theme);
+    let size = px(st.icon, scale);
     let to_ask: Vec<Ask> = with(|d| {
         let missing: Vec<&Item> = items.iter().filter(|i| !d.icons.contains_key(&(i.key.clone(), size))).collect();
         missing.into_iter().filter(|i| d.asked.insert((i.key.clone(), size))).map(|i| (i.key.clone(), size, icon_sources(i, &d.pins))).collect()
@@ -610,9 +802,21 @@ fn render() {
         return;
     }
     with(|d| d.sig = sig);
+    let want_vis = if hidden || items.is_empty() { 0.0 } else { 1.0 };
+    let vis = with(|d| {
+        if !d.motion {
+            d.vis = want_vis;
+        }
+        d.vis
+    });
     unsafe {
-        if hidden || items.is_empty() {
+        if vis != want_vis {
+            start_anim(hwnd);
+        }
+        if want_vis == 0.0 {
             let _ = ShowWindow(with(|d| d.tip), SW_HIDE);
+        }
+        if vis == 0.0 && want_vis == 0.0 {
             let _ = ShowWindow(hwnd, SW_HIDE);
             return;
         }
@@ -630,7 +834,7 @@ fn render() {
         let buf = std::slice::from_raw_parts_mut(bits as *mut u32, (w * h) as usize);
         buf.fill(0);
         let (bg, fg, accent) = (rgb(&theme.background), rgb(&theme.foreground), rgb(&theme.accent));
-        fill_round_a(buf, w, h, R { x: 0, y: 0, w, h }, px(CORNER_DIP, scale), bg, theme.opacity.clamp(0.4, 1.0));
+        fill_round_a(buf, w, h, R { x: 0, y: 0, w, h }, px(st.radius, scale), bg, st.opacity);
         DOCK.with(|d| {
             let d = d.borrow();
             let icons = &d.as_ref().expect("dock").icons;
@@ -640,16 +844,19 @@ fn render() {
                     continue;
                 }
                 let Some(item) = items.get(idx) else { continue };
+                let (hv, entry) = if motion { (ease(d.as_ref().expect("dock").hov.get(&item.key).copied().unwrap_or(0.0)), ease(d.as_ref().expect("dock").born.get(&item.key).copied().unwrap_or(1.0))) } else { ((hover == Some(idx)) as i32 as f32, 1.0) };
                 if item.active {
                     fill_round_a(buf, w, h, *cell, px(10, scale), accent, 0.28);
-                } else if hover == Some(idx) {
-                    fill_round_a(buf, w, h, *cell, px(10, scale), fg, 0.10);
+                } else if hv > 0.0 {
+                    fill_round_a(buf, w, h, *cell, px(10, scale), fg, 0.10 * hv);
                 }
-                let dim = if item.other_ws { 0.5 } else { 1.0 };
-                let lift = px(2, scale);
+                let dim = if item.other_ws { 0.5 } else { 1.0 } * entry;
+                let lift = px(2, scale) as f32;
+                let sc = if motion { (1.0 + 0.14 * hv) * (0.6 + 0.4 * entry) * if pressed == Some(idx) { 0.92 } else { 1.0 } } else { 1.0 };
+                let (ccx, ccy) = (cell.x as f32 + cell.w as f32 / 2.0, cell.y as f32 + cell.h as f32 / 2.0 - lift - if motion { px(2, scale) as f32 * hv } else { 0.0 });
                 match icons.get(&(item.key.clone(), size)) {
-                    Some(ic) => draw_icon(buf, w, h, ic, cell.x + (cell.w - ic.w) / 2, cell.y + (cell.h - ic.h) / 2 - lift, dim),
-                    None => fill_round_a(buf, w, h, R { x: cell.x + (cell.w - size) / 2, y: cell.y + (cell.h - size) / 2 - lift, w: size, h: size }, px(6, scale), fg, 0.25),
+                    Some(ic) => draw_icon(buf, w, h, ic, ccx, ccy, sc, dim),
+                    None => fill_round_a(buf, w, h, R { x: (ccx - size as f32 / 2.0) as i32, y: (ccy - size as f32 / 2.0) as i32, w: size, h: size }, px(6, scale), fg, 0.25),
                 }
                 if item.wins.is_empty() {
                     continue;
@@ -662,7 +869,7 @@ fn render() {
         let pos = POINT { x: layout_.bar.x, y: layout_.bar.y };
         let sz = SIZE { cx: w, cy: h };
         let src = POINT::default();
-        let bf = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: 1 };
+        let bf = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: (vis * 255.0).round() as u8, AlphaFormat: 1 };
         let _ = UpdateLayeredWindow(hwnd, None, Some(&pos), Some(&sz), mem, Some(&src), COLORREF(0), Some(&bf), ULW_ALPHA);
         SelectObject(mem, old);
         let _ = DeleteObject(dib);
@@ -802,8 +1009,18 @@ unsafe fn tick() {
             d.asked.clear();
         }
         d.hidden = hide;
+        d.motion = motion_enabled(&d.theme);
         ch
     });
+    let (want_hide, tray_open) = with(|d| (d.theme.hide_native_taskbar, d.tray_until.is_some_and(|t| t > std::time::Instant::now())));
+    if want_hide && !tray_open {
+        set_native_taskbar(true);
+    } else if !want_hide {
+        restore_native_taskbar();
+    }
+    if hide && !hidden {
+        crate::dock_menu::dismiss();
+    }
     let pins_path = with(|d| d.pins_path.clone());
     let stamp = pins_stamp(&pins_path);
     let pins_changed = with(|d| d.pins_stamp != stamp);
@@ -882,6 +1099,46 @@ unsafe fn click(idx: usize) {
     }
 }
 
+// "+N": un selector con la primera ventana de cada grupo que no entró en el dock.
+unsafe fn overflow_ctx(first_hidden: usize) -> Option<crate::dock_menu::Ctx> {
+    let mut ctx = with(|d| {
+        let cell = *d.layout.cells.last()?;
+        let wins: Vec<isize> = d.items.iter().skip(first_hidden).filter_map(|i| i.wins.first().copied()).collect();
+        Some(crate::dock_menu::Ctx {
+            picker: true,
+            titles: Vec::new(),
+            active: None,
+            theme: d.theme.clone(),
+            scale: d.scale,
+            cx: d.layout.bar.x + cell.x + cell.w / 2,
+            bar: d.layout.bar,
+            bottom: d.theme.position != "bottom",
+            mon: d.mon,
+            wins,
+            last: None,
+            key: String::new(),
+            pinned: false,
+            pinnable: false,
+            launch: None,
+            closable: false,
+            tray: false,
+        })
+    })?;
+    ctx.active = Some(GetForegroundWindow().0 as isize);
+    ctx.titles = window_titles(&ctx.wins);
+    Some(ctx)
+}
+
+unsafe fn window_titles(wins: &[isize]) -> Vec<String> {
+    wins.iter()
+        .map(|w| {
+            let mut buf = [0u16; 256];
+            let n = GetWindowTextW(HWND(*w as *mut _), &mut buf).max(0) as usize;
+            clip_title(&String::from_utf16_lossy(&buf[..n]), 48)
+        })
+        .collect()
+}
+
 // Datos del menú de una celda. Los títulos se leen fuera del préstamo del estado.
 unsafe fn menu_ctx(idx: usize, picker: bool) -> Option<crate::dock_menu::Ctx> {
     let mut ctx = with(|d| {
@@ -903,18 +1160,13 @@ unsafe fn menu_ctx(idx: usize, picker: bool) -> Option<crate::dock_menu::Ctx> {
             pinned: it.pin.is_some(),
             pinnable: pin_for(it, |p| p.exists()).is_some(),
             launch: launch_of(&d.pins, it),
+            closable: true,
+            tray: d.theme.hide_native_taskbar,
         })
     })?;
+    ctx.closable = !ctx.wins.iter().any(|w| is_elevated(HWND(*w as *mut _)));
     ctx.active = Some(GetForegroundWindow().0 as isize);
-    ctx.titles = ctx
-        .wins
-        .iter()
-        .map(|w| {
-            let mut buf = [0u16; 256];
-            let n = GetWindowTextW(HWND(*w as *mut _), &mut buf).max(0) as usize;
-            clip_title(&String::from_utf16_lossy(&buf[..n]), 48)
-        })
-        .collect();
+    ctx.titles = window_titles(&ctx.wins);
     Some(ctx)
 }
 
@@ -1034,6 +1286,10 @@ unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
             refresh();
             LRESULT(0)
         }
+        WM_TIMER if wp.0 == T_ANIM => {
+            anim_tick(h);
+            LRESULT(0)
+        }
         WM_TIMER if wp.0 == T_TICK => {
             tick();
             LRESULT(0)
@@ -1087,6 +1343,9 @@ unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
             }
             if changed {
                 render();
+                if with(|d| d.motion) {
+                    start_anim(h);
+                }
                 match with(|d| d.hover) {
                     Some(i) => show_tip(i),
                     None => hide_tip(),
@@ -1097,9 +1356,13 @@ unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
         0x02A3 => {
             with(|d| {
                 d.hover = None;
+                d.pressed = None;
                 d.tracking = false;
             });
             render();
+            if with(|d| d.motion) {
+                start_anim(h);
+            }
             hide_tip();
             LRESULT(0)
         }
@@ -1122,12 +1385,32 @@ unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
             target.iter().for_each(|(o, a)| crate::dock_menu::launch(o, a));
             LRESULT(0)
         }
+        WM_LBUTTONDOWN => {
+            let (x, y) = xy(lp);
+            let on_item = with(|d| match hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y) {
+                Some(Hit::Item(i)) => Some(i),
+                _ => None,
+            });
+            if on_item.is_some() && with(|d| d.motion) {
+                with(|d| d.pressed = on_item);
+                render();
+            }
+            LRESULT(0)
+        }
         WM_LBUTTONUP => {
             let (x, y) = xy(lp);
+            if with(|d| d.pressed.take()).is_some() {
+                with(|d| d.sig = 0);
+                render();
+            }
             match with(|d| hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y).map(|h| (h, d.layout.cells.len()))) {
                 Some((Hit::Item(i), _)) => click(i),
-                // shortcut: "+N" salta al primer grupo oculto, sin menú con la lista completa; hacerlo cuando haya menú propio.
-                Some((Hit::Overflow, cells)) => click(cells - 1),
+                Some((Hit::Overflow, cells)) => {
+                    if let Some(ctx) = overflow_ctx(cells - 1) {
+                        hide_tip();
+                        crate::dock_menu::show(ctx);
+                    }
+                }
                 None => {}
             }
             LRESULT(0)
@@ -1144,16 +1427,41 @@ mod tests {
 
     #[test]
     fn dock_is_centered_on_the_requested_edge() {
-        let b = layout(3, 1.0, MON, true);
+        let b = layout(3, 1.0, MON, true, 4);
         assert_eq!(b.bar.y + b.bar.h, 1080 - MARGIN_DIP);
         assert_eq!(b.bar.x * 2 + b.bar.w, 1920);
-        assert_eq!(layout(3, 1.0, MON, false).bar.y, MARGIN_DIP);
+        assert_eq!(layout(3, 1.0, MON, false, 4).bar.y, MARGIN_DIP);
         assert_eq!(b.cells.len(), 3);
     }
 
     #[test]
+    fn style_is_clamped_and_motion_eases_to_its_target() {
+        let t = Theme { dock_icon: 99, dock_radius: -3, dock_gap: 50, dock_opacity: Some(0.1), ..Theme::default() };
+        let s = style(&t);
+        assert_eq!((s.icon, s.radius, s.gap, s.opacity), (32, 0, 12, 0.4));
+        assert_eq!(approach(0.0, 1.0, 60.0, 120.0), 0.5);
+        assert_eq!(approach(0.9, 1.0, 60.0, 120.0), 1.0);
+        assert_eq!(approach(0.3, 0.0, 120.0, 120.0), 0.0);
+        assert!(ease(0.5) > 0.5 && ease(1.0) == 1.0 && ease(0.0) == 0.0);
+    }
+
+    #[test]
+    fn a_scaled_icon_stays_centred_and_one_to_one_is_exact() {
+        let ic = Icon { w: 2, h: 2, px: vec![0xFF_FF_FF_FF; 4] };
+        let mut one = vec![0u32; 16];
+        draw_icon(&mut one, 4, 4, &ic, 2.0, 2.0, 1.0, 1.0);
+        assert_eq!(one.iter().filter(|p| **p == 0xFF_FF_FF_FF).count(), 4);
+        let mut big = vec![0u32; 16];
+        draw_icon(&mut big, 4, 4, &ic, 2.0, 2.0, 2.0, 1.0);
+        assert_eq!(big.iter().filter(|p| **p == 0xFF_FF_FF_FF).count(), 16);
+        let mut half = vec![0u32; 16];
+        draw_icon(&mut half, 4, 4, &ic, 2.0, 2.0, 1.0, 0.5);
+        assert!(half.iter().all(|p| *p == 0 || (*p >> 24) == 0x80));
+    }
+
+    #[test]
     fn many_windows_collapse_into_a_plus_n_cell() {
-        let l = layout(200, 1.0, MON, true);
+        let l = layout(200, 1.0, MON, true, 4);
         assert!(l.overflow > 1 && l.bar.w <= 1920 * 4 / 5);
         assert_eq!(l.cells.len() + l.overflow - 1, 200);
         assert_eq!(hit_test(&l, l.bar.x + l.cells.last().unwrap().x + 1, l.bar.y + l.cells[0].y + 1), Some(Hit::Overflow));
@@ -1161,7 +1469,7 @@ mod tests {
 
     #[test]
     fn hit_test_finds_the_cell_and_ignores_the_gaps() {
-        let l = layout(3, 1.0, MON, true);
+        let l = layout(3, 1.0, MON, true, 4);
         let c = l.cells[1];
         assert_eq!(hit_test(&l, l.bar.x + c.x + 5, l.bar.y + c.y + 5), Some(Hit::Item(1)));
         assert_eq!(hit_test(&l, l.bar.x + c.x - 1, l.bar.y + c.y + 5), None);
@@ -1170,7 +1478,7 @@ mod tests {
 
     #[test]
     fn zero_items_do_not_panic() {
-        assert!(layout(0, 1.5, MON, true).cells.is_empty());
+        assert!(layout(0, 1.5, MON, true, 4).cells.is_empty());
     }
 
     #[test]

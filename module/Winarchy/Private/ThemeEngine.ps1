@@ -148,6 +148,8 @@ function Build-WinarchyThemeContext {
     $dockOn = Test-WinarchyBarDock
     $offset = if ($dockOn) { Get-WinarchyDockWorkAreaOffset }
     $ctx['computed.dock'] = if ($dockOn) { 'true' } else { 'false' }
+    $ctx['computed.dock_float'] = if ((Get-WinarchyDockMode) -eq 'float') { 'true' } else { 'false' }
+    $ctx['computed.hide_native'] = if ($dockOn -and (Test-WinarchyTaskbarHidden)) { 'true' } else { 'false' }
     $ctx['computed.work_top'] = if ($offset) { $offset.Top } else { 0 }
     $ctx['computed.work_bottom'] = if ($offset) { $offset.Bottom } else { 2 }
     # La traslucidez sobre fondo claro degrada la legibilidad: solo los themes oscuros.
@@ -778,7 +780,10 @@ function Invoke-WinarchyReload {
         $shellExe = Get-WinarchyShellExe
         if ($shellExe) { Start-Process $shellExe -WindowStyle Hidden }
     }
-    else { Stop-Process -Name 'winarchy-shell' -Force -ErrorAction SilentlyContinue }
+    else {
+        Stop-Process -Name 'winarchy-shell' -Force -ErrorAction SilentlyContinue
+        Restore-WinarchyNativeTaskbar
+    }
     if ($Light) { return }
     Start-WinarchyWindowSlots
     $ahk = Join-Path (Get-WinarchyRoot) 'config\ahk\winarchy.ahk'

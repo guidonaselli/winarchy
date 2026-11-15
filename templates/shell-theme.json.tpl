@@ -9,5 +9,7 @@
   "font_family": "{{bar.font_family}}",
   "font_size": {{bar.font_size}},
   "position": "{{computed.bar_position}}",
-  "dock": {{computed.dock}}
+  "dock": {{computed.dock}},
+  "dock_float": {{computed.dock_float}},
+  "hide_native_taskbar": {{computed.hide_native}}
 }

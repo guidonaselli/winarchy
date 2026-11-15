@@ -3234,6 +3234,42 @@ Describe 'Bar dock' {
         }
     }
 
+    It 'float mode reserves nothing; the mode is read from the switch file' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyActiveBar { 'native' }
+            Mock Get-ItemProperty { [pscustomobject]@{ AppliedDPI = 96 } }
+            Mock Get-WinarchyBarPosition { 'top' }
+            Set-Content (Get-WinarchyBarDockPath) -Value 'float' -NoNewline
+            Get-WinarchyDockMode | Should -Be 'float'
+            $o = Get-WinarchyDockWorkAreaOffset
+            $o.Top | Should -Be 0
+            $o.Bottom | Should -Be 2
+            Set-Content (Get-WinarchyBarDockPath) -Value 'on' -NoNewline
+            Get-WinarchyDockMode | Should -Be 'reserve'
+            Remove-Item (Get-WinarchyBarDockPath) -Force
+            Get-WinarchyDockMode | Should -Be 'off'
+        }
+    }
+
+    It 'hiding the native taskbar sets auto-hide, flags the shell and is undone by autohide' {
+        InModuleScope Winarchy {
+            Mock Set-WinarchyTaskbarAutoHide { $true }
+            Mock Test-WinarchyBarDock { $false }
+            $flag = Get-WinarchyTaskbarHiddenPath
+            $had = Test-Path $flag
+            try {
+                Set-WinarchyTaskbarHidden -Mode hide
+                Test-WinarchyTaskbarHidden | Should -BeTrue
+                Should -Invoke Set-WinarchyTaskbarAutoHide -ParameterFilter { $Enabled } -Times 1
+                Set-WinarchyTaskbarHidden -Mode autohide
+                Test-WinarchyTaskbarHidden | Should -BeFalse
+                Set-WinarchyTaskbarHidden -Mode show
+                Should -Invoke Set-WinarchyTaskbarAutoHide -ParameterFilter { -not $Enabled } -Times 1
+            }
+            finally { if ($had) { Set-Content $flag -Value 'on' -NoNewline } else { Remove-Item $flag -Force -ErrorAction SilentlyContinue } }
+        }
+    }
+
     It 'renders the offset and the shell flag from the tokens' {
         InModuleScope Winarchy {
             $root = Get-WinarchyRoot
@@ -3248,8 +3284,12 @@ Describe 'Bar dock' {
             $shellCtx = @{}
             foreach ($m in [regex]::Matches((Get-Content $shellTpl -Raw), '\{\{([^}]+)\}\}')) { $shellCtx[$m.Groups[1].Value] = '1' }
             $shellCtx['computed.dock'] = 'true'
+            $shellCtx['computed.dock_float'] = 'true'
+            $shellCtx['computed.hide_native'] = 'false'
             $shell = Invoke-WinarchyTemplate -TemplatePath $shellTpl -Context $shellCtx
             ($shell | ConvertFrom-Json).dock | Should -BeTrue
+            ($shell | ConvertFrom-Json).dock_float | Should -BeTrue
+            ($shell | ConvertFrom-Json).hide_native_taskbar | Should -BeFalse
         }
     }
 
@@ -3260,9 +3300,11 @@ Describe 'Bar dock' {
             Mock Get-WinarchyActiveBar { 'native' }
             Set-WinarchyBarDock -Mode on
             Test-Path (Get-WinarchyBarDockPath) | Should -BeTrue
+            Set-WinarchyBarDock -Mode float
+            (Get-Content (Get-WinarchyBarDockPath) -Raw) | Should -Be 'float'
             Set-WinarchyBarDock -Mode off
             Test-Path (Get-WinarchyBarDockPath) | Should -BeFalse
-            Should -Invoke Set-WinarchyTheme -Times 2
+            Should -Invoke Set-WinarchyTheme -Times 3
         }
     }
 

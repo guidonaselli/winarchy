@@ -54,8 +54,19 @@ function Test-WinarchyBarDock {
     (Get-WinarchyActiveBar) -eq 'native' -and (Test-Path (Get-WinarchyBarDockPath))
 }
 
+function Get-WinarchyDockMode {
+    <# off | reserve (komorebi deja libre el área del dock) | float (el dock flota sobre las ventanas, sin reservar). #>
+    if (-not (Test-WinarchyBarDock)) { return 'off' }
+    if ((Get-Content (Get-WinarchyBarDockPath) -Raw -ErrorAction SilentlyContinue) -match 'float') { 'float' } else { 'reserve' }
+}
+
+function Get-WinarchyTaskbarHiddenPath { Join-Path (Get-WinarchyStateDir) 'taskbar-hidden' }
+
+function Test-WinarchyTaskbarHidden { Test-Path (Get-WinarchyTaskbarHiddenPath) }
+
 function Get-WinarchyDockWorkAreaOffset {
-    <# Lo que komorebi reserva para el dock, en px. Espeja BAR_DIP + MARGIN_DIP (+2 de la franja de la taskbar nativa, solo abajo) de shell/src/dock.rs. #>
+    <# Lo que komorebi reserva para el dock, en px. Espeja BAR_DIP + MARGIN_DIP (+2 de la franja de la taskbar nativa, solo abajo) de shell/src/dock.rs. En modo float no reserva nada. #>
+    if ((Get-WinarchyDockMode) -eq 'float') { return [pscustomobject]@{ Top = 0; Bottom = 2 } }
     $dpi = (Get-ItemProperty 'HKCU:\Control Panel\Desktop\WindowMetrics' -ErrorAction SilentlyContinue).AppliedDPI
     if (-not $dpi) { $dpi = 96 }
     $dockEdge = if ((Get-WinarchyBarPosition) -eq 'top') { 'bottom' } else { 'top' }
@@ -68,11 +79,11 @@ function Get-WinarchyDockWorkAreaOffset {
 }
 
 function Set-WinarchyBarDock {
-    param([Parameter(Mandatory)][ValidateSet('on', 'off')][string]$Mode)
+    param([Parameter(Mandatory)][ValidateSet('on', 'float', 'off')][string]$Mode)
     $path = Get-WinarchyBarDockPath
-    if ($Mode -eq 'on') { Set-WinarchyFileAtomic -Path $path -Value 'on' }
+    if ($Mode -ne 'off') { Set-WinarchyFileAtomic -Path $path -Value $(if ($Mode -eq 'float') { 'float' } else { 'on' }) }
     elseif (Test-Path $path) { Remove-Item $path -Force }
-    if ($Mode -eq 'on' -and (Get-WinarchyActiveBar) -ne 'native') { Write-WinarchyWarn 'The dock needs the native shell: run `winarchy bar use native`.' }
+    if ($Mode -ne 'off' -and (Get-WinarchyActiveBar) -ne 'native') { Write-WinarchyWarn 'The dock needs the native shell: run `winarchy bar use native`.' }
     $theme = Get-WinarchyCurrentTheme
     if ($theme) { Set-WinarchyTheme -Name $theme }
     else { Write-WinarchyOk "Dock: $Mode (applies on the next `winarchy theme set`)." }

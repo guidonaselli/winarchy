@@ -24,7 +24,7 @@ function Show-WinarchyHelp {
     background set <file>     Apply one of them
     background next           Cycle to the next background
     bar position [top|bottom] Where the bar sits (no arg: show current)
-    bar dock <on|off>         Taskbar-style dock of open apps in the native shell
+    bar dock <on|float|off>   Taskbar-style dock of open apps (float: no reserved screen area)
     bar transparent [on|off]  See through the bar (no arg: toggle)
     assistant on|off|status   Voice assistant (hold Right Ctrl+Space to talk); on installs its local speech
                               runtime and signs in with ChatGPT; also: assistant login|logout
@@ -67,7 +67,7 @@ function Show-WinarchyHelp {
     rules collisions          ASC rules dropped because a higher layer decided otherwise
     rules sync [--apply]      Refresh the vendored community ASC (shows the diff first;
                               never touches your config/komorebi/rules.toml)
-    taskbar <autohide|show>   Native Windows taskbar mode
+    taskbar <hide|autohide|show>   Native Windows taskbar mode (hide: gone, dock only)
     harden [--revert]         Turn off Bing search, ads, suggestions, widgets and tips (HKCU)
     extras                    Optional extras outside the core and their status
     extras add windhawk [--yes]
@@ -212,7 +212,7 @@ function Invoke-Winarchy {
                 }
                 'dock' {
                     $mode = if ($rest.Count -ge 2) { $rest[1].ToLower() } else { '' }
-                    if ($mode -notin 'on', 'off') { throw 'Usage: winarchy bar dock <on|off>' }
+                    if ($mode -notin 'on', 'float', 'off') { throw 'Usage: winarchy bar dock <on|float|off>' }
                     Set-WinarchyBarDock -Mode $mode
                 }
                 default { throw "Unknown subcommand: bar $sub (position|transparent|use|dock)" }
@@ -284,8 +284,8 @@ function Invoke-Winarchy {
         }
         'taskbar' {
             $mode = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { '' }
-            if ($mode -notin 'autohide', 'show') { throw 'Usage: winarchy taskbar <autohide|show>' }
-            $null = Set-WinarchyTaskbarAutoHide -Enabled ($mode -eq 'autohide')
+            if ($mode -notin 'hide', 'autohide', 'show') { throw 'Usage: winarchy taskbar <hide|autohide|show>' }
+            Set-WinarchyTaskbarHidden -Mode $mode
             Write-WinarchyOk "Taskbar: $mode"
         }
         'harden' {

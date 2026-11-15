@@ -17,3 +17,31 @@ function Set-WinarchyTaskbarAutoHide {
     Stop-Process -Name explorer -Force
     $true
 }
+
+function Restore-WinarchyNativeTaskbar {
+    <# Una shell matada a la fuerza no devuelve la taskbar que ocultó: se la muestra desde acá. #>
+    if (-not ('Winarchy.TaskbarNative' -as [type])) {
+        Add-Type -Namespace Winarchy -Name TaskbarNative -MemberDefinition '[DllImport("user32.dll")] public static extern IntPtr FindWindowEx(IntPtr p, IntPtr a, string c, string t); [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);'
+    }
+    foreach ($class in 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd') {
+        $h = [IntPtr]::Zero
+        while (($h = [Winarchy.TaskbarNative]::FindWindowEx([IntPtr]::Zero, $h, $class, $null)) -ne [IntPtr]::Zero) {
+            if (-not [Winarchy.TaskbarNative]::IsWindowVisible($h)) { $null = [Winarchy.TaskbarNative]::ShowWindow($h, 8) }
+        }
+    }
+}
+
+function Set-WinarchyTaskbarHidden {
+    <# hide = auto-hide + la shell oculta la ventana (sin bandeja de íconos); autohide y show devuelven la nativa. #>
+    param([Parameter(Mandatory)][ValidateSet('hide', 'autohide', 'show')][string]$Mode)
+    $path = Get-WinarchyTaskbarHiddenPath
+    if ($Mode -eq 'hide') { Set-WinarchyFileAtomic -Path $path -Value 'on' }
+    elseif (Test-Path $path) { Remove-Item $path -Force }
+    if ($Mode -ne 'hide') { Restore-WinarchyNativeTaskbar }
+    if ($Mode -eq 'hide' -and -not (Test-WinarchyBarDock)) { Write-WinarchyWarn 'Hidden taskbar takes effect with the dock on: `winarchy bar dock on`.' }
+    $null = Set-WinarchyTaskbarAutoHide -Enabled ($Mode -ne 'show')
+    if (Test-WinarchyBarDock) {
+        $theme = Get-WinarchyCurrentTheme
+        if ($theme) { Set-WinarchyTheme -Name $theme }
+    }
+}

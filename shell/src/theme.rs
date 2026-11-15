@@ -13,6 +13,18 @@ pub struct Theme {
     pub position: String,
     #[serde(default)]
     pub dock: bool,
+    #[serde(default)]
+    pub hide_native_taskbar: bool,
+    #[serde(default = "d_icon")]
+    pub dock_icon: i32,
+    #[serde(default = "d_radius")]
+    pub dock_radius: i32,
+    #[serde(default = "d_gap")]
+    pub dock_gap: i32,
+    #[serde(default)]
+    pub dock_opacity: Option<f32>,
+    #[serde(default = "on")]
+    pub dock_motion: bool,
     #[serde(default = "on")]
     pub pet: bool,
     #[serde(default)]
@@ -56,6 +68,18 @@ fn on() -> bool {
     true
 }
 
+fn d_icon() -> i32 {
+    24
+}
+
+fn d_radius() -> i32 {
+    16
+}
+
+fn d_gap() -> i32 {
+    4
+}
+
 impl Default for Theme {
     fn default() -> Self {
         Theme {
@@ -68,6 +92,12 @@ impl Default for Theme {
             font_size: 13,
             position: "top".into(),
             dock: false,
+            hide_native_taskbar: false,
+            dock_icon: d_icon(),
+            dock_radius: d_radius(),
+            dock_gap: d_gap(),
+            dock_opacity: None,
+            dock_motion: true,
             pet: true,
             location: None,
             calendar: Vec::new(),

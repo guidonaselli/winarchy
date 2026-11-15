@@ -786,8 +786,12 @@ unsafe fn tick_inner() {
     let minute = GetLocalTime().wMinute;
     let fm = focus_monitor();
     let moved = with(|s| (fm.left, fm.top) != (s.pill_mon.left, s.pill_mon.top));
-    if reloaded && with(|s| s.theme.dock) {
-        dock::set_theme(&with(|s| s.theme.clone()));
+    if reloaded {
+        if with(|s| s.theme.dock) {
+            dock::set_theme(&with(|s| s.theme.clone()));
+        } else {
+            dock::restore_native_taskbar();
+        }
     }
     if !busy && (reloaded || expanding || moved || minute != last) {
         with(|s| s.last_minute = minute);
@@ -893,6 +897,7 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
         }
         WM_DESTROY => {
             if with(|s| s.strip) == h {
+                dock::restore_native_taskbar();
                 PostQuitMessage(0);
             }
             LRESULT(0)
@@ -1052,6 +1057,11 @@ fn workspace_changed(prev: Option<usize>, cur: Option<usize>) -> bool {
 fn main() {
     let root = std::env::current_exe().ok().and_then(|p| p.ancestors().nth(4).map(|p| p.to_path_buf())).unwrap_or_default();
     let theme_path = std::env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| root.join("config").join("shell").join("theme.json"));
+    let prev_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |i| {
+        dock::restore_native_taskbar();
+        prev_hook(i);
+    }));
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let inst = GetModuleHandleW(PCWSTR::null()).unwrap();
@@ -1082,6 +1092,8 @@ fn main() {
         if dock_on {
             let state_dir = with(|s| s.theme_path.ancestors().nth(3).map(|r| r.join("state")).unwrap_or_default());
             let _ = dock::init(&with(|s| s.theme.clone()), &state_dir);
+        } else {
+            dock::restore_native_taskbar();
         }
         SetTimer(strip, TIMER_TICK, 1000, None);
 
