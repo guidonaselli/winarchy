@@ -82,16 +82,26 @@ pub fn focus_args(monitor: usize, workspace: usize) -> [String; 3] {
 }
 
 // Anclados primero y en su orden; un anclado cuyo exe ya corre se fusiona con ese grupo en vez de duplicarse.
-fn arrange(pins: &[(String, String)], mut groups: Vec<Item>) -> Vec<Item> {
+#[derive(Clone)]
+struct Pin {
+    lnk: String,
+    exe: String,
+    aumid: Option<String>,
+}
+
+fn arrange(pins: &[Pin], mut groups: Vec<Item>) -> Vec<Item> {
     let mut out = Vec::new();
-    for (lnk, exe) in pins {
-        match groups.iter().position(|g| !exe.is_empty() && g.exe.eq_ignore_ascii_case(exe)) {
+    for Pin { lnk, exe, aumid } in pins {
+        let same = |g: &Item| {
+            (!exe.is_empty() && g.exe.eq_ignore_ascii_case(exe)) || matches!((&g.aumid, aumid), (Some(a), Some(b)) if a.eq_ignore_ascii_case(b))
+        };
+        match groups.iter().position(same) {
             Some(i) => {
                 let mut g = groups.remove(i);
                 g.pin = Some(lnk.clone());
                 out.push(g);
             }
-            None => out.push(Item { key: format!("pin:{}", lnk.to_lowercase()), exe: exe.clone(), aumid: None, wins: Vec::new(), active: false, other_ws: false, pin: Some(lnk.clone()) }),
+            None => out.push(Item { key: format!("pin:{}", lnk.to_lowercase()), exe: exe.clone(), aumid: aumid.clone(), wins: Vec::new(), active: false, other_ws: false, pin: Some(lnk.clone()) }),
         }
     }
     out.extend(groups);
@@ -139,7 +149,7 @@ struct Dock {
     sig: u64,
     hidden: bool,
     pending_focus: Option<isize>,
-    pins: Vec<(String, String)>,
+    pins: Vec<Pin>,
     ident: HashMap<isize, (String, Option<String>)>,
     pins_stamp: Option<std::time::SystemTime>,
     shell_msg: u32,
@@ -271,7 +281,7 @@ fn sort_pins(files: &mut [std::path::PathBuf], order: &[String]) {
     files.sort_by(|a, b| rank(a).cmp(&rank(b)).then_with(|| a.cmp(b)));
 }
 
-fn load_pins() -> Vec<(String, String)> {
+fn load_pins() -> Vec<Pin> {
     use windows::core::Interface;
     use windows::Win32::System::Com::{CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER, STGM_READ};
     let Some(dir) = pins_dir() else { return Vec::new() };
@@ -281,7 +291,7 @@ fn load_pins() -> Vec<(String, String)> {
     let mut pins = Vec::new();
     for f in files {
         let wide: Vec<u16> = f.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
-        let exe = unsafe {
+        let (exe, aumid) = unsafe {
             let Ok(link) = CoCreateInstance::<_, IShellLinkW>(&ShellLink, None, CLSCTX_INPROC_SERVER) else { continue };
             let Ok(file) = link.cast::<IPersistFile>() else { continue };
             if file.Load(PCWSTR(wide.as_ptr()), STGM_READ).is_err() {
@@ -290,10 +300,12 @@ fn load_pins() -> Vec<(String, String)> {
             let mut buf = [0u16; 520];
             let _ = link.GetPath(&mut buf, std::ptr::null_mut(), 0);
             let n = buf.iter().position(|c| *c == 0).unwrap_or(0);
-            String::from_utf16_lossy(&buf[..n])
+            let aumid = link.cast::<windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore>().ok().and_then(|st| variant_string(&st));
+            (String::from_utf16_lossy(&buf[..n]), aumid)
         };
-        if !exe.is_empty() {
-            pins.push((f.to_string_lossy().into_owned(), exe));
+        // File Explorer y los de Store no traen exe: se identifican por AUMID.
+        if !exe.is_empty() || aumid.is_some() {
+            pins.push(Pin { lnk: f.to_string_lossy().into_owned(), exe, aumid });
         }
     }
     pins
@@ -325,15 +337,21 @@ unsafe fn exe_of(h: HWND) -> String {
 }
 
 unsafe fn aumid_of(h: HWND) -> Option<String> {
-    use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
-    use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
     use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
     let store: IPropertyStore = SHGetPropertyStoreForWindow(h).ok()?;
-    let v = store.GetValue(&PKEY_AppUserModel_ID).ok()?;
-    let s = PropVariantToStringAlloc(&v).ok()?;
-    let r = s.to_string().ok();
-    windows::Win32::System::Com::CoTaskMemFree(Some(s.0 as *const _));
-    r.filter(|a| !a.is_empty())
+    variant_string(&store)
+}
+
+fn variant_string(store: &windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore) -> Option<String> {
+    use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
+    use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
+    unsafe {
+        let v = store.GetValue(&PKEY_AppUserModel_ID).ok()?;
+        let s = PropVariantToStringAlloc(&v).ok()?;
+        let r = s.to_string().ok();
+        windows::Win32::System::Com::CoTaskMemFree(Some(s.0 as *const _));
+        r.filter(|a| !a.is_empty())
+    }
 }
 
 unsafe fn is_eligible(h: HWND, own_pid: u32, shell: HWND) -> bool {
@@ -994,14 +1012,23 @@ mod tests {
 
     #[test]
     fn a_running_pin_merges_with_its_group_and_leads_the_list() {
-        let pins = vec![("a.lnk".to_string(), r"C:\X\Tool.exe".to_string())];
+        let pins = vec![Pin { lnk: "a.lnk".into(), exe: r"C:\X\Tool.exe".into(), aumid: None }];
         let out = arrange(&pins, vec![item("exe:other", r"C:\o.exe"), item("exe:tool", r"c:\x\tool.EXE")]);
         assert_eq!((out[0].key.as_str(), out[0].pin.as_deref(), out.len()), ("exe:tool", Some("a.lnk"), 2));
     }
 
     #[test]
+    fn a_pin_without_exe_merges_by_aumid() {
+        let pins = vec![Pin { lnk: "e.lnk".into(), exe: String::new(), aumid: Some("Microsoft.Windows.Explorer".into()) }];
+        let mut g = item("aumid:microsoft.windows.explorer", r"C:\Windows\explorer.exe");
+        g.aumid = Some("microsoft.windows.explorer".into());
+        let out = arrange(&pins, vec![item("exe:o", "o.exe"), g]);
+        assert_eq!((out.len(), out[0].pin.as_deref(), out[0].wins.len()), (2, Some("e.lnk"), 1));
+    }
+
+    #[test]
     fn a_pin_without_windows_stays_as_a_launcher() {
-        let pins = vec![("b.lnk".to_string(), r"C:\gone.exe".to_string())];
+        let pins = vec![Pin { lnk: "b.lnk".into(), exe: r"C:\gone.exe".into(), aumid: None }];
         let out = arrange(&pins, vec![item("exe:o", "o.exe")]);
         assert!(out[0].wins.is_empty() && out[0].pin.as_deref() == Some("b.lnk") && out[1].key == "exe:o");
     }
