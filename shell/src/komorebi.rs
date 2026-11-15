@@ -1,11 +1,14 @@
 use serde_json::Value;
+use std::collections::HashMap;
 use std::io::Read;
 use std::os::windows::process::CommandExt;
+use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::Mutex;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::*;
 use windows::Win32::Storage::FileSystem::{FILE_FLAGS_AND_ATTRIBUTES, PIPE_ACCESS_INBOUND};
 use windows::Win32::System::Pipes::*;
+use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 
 const PIPE: &str = r"\\.\pipe\winarchy-shell-komorebi";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -18,6 +21,37 @@ pub struct Workspaces {
 }
 
 pub static CURRENT: Mutex<Option<Workspaces>> = Mutex::new(None);
+
+// hwnd -> (monitor, workspace) de komorebi. Se conserva el último mapa si komorebi se reinicia.
+pub type WindowMap = HashMap<isize, (usize, usize)>;
+pub static WINDOWS: Mutex<Option<WindowMap>> = Mutex::new(None);
+// hwnd de la ventana a la que se avisa (con `WM_WINDOW_MAP`) cuando cambia el mapa.
+pub static NOTIFY: AtomicIsize = AtomicIsize::new(0);
+pub const WM_WINDOW_MAP: u32 = 0x8000 + 20;
+
+pub fn parse_windows(event: &Value) -> Option<WindowMap> {
+    let monitors = event.get("state")?.get("monitors")?.get("elements")?.as_array()?;
+    let mut map = WindowMap::new();
+    for (mi, m) in monitors.iter().enumerate() {
+        for (wi, w) in m["workspaces"]["elements"].as_array().into_iter().flatten().enumerate() {
+            let mut add = |v: &Value| {
+                if let Some(h) = v["hwnd"].as_i64() {
+                    map.insert(h as isize, (mi, wi));
+                }
+            };
+            for c in w["containers"]["elements"].as_array().into_iter().flatten() {
+                c["windows"]["elements"].as_array().into_iter().flatten().for_each(&mut add);
+            }
+            w["floating_windows"]["elements"].as_array().into_iter().flatten().for_each(&mut add);
+            w["monocle_container"]["windows"]["elements"].as_array().into_iter().flatten().for_each(&mut add);
+        }
+    }
+    Some(map)
+}
+
+pub fn window_slot(hwnd: isize) -> Option<(usize, usize)> {
+    WINDOWS.lock().unwrap().as_ref()?.get(&hwnd).copied()
+}
 
 pub fn parse(event: &Value) -> Option<Workspaces> {
     let monitors = event.get("state")?.get("monitors")?.get("elements")?.as_array()?;
@@ -77,7 +111,19 @@ unsafe fn read_events(h: HANDLE, on_change: &impl Fn()) {
         pending.extend_from_slice(&buf[..n]);
         while let Some(i) = pending.iter().position(|b| *b == b'\n') {
             let line: Vec<u8> = pending.drain(..=i).collect();
-            if let Some(ws) = serde_json::from_slice::<Value>(&line).ok().as_ref().and_then(parse) {
+            let ev = serde_json::from_slice::<Value>(&line).ok();
+            if let Some(map) = ev.as_ref().and_then(parse_windows) {
+                let mut cur = WINDOWS.lock().unwrap();
+                if cur.as_ref() != Some(&map) {
+                    *cur = Some(map);
+                    drop(cur);
+                    let n = NOTIFY.load(Ordering::Relaxed);
+                    if n != 0 {
+                        let _ = PostMessageW(HWND(n as *mut _), WM_WINDOW_MAP, WPARAM(0), LPARAM(0));
+                    }
+                }
+            }
+            if let Some(ws) = ev.as_ref().and_then(parse) {
                 let mut cur = CURRENT.lock().unwrap();
                 if cur.as_ref() != Some(&ws) {
                     *cur = Some(ws);
@@ -105,6 +151,23 @@ mod tests {
         assert_eq!(ws.focused, 2);
         assert_eq!(ws.occupied, vec![false, true, false]);
         assert_eq!(ws.layout, "");
+    }
+
+    #[test]
+    fn maps_every_window_to_its_monitor_and_workspace() {
+        let ev = serde_json::json!({"state":{"monitors":{"elements":[
+            {"workspaces":{"elements":[
+                {"containers":{"elements":[{"windows":{"elements":[{"hwnd":10},{"hwnd":11}]}}]},"floating_windows":{"elements":[{"hwnd":12}]},"monocle_container":null},
+                {"containers":{"elements":[]},"floating_windows":{"elements":[]},"monocle_container":{"windows":{"elements":[{"hwnd":13}]}}}]}},
+            {"workspaces":{"elements":[{"containers":{"elements":[{"windows":{"elements":[{"hwnd":20}]}}]}}]}}]}}});
+        let m = parse_windows(&ev).unwrap();
+        assert_eq!((m[&10], m[&11], m[&12], m[&13], m[&20]), ((0, 0), (0, 0), (0, 0), (0, 1), (1, 0)));
+        assert_eq!(m.len(), 5);
+    }
+
+    #[test]
+    fn events_without_state_leave_the_window_map_alone() {
+        assert!(parse_windows(&serde_json::json!({"event":{}})).is_none());
     }
 
     #[test]
