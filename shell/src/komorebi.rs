@@ -110,7 +110,7 @@ fn run_once(on_change: &impl Fn()) {
         }
         let sub = std::process::Command::new("komorebic.exe").args(["subscribe-pipe", "winarchy-shell-komorebi"]).creation_flags(CREATE_NO_WINDOW).status();
         if sub.is_ok_and(|s| s.success()) && (ConnectNamedPipe(h, None).is_ok() || GetLastError() == ERROR_PIPE_CONNECTED) {
-            seed_windows();
+            std::thread::spawn(seed_windows);
             read_events(h, on_change);
         }
         let _ = DisconnectNamedPipe(h);

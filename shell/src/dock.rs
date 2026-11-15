@@ -195,6 +195,9 @@ pub fn init(theme: &Theme) -> Option<HWND> {
 }
 
 pub fn set_theme(theme: &Theme) {
+    if DOCK.with(|d| d.borrow().is_none()) {
+        return;
+    }
     with(|d| {
         d.theme = theme.clone();
         d.sig = 0;

@@ -147,7 +147,7 @@ function Build-WinarchyThemeContext {
     $ctx['computed.bar_opacity'] = if (Test-WinarchyBarTransparent) { '0.72' } else { '1' }
     $dockOn = Test-WinarchyBarDock
     $offset = if ($dockOn) { Get-WinarchyDockWorkAreaOffset }
-    $ctx['computed.dock'] = if (Test-Path (Get-WinarchyBarDockPath)) { 'true' } else { 'false' }
+    $ctx['computed.dock'] = if ($dockOn) { 'true' } else { 'false' }
     $ctx['computed.work_top'] = if ($offset) { $offset.Top } else { 0 }
     $ctx['computed.work_bottom'] = if ($offset) { $offset.Bottom } else { 2 }
     # La traslucidez sobre fondo claro degrada la legibilidad: solo los themes oscuros.
