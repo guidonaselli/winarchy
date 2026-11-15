@@ -139,6 +139,7 @@ struct Dock {
     hidden: bool,
     pending_focus: Option<isize>,
     pins: Vec<(String, String)>,
+    pins_stamp: Option<std::time::SystemTime>,
     shell_msg: u32,
     created_msg: u32,
 }
@@ -181,6 +182,7 @@ pub fn init(theme: &Theme) -> Option<HWND> {
             hidden: false,
             pending_focus: None,
             pins: load_pins(),
+            pins_stamp: pins_stamp(),
             shell_msg: RegisterWindowMessageW(w!("SHELLHOOK")),
             created_msg: RegisterWindowMessageW(w!("TaskbarCreated")),
         };
@@ -206,11 +208,19 @@ pub fn set_theme(theme: &Theme) {
 }
 
 // `.lnk` de la taskbar nativa. shortcut: sin el orden de `Taskband` (va alfabético) y sin anclados de Store (el `.lnk` no trae exe), cuando se necesite ese orden leer `Taskband\Favorites`.
+fn pins_dir() -> Option<std::path::PathBuf> {
+    let appdata = std::env::var_os("APPDATA")?;
+    Some(std::path::Path::new(&appdata).join(r"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"))
+}
+
+fn pins_stamp() -> Option<std::time::SystemTime> {
+    std::fs::metadata(pins_dir()?).and_then(|m| m.modified()).ok()
+}
+
 fn load_pins() -> Vec<(String, String)> {
     use windows::core::Interface;
     use windows::Win32::System::Com::{CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER, STGM_READ};
-    let Some(appdata) = std::env::var_os("APPDATA") else { return Vec::new() };
-    let dir = std::path::Path::new(&appdata).join(r"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar");
+    let Some(dir) = pins_dir() else { return Vec::new() };
     let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut files: Vec<_> = rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("lnk"))).collect();
     files.sort();
@@ -592,6 +602,16 @@ unsafe fn tick() {
         d.hidden = hide;
         ch
     });
+    let stamp = pins_stamp();
+    let pins_changed = with(|d| d.pins_stamp != stamp);
+    if pins_changed {
+        let pins = load_pins();
+        with(|d| {
+            d.pins = pins;
+            d.pins_stamp = stamp;
+        });
+        refresh();
+    }
     if hide != hidden || changed {
         render();
     }
@@ -738,8 +758,11 @@ unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
         }
         WM_LBUTTONUP => {
             let (x, y) = xy(lp);
-            if let Some(Hit::Item(i)) = with(|d| hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y)) {
-                click(i);
+            match with(|d| hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y).map(|h| (h, d.layout.cells.len()))) {
+                Some((Hit::Item(i), _)) => click(i),
+                // shortcut: "+N" salta al primer grupo oculto, sin menú con la lista completa; hacerlo cuando haya menú propio.
+                Some((Hit::Overflow, cells)) => click(cells - 1),
+                None => {}
             }
             LRESULT(0)
         }

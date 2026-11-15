@@ -1,5 +1,10 @@
 # Taskbar.ps1 — auto-hide de la taskbar nativa de Windows (StuckRects3).
 
+function Test-WinarchyTaskbarAutoHide {
+    $val = (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3' -Name Settings -ErrorAction SilentlyContinue).Settings
+    [bool]($val -and ($val[8] -band 0x01))
+}
+
 function Set-WinarchyTaskbarAutoHide {
     <# Devuelve $true si cambió el estado; reinicia Explorer solo en ese caso. #>
     param([Parameter(Mandatory)][bool]$Enabled)
