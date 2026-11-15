@@ -169,13 +169,14 @@ pub unsafe fn show(c: Ctx) {
     if list.is_empty() {
         return;
     }
+    let current = c.active.filter(|a| c.wins.contains(a)).or(c.last);
     let labels: Vec<String> = list
         .iter()
         .map(|a| match a {
             Act::Focus(id) => {
                 let i = c.wins.iter().position(|w| w == id).unwrap_or(0);
                 let title = c.titles.get(i).filter(|t| !t.is_empty()).cloned().unwrap_or_else(|| "…".into());
-                format!("{}{title}", if c.active == Some(*id) { "• " } else { "   " })
+                format!("{}{title}", if current == Some(*id) { "• " } else { "   " })
             }
             other => label(*other, c.wins.len()).to_string(),
         })
