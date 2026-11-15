@@ -241,6 +241,7 @@ struct Dock {
     vis: f32,
     anim_at: std::time::Instant,
     tray_until: Option<std::time::Instant>,
+    flashing: HashSet<isize>,
 }
 
 
@@ -301,6 +302,7 @@ pub fn init(theme: &Theme, state_dir: &std::path::Path) -> Option<HWND> {
             vis: 0.0,
             anim_at: std::time::Instant::now(),
             tray_until: None,
+            flashing: HashSet::new(),
         };
         DOCK.with(|s| *s.borrow_mut() = Some(d));
         spawn_icon_worker(hwnd.0 as isize);
@@ -670,6 +672,7 @@ unsafe fn refresh() {
     }
     with(|d| {
         d.ident = ident;
+        d.flashing.retain(|w| *w != fg && IsWindow(HWND(*w as *mut _)).as_bool());
         d.order.retain(|k| groups.iter().any(|g| &g.key == k));
         for g in &groups {
             if !d.order.contains(&g.key) {
@@ -701,7 +704,7 @@ fn signature(d: &Dock) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     for i in &d.items {
-        (&i.key, i.wins.len(), i.active, i.other_ws).hash(&mut h);
+        (&i.key, i.wins.len(), i.active, i.other_ws, i.wins.iter().any(|w| d.flashing.contains(w))).hash(&mut h);
     }
     (d.hover, d.pressed, d.icons.len(), d.scale.to_bits(), d.mon, d.hidden, d.vis.to_bits()).hash(&mut h);
     (&d.theme.background, &d.theme.accent, &d.theme.position).hash(&mut h);
@@ -790,7 +793,49 @@ fn icon_sources(i: &Item, pins: &[Pin]) -> Vec<String> {
     v
 }
 
+const ATTN: (u8, u8, u8) = (255, 176, 32);
+
+// Texto centrado en una celda: GDI dibuja blanco sobre negro y la luminancia pasa a cobertura (como el tooltip).
+unsafe fn draw_label(buf: &mut [u32], stride: i32, rows: i32, cell: R, text: &str, theme: &Theme, scale: f32, fg: (u8, u8, u8)) {
+    let (w, h) = (cell.w, cell.h);
+    let wide: Vec<u16> = text.encode_utf16().collect();
+    let family: Vec<u16> = theme.font_family.encode_utf16().chain(std::iter::once(0)).collect();
+    let screen = GetDC(None);
+    let mem = CreateCompatibleDC(screen);
+    let bmi = BITMAPINFO { bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: w, biHeight: -h, biPlanes: 1, biBitCount: 32, biCompression: 0, ..Default::default() }, ..Default::default() };
+    let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
+    if let Ok(dib) = CreateDIBSection(mem, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) {
+        let old = SelectObject(mem, dib);
+        let font = CreateFontW(-px(theme.font_size.max(11), scale), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, ANTIALIASED_QUALITY.0 as u32, 0, PCWSTR(family.as_ptr()));
+        let old_font = SelectObject(mem, font);
+        let src = std::slice::from_raw_parts_mut(bits as *mut u32, (w * h) as usize);
+        src.fill(0);
+        SetBkMode(mem, TRANSPARENT);
+        SetTextColor(mem, COLORREF(0x00FF_FFFF));
+        let mut rc = RECT { left: 0, top: 0, right: w, bottom: h };
+        let mut tmp = wide.clone();
+        DrawTextW(mem, &mut tmp, &mut rc, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
+        for y in 0..h {
+            for x in 0..w {
+                let p = src[(y * w + x) as usize];
+                let c = ((p >> 16) & 255).max((p >> 8) & 255).max(p & 255);
+                let (dx, dy) = (cell.x + x, cell.y + y);
+                if c > 0 && dx >= 0 && dy >= 0 && dx < stride && dy < rows {
+                    blend(&mut buf[(dy * stride + dx) as usize], premul(fg, c as f32 / 255.0));
+                }
+            }
+        }
+        SelectObject(mem, old_font);
+        let _ = DeleteObject(font);
+        SelectObject(mem, old);
+        let _ = DeleteObject(dib);
+    }
+    let _ = DeleteDC(mem);
+    ReleaseDC(None, screen);
+}
+
 fn render() {
+    let flashing = with(|d| d.flashing.clone());
     let (hwnd, theme, items, layout_, hover, scale, hidden, motion, pressed) = with(|d| {
         d.layout = layout(d.items.len(), d.scale, d.mon, d.theme.position != "bottom", style(&d.theme).gap);
         (d.hwnd, d.theme.clone(), d.items.clone(), Layout { bar: d.layout.bar, cells: d.layout.cells.clone(), overflow: d.layout.overflow }, d.hover, d.scale, d.hidden, d.motion, d.pressed)
@@ -850,12 +895,16 @@ fn render() {
             for (idx, cell) in layout_.cells.iter().enumerate() {
                 if layout_.overflow > 0 && idx == layout_.cells.len() - 1 {
                     fill_round_a(buf, w, h, *cell, px(10, scale), fg, 0.12);
+                    draw_label(buf, w, h, *cell, &format!("+{}", layout_.overflow), &theme, scale, fg);
                     continue;
                 }
                 let Some(item) = items.get(idx) else { continue };
                 let (hv, entry) = if motion { (ease(d.as_ref().expect("dock").hov.get(&item.key).copied().unwrap_or(0.0)), ease(d.as_ref().expect("dock").born.get(&item.key).copied().unwrap_or(1.0))) } else { ((hover == Some(idx)) as i32 as f32, 1.0) };
+                let attn = !item.active && item.wins.iter().any(|w| flashing.contains(w));
                 if item.active {
                     fill_round_a(buf, w, h, *cell, px(10, scale), accent, 0.28);
+                } else if attn {
+                    fill_round_a(buf, w, h, *cell, px(10, scale), ATTN, 0.38);
                 } else if hv > 0.0 {
                     fill_round_a(buf, w, h, *cell, px(10, scale), fg, 0.10 * hv);
                 }
@@ -872,7 +921,7 @@ fn render() {
                 }
                 let dot = px(DOT_DIP, scale);
                 let dw = if item.active { dot * 3 } else { dot };
-                fill_round_a(buf, w, h, R { x: cell.x + (cell.w - dw) / 2, y: cell.y + cell.h - dot - px(3, scale), w: dw, h: dot }, dot / 2, if item.active { accent } else { fg }, if item.active { 1.0 } else { 0.6 });
+                fill_round_a(buf, w, h, R { x: cell.x + (cell.w - dw) / 2, y: cell.y + cell.h - dot - px(3, scale), w: dw, h: dot }, dot / 2, if item.active { accent } else if attn { ATTN } else { fg }, if item.active || attn { 1.0 } else { 0.6 });
             }
         });
         let pos = POINT { x: layout_.bar.x, y: layout_.bar.y };
@@ -1289,6 +1338,10 @@ unsafe fn show_tip(idx: usize) {
 unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let (shell_msg, created_msg) = DOCK.with(|d| d.try_borrow().ok().and_then(|d| d.as_ref().map(|d| (d.shell_msg, d.created_msg))).unwrap_or((0, 0)));
     if m != 0 && m == shell_msg {
+        // HSHELL_FLASH: la ventana pide atención; se limpia al pasar al frente o al cerrarse.
+        if wp.0 as u32 == 0x8006 {
+            with(|d| d.flashing.insert(lp.0));
+        }
         queue_refresh(h);
         return LRESULT(0);
     }
