@@ -163,7 +163,7 @@ struct Dock {
     hidden: bool,
     pending_focus: Option<isize>,
     pins: Vec<Pin>,
-    ident: HashMap<isize, (String, Option<String>)>,
+    ident: HashMap<isize, (String, Option<String>, std::time::Instant)>,
     pins_stamp: Option<std::time::SystemTime>,
     shell_msg: u32,
     created_msg: u32,
@@ -404,9 +404,11 @@ unsafe fn refresh() {
     let eligible: Vec<HWND> = all.into_iter().filter(|h| is_eligible(*h, own, shell)).collect();
     // exe y AUMID no cambian en la vida de la ventana: se piden una vez y no en cada refresco.
     let mut ident = with(|d| std::mem::take(&mut d.ident));
-    ident.retain(|k, _| eligible.iter().any(|h| h.0 as isize == *k));
+    // Electron fija el AUMID tarde: una lectura sin AUMID caduca a los 5 s y se reintenta.
+    let now = std::time::Instant::now();
+    ident.retain(|k, v| eligible.iter().any(|h| h.0 as isize == *k) && (v.1.is_some() || now.duration_since(v.2).as_secs() < 5));
     for h in eligible {
-        let (exe, aumid) = ident.entry(h.0 as isize).or_insert_with(|| (exe_of(h), aumid_of(h))).clone();
+        let (exe, aumid, _) = ident.entry(h.0 as isize).or_insert_with(|| (exe_of(h), aumid_of(h), now)).clone();
         let key = apps::group_key(aumid.as_deref(), &exe);
         let id = h.0 as isize;
         let cloaked = is_cloaked(h);
