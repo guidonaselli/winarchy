@@ -55,6 +55,13 @@ function Invoke-WinarchyDoctor {
             $(if ($shellCount -eq 0) { 'status bar down' } elseif ($shellCount -eq 1) { 'status bar' } else { "$shellCount winarchy-shell processes" }) `
             'winarchy reload'
     }
+    if (Test-WinarchyBarDock) {
+        $want = Get-WinarchyDockWorkAreaOffset
+        $json = Join-Path (Get-WinarchyRoot) 'config\komorebi\komorebi.json'
+        $have = if (Test-Path $json) { (Get-Content $json -Raw | ConvertFrom-Json).global_work_area_offset }
+        Add-Check 'dock reserved area in komorebi' ($have -and $have.top -eq $want.Top -and $have.bottom -eq $want.Bottom) `
+            "dock on: komorebi reserves top=$($want.Top) bottom=$($want.Bottom)" 'winarchy bar dock on  (re-renders komorebi.json)'
+    }
     if (Test-WinarchyProcess 'komorebi') {
         Add-Check 'komorebi sees every monitor' (Test-WinarchyMonitorHealth) `
             'one komorebi monitor per connected display' 'winarchy reload'
