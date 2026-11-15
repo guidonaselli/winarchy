@@ -1,7 +1,7 @@
 #![windows_subsystem = "windows"]
 
-#[allow(dead_code)]
 mod apps;
+mod dock;
 mod brightness;
 mod calendar;
 mod world;
@@ -229,7 +229,7 @@ unsafe extern "system" fn collect_monitor(m: HMONITOR, _: HDC, _: *mut RECT, dat
 }
 
 // Rectángulos de todos los monitores, el primario primero.
-unsafe fn monitor_rects() -> Vec<RECT> {
+pub(crate) unsafe fn monitor_rects() -> Vec<RECT> {
     let mut v: Vec<RECT> = Vec::new();
     let _ = EnumDisplayMonitors(None, None, Some(collect_monitor), LPARAM(&mut v as *mut _ as isize));
     v.sort_by_key(|r| (r.left != 0 || r.top != 0, r.left));
@@ -254,7 +254,7 @@ unsafe fn focus_monitor() -> RECT {
 }
 
 // Escala del monitor que contiene el rectángulo: cada monitor puede tener su propio DPI.
-unsafe fn mon_scale(r: &RECT) -> f32 {
+pub(crate) unsafe fn mon_scale(r: &RECT) -> f32 {
     let m = MonitorFromPoint(POINT { x: r.left + 1, y: r.top + 1 }, MONITOR_DEFAULTTONEAREST);
     let (mut x, mut y) = (0u32, 0u32);
     if GetDpiForMonitor(m, MDT_EFFECTIVE_DPI, &mut x, &mut y).is_ok() && x > 0 {
@@ -785,6 +785,9 @@ unsafe fn tick_inner() {
     let minute = GetLocalTime().wMinute;
     let fm = focus_monitor();
     let moved = with(|s| (fm.left, fm.top) != (s.pill_mon.left, s.pill_mon.top));
+    if reloaded && with(|s| s.theme.dock) {
+        dock::set_theme(&with(|s| s.theme.clone()));
+    }
     if !busy && (reloaded || expanding || moved || minute != last) {
         with(|s| s.last_minute = minute);
         render_pill(pill);
@@ -1074,6 +1077,10 @@ fn main() {
         extras::spawn_weather(theme_path);
         render_pill(pill);
         let _ = ShowWindow(pill, SW_SHOWNOACTIVATE);
+        let dock_on = with(|s| s.theme.dock);
+        if dock_on {
+            let _ = dock::init(&with(|s| s.theme.clone()));
+        }
         SetTimer(strip, TIMER_TICK, 1000, None);
 
         let target = strip.0 as isize;

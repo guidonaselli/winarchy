@@ -11,6 +11,8 @@ pub struct Theme {
     pub font_family: String,
     pub font_size: i32,
     pub position: String,
+    #[serde(default)]
+    pub dock: bool,
     #[serde(default = "on")]
     pub pet: bool,
     #[serde(default)]
@@ -65,6 +67,7 @@ impl Default for Theme {
             font_family: "Segoe UI".into(),
             font_size: 13,
             position: "top".into(),
+            dock: false,
             pet: true,
             location: None,
             calendar: Vec::new(),
