@@ -124,6 +124,7 @@ struct Icon {
 
 struct Dock {
     hwnd: HWND,
+    tip: HWND,
     theme: Theme,
     items: Vec<Item>,
     order: Vec<String>,
@@ -165,8 +166,12 @@ pub fn init(theme: &Theme) -> Option<HWND> {
         let r = crate::monitor_rects()[0];
         let mon = (r.left, r.top, r.right, r.bottom);
         let scale = crate::mon_scale(&r);
+        let tip_class = WNDCLASSW { lpfnWndProc: Some(tip_proc), hInstance: inst.into(), lpszClassName: w!("WinarchyShellDockTip"), ..Default::default() };
+        RegisterClassW(&tip_class);
+        let tip = CreateWindowExW(ex | WS_EX_TRANSPARENT, tip_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, 1, None, None, inst, None).ok()?;
         let d = Dock {
             hwnd,
+            tip,
             theme: theme.clone(),
             items: Vec::new(),
             order: Vec::new(),
@@ -436,6 +441,7 @@ fn render() {
     with(|d| d.sig = sig);
     unsafe {
         if hidden || items.is_empty() {
+            let _ = ShowWindow(with(|d| d.tip), SW_HIDE);
             let _ = ShowWindow(hwnd, SW_HIDE);
             return;
         }
@@ -675,6 +681,101 @@ fn xy(lp: LPARAM) -> (i32, i32) {
     ((lp.0 & 0xffff) as i16 as i32, ((lp.0 >> 16) & 0xffff) as i16 as i32)
 }
 
+unsafe extern "system" fn tip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    if m == WM_MOUSEACTIVATE {
+        return LRESULT(MA_NOACTIVATE as isize);
+    }
+    DefWindowProcW(h, m, wp, lp)
+}
+
+pub fn clip_title(t: &str, max: usize) -> String {
+    if t.chars().count() <= max {
+        return t.to_string();
+    }
+    let mut out: String = t.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+// Texto del tooltip: el título de la ventana a enfocar, o el nombre del anclado si no hay ventanas.
+unsafe fn tip_text(idx: usize) -> Option<String> {
+    let (wins, last, pin) = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), d.last_active.get(&i.key).copied(), i.pin.clone())))?;
+    let target = pick_target(&wins, 0, last);
+    if let Some(t) = target {
+        let h = HWND(t as *mut _);
+        let mut buf = [0u16; 256];
+        let n = GetWindowTextW(h, &mut buf).max(0) as usize;
+        let title = String::from_utf16_lossy(&buf[..n]);
+        if !title.is_empty() {
+            return Some(clip_title(&title, 48));
+        }
+    }
+    pin.and_then(|p| std::path::Path::new(&p).file_stem().map(|s| s.to_string_lossy().into_owned()))
+}
+
+unsafe fn hide_tip() {
+    let tip = with(|d| d.tip);
+    let _ = ShowWindow(tip, SW_HIDE);
+}
+
+// Tooltip propio (ventana layered chica): el texto se dibuja con GDI sobre negro y su luminancia pasa a alfa.
+unsafe fn show_tip(idx: usize) {
+    let Some(text) = tip_text(idx) else { return hide_tip() };
+    let (tip, theme, scale, bar, cell, bottom) = with(|d| (d.tip, d.theme.clone(), d.scale, d.layout.bar, d.layout.cells.get(idx).copied(), d.theme.position != "bottom"));
+    let Some(cell) = cell else { return hide_tip() };
+    let wide: Vec<u16> = text.encode_utf16().collect();
+    let family: Vec<u16> = theme.font_family.encode_utf16().chain(std::iter::once(0)).collect();
+    let screen = GetDC(None);
+    let mem = CreateCompatibleDC(screen);
+    let font = CreateFontW(-px((theme.font_size - 1).max(10), scale), 0, 0, 0, 500, 0, 0, 0, 1, 0, 0, ANTIALIASED_QUALITY.0 as u32, 0, PCWSTR(family.as_ptr()));
+    let old_font = SelectObject(mem, font);
+    let mut ext = SIZE::default();
+    let _ = GetTextExtentPoint32W(mem, &wide, &mut ext);
+    let pad = px(8, scale);
+    let (w, h) = (ext.cx + 2 * pad, ext.cy + pad);
+    let bmi = BITMAPINFO { bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: w, biHeight: -h, biPlanes: 1, biBitCount: 32, biCompression: 0, ..Default::default() }, ..Default::default() };
+    let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
+    let Ok(dib) = CreateDIBSection(mem, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) else {
+        SelectObject(mem, old_font);
+        let _ = DeleteObject(font);
+        let _ = DeleteDC(mem);
+        ReleaseDC(None, screen);
+        return;
+    };
+    let old = SelectObject(mem, dib);
+    let buf = std::slice::from_raw_parts_mut(bits as *mut u32, (w * h) as usize);
+    buf.fill(0);
+    SetBkMode(mem, TRANSPARENT);
+    SetTextColor(mem, COLORREF(0x00FF_FFFF));
+    let mut rc = RECT { left: pad, top: pad / 2, right: w - pad, bottom: h };
+    let mut tmp = wide.clone();
+    DrawTextW(mem, &mut tmp, &mut rc, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE);
+    let (bg, fg) = (rgb(&theme.background), rgb(&theme.foreground));
+    let coverage: Vec<u32> = buf.iter().map(|p| ((*p >> 16) & 255).max((*p >> 8) & 255).max(*p & 255)).collect();
+    buf.fill(0);
+    fill_round_a(buf, w, h, R { x: 0, y: 0, w, h }, px(8, scale), bg, 0.96);
+    for (i, c) in coverage.iter().enumerate() {
+        if *c > 0 {
+            blend(&mut buf[i], premul(fg, *c as f32 / 255.0));
+        }
+    }
+    let mon = with(|d| d.mon);
+    let cx = bar.x + cell.x + cell.w / 2;
+    let x = (cx - w / 2).clamp(mon.0, (mon.2 - w).max(mon.0));
+    let gap = px(8, scale);
+    let y = if bottom { bar.y - h - gap } else { bar.y + bar.h + gap };
+    let (pos, sz, src) = (POINT { x, y }, SIZE { cx: w, cy: h }, POINT::default());
+    let bf = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: 1 };
+    let _ = UpdateLayeredWindow(tip, None, Some(&pos), Some(&sz), mem, Some(&src), COLORREF(0), Some(&bf), ULW_ALPHA);
+    SelectObject(mem, old);
+    SelectObject(mem, old_font);
+    let _ = DeleteObject(dib);
+    let _ = DeleteObject(font);
+    let _ = DeleteDC(mem);
+    ReleaseDC(None, screen);
+    let _ = ShowWindow(tip, SW_SHOWNOACTIVATE);
+}
+
 unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let (shell_msg, created_msg) = DOCK.with(|d| d.try_borrow().ok().and_then(|d| d.as_ref().map(|d| (d.shell_msg, d.created_msg))).unwrap_or((0, 0)));
     if m != 0 && m == shell_msg {
@@ -745,6 +846,10 @@ unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
             }
             if changed {
                 render();
+                match with(|d| d.hover) {
+                    Some(i) => show_tip(i),
+                    None => hide_tip(),
+                }
             }
             LRESULT(0)
         }
@@ -754,6 +859,7 @@ unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                 d.tracking = false;
             });
             render();
+            hide_tip();
             LRESULT(0)
         }
         WM_LBUTTONUP => {
@@ -837,6 +943,12 @@ mod tests {
         let pins = vec![("b.lnk".to_string(), r"C:\gone.exe".to_string())];
         let out = arrange(&pins, vec![item("exe:o", "o.exe")]);
         assert!(out[0].wins.is_empty() && out[0].pin.as_deref() == Some("b.lnk") && out[1].key == "exe:o");
+    }
+
+    #[test]
+    fn long_titles_are_clipped_with_an_ellipsis() {
+        assert_eq!(clip_title("abc", 5), "abc");
+        assert_eq!(clip_title("abcdefgh", 5), "abcd…");
     }
 
     #[test]
