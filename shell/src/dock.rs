@@ -1108,11 +1108,16 @@ unsafe fn click(idx: usize) {
     }
 }
 
+// Un selector con la primera ventana de cada grupo desde `from`; los anclados sin ventana no tienen a quién enfocar.
+fn overflow_wins(items: &[Item], from: usize) -> Vec<isize> {
+    items.iter().skip(from).filter_map(|i| i.wins.first().copied()).collect()
+}
+
 // "+N": un selector con la primera ventana de cada grupo que no entró en el dock.
 unsafe fn overflow_ctx(first_hidden: usize) -> Option<crate::dock_menu::Ctx> {
     let mut ctx = with(|d| {
         let cell = *d.layout.cells.last()?;
-        let wins: Vec<isize> = d.items.iter().skip(first_hidden).filter_map(|i| i.wins.first().copied()).collect();
+        let wins = overflow_wins(&d.items, first_hidden);
         Some(crate::dock_menu::Ctx {
             picker: true,
             titles: Vec::new(),
@@ -1466,6 +1471,14 @@ mod tests {
         let mut half = vec![0u32; 16];
         draw_icon(&mut half, 4, 4, &ic, 2.0, 2.0, 1.0, 0.5);
         assert!(half.iter().all(|p| *p == 0 || (*p >> 24) == 0x80));
+    }
+
+    #[test]
+    fn the_overflow_picker_lists_one_window_per_hidden_group_and_skips_launchers() {
+        let it = |wins: Vec<isize>| Item { key: String::new(), exe: String::new(), aumid: None, wins, active: false, other_ws: false, pin: None };
+        let items = vec![it(vec![1]), it(vec![2, 3]), it(vec![]), it(vec![4])];
+        assert_eq!(overflow_wins(&items, 1), [2, 4]);
+        assert!(overflow_wins(&items, 4).is_empty());
     }
 
     #[test]
