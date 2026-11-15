@@ -87,13 +87,26 @@ struct Pin {
     lnk: String,
     exe: String,
     aumid: Option<String>,
+    // Squirrel (Discord, Slack, Teams): el .lnk apunta a Update.exe y el exe real va en `--processStart X.exe`.
+    launched: Option<String>,
+}
+
+fn squirrel_target(exe: &str, args: &str) -> Option<String> {
+    if !std::path::Path::new(exe).file_name()?.to_string_lossy().eq_ignore_ascii_case("update.exe") {
+        return None;
+    }
+    let mut it = args.split_whitespace();
+    it.find(|a| a.eq_ignore_ascii_case("--processStart") || a.eq_ignore_ascii_case("--processStartAndWait"))?;
+    it.next().map(|n| n.trim_matches('"').to_lowercase())
 }
 
 fn arrange(pins: &[Pin], mut groups: Vec<Item>) -> Vec<Item> {
     let mut out = Vec::new();
-    for Pin { lnk, exe, aumid } in pins {
+    for Pin { lnk, exe, aumid, launched } in pins {
         let same = |g: &Item| {
-            (!exe.is_empty() && g.exe.eq_ignore_ascii_case(exe)) || matches!((&g.aumid, aumid), (Some(a), Some(b)) if a.eq_ignore_ascii_case(b))
+            (!exe.is_empty() && g.exe.eq_ignore_ascii_case(exe))
+                || launched.as_deref().is_some_and(|n| std::path::Path::new(&g.exe).file_name().is_some_and(|f| f.to_string_lossy().eq_ignore_ascii_case(n)))
+                || matches!((&g.aumid, aumid), (Some(a), Some(b)) if a.eq_ignore_ascii_case(b))
         };
         match groups.iter().position(same) {
             Some(i) => {
@@ -291,7 +304,7 @@ fn load_pins() -> Vec<Pin> {
     let mut pins = Vec::new();
     for f in files {
         let wide: Vec<u16> = f.to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
-        let (exe, aumid) = unsafe {
+        let (exe, aumid, args) = unsafe {
             let Ok(link) = CoCreateInstance::<_, IShellLinkW>(&ShellLink, None, CLSCTX_INPROC_SERVER) else { continue };
             let Ok(file) = link.cast::<IPersistFile>() else { continue };
             if file.Load(PCWSTR(wide.as_ptr()), STGM_READ).is_err() {
@@ -301,11 +314,15 @@ fn load_pins() -> Vec<Pin> {
             let _ = link.GetPath(&mut buf, std::ptr::null_mut(), 0);
             let n = buf.iter().position(|c| *c == 0).unwrap_or(0);
             let aumid = link.cast::<windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore>().ok().and_then(|st| variant_string(&st));
-            (String::from_utf16_lossy(&buf[..n]), aumid)
+            let mut abuf = [0u16; 1024];
+            let _ = link.GetArguments(&mut abuf);
+            let an = abuf.iter().position(|c| *c == 0).unwrap_or(0);
+            (String::from_utf16_lossy(&buf[..n]), aumid, String::from_utf16_lossy(&abuf[..an]))
         };
         // File Explorer y los de Store no traen exe: se identifican por AUMID.
         if !exe.is_empty() || aumid.is_some() {
-            pins.push(Pin { lnk: f.to_string_lossy().into_owned(), exe, aumid });
+            let launched = squirrel_target(&exe, &args);
+            pins.push(Pin { lnk: f.to_string_lossy().into_owned(), exe, aumid, launched });
         }
     }
     pins
@@ -1012,14 +1029,14 @@ mod tests {
 
     #[test]
     fn a_running_pin_merges_with_its_group_and_leads_the_list() {
-        let pins = vec![Pin { lnk: "a.lnk".into(), exe: r"C:\X\Tool.exe".into(), aumid: None }];
+        let pins = vec![Pin { lnk: "a.lnk".into(), exe: r"C:\X\Tool.exe".into(), aumid: None, launched: None }];
         let out = arrange(&pins, vec![item("exe:other", r"C:\o.exe"), item("exe:tool", r"c:\x\tool.EXE")]);
         assert_eq!((out[0].key.as_str(), out[0].pin.as_deref(), out.len()), ("exe:tool", Some("a.lnk"), 2));
     }
 
     #[test]
     fn a_pin_without_exe_merges_by_aumid() {
-        let pins = vec![Pin { lnk: "e.lnk".into(), exe: String::new(), aumid: Some("Microsoft.Windows.Explorer".into()) }];
+        let pins = vec![Pin { lnk: "e.lnk".into(), exe: String::new(), aumid: Some("Microsoft.Windows.Explorer".into()), launched: None }];
         let mut g = item("aumid:microsoft.windows.explorer", r"C:\Windows\explorer.exe");
         g.aumid = Some("microsoft.windows.explorer".into());
         let out = arrange(&pins, vec![item("exe:o", "o.exe"), g]);
@@ -1027,8 +1044,17 @@ mod tests {
     }
 
     #[test]
+    fn a_squirrel_pin_merges_with_the_real_exe() {
+        assert_eq!(squirrel_target(r"C:\U\Discord\Update.exe", "--processStart Discord.exe").as_deref(), Some("discord.exe"));
+        assert_eq!(squirrel_target(r"C:\U\Tool.exe", "--processStart Discord.exe"), None);
+        let pins = vec![Pin { lnk: "d.lnk".into(), exe: r"C:\U\Discord\Update.exe".into(), aumid: None, launched: Some("discord.exe".into()) }];
+        let out = arrange(&pins, vec![item("exe:d", r"C:\U\Discord\app-1\Discord.exe")]);
+        assert_eq!((out.len(), out[0].wins.len()), (1, 1));
+    }
+
+    #[test]
     fn a_pin_without_windows_stays_as_a_launcher() {
-        let pins = vec![Pin { lnk: "b.lnk".into(), exe: r"C:\gone.exe".into(), aumid: None }];
+        let pins = vec![Pin { lnk: "b.lnk".into(), exe: r"C:\gone.exe".into(), aumid: None, launched: None }];
         let out = arrange(&pins, vec![item("exe:o", "o.exe")]);
         assert!(out[0].wins.is_empty() && out[0].pin.as_deref() == Some("b.lnk") && out[1].key == "exe:o");
     }
