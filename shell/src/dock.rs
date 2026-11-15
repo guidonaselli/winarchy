@@ -527,7 +527,14 @@ fn spawn_icon_worker(target: isize) {
     std::thread::spawn(move || unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         while let Ok((key, size, sources)) = rx.recv() {
-            if let Some(ic) = sources.iter().find_map(|s| fetch_icon(s, size)) {
+            // shortcut: reintenta 3 veces con 400 ms en el mismo hilo (bloquea la cola un máximo de ~0,8 s); un ícono que sigue fallando queda en placeholder hasta recargar el dock.
+            let found = (0..3).find_map(|n| {
+                if n > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(400));
+                }
+                sources.iter().find_map(|s| fetch_icon(s, size))
+            });
+            if let Some(ic) = found {
                 READY.lock().unwrap().push((key, size, ic));
                 let _ = PostMessageW(HWND(target as *mut _), WM_ICON, WPARAM(0), LPARAM(0));
             }
