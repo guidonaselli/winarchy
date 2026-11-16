@@ -637,8 +637,25 @@ unsafe fn exe_of(h: HWND) -> String {
 
 unsafe fn aumid_of(h: HWND) -> Option<String> {
     use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
-    let store: IPropertyStore = SHGetPropertyStoreForWindow(h).ok()?;
-    variant_string(&store)
+    let store: windows::core::Result<IPropertyStore> = SHGetPropertyStoreForWindow(h);
+    let from_window = store.ok().and_then(|s| variant_string(&s));
+    from_window.or_else(|| packaged_aumid(h))
+}
+
+// Las apps empaquetadas (WhatsApp, Calculadora) no ponen AUMID en la ventana pero sí en el proceso; sin él el ícono sale del .exe protegido y queda genérico.
+unsafe fn packaged_aumid(h: HWND) -> Option<String> {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetApplicationUserModelId(process: HANDLE, len: *mut u32, buf: *mut u16) -> i32;
+    }
+    let mut pid = 0u32;
+    GetWindowThreadProcessId(h, Some(&mut pid));
+    let p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+    let mut buf = [0u16; 130];
+    let mut n = buf.len() as u32;
+    let rc = GetApplicationUserModelId(p, &mut n, buf.as_mut_ptr());
+    let _ = CloseHandle(p);
+    (rc == 0 && n > 1).then(|| String::from_utf16_lossy(&buf[..n as usize - 1]))
 }
 
 fn variant_string(store: &windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore) -> Option<String> {
@@ -1450,7 +1467,8 @@ unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
             let (changed, need_track) = with(|d| {
                 let idx = match hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y) {
                     Some(Hit::Item(i)) => Some(i),
-                    _ => None,
+                    Some(Hit::Overflow) => d.layout.cells.len().checked_sub(1),
+                    None => None,
                 };
                 let changed = idx != d.hover;
                 d.hover = idx;
