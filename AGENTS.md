@@ -58,7 +58,7 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
   degrada a komorebi) y toma sus colores de `config/shell/theme.json`, generado desde
   `templates/shell-theme.json.tpl`. El binario sale como asset del Release con SHA256 en `[shell]`
   de `versions.lock.toml` y el instalador lo verifica.
-- Dock (`winarchy bar dock on|float|off`, `state/bar-dock`; `float` no reserva área en komorebi): vive en la shell nativa, nunca registra hotkeys ni usa `SHAppBarMessage`; la reserva de komorebi sale de los tokens `computed.work_top/bottom` (espeja `BAR_DIP`+`MARGIN_DIP` de `shell/src/dock.rs`). La taskbar nativa sigue en auto-hide y aloja la bandeja; `winarchy taskbar hide` (opt-in, con dock) la oculta con `ShowWindow` y la shell la devuelve al cerrar, al apagar el dock y ante un panic, nunca la deja oculta sin dock.
+- Dock (`winarchy bar dock on|float|hide|off`, `state/bar-dock`; `float` y `hide` no reservan área en komorebi, `hide` además se esconde y aparece al llevar el mouse al borde): hay uno por monitor (la reserva de `on` es el offset global, igual en todos), vive en la shell nativa, nunca registra hotkeys ni usa `SHAppBarMessage`; la reserva de komorebi sale de los tokens `computed.work_top/bottom` (espeja `BAR_DIP`+`MARGIN_DIP` de `shell/src/dock.rs`). La taskbar nativa sigue en auto-hide y aloja la bandeja; `winarchy taskbar hide` (opt-in, con dock) la oculta con `ShowWindow` y la shell la devuelve al cerrar, al apagar el dock y ante un panic, nunca la deja oculta sin dock.
 - Fuera de alcance: novideo_srgb, Twinkle Tray (dependen del hardware de la máquina).
 - Antes de cambios de sistema (registry, autostart): snapshot en `backups/<timestamp>/`.
 

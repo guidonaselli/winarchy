@@ -42,7 +42,6 @@ function Add-WinarchyWindowRulesToKomorebiJson {
     catch { return $Json }
 
     $config = $Json | ConvertFrom-Json
-    if (Test-WinarchyBarDock) { Set-WinarchyDockMonitorOffset -Config $config -State $state }
     # display_index_preferences con el orden vivo de los monitores
     if ($map.Count -gt 1) {
         $order = [ordered]@{}

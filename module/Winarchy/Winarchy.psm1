@@ -24,7 +24,7 @@ function Show-WinarchyHelp {
     background set <file>     Apply one of them
     background next           Cycle to the next background
     bar position [top|bottom] Where the bar sits (no arg: show current)
-    bar dock <on|float|off>   Taskbar-style dock of open apps (float: no reserved screen area)
+    bar dock <on|float|hide|off>   Dock of open apps on every monitor (float: no reserved area; hide: also auto-hides)
     bar transparent [on|off]  See through the bar (no arg: toggle)
     assistant on|off|status   Voice assistant (hold Right Ctrl+Space to talk); on installs its local speech
                               runtime and signs in with ChatGPT; also: assistant login|logout
@@ -212,7 +212,7 @@ function Invoke-Winarchy {
                 }
                 'dock' {
                     $mode = if ($rest.Count -ge 2) { $rest[1].ToLower() } else { '' }
-                    if ($mode -notin 'on', 'float', 'off') { throw 'Usage: winarchy bar dock <on|float|off>' }
+                    if ($mode -notin 'on', 'float', 'hide', 'off') { throw 'Usage: winarchy bar dock <on|float|hide|off>' }
                     Set-WinarchyBarDock -Mode $mode
                 }
                 default { throw "Unknown subcommand: bar $sub (position|transparent|use|dock)" }

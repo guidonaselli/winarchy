@@ -55,9 +55,10 @@ function Test-WinarchyBarDock {
 }
 
 function Get-WinarchyDockMode {
-    <# off | reserve (komorebi deja libre el área del dock) | float (el dock flota sobre las ventanas, sin reservar). #>
+    <# off | reserve (komorebi deja libre el área del dock) | float (flota sobre las ventanas, sin reservar) | hide (como float, y se esconde hasta llevar el mouse al borde). #>
     if (-not (Test-WinarchyBarDock)) { return 'off' }
-    if ((Get-Content (Get-WinarchyBarDockPath) -Raw -ErrorAction SilentlyContinue) -match 'float') { 'float' } else { 'reserve' }
+    $raw = Get-Content (Get-WinarchyBarDockPath) -Raw -ErrorAction SilentlyContinue
+    if ($raw -match 'hide') { 'hide' } elseif ($raw -match 'float') { 'float' } else { 'reserve' }
 }
 
 function Get-WinarchyTaskbarHiddenPath { Join-Path (Get-WinarchyStateDir) 'taskbar-hidden' }
@@ -65,8 +66,8 @@ function Get-WinarchyTaskbarHiddenPath { Join-Path (Get-WinarchyStateDir) 'taskb
 function Test-WinarchyTaskbarHidden { Test-Path (Get-WinarchyTaskbarHiddenPath) }
 
 function Get-WinarchyDockWorkAreaOffset {
-    <# Lo que komorebi reserva para el dock, en px. Espeja BAR_DIP + MARGIN_DIP (+2 de la franja de la taskbar nativa, solo abajo) de shell/src/dock.rs. En modo float no reserva nada. #>
-    if ((Get-WinarchyDockMode) -eq 'float') { return [pscustomobject]@{ Top = 0; Bottom = 2 } }
+    <# Lo que komorebi reserva para el dock, en px. Espeja BAR_DIP + MARGIN_DIP (+2 de la franja de la taskbar nativa, solo abajo) de shell/src/dock.rs. En float y hide no reserva nada. #>
+    if ((Get-WinarchyDockMode) -in 'float', 'hide') { return [pscustomobject]@{ Top = 0; Bottom = 2 } }
     $dpi = (Get-ItemProperty 'HKCU:\Control Panel\Desktop\WindowMetrics' -ErrorAction SilentlyContinue).AppliedDPI
     if (-not $dpi) { $dpi = 96 }
     $dockEdge = if ((Get-WinarchyBarPosition) -eq 'top') { 'bottom' } else { 'top' }
@@ -79,24 +80,12 @@ function Get-WinarchyDockWorkAreaOffset {
 }
 
 function Set-WinarchyBarDock {
-    param([Parameter(Mandatory)][ValidateSet('on', 'float', 'off')][string]$Mode)
+    param([Parameter(Mandatory)][ValidateSet('on', 'float', 'hide', 'off')][string]$Mode)
     $path = Get-WinarchyBarDockPath
-    if ($Mode -ne 'off') { Set-WinarchyFileAtomic -Path $path -Value $(if ($Mode -eq 'float') { 'float' } else { 'on' }) }
+    if ($Mode -ne 'off') { Set-WinarchyFileAtomic -Path $path -Value $(if ($Mode -in 'float', 'hide') { $Mode } else { 'on' }) }
     elseif (Test-Path $path) { Remove-Item $path -Force; if (Test-WinarchyTaskbarHidden) { Restore-WinarchyNativeTaskbar } }
     if ($Mode -ne 'off' -and (Get-WinarchyActiveBar) -ne 'native') { Write-WinarchyWarn 'The dock needs the native shell: run `winarchy bar use native`.' }
     $theme = Get-WinarchyCurrentTheme
     if ($theme) { Set-WinarchyTheme -Name $theme }
     else { Write-WinarchyOk "Dock: $Mode (applies on the next `winarchy theme set`)." }
-}
-
-function Set-WinarchyDockMonitorOffset {
-    <# Con varios monitores el dock vive solo en el primario: el área reservada pasa del global a ese monitor. Sin komorebi o con un monitor queda el global del token. #>
-    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$State)
-    $elements = @($State.monitors.elements)
-    if ($elements.Count -lt 2) { return }
-    $primary = 0..($elements.Count - 1) | Where-Object { $elements[$_].size.left -eq 0 -and $elements[$_].size.top -eq 0 } | Select-Object -First 1
-    if ($null -eq $primary -or -not $Config.monitors -or $primary -ge @($Config.monitors).Count) { return }
-    $o = Get-WinarchyDockWorkAreaOffset
-    $Config.global_work_area_offset = [pscustomobject]@{ left = 0; top = 0; right = 0; bottom = 2 }
-    $Config.monitors[$primary] | Add-Member -NotePropertyName work_area_offset -NotePropertyValue ([pscustomobject]@{ left = 0; top = $o.Top; right = 0; bottom = $o.Bottom }) -Force
 }

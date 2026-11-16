@@ -11,5 +11,6 @@
   "position": "{{computed.bar_position}}",
   "dock": {{computed.dock}},
   "dock_float": {{computed.dock_float}},
+  "dock_hide": {{computed.dock_hide}},
   "hide_native_taskbar": {{computed.hide_native}}
 }

@@ -14,6 +14,8 @@ pub struct Theme {
     #[serde(default)]
     pub dock: bool,
     #[serde(default)]
+    pub dock_hide: bool,
+    #[serde(default)]
     pub hide_native_taskbar: bool,
     #[serde(default = "d_icon")]
     pub dock_icon: i32,
@@ -92,6 +94,7 @@ impl Default for Theme {
             font_size: 13,
             position: "top".into(),
             dock: false,
+            dock_hide: false,
             hide_native_taskbar: false,
             dock_icon: d_icon(),
             dock_radius: d_radius(),

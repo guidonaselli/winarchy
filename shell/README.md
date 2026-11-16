@@ -8,7 +8,7 @@ Shell nativa opcional de Winarchy (franja reservada + isla). Se activa con `stat
 
 ## Dock
 
-`winarchy bar dock on|float|off` agrega un dock con las apps abiertas y ancladas, en el borde opuesto al de la isla. `on` reserva su franja en komorebi; `float` flota sobre las ventanas sin reservar nada.
+`winarchy bar dock on|float|hide|off` agrega un dock con las apps abiertas y ancladas en cada monitor, en el borde opuesto al de la isla; `hide` no reserva nada y se esconde hasta llevar el mouse al borde. `on` reserva su franja en komorebi; `float` flota sobre las ventanas sin reservar nada.
 
 - **Ventanas**: agrupa por AppUserModelID (respaldo: exe). Clic enfoca (restaura minimizadas, cambia de workspace con `komorebic`); clic en la app que ya está al frente la minimiza; con varias ventanas el clic abre un selector con sus títulos; clic medio abre una instancia nueva. La celda "+N" abre el selector de los grupos que no entraron.
 - **Clic derecho**: abrir/nueva ventana, anclar/desanclar, cerrar y cerrar todas, y "Bandeja del sistema" si la taskbar nativa está oculta. Las ventanas elevadas no se pueden cerrar desde acá (UIPI): la entrada no aparece.

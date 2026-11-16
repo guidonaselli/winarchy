@@ -149,6 +149,7 @@ function Build-WinarchyThemeContext {
     $offset = if ($dockOn) { Get-WinarchyDockWorkAreaOffset }
     $ctx['computed.dock'] = if ($dockOn) { 'true' } else { 'false' }
     $ctx['computed.dock_float'] = if ((Get-WinarchyDockMode) -eq 'float') { 'true' } else { 'false' }
+    $ctx['computed.dock_hide'] = if ((Get-WinarchyDockMode) -eq 'hide') { 'true' } else { 'false' }
     $ctx['computed.hide_native'] = if ($dockOn -and (Test-WinarchyTaskbarHidden)) { 'true' } else { 'false' }
     $ctx['computed.work_top'] = if ($offset) { $offset.Top } else { 0 }
     $ctx['computed.work_bottom'] = if ($offset) { $offset.Bottom } else { 2 }

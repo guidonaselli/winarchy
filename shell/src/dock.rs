@@ -3,7 +3,7 @@ use crate::apps::{self, Foreground, WinAttrs};
 use crate::komorebi;
 use crate::layout::{px, R};
 use crate::theme::{rgb, Theme};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::os::windows::process::CommandExt;
 use serde::{Deserialize, Serialize};
@@ -187,6 +187,9 @@ const T_REFRESH: usize = 1;
 const T_TICK: usize = 2;
 const T_FOCUS: usize = 3;
 const T_ANIM: usize = 4;
+const T_EDGE: usize = 5;
+const EDGE_MS: u32 = 60;
+const LEAVE_MS: u128 = 450;
 const ANIM_MS: u32 = 16;
 const TRAY_SECS: u64 = 12;
 const REFRESH_MS: u32 = 60;
@@ -203,6 +206,7 @@ struct Item {
     pin: Option<String>,
 }
 
+#[derive(Clone)]
 struct Icon {
     w: i32,
     h: i32,
@@ -243,6 +247,14 @@ struct Dock {
     tray_until: Option<std::time::Instant>,
     flashing: HashSet<isize>,
     drag: Option<Drag>,
+    peek: bool,
+    leave: Option<std::time::Instant>,
+}
+
+impl Dock {
+    fn want_visible(&self) -> bool {
+        !(self.hidden || self.items.is_empty() || (self.theme.dock_hide && !self.peek))
+    }
 }
 
 struct Drag {
@@ -252,10 +264,31 @@ struct Drag {
 }
 
 
-thread_local! { static DOCK: RefCell<Option<Dock>> = const { RefCell::new(None) }; }
+// Un dock por monitor (el i-ésimo de `monitor_rects`); `CUR` marca sobre cuál operan `with` y las funciones sin parámetro.
+thread_local! {
+    static DOCKS: RefCell<Vec<Dock>> = const { RefCell::new(Vec::new()) };
+    static CUR: Cell<usize> = const { Cell::new(0) };
+}
 
 fn with<R>(f: impl FnOnce(&mut Dock) -> R) -> R {
-    DOCK.with(|d| f(d.borrow_mut().as_mut().expect("dock")))
+    DOCKS.with(|v| {
+        let mut v = v.borrow_mut();
+        let i = CUR.get().min(v.len().saturating_sub(1));
+        f(v.get_mut(i).expect("dock"))
+    })
+}
+
+fn dock_count() -> usize {
+    DOCKS.with(|v| v.borrow().len())
+}
+
+fn for_each_dock(mut f: impl FnMut()) {
+    let keep = CUR.get();
+    for i in 0..dock_count() {
+        CUR.set(i);
+        f();
+    }
+    CUR.set(keep);
 }
 
 // Íconos listos desde el worker, con píxeles premultiplicados.
@@ -268,70 +301,167 @@ pub fn init(theme: &Theme, state_dir: &std::path::Path) -> Option<HWND> {
         let inst = GetModuleHandleW(PCWSTR::null()).ok()?;
         let class = WNDCLASSW { lpfnWndProc: Some(dock_proc), hInstance: inst.into(), hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(), lpszClassName: w!("WinarchyShellDock"), ..Default::default() };
         RegisterClassW(&class);
-        let ex = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_LAYERED;
-        let hwnd = CreateWindowExW(ex, class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, 1, None, None, inst, None).ok()?;
-        let r = crate::monitor_rects()[0];
-        let mon = (r.left, r.top, r.right, r.bottom);
-        let scale = crate::mon_scale(&r);
         let tip_class = WNDCLASSW { lpfnWndProc: Some(tip_proc), hInstance: inst.into(), lpszClassName: w!("WinarchyShellDockTip"), ..Default::default() };
         RegisterClassW(&tip_class);
-        let tip = CreateWindowExW(ex | WS_EX_TRANSPARENT, tip_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, 1, None, None, inst, None).ok()?;
         let pins_path = state_dir.join("dock-pins.json");
-        let d = Dock {
-            hwnd,
-            tip,
-            theme: theme.clone(),
-            items: Vec::new(),
-            order: Vec::new(),
-            last_active: HashMap::new(),
-            icons: HashMap::new(),
-            asked: HashSet::new(),
-            layout: layout(0, scale, mon, theme.position != "bottom", style(theme).gap),
-            hover: None,
-            tracking: false,
-            scale,
-            mon,
-            sig: 0,
-            hidden: false,
-            pending_focus: None,
-            pins: load_pins(&pins_path),
-            ident: HashMap::new(),
-            pins_stamp: pins_stamp(&pins_path),
-            pins_path,
-            shell_msg: RegisterWindowMessageW(w!("SHELLHOOK")),
-            created_msg: RegisterWindowMessageW(w!("TaskbarCreated")),
-            motion: motion_enabled(theme),
-            hov: HashMap::new(),
-            born: HashMap::new(),
-            known: HashSet::new(),
-            seeded: false,
-            pressed: None,
-            vis: 0.0,
-            anim_at: std::time::Instant::now(),
-            tray_until: None,
-            flashing: HashSet::new(),
-            drag: None,
-        };
-        DOCK.with(|s| *s.borrow_mut() = Some(d));
-        spawn_icon_worker(hwnd.0 as isize);
-        komorebi::NOTIFY.store(hwnd.0 as isize, std::sync::atomic::Ordering::Relaxed);
-        register(hwnd);
+        let docks: Vec<Dock> = crate::monitor_rects().iter().filter_map(|r| create_dock(r, theme, &pins_path)).collect();
+        let first = docks.first()?.hwnd;
+        DOCKS.with(|v| *v.borrow_mut() = docks);
+        spawn_icon_worker(first.0 as isize);
+        komorebi::NOTIFY.store(first.0 as isize, std::sync::atomic::Ordering::Relaxed);
+        for_each_dock(|| {
+            let h = with(|d| d.hwnd);
+            register(h);
+            refresh();
+            SetTimer(h, T_TICK, 1000, None);
+            sync_edge_timer(h);
+        });
+        Some(first)
+    }
+}
+
+unsafe fn create_dock(r: &RECT, theme: &Theme, pins_path: &std::path::Path) -> Option<Dock> {
+    let inst = GetModuleHandleW(PCWSTR::null()).ok()?;
+    let ex = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_LAYERED;
+    let hwnd = CreateWindowExW(ex, w!("WinarchyShellDock"), w!(""), WS_POPUP, 0, 0, 1, 1, None, None, inst, None).ok()?;
+    let tip = CreateWindowExW(ex | WS_EX_TRANSPARENT, w!("WinarchyShellDockTip"), w!(""), WS_POPUP, 0, 0, 1, 1, None, None, inst, None).ok()?;
+    let mon = (r.left, r.top, r.right, r.bottom);
+    let scale = crate::mon_scale(r);
+    Some(Dock {
+        hwnd,
+        tip,
+        theme: theme.clone(),
+        items: Vec::new(),
+        order: Vec::new(),
+        last_active: HashMap::new(),
+        icons: HashMap::new(),
+        asked: HashSet::new(),
+        layout: layout(0, scale, mon, theme.position != "bottom", style(theme).gap),
+        hover: None,
+        tracking: false,
+        scale,
+        mon,
+        sig: 0,
+        hidden: false,
+        pending_focus: None,
+        pins: load_pins(pins_path),
+        ident: HashMap::new(),
+        pins_stamp: pins_stamp(pins_path),
+        pins_path: pins_path.to_path_buf(),
+        shell_msg: RegisterWindowMessageW(w!("SHELLHOOK")),
+        created_msg: RegisterWindowMessageW(w!("TaskbarCreated")),
+        motion: motion_enabled(theme),
+        hov: HashMap::new(),
+        born: HashMap::new(),
+        known: HashSet::new(),
+        seeded: false,
+        pressed: None,
+        vis: 0.0,
+        anim_at: std::time::Instant::now(),
+        tray_until: None,
+        flashing: HashSet::new(),
+        drag: None,
+        peek: false,
+        leave: None,
+    })
+}
+
+// Altas y bajas de monitores: un dock por pantalla. Solo lo corre el dock 0 (el primario nunca desaparece).
+unsafe fn sync_docks() {
+    let rects = crate::monitor_rects();
+    CUR.set(0);
+    let (theme, pins_path) = with(|d| (d.theme.clone(), d.pins_path.clone()));
+    let extra: Vec<Dock> = DOCKS.with(|v| {
+        let mut v = v.borrow_mut();
+        if v.len() > rects.len().max(1) {
+            v.split_off(rects.len().max(1))
+        } else {
+            Vec::new()
+        }
+    });
+    for d in &extra {
+        let _ = DestroyWindow(d.tip);
+        let _ = DestroyWindow(d.hwnd);
+    }
+    while dock_count() < rects.len() {
+        let Some(d) = create_dock(&rects[dock_count()], &theme, &pins_path) else { break };
+        let h = d.hwnd;
+        DOCKS.with(|v| v.borrow_mut().push(d));
+        CUR.set(dock_count() - 1);
+        register(h);
         refresh();
-        SetTimer(hwnd, T_TICK, 1000, None);
-        Some(hwnd)
+        SetTimer(h, T_TICK, 1000, None);
+        sync_edge_timer(h);
+    }
+    CUR.set(0);
+}
+
+// El timer del borde solo corre en modo `hide`; fuera de él el dock siempre se ve.
+unsafe fn sync_edge_timer(h: HWND) {
+    if with(|d| d.theme.dock_hide) {
+        SetTimer(h, T_EDGE, EDGE_MS, None);
+    } else {
+        let _ = KillTimer(h, T_EDGE);
+        with(|d| {
+            d.peek = false;
+            d.leave = None;
+        });
+    }
+}
+
+// Devuelve (en el borde que lo revela, sobre la barra ya visible). El borde son 2 px, ensanchados una altura de barra a cada lado.
+fn reveal_zones(m: MonRect, b: R, bottom: bool, p: (i32, i32)) -> (bool, bool) {
+    let on_mon = p.0 >= m.0 && p.0 < m.2 && p.1 >= m.1 && p.1 < m.3;
+    let edge = if bottom { p.1 >= m.3 - 2 } else { p.1 < m.1 + 2 };
+    let at_edge = on_mon && edge && p.0 >= b.x - b.h && p.0 < b.x + b.w + b.h;
+    let on_bar = on_mon && p.0 >= b.x && p.0 < b.x + b.w && if bottom { p.1 >= b.y - 2 } else { p.1 < b.y + b.h + 2 };
+    (at_edge, on_bar)
+}
+
+// Mouse en el borde del dock (o sobre él, ya visible): lo muestra; fuera por un rato (y sin menú abierto): lo esconde.
+unsafe fn edge_tick(h: HWND) {
+    let mut p = POINT::default();
+    if GetCursorPos(&mut p).is_err() {
+        return;
+    }
+    let changed = with(|d| {
+        if !d.theme.dock_hide {
+            return false;
+        }
+        let (at_edge, on_bar) = reveal_zones(d.mon, d.layout.bar, d.theme.position != "bottom", (p.x, p.y));
+        let before = d.peek;
+        if at_edge || (d.peek && (on_bar || crate::dock_menu::is_open())) {
+            d.peek = true;
+            d.leave = None;
+        } else if d.peek {
+            let t = *d.leave.get_or_insert_with(std::time::Instant::now);
+            if t.elapsed().as_millis() > LEAVE_MS {
+                d.peek = false;
+                d.leave = None;
+            }
+        }
+        before != d.peek
+    });
+    if changed {
+        render();
+        if with(|d| d.motion) {
+            start_anim(h);
+        }
     }
 }
 
 pub fn set_theme(theme: &Theme) {
-    if DOCK.with(|d| d.borrow().is_none()) {
-        return;
-    }
-    with(|d| {
-        d.theme = theme.clone();
-        d.motion = motion_enabled(theme);
-        d.sig = 0;
+    for_each_dock(|| {
+        with(|d| {
+            d.theme = theme.clone();
+            d.motion = motion_enabled(theme);
+            d.sig = 0;
+        });
+        unsafe {
+            sync_edge_timer(with(|d| d.hwnd));
+            refresh()
+        }
     });
-    unsafe { refresh() }
 }
 
 // El ajuste de Windows "efectos de animación" apagado manda sobre el theme.
@@ -441,7 +571,7 @@ unsafe fn anim_tick(h: HWND) {
         }
         d.born.retain(|_, p| *p < 1.0);
         busy |= !d.born.is_empty();
-        let target = if d.hidden || d.items.is_empty() { 0.0 } else { 1.0 };
+        let target = if d.want_visible() { 1.0 } else { 0.0 };
         let v = approach(d.vis, target, dt, FADE_MS);
         busy |= v != d.vis;
         d.vis = v;
@@ -756,7 +886,7 @@ fn signature(d: &Dock) -> u64 {
     for i in &d.items {
         (&i.key, i.wins.len(), i.active, i.other_ws, i.wins.iter().any(|w| d.flashing.contains(w))).hash(&mut h);
     }
-    (d.hover, d.pressed, d.icons.len(), d.scale.to_bits(), d.mon, d.hidden, d.vis.to_bits()).hash(&mut h);
+    (d.hover, d.pressed, d.icons.len(), d.scale.to_bits(), d.mon, d.hidden, d.vis.to_bits(), d.peek, d.theme.dock_hide).hash(&mut h);
     (&d.theme.background, &d.theme.accent, &d.theme.position).hash(&mut h);
     (d.theme.dock_icon, d.theme.dock_radius, d.theme.dock_gap, d.theme.dock_opacity.map(f32::to_bits), d.motion).hash(&mut h);
     for i in &d.items {
@@ -886,9 +1016,9 @@ unsafe fn draw_label(buf: &mut [u32], stride: i32, rows: i32, cell: R, text: &st
 
 fn render() {
     let flashing = with(|d| d.flashing.clone());
-    let (hwnd, theme, items, layout_, hover, scale, hidden, motion, pressed) = with(|d| {
+    let (hwnd, theme, items, layout_, hover, scale, want_vis, motion, pressed) = with(|d| {
         d.layout = layout(d.items.len(), d.scale, d.mon, d.theme.position != "bottom", style(&d.theme).gap);
-        (d.hwnd, d.theme.clone(), d.items.clone(), Layout { bar: d.layout.bar, cells: d.layout.cells.clone(), overflow: d.layout.overflow }, d.hover, d.scale, d.hidden, d.motion, d.pressed)
+        (d.hwnd, d.theme.clone(), d.items.clone(), Layout { bar: d.layout.bar, cells: d.layout.cells.clone(), overflow: d.layout.overflow }, d.hover, d.scale, d.want_visible(), d.motion, d.pressed)
     });
     let st = style(&theme);
     let size = px(st.icon, scale);
@@ -906,7 +1036,7 @@ fn render() {
         return;
     }
     with(|d| d.sig = sig);
-    let want_vis = if hidden || items.is_empty() { 0.0 } else { 1.0 };
+    let want_vis = if want_vis { 1.0 } else { 0.0 };
     let vis = with(|d| {
         if !d.motion {
             d.vis = want_vis;
@@ -939,9 +1069,10 @@ fn render() {
         buf.fill(0);
         let (bg, fg, accent) = (rgb(&theme.background), rgb(&theme.foreground), rgb(&theme.accent));
         fill_round_a(buf, w, h, R { x: 0, y: 0, w, h }, px(st.radius, scale), bg, st.opacity);
-        DOCK.with(|d| {
-            let d = d.borrow();
-            let icons = &d.as_ref().expect("dock").icons;
+        DOCKS.with(|v| {
+            let v = v.borrow();
+            let d = &v[CUR.get().min(v.len() - 1)];
+            let icons = &d.icons;
             for (idx, cell) in layout_.cells.iter().enumerate() {
                 if layout_.overflow > 0 && idx == layout_.cells.len() - 1 {
                     fill_round_a(buf, w, h, *cell, px(10, scale), fg, 0.12);
@@ -949,7 +1080,7 @@ fn render() {
                     continue;
                 }
                 let Some(item) = items.get(idx) else { continue };
-                let (hv, entry) = if motion { (ease(d.as_ref().expect("dock").hov.get(&item.key).copied().unwrap_or(0.0)), ease(d.as_ref().expect("dock").born.get(&item.key).copied().unwrap_or(1.0))) } else { ((hover == Some(idx)) as i32 as f32, 1.0) };
+                let (hv, entry) = if motion { (ease(d.hov.get(&item.key).copied().unwrap_or(0.0)), ease(d.born.get(&item.key).copied().unwrap_or(1.0))) } else { ((hover == Some(idx)) as i32 as f32, 1.0) };
                 let attn = !item.active && item.wins.iter().any(|w| flashing.contains(w));
                 if item.active {
                     fill_round_a(buf, w, h, *cell, px(10, scale), accent, 0.28);
@@ -974,7 +1105,9 @@ fn render() {
                 fill_round_a(buf, w, h, R { x: cell.x + (cell.w - dw) / 2, y: cell.y + cell.h - dot - px(3, scale), w: dw, h: dot }, dot / 2, if item.active { accent } else if attn { ATTN } else { fg }, if item.active || attn { 1.0 } else { 0.6 });
             }
         });
-        let pos = POINT { x: layout_.bar.x, y: layout_.bar.y };
+        // En `hide` el dock se desliza hacia su borde al esconderse.
+        let slide = if theme.dock_hide { ((1.0 - ease(vis)) * px(16, scale) as f32) as i32 } else { 0 };
+        let pos = POINT { x: layout_.bar.x, y: layout_.bar.y + if theme.position != "bottom" { slide } else { -slide } };
         let sz = SIZE { cx: w, cy: h };
         let src = POINT::default();
         let bf = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: (vis * 255.0).round() as u8, AlphaFormat: 1 };
@@ -992,19 +1125,21 @@ fn drain_ready() {
     if ready.is_empty() {
         return;
     }
-    with(|d| {
-        for (k, size, ic) in ready {
-            d.icons.insert((k, size), ic);
-        }
-        if d.icons.len() > MAX_ICONS {
-            let live: HashSet<String> = d.items.iter().map(|i| i.key.clone()).collect();
-            d.icons.retain(|(k, _), _| live.contains(k));
-            let kept: HashSet<(String, i32)> = d.icons.keys().cloned().collect();
-            d.asked.retain(|a| kept.contains(a));
-        }
-        d.sig = 0;
+    for_each_dock(|| {
+        with(|d| {
+            for (k, size, ic) in &ready {
+                d.icons.insert((k.clone(), *size), ic.clone());
+            }
+            if d.icons.len() > MAX_ICONS {
+                let live: HashSet<String> = d.items.iter().map(|i| i.key.clone()).collect();
+                d.icons.retain(|(k, _), _| live.contains(k));
+                let kept: HashSet<(String, i32)> = d.icons.keys().cloned().collect();
+                d.asked.retain(|a| kept.contains(a));
+            }
+            d.sig = 0;
+        });
+        render();
     });
-    render();
 }
 
 fn spawn_icon_worker(target: isize) {
@@ -1092,20 +1227,26 @@ unsafe fn dock_foreground(mon: MonRect) -> Option<Foreground> {
 
 // La taskbar nativa en auto-hide, al aparecer, queda sobre el dock: mientras se vea (o su overflow) no se reafirma el orden.
 unsafe fn native_taskbar_visible(mon: MonRect) -> bool {
-    if let Ok(t) = FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null()) {
+    let over = Cell::new(false);
+    for_native_taskbars(|t| {
         let mut rc = RECT::default();
-        if GetWindowRect(t, &mut rc).is_ok() && IsWindowVisible(t).as_bool() && rc.top < mon.3 - 4 && rc.bottom > mon.3 - 4 {
-            return true;
+        if GetWindowRect(t, &mut rc).is_ok() && IsWindowVisible(t).as_bool() && rc.top < mon.3 - 4 && rc.bottom > mon.3 - 4 && rc.left < mon.2 && rc.right > mon.0 {
+            over.set(true);
         }
-    }
-    FindWindowW(w!("TopLevelWindowForOverflowXamlIsland"), PCWSTR::null()).is_ok_and(|o| IsWindowVisible(o).as_bool())
+    });
+    over.get() || FindWindowW(w!("TopLevelWindowForOverflowXamlIsland"), PCWSTR::null()).is_ok_and(|o| IsWindowVisible(o).as_bool())
 }
 
 unsafe fn tick() {
+    let cur = CUR.get();
+    if cur == 0 {
+        sync_docks();
+    }
+    let rects = crate::monitor_rects();
+    let Some(r0) = rects.get(cur).copied() else { return };
     let (hwnd, mon, hidden) = with(|d| (d.hwnd, d.mon, d.hidden));
     let busy = matches!(SHQueryUserNotificationState(), Ok(s) if s == QUNS_BUSY || s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE);
     let hide = apps::should_hide(dock_foreground(mon).as_ref(), mon, busy);
-    let r0 = crate::monitor_rects()[0];
     let m0 = (r0.left, r0.top, r0.right, r0.bottom);
     let scale = crate::mon_scale(&r0);
     let changed = with(|d| {
@@ -1385,8 +1526,18 @@ unsafe fn show_tip(idx: usize) {
     let _ = ShowWindow(tip, SW_SHOWNOACTIVATE);
 }
 
+// Los mensajes llegan anidados (ShowWindow envía a su propia ventana): `CUR` se devuelve a lo que era al salir.
 unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    let (shell_msg, created_msg) = DOCK.with(|d| d.try_borrow().ok().and_then(|d| d.as_ref().map(|d| (d.shell_msg, d.created_msg))).unwrap_or((0, 0)));
+    let keep = CUR.get();
+    let r = dock_msg(h, m, wp, lp);
+    CUR.set(keep);
+    r
+}
+
+unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    let Some(i) = DOCKS.with(|v| v.try_borrow().ok().and_then(|v| v.iter().position(|d| d.hwnd == h))) else { return DefWindowProcW(h, m, wp, lp) };
+    CUR.set(i);
+    let (shell_msg, created_msg) = with(|d| (d.shell_msg, d.created_msg));
     if m != 0 && m == shell_msg {
         // HSHELL_FLASH: la ventana pide atención; se limpia al pasar al frente o al cerrarse.
         if wp.0 as u32 == 0x8006 {
@@ -1410,6 +1561,10 @@ unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
             anim_tick(h);
             LRESULT(0)
         }
+        WM_TIMER if wp.0 == T_EDGE => {
+            edge_tick(h);
+            LRESULT(0)
+        }
         WM_TIMER if wp.0 == T_TICK => {
             tick();
             LRESULT(0)
@@ -1429,7 +1584,8 @@ unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
             LRESULT(0)
         }
         x if x == komorebi::WM_WINDOW_MAP => {
-            queue_refresh(h);
+            let all: Vec<HWND> = DOCKS.with(|v| v.borrow().iter().map(|d| d.hwnd).collect());
+            all.into_iter().for_each(|d| queue_refresh(d));
             LRESULT(0)
         }
         WM_DISPLAYCHANGE | WM_DPICHANGED => {
@@ -1638,6 +1794,17 @@ mod tests {
         assert_eq!(hit_test(&l, l.bar.x + c.x + 5, l.bar.y + c.y + 5), Some(Hit::Item(1)));
         assert_eq!(hit_test(&l, l.bar.x + c.x - 1, l.bar.y + c.y + 5), None);
         assert_eq!(hit_test(&l, 0, 0), None);
+    }
+
+    #[test]
+    fn the_reveal_edge_is_two_pixels_on_the_dock_side_of_its_own_monitor() {
+        let bar = R { x: 800, y: 1026, w: 300, h: 48 };
+        assert_eq!(reveal_zones(MON, bar, true, (900, 1079)), (true, true));
+        assert_eq!(reveal_zones(MON, bar, true, (900, 900)), (false, false));
+        assert_eq!(reveal_zones(MON, bar, true, (2000, 1079)), (false, false));
+        assert_eq!(reveal_zones(MON, bar, true, (760, 1079)), (true, false));
+        assert_eq!(reveal_zones(MON, bar, true, (900, 1030)), (false, true));
+        assert_eq!(reveal_zones(MON, bar, false, (760, 0)), (true, false));
     }
 
     #[test]
