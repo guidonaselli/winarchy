@@ -188,6 +188,8 @@ const T_TICK: usize = 2;
 const T_FOCUS: usize = 3;
 const T_ANIM: usize = 4;
 const T_EDGE: usize = 5;
+const T_TIP: usize = 6;
+const TIP_FADE_MS: u128 = 130;
 const EDGE_MS: u32 = 60;
 const LEAVE_MS: u128 = 450;
 const ANIM_MS: u32 = 16;
@@ -249,6 +251,7 @@ struct Dock {
     drag: Option<Drag>,
     peek: bool,
     leave: Option<std::time::Instant>,
+    tip_born: Option<std::time::Instant>,
 }
 
 impl Dock {
@@ -363,6 +366,7 @@ unsafe fn create_dock(r: &RECT, theme: &Theme, pins_path: &std::path::Path) -> O
         drag: None,
         peek: false,
         leave: None,
+        tip_born: None,
     })
 }
 
@@ -465,7 +469,7 @@ pub fn set_theme(theme: &Theme) {
 }
 
 // El ajuste de Windows "efectos de animación" apagado manda sobre el theme.
-fn motion_enabled(t: &Theme) -> bool {
+pub(crate) fn motion_enabled(t: &Theme) -> bool {
     let mut on = windows::Win32::Foundation::BOOL(1);
     unsafe {
         let _ = SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, Some(&mut on as *mut _ as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
@@ -1464,7 +1468,10 @@ unsafe fn tip_text(idx: usize) -> Option<String> {
 }
 
 unsafe fn hide_tip() {
-    let tip = with(|d| d.tip);
+    let tip = with(|d| {
+        d.tip_born = None;
+        d.tip
+    });
     let _ = ShowWindow(tip, SW_HIDE);
 }
 
@@ -1515,7 +1522,8 @@ unsafe fn show_tip(idx: usize) {
     let mon = with(|d| d.mon);
     let (x, y) = crate::dock_menu::popup_pos(bar.x + cell.x + cell.w / 2, bar, w, h, bottom, px(8, scale), mon);
     let (pos, sz, src) = (POINT { x, y }, SIZE { cx: w, cy: h }, POINT::default());
-    let bf = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: 1 };
+    let animate = with(|d| d.motion);
+    let bf = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: if animate { 0 } else { 255 }, AlphaFormat: 1 };
     let _ = UpdateLayeredWindow(tip, None, Some(&pos), Some(&sz), mem, Some(&src), COLORREF(0), Some(&bf), ULW_ALPHA);
     SelectObject(mem, old);
     SelectObject(mem, old_font);
@@ -1524,6 +1532,29 @@ unsafe fn show_tip(idx: usize) {
     let _ = DeleteDC(mem);
     ReleaseDC(None, screen);
     let _ = ShowWindow(tip, SW_SHOWNOACTIVATE);
+    if animate {
+        let dock = with(|d| {
+            d.tip_born = Some(std::time::Instant::now());
+            d.hwnd
+        });
+        SetTimer(dock, T_TIP, ANIM_MS, None);
+    }
+}
+
+// Fundido del tooltip: solo cambia el alfa constante; el contenido ya está en la ventana.
+unsafe fn tip_tick(h: HWND) {
+    let (tip, born) = with(|d| (d.tip, d.tip_born));
+    let Some(born) = born else {
+        let _ = KillTimer(h, T_TIP);
+        return;
+    };
+    let t = (born.elapsed().as_millis() as f32 / TIP_FADE_MS as f32).min(1.0);
+    let bf = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: (ease(t) * 255.0).round() as u8, AlphaFormat: 1 };
+    let _ = UpdateLayeredWindow(tip, None, None, None, None, None, COLORREF(0), Some(&bf), ULW_ALPHA);
+    if t >= 1.0 {
+        let _ = KillTimer(h, T_TIP);
+        with(|d| d.tip_born = None);
+    }
 }
 
 // Los mensajes llegan anidados (ShowWindow envía a su propia ventana): `CUR` se devuelve a lo que era al salir.
@@ -1559,6 +1590,10 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         }
         WM_TIMER if wp.0 == T_ANIM => {
             anim_tick(h);
+            LRESULT(0)
+        }
+        WM_TIMER if wp.0 == T_TIP => {
+            tip_tick(h);
             LRESULT(0)
         }
         WM_TIMER if wp.0 == T_EDGE => {

@@ -141,7 +141,13 @@ struct Menu {
     pad: i32,
     theme: Theme,
     scale: f32,
+    born: std::time::Instant,
+    animate: bool,
+    bottom: bool,
 }
+
+const OPEN_MS: f32 = 150.0;
+const T_OPEN: usize = 1;
 
 thread_local! { static MENU: RefCell<Option<Menu>> = const { RefCell::new(None) }; }
 
@@ -204,9 +210,13 @@ pub unsafe fn show(c: Ctx) {
     let class = WNDCLASSW { lpfnWndProc: Some(menu_proc), hInstance: inst.into(), hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(), lpszClassName: w!("WinarchyShellDockMenu"), ..Default::default() };
     RegisterClassW(&class);
     let Ok(hwnd) = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED, class.lpszClassName, w!(""), WS_POPUP, x, y, w, h, None, None, inst, None) else { return };
-    let menu = Menu { hwnd, acts: list, labels, target: pick_target(&c.wins, 0, c.last), wins: c.wins, launch: c.launch, key: c.key, hover: None, pos: POINT { x, y }, size: (w, h), row, pad, theme: c.theme, scale: c.scale };
+    let menu = Menu { hwnd, acts: list, labels, target: pick_target(&c.wins, 0, c.last), wins: c.wins, launch: c.launch, key: c.key, hover: None, pos: POINT { x, y }, size: (w, h), row, pad, animate: crate::dock::motion_enabled(&c.theme), theme: c.theme, scale: c.scale, born: std::time::Instant::now(), bottom: c.bottom };
     paint(&menu);
+    let animate = menu.animate;
     MENU.with(|m| *m.borrow_mut() = Some(menu));
+    if animate {
+        SetTimer(hwnd, T_OPEN, 16, None);
+    }
     let _ = ShowWindow(hwnd, SW_SHOW);
     let _ = SetForegroundWindow(hwnd);
 }
@@ -218,6 +228,10 @@ pub fn dismiss() {
             let _ = DestroyWindow(m.hwnd);
         }
     }
+}
+
+fn open_progress(m: &Menu) -> f32 {
+    if m.animate { (m.born.elapsed().as_secs_f32() * 1000.0 / OPEN_MS).min(1.0) } else { 1.0 }
 }
 
 // Texto sobre negro y la luminancia pasa a alfa: GDI no escribe alfa propio en un DIB de 32 bits.
@@ -260,8 +274,12 @@ unsafe fn paint(m: &Menu) {
         }
     }
     let (sz, src) = (SIZE { cx: w, cy: h }, POINT::default());
-    let bf = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: 1 };
-    let _ = UpdateLayeredWindow(m.hwnd, None, Some(&m.pos), Some(&sz), mem, Some(&src), COLORREF(0), Some(&bf), ULW_ALPHA);
+    let e = crate::dock::ease(open_progress(m));
+    let bf = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: (e * 255.0).round() as u8, AlphaFormat: 1 };
+    // Entra deslizándose unos px desde el lado del dock.
+    let off = ((1.0 - e) * px(10, s) as f32) as i32;
+    let pos = POINT { x: m.pos.x, y: m.pos.y + if m.bottom { off } else { -off } };
+    let _ = UpdateLayeredWindow(m.hwnd, None, Some(&pos), Some(&sz), mem, Some(&src), COLORREF(0), Some(&bf), ULW_ALPHA);
     SelectObject(mem, old_font);
     let _ = DeleteObject(font);
     SelectObject(mem, old);
@@ -310,6 +328,13 @@ fn y_of(lp: LPARAM) -> i32 {
 unsafe extern "system" fn menu_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let rows = |lp: LPARAM| MENU.with(|m| m.try_borrow().ok().and_then(|m| m.as_ref().and_then(|m| row_at(y_of(lp), m.pad, m.row, m.acts.len()))));
     match msg {
+        WM_TIMER if wp.0 == T_OPEN => {
+            let done = MENU.with(|m| m.try_borrow().ok().and_then(|m| m.as_ref().map(|m| unsafe { paint(m); open_progress(m) >= 1.0 })));
+            if done != Some(false) {
+                let _ = KillTimer(h, T_OPEN);
+            }
+            LRESULT(0)
+        }
         WM_MOUSEMOVE => {
             set_hover(rows(lp));
             LRESULT(0)
