@@ -23,7 +23,6 @@ pub enum Act {
     Unpin,
     Close,
     CloseAll,
-    Tray,
 }
 
 // `picker`: solo la lista de ventanas (clic izquierdo en un grupo con varias). El menú contextual la antepone cuando hay más de una.
@@ -34,11 +33,10 @@ pub struct Caps {
     pub pinnable: bool,
     pub picker: bool,
     pub closable: bool,
-    pub tray: bool,
 }
 
 pub fn acts(wins: &[isize], c: Caps) -> Vec<Act> {
-    let Caps { launchable, pinned, pinnable, picker, closable, tray } = c;
+    let Caps { launchable, pinned, pinnable, picker, closable } = c;
     let windows = wins.len();
     let mut v = Vec::new();
     if picker || windows > 1 {
@@ -62,9 +60,6 @@ pub fn acts(wins: &[isize], c: Caps) -> Vec<Act> {
     if closable && windows > 1 {
         v.push(Act::CloseAll);
     }
-    if tray {
-        v.push(Act::Tray);
-    }
     v
 }
 
@@ -77,7 +72,6 @@ fn label(a: Act, windows: usize) -> &'static str {
         Act::Unpin => K::MenuUnpin,
         Act::Close => K::MenuClose,
         Act::CloseAll => K::MenuCloseAll,
-        Act::Tray => K::MenuTray,
     })
 }
 
@@ -123,7 +117,6 @@ pub struct Ctx {
     pub pinned: bool,
     pub pinnable: bool,
     pub closable: bool,
-    pub tray: bool,
 }
 
 struct Menu {
@@ -175,7 +168,7 @@ unsafe fn font_for(theme: &Theme, scale: f32) -> HFONT {
 
 pub unsafe fn show(c: Ctx) {
     dismiss();
-    let list = acts(&c.wins, Caps { launchable: c.launch.is_some(), pinned: c.pinned, pinnable: c.pinnable, picker: c.picker, closable: c.closable, tray: c.tray });
+    let list = acts(&c.wins, Caps { launchable: c.launch.is_some(), pinned: c.pinned, pinnable: c.pinnable, picker: c.picker, closable: c.closable });
     if list.is_empty() {
         return;
     }
@@ -351,7 +344,6 @@ fn activate(i: usize) {
                 crate::dock::focus_window(h);
             }
         },
-        Some(Act::Tray) => crate::dock::show_tray(),
         Some(Act::Open) => m.launch.iter().for_each(|(o, a)| launch(o, a)),
         Some(Act::Pin | Act::Unpin) => crate::dock::toggle_pin(&m.key),
         Some(Act::Close) => m.target.into_iter().for_each(close),
@@ -424,7 +416,7 @@ mod tests {
     use super::*;
 
     fn caps(l: bool, pinned: bool, pinnable: bool, picker: bool) -> Caps {
-        Caps { launchable: l, pinned, pinnable, picker, closable: true, tray: false }
+        Caps { launchable: l, pinned, pinnable, picker, closable: true }
     }
 
     #[test]
@@ -442,9 +434,9 @@ mod tests {
     }
 
     #[test]
-    fn elevated_windows_cannot_be_closed_and_the_tray_entry_is_last() {
-        let c = Caps { closable: false, tray: true, ..caps(true, false, false, false) };
-        assert_eq!(acts(&[1, 2], c), [Act::Focus(1), Act::Focus(2), Act::Open, Act::Tray]);
+    fn elevated_windows_cannot_be_closed_and_app_actions_stay_in_the_app_menu() {
+        let c = Caps { closable: false, ..caps(true, false, false, false) };
+        assert_eq!(acts(&[1, 2], c), [Act::Focus(1), Act::Focus(2), Act::Open]);
     }
 
     #[test]

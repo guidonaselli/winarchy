@@ -21,6 +21,12 @@ AwakeFlag := StateDir "\stay-awake.flag"
 GamesTomls := [RepoRoot "\games.toml", RepoRoot "\games.user.toml"]
 WinarchyPs1 := RepoRoot "\bin\winarchy.ps1"
 DirCreate(StateDir)
+WinarchyLocale := EnvGet('WINARCHY_LANG')
+if (WinarchyLocale = '') {
+    locale := Buffer(170, 0)
+    WinarchyLocale := DllCall('GetUserDefaultLocaleName', 'Ptr', locale, 'Int', 85, 'Int') ? StrGet(locale, 'UTF-16') : 'en'
+}
+WinarchyLocale := StrLower(WinarchyLocale)
 try FileDelete(AwakeFlag)   ; the execution state dies with this process, so a surviving flag would lie
 
 ; Asistente de voz: opt-in (`winarchy assistant on`); este script, que arranca con la sesión, lo levanta.
@@ -585,12 +591,109 @@ HealMonitors() {
 }
 
 ; --- Menu items (palette menu and tray share them) ---------------------------------
-OnOff(flag) => Chr(0xB7) ' ' (FileExist(flag) ? 'on' : 'off')
+WinarchyText(text) {
+    global WinarchyLocale
+    static es := Map(
+        'System tray', 'Bandeja del sistema', 'Apps', 'Aplicaciones', 'Themes', 'Temas',
+        'Capture', 'Capturas', 'Tiling', 'Mosaico', 'Bar', 'Barra', 'Coding agent', 'Agente de código',
+        'Keybindings', 'Atajos de teclado', 'Reload stack', 'Recargar entorno', 'Game mode', 'Modo de juego',
+        'Stay awake', 'Mantener activo', 'On', 'Activado', 'Off', 'Desactivado', 'Doctor', 'Diagnóstico',
+        'Check for updates', 'Buscar actualizaciones', 'System', 'Sistema', 'Quit Winarchy', 'Cerrar Winarchy',
+        'Next theme', 'Siguiente tema', 'Theme gallery', 'Galería de temas', 'Next background', 'Siguiente fondo',
+        'Layout', 'Distribución', 'Manage this window', 'Administrar esta ventana',
+        'Unmanage this window', 'Dejar de administrar esta ventana', 'Stop tiling this workspace', 'Desactivar mosaico en este escritorio',
+        'New windows: stack / tile', 'Nuevas ventanas: apilar / mosaico', 'Title bars', 'Barras de título',
+        'Mouse follows focus', 'El mouse sigue el foco', 'Restore hidden windows', 'Restaurar ventanas ocultas',
+        'BSP', 'BSP', 'split in halves', 'dividir en mitades', 'Grid', 'Cuadrícula', 'even 2×2 grid', 'cuadrícula 2 × 2',
+        'Columns', 'Columnas', 'side by side', 'lado a lado', 'Rows', 'Filas', 'stacked rows', 'filas apiladas',
+        'Vertical stack', 'Pila vertical', 'main left', 'principal a la izquierda',
+        'Right main stack', 'Pila con principal derecha', 'main right', 'principal a la derecha',
+        'Horizontal stack', 'Pila horizontal', 'main on top', 'principal arriba',
+        'Ultrawide stack', 'Pila ultrapanorámica', 'main in centre', 'principal al centro',
+        'Scrolling', 'Desplazamiento', 'scrolling strip', 'tira desplazable', 'Next layout', 'Siguiente distribución',
+        'Move to top', 'Mover arriba', 'Move to bottom', 'Mover abajo', 'Toggle transparency', 'Alternar transparencia',
+        'Lock', 'Bloquear', 'Screensaver', 'Protector de pantalla', 'Sleep', 'Suspender', 'Hibernate', 'Hibernar',
+        'Sign out', 'Cerrar sesión', 'Restart', 'Reiniciar', 'Shut down', 'Apagar', 'Settings', 'Configuración',
+        'Region', 'Región', 'Window', 'Ventana', 'Full screen', 'Pantalla completa',
+        'Repeat last region', 'Repetir última región', 'Scrolling capture', 'Captura con desplazamiento',
+        'Record screen', 'Grabar pantalla', 'Record as GIF', 'Grabar como GIF', 'Stop recording', 'Detener grabación',
+        'Text from screen (OCR)', 'Texto de pantalla (OCR)', 'Scan QR code', 'Escanear código QR',
+        'Color picker', 'Selector de color', 'Pin to screen', 'Fijar en pantalla', 'Ruler', 'Regla', 'No matches', 'Sin coincidencias',
+        'Search', 'Buscar', 'Filter by key or action', 'Filtrar por tecla o acción',
+        'move', 'mover', 'select', 'seleccionar', 'back', 'volver', 'scroll', 'desplazarse', 'close', 'cerrar',
+        'binding', 'atajo', 'bindings', 'atajos', 'result', 'resultado', 'results', 'resultados',
+        'Menus', 'Menús', 'Webapps', 'Aplicaciones web', 'Clipboard', 'Portapapeles', 'Windows', 'Ventanas',
+        'Mouse', 'Mouse', 'Focus', 'Foco', 'Move window', 'Mover ventana', 'Stacks', 'Pilas', 'Resize', 'Redimensionar',
+        'Workspaces', 'Espacios de trabajo', 'Monitors', 'Monitores', 'System settings', 'Configuración del sistema',
+        'terminal', 'Terminal', 'launcher (Flow)', 'Lanzador (Flow)', 'search files (Everything)', 'Buscar archivos (Everything)',
+        'browser', 'Navegador', 'file explorer', 'Explorador de archivos', 'music (Spotify / YT Music)', 'Música (Spotify / YT Music)',
+        'Obsidian', 'Obsidian', 'calculator', 'Calculadora', 'coding agent', 'Agente de código', 'Winarchy menu', 'Menú de Winarchy',
+        'system / power menu', 'Menú del sistema y energía', 'this keybindings list', 'Esta lista de atajos de teclado',
+        'native shell: show CPU / RAM in the island', 'Mostrar CPU / RAM en la isla nativa',
+        'hold to talk to the voice assistant (needs `winarchy assistant on`)', 'Mantener para hablar con el asistente (requiere `winarchy assistant on`)',
+        'ChatGPT', 'ChatGPT', 'Claude', 'Claude', 'YouTube', 'YouTube', 'X', 'X', 'Google Calendar', 'Google Calendar', 'WhatsApp', 'WhatsApp',
+        'select all', 'Seleccionar todo', 'copy', 'Copiar', 'cut', 'Cortar', 'clipboard history', 'Historial del portapapeles',
+        'close window', 'Cerrar ventana', 'monocle (fill the workspace)', 'Monocle (ocupar el espacio de trabajo)',
+        'maximize', 'Maximizar', 'minimize', 'Minimizar', 'float / tile', 'Flotar / mosaico', 'pause tiling', 'Pausar mosaico',
+        'retile', 'Reaplicar mosaico', 'reload the whole stack', 'Recargar todo el entorno', 'promote to the largest tile', 'Promover al mosaico más grande',
+        'next layout', 'Distribución siguiente', 'previous layout', 'Distribución anterior',
+        'next occupied workspace', 'Espacio de trabajo ocupado siguiente', 'previous occupied workspace', 'Espacio de trabajo ocupado anterior',
+        'back to the workspace you came from', 'Volver al espacio de trabajo anterior',
+        'scroll down = previous occupied workspace', 'Desplazarse hacia abajo: espacio ocupado anterior',
+        'scroll up = next occupied workspace', 'Desplazarse hacia arriba: espacio ocupado siguiente',
+        'focus the largest tile', 'Enfocar el mosaico más grande', 'mirror layout left / right', 'Invertir distribución izquierda / derecha',
+        'mirror layout up / down', 'Invertir distribución arriba / abajo', 'stop tiling this workspace', 'Dejar de organizar este espacio de trabajo',
+        'save tile sizes', 'Guardar tamaños de mosaico', 'restore tile sizes', 'Restaurar tamaños de mosaico',
+        'dim unfocused windows', 'Atenuar ventanas sin foco', 'stay awake', 'Mantener activo',
+        'emoji picker (Win+. is the monitor hotkey here)', 'Selector de emojis (Win+. es la tecla del monitor aquí)',
+        'switch tiling / floating layer', 'Cambiar entre mosaico y ventanas flotantes', 'lock the tile in place', 'Bloquear el mosaico en su lugar',
+        'lock the session', 'Bloquear la sesión', 'drag to move the window under the cursor', 'Arrastrar para mover la ventana bajo el cursor',
+        'drag to resize it (grab the nearest edge or corner)', 'Arrastrar para cambiar el tamaño desde el borde o esquina más cercana',
+        'move focus', 'Mover el foco', 'move left', 'Mover a la izquierda', 'move right', 'Mover a la derecha',
+        'move up', 'Mover arriba', 'move down', 'Mover abajo', 'stack with the neighbour', 'Apilar con la ventana vecina',
+        'take the window out of the stack', 'Sacar la ventana de la pila', 'stack the whole workspace', 'Apilar todo el espacio de trabajo',
+        'unstack the whole container', 'Separar toda la pila', 'previous tab', 'Pestaña anterior', 'next tab', 'Pestaña siguiente',
+        'go to tab N of the stack', 'Ir a la pestaña N de la pila', 'wider', 'Más ancho', 'narrower', 'Más estrecho',
+        'taller', 'Más alto', 'shorter', 'Más bajo', 'wider, a little', 'Un poco más ancho', 'narrower, a little', 'Un poco más estrecho',
+        'taller, a little', 'Un poco más alto', 'shorter, a little', 'Un poco más bajo', 'wider, a lot', 'Mucho más ancho',
+        'narrower, a lot', 'Mucho más estrecho', 'taller, a lot', 'Mucho más alto', 'shorter, a lot', 'Mucho más bajo',
+        'go to workspace N of the monitor under the cursor', 'Ir al espacio N del monitor bajo el cursor',
+        'move window to workspace', 'Mover la ventana al espacio de trabajo', 'send window to workspace, stay here', 'Enviar la ventana al espacio de trabajo y quedarse aquí',
+        'focus previous monitor', 'Enfocar el monitor anterior', 'focus next monitor', 'Enfocar el monitor siguiente',
+        'move window to previous monitor', 'Mover la ventana al monitor anterior', 'move window to next monitor', 'Mover la ventana al monitor siguiente',
+        'send window to previous monitor, stay here', 'Enviar la ventana al monitor anterior y quedarse aquí',
+        'send window to next monitor, stay here', 'Enviar la ventana al monitor siguiente y quedarse aquí',
+        'move workspace to previous monitor', 'Mover el espacio de trabajo al monitor anterior',
+        'move workspace to next monitor', 'Mover el espacio de trabajo al monitor siguiente',
+        'move window to the monitor on that side', 'Mover la ventana al monitor de ese lado',
+        'move workspace to the monitor on that side', 'Mover el espacio de trabajo al monitor de ese lado',
+        'region', 'Región', 'active window', 'Ventana activa', 'full screen', 'Pantalla completa',
+        'record screen', 'Grabar la pantalla', 'record as GIF', 'Grabar como GIF', 'stop recording', 'Detener la grabación',
+        'text from screen (OCR)', 'Texto de pantalla (OCR)', 'colour picker', 'Selector de color', 'QR code scan', 'Escanear código QR',
+        'theme gallery', 'Galería de temas', 'next background', 'Siguiente fondo', 'sound', 'Sonido', 'bluetooth', 'Bluetooth',
+        'network', 'Red', 'display', 'Pantalla', 'power & sleep', 'Energía y suspensión'
+    )
+    return (SubStr(WinarchyLocale, 1, 2) = 'es' && es.Has(text)) ? es[text] : text
+}
+
+WinarchyLocalize(items) {
+    for it in items {
+        it.text := WinarchyText(it.text)
+        if it.HasOwnProp('hint')
+            it.hint := WinarchyText(it.hint)
+        if it.HasOwnProp('sub')
+            WinarchyLocalize(it.sub)
+    }
+    return items
+}
+
+OnOff(flag) => WinarchyText(FileExist(flag) ? 'On' : 'Off')
 
 WinarchyMenuItems() {
     global GameFlag, AwakeFlag
     return [
         {text:'Apps',          hint:'SUPER+Space',        action:(*)=>ToggleFlowScoped('app ')},
+        {text:'System tray',                              action:(*)=>ShellIsland('dock.tray')},
         {text:'Themes',                                   sub: WinarchyThemeItems()},
         {text:'Capture',                                  sub: WinarchyCaptureItems()},
         {text:'Tiling',                                   sub: WinarchyTilingItems()},
@@ -598,8 +701,8 @@ WinarchyMenuItems() {
         {text:'Coding agent',  hint:'SUPER+Ctrl+Shift+A', action:(*)=>Winarchy('agent launch')},
         {text:'Keybindings',   hint:'SUPER+K',            action:(*)=>ToggleKeyOverlay()},
         {text:'Reload stack',  hint:'SUPER+Shift+R',      action:(*)=>Winarchy('reload')},
-        {text:'Game mode ' OnOff(GameFlag),               action:(*)=>ToggleGameMode()},
-        {text:'Stay awake ' OnOff(AwakeFlag), hint:'SUPER+Ctrl+I', action:(*)=>ToggleStayAwake()},
+        {text:WinarchyText('Game mode') ' · ' OnOff(GameFlag), action:(*)=>ToggleGameMode()},
+        {text:WinarchyText('Stay awake') ' · ' OnOff(AwakeFlag), hint:'SUPER+Ctrl+I', action:(*)=>ToggleStayAwake()},
         {text:'Doctor',                                   action:(*)=>WinarchyTerminal('doctor')},
         {text:'Check for updates',                        action:(*)=>WinarchyTerminal('update')},
         {text:'System',        hint:'SUPER+Esc',          sub: WinarchySysItems()},
@@ -607,7 +710,7 @@ WinarchyMenuItems() {
 }
 
 WinarchyMenuItemsWithUser() {
-    items := WinarchyMenuItems()
+    items := WinarchyLocalize(WinarchyMenuItems())
     if IsSet(WinarchyUserMenu) && WinarchyUserMenu is Array {
         for entry in WinarchyUserMenu
             items.InsertAt(items.Length, entry)     ; before Quit, which closes the list
@@ -635,7 +738,7 @@ WinarchyTilingItems() {
 }
 
 WinarchyLayoutItems() {
-    L := (name, glyph, what, cmd) => {text: name, hint: glyph '  ' what, layout: cmd, action: (*) => Komorebic('change-layout ' cmd)}
+    L := (name, glyph, what, cmd) => {text: name, hint: glyph '  ' WinarchyText(what), layout: cmd, action: (*) => Komorebic('change-layout ' cmd)}
     return [
         L('BSP', Chr(0x25E9), 'split in halves', 'bsp'),
         L('Grid', Chr(0x25A6), 'even 2' Chr(0xD7) '2 grid', 'grid'),
@@ -692,7 +795,7 @@ ShowMainMenu(*) {
 
 ShowSystemMenu(*) {
     if !PalClosed('system')
-        PalOpen('system', WinarchySysItems(), 'System')
+        PalOpen('system', WinarchyLocalize(WinarchySysItems()), WinarchyText('System'))
 }
 
 ShellIsland(cmd) {
@@ -741,7 +844,7 @@ ToggleKeyOverlay(*) {
     if FileExist(A_ScriptDir '\user.ahk')
         for s in ParseKeymap(A_ScriptDir '\user.ahk', 'User')
             sections.Push(s)
-    PalOpen('keys', sections, 'Keybindings')
+    PalOpen('keys', sections, WinarchyText('Keybindings'))
 }
 
 ; Sections come from the "; --- Title ---" headers; descriptions from the inline comment.
@@ -758,7 +861,8 @@ ParseKeymap(path, defaultTitle := '', startAt := '') {
             continue
         }
         if RegExMatch(line, '^; --- (.+?) -{2,}', &m) {
-            cur := {title: RegExReplace(Trim(m[1]), '\s*\(.*\)$'), items: []}
+            title := RegExReplace(Trim(m[1]), '\s*\(.*\)$')
+            cur := {title: startAt != '' ? WinarchyText(title) : title, items: []}
             sections.Push(cur)
             continue
         }
@@ -779,6 +883,8 @@ ParseKeymap(path, defaultTitle := '', startAt := '') {
         else
             key := StrUpper(SubStr(key, 1, 1)) SubStr(key, 2)
         desc := RegExMatch(rest, ';\s*(.+)$', &md) ? Trim(md[1]) : Trim(rest)
+        if (startAt != '')
+            desc := WinarchyText(desc)
         cur.items.Push({
             keys: 'SUPER' (InStr(mods, '!') ? '+Alt' : '') (InStr(mods, '^') ? '+Ctrl' : '') (InStr(mods, '+') ? '+Shift' : '') '+' key,
             desc: StrUpper(SubStr(desc, 1, 1)) SubStr(desc, 2)})
@@ -830,7 +936,7 @@ PalOpen(mode, items, title) {
     PalSetFont(g, 's12 norm', c.font)
     g.Add('Text', Format('x{} y{} w24 h30 c{} 0x200', pad, pad + 30, c.mut), Chr(0xF002))
     ed := g.Add('Edit', Format('x{} y{} w{} h30 -E0x200 -Multi Background{} c{}', pad + 28, pad + 34, w - pad * 2 - 28, c.bg, c.fg))
-    SendMessage(0x1501, 1, StrPtr(keys ? 'Filter by key or action' : 'Search'), ed)   ; EM_SETCUEBANNER
+    SendMessage(0x1501, 1, StrPtr(WinarchyText(keys ? 'Filter by key or action' : 'Search')), ed)   ; EM_SETCUEBANNER
     g.Add('Text', Format('x{} y{} w{} h1 Background{}', pad, pad + 68, w - pad * 2, c.mut))
 
     y0 := pad + 80
@@ -845,9 +951,9 @@ PalOpen(mode, items, title) {
     fy := y0 + n * rowH + 10
     PalSetFont(g, 's9 norm', c.font)
     arrows := Chr(0x2191) Chr(0x2193)
-    help := keys ? arrows ' scroll    esc close' : arrows ' move    ' Chr(0x21B5) ' select    esc back'
-    g.Add('Text', Format('x{} y{} w{} h20 c{}', pad, fy, labelW, c.mut), help)
-    count := g.Add('Text', Format('x{} y{} w{} h20 c{} Right', pad + labelW, fy, hintW, c.mut), '')
+    help := keys ? arrows ' ' WinarchyText('scroll') '    esc ' WinarchyText('close') : arrows ' ' WinarchyText('move') '    ' Chr(0x21B5) ' ' WinarchyText('select') '    esc ' WinarchyText('back')
+    g.Add('Text', Format('x{} y{} w{} h20 c{}', pad, fy, labelW, c.fg), help)
+    count := g.Add('Text', Format('x{} y{} w{} h20 c{} Right', pad + labelW, fy, hintW, c.fg), '')
     h := fy + 20 + pad - 4
 
     boxes := []
@@ -956,7 +1062,7 @@ PalRefresh(sel := 0) {
     found := 0
     for e in list
         found += !e.HasOwnProp('header')
-    Pal.count.Text := (Pal.mode = 'keys') ? found ' bindings' : (q = '' ? '' : found ' results')
+    Pal.count.Text := (Pal.mode = 'keys') ? found ' ' WinarchyText(found = 1 ? 'binding' : 'bindings') : (q = '' ? '' : found ' ' WinarchyText(found = 1 ? 'result' : 'results'))
     PalDraw()
 }
 
@@ -973,7 +1079,7 @@ PalDraw() {
     Pal.top := Max(1, Min(Pal.top, len - n + 1))
     for k, r in Pal.rows {
         i := Pal.top + k - 1
-        e := (i <= len) ? Pal.list[i] : {text: (k = 1 && !len) ? 'No matches' : '', hint: '', empty: true}
+        e := (i <= len) ? Pal.list[i] : {text: (k = 1 && !len) ? WinarchyText('No matches') : '', hint: '', empty: true}
         head := e.HasOwnProp('header'), on := (i = Pal.sel)
         if (on != r.on) {
             r.on := on
@@ -981,7 +1087,7 @@ PalDraw() {
             r.hint.Opt('Background' (on ? c.ac : c.bg))
         }
         r.label.SetFont((head ? 'bold' : 'norm') ' c' (on ? c.bg : head ? c.ac : e.HasOwnProp('empty') ? c.mut : c.fg))
-        r.hint.SetFont('c' (on ? c.bg : Pal.mode = 'keys' ? c.fg : c.mut))
+        r.hint.SetFont('c' (on ? c.bg : c.fg))
         r.label.Text := ' ' e.text
         r.hint.Text := e.hint ' '
     }

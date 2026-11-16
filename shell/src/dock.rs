@@ -65,39 +65,48 @@ pub fn ease(t: f32) -> f32 {
 #[derive(Debug, PartialEq)]
 pub struct Layout {
     pub bar: R,
+    pub brand: R,
     pub cells: Vec<R>,
     pub overflow: usize,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Hit {
+    Brand,
     Item(usize),
     Overflow,
 }
+
+const HUB_INDEX: usize = usize::MAX;
 
 // El dock vive en el borde opuesto al de la isla: `bottom` es el borde del dock. `bar` va en coordenadas de pantalla, `cells` relativas a `bar`.
 pub fn layout(n: usize, scale: f32, mon: MonRect, bottom: bool, gap_dip: i32) -> Layout {
     let (cell, gap, pad) = (px(CELL_DIP, scale), px(gap_dip, scale), px(PAD_DIP, scale));
     let max_w = (mon.2 - mon.0) * 4 / 5;
     let cap = (((max_w - 2 * pad + gap) / (cell + gap)).max(1)) as usize;
-    let (shown, overflow) = if n <= cap { (n, 0) } else { (cap - 1, n - (cap - 1)) };
-    let slots = shown + usize::from(overflow > 0);
-    let w = 2 * pad + slots as i32 * cell + (slots as i32 - 1).max(0) * gap;
+    let app_cap = cap.saturating_sub(1);
+    let (shown, overflow) = if n <= app_cap { (n, 0) } else { (app_cap.saturating_sub(1), n - app_cap.saturating_sub(1)) };
+    let slots = shown + usize::from(overflow > 0) + 1;
+    let w = 2 * pad + slots as i32 * cell + (slots as i32 - 1) * gap;
     let h = px(BAR_DIP, scale);
     let x = mon.0 + (mon.2 - mon.0 - w) / 2;
     let y = if bottom { mon.3 - px(MARGIN_DIP, scale) - h } else { mon.1 + px(MARGIN_DIP, scale) };
-    let cells = (0..slots).map(|i| R { x: pad + i as i32 * (cell + gap), y: (h - cell) / 2, w: cell, h: cell }).collect();
-    Layout { bar: R { x, y, w, h }, cells, overflow }
+    let brand = R { x: pad, y: (h - cell) / 2, w: cell, h: cell };
+    let cells = (0..slots - 1).map(|i| R { x: pad + (i as i32 + 1) * (cell + gap), y: (h - cell) / 2, w: cell, h: cell }).collect();
+    Layout { bar: R { x, y, w, h }, brand, cells, overflow }
 }
 
 pub fn hit_test(l: &Layout, x: i32, y: i32) -> Option<Hit> {
     let (rx, ry) = (x - l.bar.x, y - l.bar.y);
+    if rx >= l.brand.x && rx < l.brand.x + l.brand.w && ry >= l.brand.y && ry < l.brand.y + l.brand.h {
+        return Some(Hit::Brand);
+    }
     let i = l.cells.iter().position(|c| rx >= c.x && rx < c.x + c.w && ry >= c.y && ry < c.y + c.h)?;
     Some(if l.overflow > 0 && i == l.cells.len() - 1 { Hit::Overflow } else { Hit::Item(i) })
 }
 
 fn display_layout(layout: &Layout, xs: &[i32], bar: R) -> Layout {
-    Layout { bar, cells: layout.cells.iter().zip(xs).map(|(c, x)| R { x: *x, ..*c }).collect(), overflow: layout.overflow }
+    Layout { bar, brand: layout.brand, cells: layout.cells.iter().zip(xs).map(|(c, x)| R { x: *x, ..*c }).collect(), overflow: layout.overflow }
 }
 
 // Ventana a enfocar al hacer clic: con el grupo ya activo, la siguiente; si no, la última activa del grupo.
@@ -264,7 +273,7 @@ struct Dock {
 
 impl Dock {
     fn want_visible(&self) -> bool {
-        !(self.hidden || self.items.is_empty() || (self.theme.dock_hide && !self.peek))
+        !(self.hidden || (self.theme.dock_hide && !self.peek))
     }
 }
 
@@ -523,8 +532,19 @@ pub fn restore_native_taskbar_at_start() {
 }
 
 pub fn show_tray() {
-    with(|d| d.tray_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(TRAY_SECS)));
-    unsafe { set_native_taskbar(false) }
+    if dock_count() > 0 {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(TRAY_SECS);
+        for_each_dock(|| with(|d| d.tray_until = Some(until)));
+    }
+    unsafe {
+        set_native_taskbar(false);
+        for_native_taskbars(|h| { let _ = SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW); });
+    }
+}
+
+fn request_control_center() {
+    let path = with(|d| d.pins_path.with_file_name("show-menu.flag"));
+    let _ = std::fs::OpenOptions::new().write(true).create_new(true).open(path);
 }
 
 unsafe fn is_elevated(h: HWND) -> bool {
@@ -1067,7 +1087,7 @@ fn icon_sources(i: &Item, pins: &[Pin]) -> Vec<String> {
 const ATTN: (u8, u8, u8) = (255, 176, 32);
 
 // Texto centrado en una celda: GDI dibuja blanco sobre negro y la luminancia pasa a cobertura (como el tooltip).
-unsafe fn draw_label(buf: &mut [u32], stride: i32, rows: i32, cell: R, text: &str, theme: &Theme, scale: f32, fg: (u8, u8, u8)) {
+unsafe fn draw_label(buf: &mut [u32], stride: i32, rows: i32, cell: R, text: &str, theme: &Theme, scale: f32, fg: (u8, u8, u8), font_size: i32) {
     let (w, h) = (cell.w, cell.h);
     let wide: Vec<u16> = text.encode_utf16().collect();
     let family: Vec<u16> = theme.font_family.encode_utf16().chain(std::iter::once(0)).collect();
@@ -1077,7 +1097,7 @@ unsafe fn draw_label(buf: &mut [u32], stride: i32, rows: i32, cell: R, text: &st
     let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
     if let Ok(dib) = CreateDIBSection(mem, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) {
         let old = SelectObject(mem, dib);
-        let font = CreateFontW(-px(theme.font_size.max(11), scale), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, ANTIALIASED_QUALITY.0 as u32, 0, PCWSTR(family.as_ptr()));
+        let font = CreateFontW(-px(font_size.max(11), scale), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, ANTIALIASED_QUALITY.0 as u32, 0, PCWSTR(family.as_ptr()));
         let old_font = SelectObject(mem, font);
         let src = std::slice::from_raw_parts_mut(bits as *mut u32, (w * h) as usize);
         src.fill(0);
@@ -1109,7 +1129,7 @@ fn render() {
     let flashing = with(|d| d.flashing.clone());
     let (hwnd, theme, items, layout_, hover, scale, want_vis, motion, pressed) = with(|d| {
         d.layout = layout(d.items.len(), d.scale, d.mon, d.theme.position != "bottom", style(&d.theme).gap);
-        (d.hwnd, d.theme.clone(), d.items.clone(), Layout { bar: d.layout.bar, cells: d.layout.cells.clone(), overflow: d.layout.overflow }, d.hover, d.scale, d.want_visible(), d.motion, d.pressed)
+        (d.hwnd, d.theme.clone(), d.items.clone(), Layout { bar: d.layout.bar, brand: d.layout.brand, cells: d.layout.cells.clone(), overflow: d.layout.overflow }, d.hover, d.scale, d.want_visible(), d.motion, d.pressed)
     });
     let (xs, bar_disp, glide_busy) = with(|d| glide_view(d));
     if glide_busy && !with(|d| d.anim_on) {
@@ -1164,6 +1184,9 @@ fn render() {
         buf.fill(0);
         let (bg, fg, accent) = (rgb(&theme.background), rgb(&theme.foreground), rgb(&theme.accent));
         fill_round_a(buf, w, h, R { x: 0, y: 0, w, h }, px(st.radius, scale), bg, st.opacity);
+        let brand_alpha = if pressed == Some(HUB_INDEX) { 0.72 } else if hover == Some(HUB_INDEX) { 0.52 } else { 0.40 };
+        fill_round_a(buf, w, h, layout_.brand, px(10, scale), accent, brand_alpha);
+        draw_label(buf, w, h, layout_.brand, "W", &theme, scale, fg, theme.font_size.max(18));
         DOCKS.with(|v| {
             let v = v.borrow();
             let d = &v[CUR.get().min(v.len() - 1)];
@@ -1172,7 +1195,7 @@ fn render() {
                 let cell = &R { x: xs[idx], ..*cell };
                 if layout_.overflow > 0 && idx == layout_.cells.len() - 1 {
                     fill_round_a(buf, w, h, *cell, px(10, scale), fg, 0.12);
-                    draw_label(buf, w, h, *cell, &format!("+{}", layout_.overflow), &theme, scale, fg);
+                    draw_label(buf, w, h, *cell, &format!("+{}", layout_.overflow), &theme, scale, fg, theme.font_size);
                     continue;
                 }
                 let Some(item) = items.get(idx) else { continue };
@@ -1471,7 +1494,6 @@ unsafe fn overflow_ctx(first_hidden: usize) -> Option<crate::dock_menu::Ctx> {
             pinnable: false,
             launch: None,
             closable: false,
-            tray: false,
         })
     })?;
     ctx.active = Some(GetForegroundWindow().0 as isize);
@@ -1511,7 +1533,6 @@ unsafe fn menu_ctx(idx: usize, picker: bool) -> Option<crate::dock_menu::Ctx> {
             pinnable: pin_for(it, |p| p.exists()).is_some(),
             launch: launch_of(&d.pins, it),
             closable: true,
-            tray: d.theme.hide_native_taskbar,
         })
     })?;
     ctx.closable = ctx.wins.iter().any(|w| !is_elevated(HWND(*w as *mut _)));
@@ -1572,8 +1593,9 @@ unsafe fn show_tip(idx: usize) {
     if crate::dock_menu::is_open() {
         return;
     }
-    let Some(text) = tip_text(idx) else { return hide_tip() };
-    let (tip, theme, scale, bar, cell, bottom) = with(|d| (d.tip, d.theme.clone(), d.scale, d.layout.bar, d.layout.cells.get(idx).copied(), d.theme.position != "bottom"));
+    let text = if idx == HUB_INDEX { Some(crate::i18n::t(crate::i18n::K::MenuWinarchy).to_string()) } else { tip_text(idx) };
+    let Some(text) = text else { return hide_tip() };
+    let (tip, theme, scale, bar, cell, bottom) = with(|d| (d.tip, d.theme.clone(), d.scale, d.layout.bar, if idx == HUB_INDEX { Some(d.layout.brand) } else { d.layout.cells.get(idx).copied() }, d.theme.position != "bottom"));
     let Some(cell) = cell else { return hide_tip() };
     let wide: Vec<u16> = text.encode_utf16().collect();
     let family: Vec<u16> = theme.font_family.encode_utf16().chain(std::iter::once(0)).collect();
@@ -1749,6 +1771,7 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
             let (changed, need_track) = with(|d| {
                 let idx = match display_hit(d, x, y) {
+                    Some(Hit::Brand) => Some(HUB_INDEX),
                     Some(Hit::Item(i)) => Some(i),
                     Some(Hit::Overflow) => d.layout.cells.len().checked_sub(1),
                     None => None,
@@ -1789,11 +1812,13 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         }
         WM_RBUTTONUP => {
             let (x, y) = xy(lp);
-            if let Some(Hit::Item(i)) = with(|d| display_hit(d, x, y)) {
-                if let Some(ctx) = menu_ctx(i, false) {
+            match with(|d| display_hit(d, x, y)) {
+                Some(Hit::Brand) => { hide_tip(); request_control_center(); }
+                Some(Hit::Item(i)) => if let Some(ctx) = menu_ctx(i, false) {
                     hide_tip();
                     crate::dock_menu::show(ctx);
-                }
+                },
+                _ => {}
             }
             LRESULT(0)
         }
@@ -1808,16 +1833,16 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         }
         WM_LBUTTONDOWN => {
             let (x, y) = xy(lp);
-            let on_item = with(|d| match display_hit(d, x, y) {
-                Some(Hit::Item(i)) => Some(i),
-                _ => None,
-            });
-            if let Some(i) = on_item {
+            let hit = with(|d| display_hit(d, x, y));
+            if let Some(Hit::Item(i)) = hit {
                 with(|d| d.drag = d.items.get(i).map(|it| Drag { key: it.key.clone(), x0: x, moving: false }));
                 SetCapture(h);
+            } else if hit == Some(Hit::Brand) {
+                SetCapture(h);
             }
-            if on_item.is_some() && with(|d| d.motion) {
-                with(|d| d.pressed = on_item);
+            let pressed = match hit { Some(Hit::Brand) => Some(HUB_INDEX), Some(Hit::Item(i)) if with(|d| d.motion) => Some(i), _ => None };
+            if pressed.is_some() && with(|d| d.motion) {
+                with(|d| d.pressed = pressed);
                 render();
             }
             LRESULT(0)
@@ -1834,6 +1859,7 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 return LRESULT(0);
             }
             match with(|d| display_hit(d, x, y).map(|h| (h, d.layout.cells.len()))) {
+                Some((Hit::Brand, _)) => request_control_center(),
                 Some((Hit::Item(i), _)) => click(i),
                 Some((Hit::Overflow, cells)) => {
                     if let Some(ctx) = overflow_ctx(cells - 1) {
@@ -1947,8 +1973,10 @@ mod tests {
     }
 
     #[test]
-    fn zero_items_do_not_panic() {
-        assert!(layout(0, 1.5, MON, true, 4).cells.is_empty());
+    fn brand_button_remains_hit_testable_without_windows() {
+        let l = layout(0, 1.5, MON, true, 4);
+        assert!(l.cells.is_empty());
+        assert_eq!(hit_test(&l, l.bar.x + l.brand.x + 1, l.bar.y + l.brand.y + 1), Some(Hit::Brand));
     }
 
     #[test]

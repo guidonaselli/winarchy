@@ -46,4 +46,4 @@ body:
     id: extra
     attributes:
       label: Anything else
-      description: Monitor setup and scaling, other shell tools running (Seelen, Windhawk, PowerToys), changes in user.ahk or rules.toml.
+      description: Monitor setup and scaling, other shell tools running (Seelen, PowerToys), changes in user.ahk or rules.toml.

@@ -35,6 +35,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 const WM_CMD_RELOAD: u32 = WM_APP + 2;
 const WM_CMD_QUIT: u32 = WM_APP + 3;
 const WM_WORKSPACES: u32 = WM_APP + 4;
+const WM_CMD_TRAY: u32 = WM_APP + 8;
 const WM_EXPAND: u32 = WM_APP + 5;
 const WM_COLLAPSE: u32 = WM_APP + 6;
 const WM_BRIGHTNESS: u32 = WM_APP + 7;
@@ -840,6 +841,10 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             tick(h);
             LRESULT(0)
         }
+        WM_CMD_TRAY => {
+            dock::show_tray();
+            LRESULT(0)
+        }
         WM_EXPAND => {
             with(|s| s.expand_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(EXPAND_SECS)));
             tick(h);
@@ -1110,6 +1115,7 @@ fn main() {
                 pipe::Command::Quit => WM_CMD_QUIT,
                 pipe::Command::Redraw => WM_WORKSPACES,
                 pipe::Command::Expand => WM_EXPAND,
+                pipe::Command::Tray => WM_CMD_TRAY,
             };
             let _ = PostMessageW(HWND(target as *mut _), m, WPARAM(0), LPARAM(0));
         });

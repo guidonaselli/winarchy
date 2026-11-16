@@ -7,13 +7,10 @@
     install     winget -> git + pwsh, clone, install.ps1 twice, Assert-Install
     uninstall   install -Activate, uninstall.ps1 twice (no pins, env vars, PATH entry, logon task,
                 running stack, profile hook or Start menu command left), reinstall, Assert-Install
-    paths       boot.ps1 into a folder with a space, an accent and an apostrophe, activated, then the
-                windhawk checks from that folder, Assert-Install -Mode active
+    paths       boot.ps1 into a folder with a space, an accent and an apostrophe, activated,
+                Assert-Install -Mode active
     ahkv1       AutoHotkey 1.1 already installed, then install.ps1: it must end on the pinned v2
                 (the AutoHotkey 1.1 installer can hang in the sandbox; it is stopped after 10 min)
-    windhawk    install, `extras add windhawk` elevated (every curated mod enabled at its pinned
-                version and loaded in explorer, tray + update check off), `extras remove windhawk`
-                (mods and Windhawk gone), Assert-Install
     published   the real one-liner against GitHub (irm .../release/boot.ps1 | iex), Assert-Install
     selfupdate  install.ps1 twice, then roll the checkout back to v1.6.0 (AHK/Flow unpinned, as
                 1.6.0 left them) and run that version's `winarchy update --self`, Assert-Install
@@ -28,7 +25,7 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'windhawk', 'barswitch')][string]$Scenario,
+    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'barswitch')][string]$Scenario,
     [switch]$Keep,
     [string]$Out = (Join-Path $env:TEMP 'winarchy-sandbox')
 )

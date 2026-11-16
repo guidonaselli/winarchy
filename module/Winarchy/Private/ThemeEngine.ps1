@@ -673,12 +673,18 @@ function Set-WinarchyWindowsAppearance {
     Set-ItemProperty -Path $personalize -Name 'ColorPrevalence' -Value 1 -Type DWord
     Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\DWM' -Name 'ColorPrevalence' -Value 1 -Type DWord
     if (-not $SkipAccent) {
+        $null = Backup-WinarchyRegistryKey -Key 'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Accent' -Label 'theme-accent'
+        $null = Backup-WinarchyRegistryKey -Key 'HKCU\SOFTWARE\Microsoft\Windows\DWM' -Label 'theme-accent'
         try {
             $r = [Convert]::ToInt32($AccentHex.Substring(1, 2), 16)
             $g = [Convert]::ToInt32($AccentHex.Substring(3, 2), 16)
             $b = [Convert]::ToInt32($AccentHex.Substring(5, 2), 16)
             $abgr = (0xFF -shl 24) -bor ($b -shl 16) -bor ($g -shl 8) -bor $r
             # int32 negativo a propósito: DWord toma el patrón de bits; [uint32] valida rango y revienta
+            $explorerAccent = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Accent'
+            if (-not (Test-Path $explorerAccent)) { New-Item -Path $explorerAccent -Force | Out-Null }
+            Set-ItemProperty -Path $explorerAccent -Name 'AccentColorMenu' -Value $abgr -Type DWord
+            Set-ItemProperty -Path $explorerAccent -Name 'StartColorMenu' -Value $abgr -Type DWord
             Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\DWM' -Name 'AccentColor' -Value $abgr -Type DWord
             Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\DWM' -Name 'ColorizationColor' -Value $abgr -Type DWord
         }

@@ -53,6 +53,7 @@ pub enum Command {
     Quit,
     Redraw,
     Expand,
+    Tray,
 }
 
 // Un cliente por vez; el hilo de UI recibe Reload/Quit por `dispatch`, nunca bloquea acá.
@@ -151,6 +152,10 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
             dispatch(Command::Expand);
             ok(json!({}))
         }
+        "dock.tray" => {
+            dispatch(Command::Tray);
+            ok(json!({}))
+        }
         "island.dismiss" => {
             *ISLAND.lock().unwrap() = None;
             dispatch(Command::Redraw);
@@ -198,5 +203,8 @@ mod tests {
         handle(br#"{"v":1,"id":1,"cmd":"assistant.state","params":{"state":"idle"}}"#, &|_| {});
         assert_eq!(crate::spirit::current().0, crate::spirit::Assist::Idle);
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"confirm.request"}"#, &|_| {})["result"], "denied");
+        let called = std::cell::Cell::new(false);
+        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"dock.tray"}"#, &|c| { assert!(matches!(c, Command::Tray)); called.set(true); })["ok"], true);
+        assert!(called.get());
     }
 }

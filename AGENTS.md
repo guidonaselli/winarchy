@@ -45,12 +45,7 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
   `release` + migración `install.ps1`). Versión = `ModuleVersion` del `.psd1`, en sync con el
   tag/Release (ver `docs/RELEASING.md`).
 - Identidad unificada: un solo tray icon (host `winarchy.ahk`, `assets/logo/winarchy.ico`);
-  los tray propios de YASB/Flow/ShareX/Everything (y Windhawk si se agrega) quedan ocultos.
-  No reintroducir un segundo tray.
-- Windhawk es un extra opcional FUERA del core (`winarchy extras`): solo se instala a pedido
-  explícito; ni `install.ps1` ni `update` lo tocan. Su set curado vive en
-  `extras/windhawk/mods.json` (se regenera con `scripts/Export-WindhawkMods.ps1`; los SHA256 de las DLL se fijan con
-  `scripts/Update-WindhawkHashes.ps1` y el instalador los verifica antes de tocar el registro).
+  los tray propios de YASB/Flow/ShareX/Everything quedan ocultos. No reintroducir un segundo tray.
 - Barra: la shell nativa (`shell/`, Rust + Win32, `winarchy-shell.exe`, "Winarchy Island") es el default; YASB es
   opcional (`install.ps1 -WithYasb` o `winarchy bar use yasb`, que lo instala pinneado si falta) y una máquina que ya
   tenía YASB lo conserva (`state/bar` ausente + `yasbc` presente = yasb). La shell nunca registra hotkeys ni hooks de teclado
@@ -58,7 +53,7 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
   degrada a komorebi) y toma sus colores de `config/shell/theme.json`, generado desde
   `templates/shell-theme.json.tpl`. El binario sale como asset del Release con SHA256 en `[shell]`
   de `versions.lock.toml` y el instalador lo verifica.
-- Dock (`winarchy bar dock on|float|hide|off`, `state/bar-dock`; `float` y `hide` no reservan área en komorebi, `hide` además se esconde y aparece al llevar el mouse al borde): hay uno por monitor (la reserva de `on` es el offset global, igual en todos), vive en la shell nativa, nunca registra hotkeys ni usa `SHAppBarMessage`; la reserva de komorebi sale de los tokens `computed.work_top/bottom` (espeja `BAR_DIP`+`MARGIN_DIP` de `shell/src/dock.rs`). La taskbar nativa sigue en auto-hide y aloja la bandeja; `winarchy taskbar hide` (opt-in, con dock) la oculta con `ShowWindow` y la shell la devuelve al cerrar, al apagar el dock y ante un panic, nunca la deja oculta sin dock.
+- Dock (`winarchy bar dock on|float|hide|off`, `state/bar-dock`; `float` y `hide` no reservan área en komorebi, `hide` se revela al llevar el mouse al borde): hay uno por monitor, incluye un botón Winarchy que abre el menú de control y acceso a la bandeja de Windows; vive en la shell nativa, nunca registra hotkeys ni usa `SHAppBarMessage`. La reserva de komorebi sale de `computed.work_top/bottom` (espeja `BAR_DIP`+`MARGIN_DIP` de `shell/src/dock.rs`). La taskbar nativa aloja la bandeja; `winarchy taskbar hide` (opt-in, con dock) la oculta con `ShowWindow` y la shell la devuelve al cerrar, al apagar el dock y ante un panic.
 - Fuera de alcance: novideo_srgb, Twinkle Tray (dependen del hardware de la máquina).
 - Antes de cambios de sistema (registry, autostart): snapshot en `backups/<timestamp>/`.
 

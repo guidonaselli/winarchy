@@ -1,5 +1,5 @@
 # Runs in the sandbox (Windows PowerShell 5.1). `elevated` runs as SYSTEM, the rest as the non-elevated user.
-param([Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'windhawk', 'elevated', 'barswitch')][string]$Scenario)
+param([Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'elevated', 'barswitch')][string]$Scenario)
 $ProgressPreference = 'SilentlyContinue'
 $out = 'C:\sandbox'
 $bare = Join-Path $out 'winarchy.git'
@@ -41,32 +41,6 @@ function Invoke-WinarchyElevated([string]$Root, [string]$Log, [string[]]$Argumen
     if ($process.ExitCode -ne 0) { $script:failed = $true; "winarchy $Arguments exited $($process.ExitCode)" }
 }
 
-function Test-WindhawkExtra([string]$Root) {
-    $mods = (Get-Content (Join-Path $Root 'extras\windhawk\mods.json') -Raw | ConvertFrom-Json).mods
-    $modsDir = "$env:ProgramData\Windhawk\Engine\Mods\64"
-    Invoke-WinarchyElevated $Root windhawk-add 'extras', 'add', 'windhawk', '--yes'
-    foreach ($mod in $mods) {
-        $key = Get-ItemProperty "HKLM:\SOFTWARE\Windhawk\Engine\Mods\$($mod.id)" -ErrorAction SilentlyContinue
-        if (-not $key -or $key.Version -ne $mod.version -or $key.Disabled -ne 0) { $script:failed = $true; "mod not enabled at $($mod.version): $($mod.id)"; continue }
-        if (-not (Test-Path (Join-Path $modsDir $key.LibraryFileName))) { $script:failed = $true; "mod dll missing: $($key.LibraryFileName)" }
-    }
-    foreach ($lib in 'libc++.whl', 'libunwind.whl', 'windhawk-mod-shim.dll') {
-        if (-not (Test-Path (Join-Path $modsDir $lib))) { $script:failed = $true; "runtime lib missing: $lib" }
-    }
-    $settings = Get-ItemProperty HKLM:\SOFTWARE\Windhawk\Settings -ErrorAction SilentlyContinue
-    if ($settings.HideTrayIcon -ne 1 -or $settings.DisableUpdateCheck -ne 1) { $script:failed = $true; 'Windhawk tray or update check still on' }
-    $loaded = $null
-    foreach ($i in 1..30) {
-        $loaded = (Get-Process explorer).Modules.ModuleName | Where-Object { $_ -like 'dark-menus_*' }
-        if ($loaded) { break }
-        Start-Sleep -Seconds 2
-    }
-    if ($loaded) { "explorer loaded $loaded" } else { $script:failed = $true; 'dark-menus not loaded in explorer' }
-    Invoke-WinarchyElevated $Root windhawk-add-again 'extras', 'add', 'windhawk', '--yes'
-    Invoke-WinarchyElevated $Root windhawk-remove 'extras', 'remove', 'windhawk'
-    if (Get-ChildItem HKLM:\SOFTWARE\Windhawk\Engine\Mods -ErrorAction SilentlyContinue) { $script:failed = $true; 'mod registry keys left' }
-    if (Test-Path "$env:ProgramFiles\Windhawk\windhawk.exe") { $script:failed = $true; 'Windhawk still installed' }
-}
 
 function Test-Uninstalled {
     $pins = winget pin list --accept-source-agreements | Out-String -Width 400
@@ -122,7 +96,6 @@ switch ($Scenario) {
         $env:WINARCHY_ACTIVATE = '1'
         try { Invoke-Expression $boot }
         catch { $failed = $true; "boot failed: $($_.Exception.Message)" }
-        Test-WindhawkExtra $dir
     }
     'published' {
         try { Invoke-RestMethod https://raw.githubusercontent.com/guidonaselli/winarchy/release/boot.ps1 | Invoke-Expression }
@@ -139,11 +112,6 @@ switch ($Scenario) {
         Invoke-WinarchyScript uninstall.ps1
         Test-Uninstalled
         Invoke-WinarchyScript install.ps1
-    }
-    'windhawk' {
-        Install-Prerequisites
-        Invoke-WinarchyScript install.ps1
-        Test-WindhawkExtra C:\winarchy
     }
     'barswitch' {
         Install-Prerequisites

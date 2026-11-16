@@ -220,25 +220,9 @@ winarchy screenshot [region|window|full|last|scrolling|record|record-gif|stop|oc
 winarchy game-mode on|off|status|add <exe>|remove <exe>
 winarchy layout save | apply | order | list | forget <exe>
 winarchy accent sync [--force] | status
-winarchy extras | add windhawk [--yes] | remove windhawk
 winarchy reload
 winarchy doctor
 ```
-
-### Extras (opt-in, outside the core)
-
-`winarchy extras add windhawk` (elevated shell) installs [Windhawk](https://windhawk.net)
-with the taskbar styler (FrostyGlass) pinned in `extras/windhawk/mods.json`.
-No clicks: each mod is installed from its precompiled build at the
-pinned version with its settings, and Windhawk is left without its own tray icon or update
-check.
-
-It changes the desktop a lot, and it is **invasive**: Windhawk injects code into
-`explorer.exe` and other processes, a Windows update can break a mod, and some antivirus
-products flag it. That is why it is never installed by `install.ps1` or `update`, and it
-asks before changing anything. If explorer misbehaves after a Windows update, start
-`windhawk.exe -safe-mode` or run `winarchy extras remove windhawk`, which removes only the
-curated mods (your own mods are kept, and so is Windhawk while any remain).
 
 ### Updates — three axes
 

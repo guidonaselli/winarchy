@@ -69,10 +69,6 @@ function Show-WinarchyHelp {
                               never touches your config/komorebi/rules.toml)
     taskbar <hide|autohide|show>   Native Windows taskbar mode (hide: gone, dock only)
     harden [--revert]         Turn off Bing search, ads, suggestions, widgets and tips (HKCU)
-    extras                    Optional extras outside the core and their status
-    extras add windhawk [--yes]
-                              Windhawk + curated mods (invasive: asks first; elevated shell)
-    extras remove windhawk    Remove the curated mods (and Windhawk if no other mods remain)
     reload                    Reload komorebi, YASB, AHK and Flow
     heal-monitors             Restart komorebi if it lost track of a monitor (runs by itself
                               when a display is plugged, unplugged or powered back on)
@@ -292,21 +288,6 @@ function Invoke-Winarchy {
             $revert = $rest -contains '--revert'
             $n = Set-WinarchyWindowsHardening -Revert:$revert
             Write-WinarchyOk "$n Windows setting(s) $(if ($revert) { 'reverted' } else { 'applied' })."
-        }
-        'extras' {
-            $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'list' }
-            switch ($sub) {
-                'list' { Get-WinarchyExtras | Format-Table -AutoSize | Out-Host }
-                'add' {
-                    if ($rest.Count -lt 2) { throw 'Usage: winarchy extras add <extra> [--yes]' }
-                    Add-WinarchyExtra -Name $rest[1] -Yes:($rest -contains '--yes' -or $rest -contains '-yes')
-                }
-                'remove' {
-                    if ($rest.Count -lt 2) { throw 'Usage: winarchy extras remove <extra>' }
-                    Remove-WinarchyExtra -Name $rest[1]
-                }
-                default { throw "Unknown subcommand: extras $sub (list|add|remove)" }
-            }
         }
         'reload' { Invoke-WinarchyReload; Write-WinarchyOk 'Stack reloaded.' }
         'heal-monitors' {
