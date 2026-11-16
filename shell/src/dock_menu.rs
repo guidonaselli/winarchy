@@ -9,7 +9,7 @@ use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP};
+use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -144,6 +144,10 @@ struct Menu {
     born: std::time::Instant,
     animate: bool,
     bottom: bool,
+    hl_y: f32,
+    hl_a: f32,
+    tick_at: std::time::Instant,
+    tracking: bool,
 }
 
 const OPEN_MS: f32 = 150.0;
@@ -210,7 +214,7 @@ pub unsafe fn show(c: Ctx) {
     let class = WNDCLASSW { lpfnWndProc: Some(menu_proc), hInstance: inst.into(), hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(), lpszClassName: w!("WinarchyShellDockMenu"), ..Default::default() };
     RegisterClassW(&class);
     let Ok(hwnd) = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED, class.lpszClassName, w!(""), WS_POPUP, x, y, w, h, None, None, inst, None) else { return };
-    let menu = Menu { hwnd, acts: list, labels, target: pick_target(&c.wins, 0, c.last), wins: c.wins, launch: c.launch, key: c.key, hover: None, pos: POINT { x, y }, size: (w, h), row, pad, animate: crate::dock::motion_enabled(&c.theme), theme: c.theme, scale: c.scale, born: std::time::Instant::now(), bottom: c.bottom };
+    let menu = Menu { hwnd, acts: list, labels, target: pick_target(&c.wins, 0, c.last), wins: c.wins, launch: c.launch, key: c.key, hover: None, pos: POINT { x, y }, size: (w, h), row, pad, animate: crate::dock::motion_enabled(&c.theme), theme: c.theme, scale: c.scale, born: std::time::Instant::now(), bottom: c.bottom, hl_y: 0.0, hl_a: 0.0, tick_at: std::time::Instant::now(), tracking: false };
     paint(&menu);
     let animate = menu.animate;
     MENU.with(|m| *m.borrow_mut() = Some(menu));
@@ -264,9 +268,9 @@ unsafe fn paint(m: &Menu) {
     buf.fill(0);
     let (bg, fg, accent) = (rgb(&m.theme.background), rgb(&m.theme.foreground), rgb(&m.theme.accent));
     fill_round_a(buf, w, h, R { x: 0, y: 0, w, h }, px(12, s), bg, 0.97);
-    if let Some(i) = m.hover {
+    if m.hl_a > 0.0 {
         let inset = px(5, s);
-        fill_round_a(buf, w, h, R { x: inset, y: m.pad + i as i32 * m.row, w: w - 2 * inset, h: m.row }, px(8, s), accent, 0.30);
+        fill_round_a(buf, w, h, R { x: inset, y: m.pad + (m.hl_y * m.row as f32).round() as i32, w: w - 2 * inset, h: m.row }, px(8, s), accent, 0.30 * m.hl_a);
     }
     for (i, c) in coverage.iter().enumerate() {
         if *c > 0 {
@@ -288,11 +292,46 @@ unsafe fn paint(m: &Menu) {
     ReleaseDC(None, screen);
 }
 
+// El resaltado se desliza entre filas y se funde al salir; sin animación salta directo.
 fn set_hover(i: Option<usize>) {
-    let changed = MENU.with(|m| m.borrow_mut().as_mut().is_some_and(|m| std::mem::replace(&mut m.hover, i) != i));
-    if changed {
+    let hwnd = MENU.with(|m| {
+        let mut m = m.borrow_mut();
+        let m = m.as_mut()?;
+        if std::mem::replace(&mut m.hover, i) == i {
+            return None;
+        }
+        if let Some(r) = i {
+            if !m.animate || m.hl_a < 0.05 {
+                m.hl_y = r as f32;
+            }
+        }
+        if !m.animate {
+            m.hl_a = if i.is_some() { 1.0 } else { 0.0 };
+        }
+        m.tick_at = std::time::Instant::now();
+        Some((m.hwnd, m.animate))
+    });
+    let Some((hwnd, animate)) = hwnd else { return };
+    if animate {
+        unsafe { SetTimer(hwnd, T_OPEN, 16, None) };
+    } else {
         MENU.with(|m| m.borrow().as_ref().map(|m| unsafe { paint(m) }));
     }
+}
+
+// Un cuadro del resaltado; devuelve si todavía falta recorrido.
+fn step_highlight(m: &mut Menu) -> bool {
+    let now = std::time::Instant::now();
+    let dt = (now.duration_since(m.tick_at).as_secs_f32() * 1000.0).min(50.0);
+    m.tick_at = now;
+    let ty = m.hover.map(|r| r as f32).unwrap_or(m.hl_y);
+    m.hl_y += (ty - m.hl_y) * (1.0 - (-dt / 40.0).exp());
+    if (ty - m.hl_y).abs() < 0.01 {
+        m.hl_y = ty;
+    }
+    let ta = if m.hover.is_some() { 1.0 } else { 0.0 };
+    m.hl_a = crate::dock::approach(m.hl_a, ta, dt, 110.0);
+    m.hl_y != ty || m.hl_a != ta
 }
 
 fn activate(i: usize) {
@@ -329,14 +368,29 @@ unsafe extern "system" fn menu_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -
     let rows = |lp: LPARAM| MENU.with(|m| m.try_borrow().ok().and_then(|m| m.as_ref().and_then(|m| row_at(y_of(lp), m.pad, m.row, m.acts.len()))));
     match msg {
         WM_TIMER if wp.0 == T_OPEN => {
-            let done = MENU.with(|m| m.try_borrow().ok().and_then(|m| m.as_ref().map(|m| unsafe { paint(m); open_progress(m) >= 1.0 })));
+            let done = MENU.with(|m| {
+                let mut m = m.try_borrow_mut().ok()?;
+                let m = m.as_mut()?;
+                let moving = step_highlight(m);
+                unsafe { paint(m) };
+                Some(!moving && open_progress(m) >= 1.0)
+            });
             if done != Some(false) {
                 let _ = KillTimer(h, T_OPEN);
             }
             LRESULT(0)
         }
         WM_MOUSEMOVE => {
+            let need_track = MENU.with(|m| m.borrow_mut().as_mut().is_some_and(|m| { let need = !m.tracking; m.tracking = true; need }));
+            if need_track {
+                let _ = TrackMouseEvent(&mut TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: h, dwHoverTime: 0 });
+            }
             set_hover(rows(lp));
+            LRESULT(0)
+        }
+        0x02A3 => {
+            MENU.with(|m| { if let Some(m) = m.borrow_mut().as_mut() { m.tracking = false; } });
+            set_hover(None);
             LRESULT(0)
         }
         WM_LBUTTONUP => {

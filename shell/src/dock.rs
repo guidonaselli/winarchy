@@ -96,6 +96,10 @@ pub fn hit_test(l: &Layout, x: i32, y: i32) -> Option<Hit> {
     Some(if l.overflow > 0 && i == l.cells.len() - 1 { Hit::Overflow } else { Hit::Item(i) })
 }
 
+fn display_layout(layout: &Layout, xs: &[i32], bar: R) -> Layout {
+    Layout { bar, cells: layout.cells.iter().zip(xs).map(|(c, x)| R { x: *x, ..*c }).collect(), overflow: layout.overflow }
+}
+
 // Ventana a enfocar al hacer clic: con el grupo ya activo, la siguiente; si no, la última activa del grupo.
 pub fn pick_target(wins: &[isize], foreground: isize, last_active: Option<isize>) -> Option<isize> {
     if let Some(i) = wins.iter().position(|w| *w == foreground) {
@@ -190,6 +194,7 @@ const T_ANIM: usize = 4;
 const T_EDGE: usize = 5;
 const T_TIP: usize = 6;
 const TIP_FADE_MS: u128 = 130;
+const GLIDE_TAU_MS: f32 = 55.0;
 const EDGE_MS: u32 = 60;
 const LEAVE_MS: u128 = 450;
 const ANIM_MS: u32 = 16;
@@ -252,6 +257,9 @@ struct Dock {
     peek: bool,
     leave: Option<std::time::Instant>,
     tip_born: Option<std::time::Instant>,
+    glide: HashMap<String, f32>,
+    bar_glide: Option<(f32, f32)>,
+    anim_on: bool,
 }
 
 impl Dock {
@@ -367,6 +375,9 @@ unsafe fn create_dock(r: &RECT, theme: &Theme, pins_path: &std::path::Path) -> O
         peek: false,
         leave: None,
         tip_born: None,
+        glide: HashMap::new(),
+        bar_glide: None,
+        anim_on: false,
     })
 }
 
@@ -550,7 +561,10 @@ fn self_elevated() -> bool {
 }
 
 unsafe fn start_anim(h: HWND) {
-    with(|d| d.anim_at = std::time::Instant::now());
+    with(|d| {
+        d.anim_at = std::time::Instant::now();
+        d.anim_on = true;
+    });
     SetTimer(h, T_ANIM, ANIM_MS, None);
 }
 
@@ -579,12 +593,81 @@ unsafe fn anim_tick(h: HWND) {
         let v = approach(d.vis, target, dt, FADE_MS);
         busy |= v != d.vis;
         d.vis = v;
+        busy |= glide_step(d, dt);
         busy
     });
     render();
     if !busy {
         let _ = KillTimer(h, T_ANIM);
+        with(|d| d.anim_on = false);
     }
+}
+
+// Posición destino (x de pantalla) de cada celda y de la barra; las celdas se deslizan hacia ahí en vez de saltar.
+fn glide_targets(d: &Dock) -> (Vec<(String, f32)>, f32, f32) {
+    let n = d.layout.cells.len();
+    let cells = d
+        .layout
+        .cells
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let key = if d.layout.overflow > 0 && i + 1 == n { "\u{0}ovf".to_string() } else { d.items.get(i).map(|x| x.key.clone()).unwrap_or_default() };
+            (key, (d.layout.bar.x + c.x) as f32)
+        })
+        .collect();
+    (cells, d.layout.bar.x as f32, d.layout.bar.w as f32)
+}
+
+// Lo que se dibuja: x de cada celda relativa a la barra y el rectángulo de la barra, más si todavía falta recorrido.
+fn glide_view(d: &mut Dock) -> (Vec<i32>, R, bool) {
+    let (tg, bx, bw) = glide_targets(d);
+    if !d.motion {
+        d.glide = tg.iter().cloned().collect();
+        d.bar_glide = Some((bx, bw));
+    } else {
+        d.glide.retain(|k, _| tg.iter().any(|(t, _)| t == k));
+        for (k, x) in &tg {
+            d.glide.entry(k.clone()).or_insert(*x);
+        }
+        d.bar_glide.get_or_insert((bx, bw));
+    }
+    let (cx, cw) = d.bar_glide.unwrap_or((bx, bw));
+    let busy = (cx - bx).abs() >= 0.5 || (cw - bw).abs() >= 0.5 || tg.iter().any(|(k, x)| (d.glide[k] - x).abs() >= 0.5);
+    let xs = tg.iter().map(|(k, _)| (d.glide[k] - cx).round() as i32).collect();
+    (xs, R { x: cx.round() as i32, y: d.layout.bar.y, w: cw.round() as i32, h: d.layout.bar.h }, busy)
+}
+
+fn display_hit(d: &mut Dock, x: i32, y: i32) -> Option<Hit> {
+    let (xs, bar, _) = glide_view(d);
+    hit_test(&display_layout(&d.layout, &xs, bar), x + bar.x, y + bar.y)
+}
+
+fn glide_step(d: &mut Dock, dt: f32) -> bool {
+    if !d.motion {
+        return false;
+    }
+    let k = 1.0 - (-dt / GLIDE_TAU_MS).exp();
+    let (tg, bx, bw) = glide_targets(d);
+    let mut busy = false;
+    let mut go = |cur: &mut f32, to: f32| {
+        *cur += (to - *cur) * k;
+        if (to - *cur).abs() < 0.5 {
+            *cur = to;
+        } else {
+            busy = true;
+        }
+    };
+    for (key, x) in &tg {
+        if let Some(c) = d.glide.get_mut(key) {
+            go(c, *x);
+        }
+    }
+    if let Some((cx, cw)) = d.bar_glide.as_mut() {
+        go(cx, bx);
+        go(cw, bw);
+    }
+    busy
 }
 
 // `.lnk` de la taskbar nativa: solo siembran los anclados propios la primera vez.
@@ -892,6 +975,10 @@ fn signature(d: &Dock) -> u64 {
     }
     (d.hover, d.pressed, d.icons.len(), d.scale.to_bits(), d.mon, d.hidden, d.vis.to_bits(), d.peek, d.theme.dock_hide).hash(&mut h);
     (&d.theme.background, &d.theme.accent, &d.theme.position).hash(&mut h);
+    d.bar_glide.map(|(x, w)| (x.to_bits(), w.to_bits())).hash(&mut h);
+    for i in &d.items {
+        d.glide.get(&i.key).map(|v| v.to_bits()).hash(&mut h);
+    }
     (d.theme.dock_icon, d.theme.dock_radius, d.theme.dock_gap, d.theme.dock_opacity.map(f32::to_bits), d.motion).hash(&mut h);
     for i in &d.items {
         (d.hov.get(&i.key).map(|v| v.to_bits()), d.born.get(&i.key).map(|v| v.to_bits())).hash(&mut h);
@@ -1024,6 +1111,10 @@ fn render() {
         d.layout = layout(d.items.len(), d.scale, d.mon, d.theme.position != "bottom", style(&d.theme).gap);
         (d.hwnd, d.theme.clone(), d.items.clone(), Layout { bar: d.layout.bar, cells: d.layout.cells.clone(), overflow: d.layout.overflow }, d.hover, d.scale, d.want_visible(), d.motion, d.pressed)
     });
+    let (xs, bar_disp, glide_busy) = with(|d| glide_view(d));
+    if glide_busy && !with(|d| d.anim_on) {
+        unsafe { start_anim(hwnd) };
+    }
     let st = style(&theme);
     let size = px(st.icon, scale);
     let to_ask: Vec<Ask> = with(|d| {
@@ -1058,7 +1149,7 @@ fn render() {
             let _ = ShowWindow(hwnd, SW_HIDE);
             return;
         }
-        let (w, h) = (layout_.bar.w, layout_.bar.h);
+        let (w, h) = (bar_disp.w, bar_disp.h);
         let bmi = BITMAPINFO { bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: w, biHeight: -h, biPlanes: 1, biBitCount: 32, biCompression: 0, ..Default::default() }, ..Default::default() };
         let screen = GetDC(None);
         let mem = CreateCompatibleDC(screen);
@@ -1078,6 +1169,7 @@ fn render() {
             let d = &v[CUR.get().min(v.len() - 1)];
             let icons = &d.icons;
             for (idx, cell) in layout_.cells.iter().enumerate() {
+                let cell = &R { x: xs[idx], ..*cell };
                 if layout_.overflow > 0 && idx == layout_.cells.len() - 1 {
                     fill_round_a(buf, w, h, *cell, px(10, scale), fg, 0.12);
                     draw_label(buf, w, h, *cell, &format!("+{}", layout_.overflow), &theme, scale, fg);
@@ -1111,7 +1203,7 @@ fn render() {
         });
         // En `hide` el dock se desliza hacia su borde al esconderse.
         let slide = if theme.dock_hide { ((1.0 - ease(vis)) * px(16, scale) as f32) as i32 } else { 0 };
-        let pos = POINT { x: layout_.bar.x, y: layout_.bar.y + if theme.position != "bottom" { slide } else { -slide } };
+        let pos = POINT { x: bar_disp.x, y: bar_disp.y + if theme.position != "bottom" { slide } else { -slide } };
         let sz = SIZE { cx: w, cy: h };
         let src = POINT::default();
         let bf = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: (vis * 255.0).round() as u8, AlphaFormat: 1 };
@@ -1656,7 +1748,7 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 refresh();
             }
             let (changed, need_track) = with(|d| {
-                let idx = match hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y) {
+                let idx = match display_hit(d, x, y) {
                     Some(Hit::Item(i)) => Some(i),
                     Some(Hit::Overflow) => d.layout.cells.len().checked_sub(1),
                     None => None,
@@ -1697,7 +1789,7 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         }
         WM_RBUTTONUP => {
             let (x, y) = xy(lp);
-            if let Some(Hit::Item(i)) = with(|d| hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y)) {
+            if let Some(Hit::Item(i)) = with(|d| display_hit(d, x, y)) {
                 if let Some(ctx) = menu_ctx(i, false) {
                     hide_tip();
                     crate::dock_menu::show(ctx);
@@ -1707,7 +1799,7 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         }
         WM_MBUTTONUP => {
             let (x, y) = xy(lp);
-            let target = with(|d| match hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y) {
+            let target = with(|d| match display_hit(d, x, y) {
                 Some(Hit::Item(i)) => d.items.get(i).and_then(|it| launch_of(&d.pins, it)),
                 _ => None,
             });
@@ -1716,7 +1808,7 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         }
         WM_LBUTTONDOWN => {
             let (x, y) = xy(lp);
-            let on_item = with(|d| match hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y) {
+            let on_item = with(|d| match display_hit(d, x, y) {
                 Some(Hit::Item(i)) => Some(i),
                 _ => None,
             });
@@ -1741,7 +1833,7 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             if moved {
                 return LRESULT(0);
             }
-            match with(|d| hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y).map(|h| (h, d.layout.cells.len()))) {
+            match with(|d| display_hit(d, x, y).map(|h| (h, d.layout.cells.len()))) {
                 Some((Hit::Item(i), _)) => click(i),
                 Some((Hit::Overflow, cells)) => {
                     if let Some(ctx) = overflow_ctx(cells - 1) {
@@ -1829,6 +1921,18 @@ mod tests {
         assert_eq!(hit_test(&l, l.bar.x + c.x + 5, l.bar.y + c.y + 5), Some(Hit::Item(1)));
         assert_eq!(hit_test(&l, l.bar.x + c.x - 1, l.bar.y + c.y + 5), None);
         assert_eq!(hit_test(&l, 0, 0), None);
+    }
+
+    #[test]
+    fn hit_testing_follows_cells_while_the_bar_glides() {
+        let old = layout(3, 1.0, MON, true, 4);
+        let target = layout(2, 1.0, MON, true, 4);
+        let xs: Vec<i32> = old.cells[1..].iter().map(|c| c.x).collect();
+        let shown = display_layout(&target, &xs, old.bar);
+        let b = old.cells[1];
+        let c = old.cells[2];
+        assert_eq!(hit_test(&shown, old.bar.x + b.x + 5, old.bar.y + b.y + 5), Some(Hit::Item(0)));
+        assert_eq!(hit_test(&shown, old.bar.x + c.x + 5, old.bar.y + c.y + 5), Some(Hit::Item(1)));
     }
 
     #[test]
