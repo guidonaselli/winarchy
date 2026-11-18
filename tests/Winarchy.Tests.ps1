@@ -123,6 +123,19 @@ Describe 'Get-WinarchyStaleIgnores' {
     }
 }
 
+Describe 'Get-WinarchyKomorebiHwnds' {
+    It 'lists every managed window, or only the floating ones' {
+        InModuleScope Winarchy {
+            $state = '{"monitors":{"elements":[{"workspaces":{"elements":[
+                {"containers":{"elements":[{"windows":{"elements":[{"hwnd":10},{"hwnd":11}]}}]},"floating_windows":{"elements":[{"hwnd":12}]},"monocle_container":null},
+                {"containers":{"elements":[]},"floating_windows":{"elements":[]},"monocle_container":{"windows":{"elements":[{"hwnd":13}]}}}]}},
+                {"workspaces":{"elements":[{"containers":{"elements":[]},"floating_windows":{"elements":[{"hwnd":20}]},"monocle_container":null}]}}]}}' | ConvertFrom-Json
+            @(Get-WinarchyKomorebiHwnds -State $state) | Sort-Object | Should -Be @(10, 11, 12, 13, 20)
+            @(Get-WinarchyKomorebiHwnds -State $state -Floating) | Should -Be @(12, 20)
+        }
+    }
+}
+
 Describe 'Test-WinarchyThemeData' {
     It 'reports every missing required key' {
         InModuleScope Winarchy {
