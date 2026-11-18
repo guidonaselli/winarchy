@@ -5,6 +5,7 @@
   "opacity": {{computed.bar_opacity}},
   "foreground": "{{colors.foreground}}",
   "accent": "{{colors.accent_ui}}",
+  "urgent": "{{colors.urgent_ui}}",
   "muted": "{{colors.color8}}",
   "font_family": "{{bar.font_family}}",
   "font_size": {{bar.font_size}},

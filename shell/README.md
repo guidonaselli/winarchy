@@ -11,7 +11,9 @@ Shell nativa opcional de Winarchy (franja reservada + isla). Se activa con `stat
 `winarchy bar dock on|float|hide|off` agrega un dock con las apps abiertas y ancladas en cada monitor, en el borde opuesto al de la isla; `hide` no reserva nada y se esconde hasta llevar el mouse al borde. `on` reserva su franja en komorebi; `float` flota sobre las ventanas sin reservar nada.
 
 - **Ventanas**: agrupa por AppUserModelID (respaldo: exe). Clic enfoca (restaura minimizadas, cambia de workspace con `komorebic`); clic en la app que ya está al frente la minimiza; con varias ventanas el clic abre un selector con sus títulos; clic medio abre una instancia nueva. La celda "+N" abre el selector de los grupos que no entraron.
-- **Clic derecho**: abrir/nueva ventana, anclar/desanclar, cerrar y cerrar todas, y "Bandeja del sistema" si la taskbar nativa está oculta. Las ventanas elevadas no se pueden cerrar desde acá (UIPI): la entrada no aparece.
+- **Logo del dock**: clic izquierdo abre Inicio; clic derecho abre el menú de control de Winarchy.
+- **Teclado**: `Win+Alt+T` enfoca el dock del monitor de la ventana activa. Usa flechas o `Tab` para recorrerlo, `Home`/`End` para ir al primero/último, `Enter` o `Espacio` para activar, la tecla Menú o `Shift+F10` para abrir el menú contextual y `Escape` para cerrar. En el selector, `Up`/`Down` recorren las opciones, `Home`/`End` y `PageUp`/`PageDown` desplazan la selección, `Enter` activa y `Delete` cierra las ventanas elegibles. `Escape` vuelve del menú al dock; otro `Escape` restaura el foco previo.
+- **Clic derecho en una app**: abrir/nueva ventana, anclar/desanclar, cerrar y cerrar todas. Las ventanas elevadas no se pueden cerrar desde acá (UIPI): la entrada no aparece.
 - **Anclados**: lista propia en `state/dock-pins.json`, sembrada una vez desde la taskbar nativa.
 - **Reordenar**: arrastrar una celda sobre otra del mismo tipo (ancladas entre sí, abiertas entre sí) las intercambia; el orden de las ancladas se guarda en `state/dock-pins.json`.
 - **Atención**: una ventana que pide atención (`FlashWindow`, como un mensaje nuevo) tiñe su celda de ámbar hasta que pasa al frente o se cierra.
@@ -25,4 +27,5 @@ Shell nativa opcional de Winarchy (franja reservada + isla). Se activa con `stat
 `winarchy taskbar autohide` (por defecto con el dock) la deja en auto-hide y sigue alojando la bandeja de íconos. `winarchy taskbar hide` la oculta del todo (requiere dock) y la shell la vuelve a ocultar si Windows la muestra; se devuelve con `taskbar autohide|show`, al cerrar la shell, al apagar el dock y ante un panic. Con la taskbar oculta:
 
 - Siguen andando: Win+N (calendario y notificaciones), Inicio, búsqueda; el volumen, la red, la batería y el contador de notificaciones los muestra la Island.
-- Se pierde el acceso directo a la bandeja de íconos: "Bandeja del sistema" en el menú del dock muestra la taskbar nativa 12 s para usarla. No hay API pública para alojar esos íconos, así que Winarchy no los reimplementa.
+- El botón `^` al extremo del dock abre la bandeja del sistema; su tooltip está localizado. La bandeja se cierra al hacer clic fuera, pulsar Escape o cambiar el foco. Explorer dibuja los íconos de la bandeja y sus textos; Winarchy no los reimplementa.
+- Al abrir Inicio o Search, el dock `hide` se muestra en el monitor correspondiente.

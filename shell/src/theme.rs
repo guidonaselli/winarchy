@@ -7,6 +7,8 @@ pub struct Theme {
     pub opacity: f32,
     pub foreground: String,
     pub accent: String,
+    #[serde(default)]
+    pub urgent: Option<String>,
     pub muted: String,
     pub font_family: String,
     pub font_size: i32,
@@ -89,6 +91,7 @@ impl Default for Theme {
             opacity: 1.0,
             foreground: "#c0caf5".into(),
             accent: "#7aa2f7".into(),
+            urgent: None,
             muted: "#565f89".into(),
             font_family: "Segoe UI".into(),
             font_size: 13,
@@ -135,11 +138,24 @@ fn merge(base: &mut serde_json::Value, over: serde_json::Value) {
     }
 }
 
+pub fn contrasting_color(color: (u8, u8, u8)) -> (u8, u8, u8) {
+    let linear = |value: u8| {
+        let c = value as f64 / 255.0;
+        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    };
+    let luminance = 0.2126 * linear(color.0) + 0.7152 * linear(color.1) + 0.0722 * linear(color.2);
+    if luminance > 0.179 { (0, 0, 0) } else { (255, 255, 255) }
+}
+
 pub fn rgb(hex: &str) -> (u8, u8, u8) {
     let h = hex.trim_start_matches('#');
     let p = |i: usize| h.get(i..i + 2).and_then(|s| u8::from_str_radix(s, 16).ok()).unwrap_or(0);
     (p(0), p(2), p(4))
 }
+
+#[cfg(test)]
+#[path = "theme_urgent_tests.rs"]
+mod urgent_tests;
 
 #[cfg(test)]
 mod tests {

@@ -45,7 +45,11 @@ messages! {
     MenuUnpin => ("Unpin from dock", "Desanclar del dock"),
     MenuClose => ("Close window", "Cerrar ventana"),
     MenuCloseAll => ("Close all windows", "Cerrar todas las ventanas"),
-    MenuWinarchy => ("Winarchy menu", "Menú de Winarchy"),
+    StartMenu => ("Start · right-click: Winarchy menu", "Inicio · clic derecho: menú de Winarchy"),
+    Start => ("Start", "Inicio"),
+    MoreApps => ("More applications", "Más aplicaciones"),
+    Applications => ("Applications", "Aplicaciones"),
+    SystemTray => ("System tray", "Bandeja del sistema"),
     NetOff => ("NET off", "SIN RED"),
     Workspace => ("WS", "ESCRITORIO"),
     Layout => ("LAYOUT", "DISEÑO"),
@@ -124,6 +128,12 @@ mod tests {
         assert_eq!(lang_of("en-US"), Lang::En);
         assert_eq!(lang_of("pt-BR"), Lang::En);
         assert_eq!(lang_of(""), Lang::En);
+    }
+
+    #[test]
+    fn brand_button_names_start_and_the_winarchy_context_menu_in_both_languages() {
+        assert_eq!(t_in(K::StartMenu, Lang::En), "Start · right-click: Winarchy menu");
+        assert_eq!(t_in(K::StartMenu, Lang::Es), "Inicio · clic derecho: menú de Winarchy");
     }
 
     #[test]

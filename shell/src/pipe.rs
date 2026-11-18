@@ -54,6 +54,8 @@ pub enum Command {
     Redraw,
     Expand,
     Tray,
+    TrayDismiss,
+    DockFocus,
 }
 
 // Un cliente por vez; el hilo de UI recibe Reload/Quit por `dispatch`, nunca bloquea acá.
@@ -152,8 +154,16 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
             dispatch(Command::Expand);
             ok(json!({}))
         }
+        "dock.focus" => {
+            dispatch(Command::DockFocus);
+            ok(json!({}))
+        }
         "dock.tray" => {
             dispatch(Command::Tray);
+            ok(json!({}))
+        }
+        "dock.tray.dismiss" => {
+            dispatch(Command::TrayDismiss);
             ok(json!({}))
         }
         "island.dismiss" => {
@@ -178,6 +188,17 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dock_focus_dispatches_and_acknowledges_request() {
+        let called = std::cell::Cell::new(0);
+        let response = handle(br#"{"v":1,"id":7,"cmd":"dock.focus"}"#, &|command| {
+            assert!(matches!(command, Command::DockFocus));
+            called.set(called.get() + 1);
+        });
+        assert_eq!(called.get(), 1);
+        assert_eq!(response, json!({"v": 1, "id": 7, "ok": true}));
+    }
 
     #[test]
     fn answers_ping_and_rejects_garbage() {
@@ -205,6 +226,9 @@ mod tests {
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"confirm.request"}"#, &|_| {})["result"], "denied");
         let called = std::cell::Cell::new(false);
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"dock.tray"}"#, &|c| { assert!(matches!(c, Command::Tray)); called.set(true); })["ok"], true);
+        assert!(called.get());
+        called.set(false);
+        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"dock.tray.dismiss"}"#, &|c| { assert!(matches!(c, Command::TrayDismiss)); called.set(true); })["ok"], true);
         assert!(called.get());
     }
 }
