@@ -118,7 +118,10 @@ function Update-WinarchyKomorebiRules {
     $rendered = Add-WinarchyWindowRulesToKomorebiJson -Json $rendered
     $rendered | ConvertFrom-Json | Out-Null
     Set-WinarchyFileAtomic -Path (Join-Path $root 'config\komorebi\komorebi.json') -Value $rendered
-    if (Test-WinarchyProcess 'komorebi') { komorebic reload-configuration 2>$null | Out-Null }
+    if (Test-WinarchyProcess 'komorebi') {
+        komorebic replace-configuration (Join-Path $root 'config\komorebi\komorebi.json') 2>$null | Out-Null
+        Write-WinarchyStaleIgnoreWarning -ConfigPath (Join-Path $root 'config\komorebi\komorebi.json')
+    }
 }
 
 function Restart-WinarchyPowerToys {

@@ -21,6 +21,7 @@ function Show-WinarchyHelp {
     theme gallery             Visual theme picker (WPF grid)
     theme add <git-url> [name]  Install a theme from a repository
     background list           Backgrounds shipped by the active theme (* = applied)
+    background gallery        Visual wallpaper picker for the active theme
     background set <file>     Apply one of them
     background next           Cycle to the next background
     bar position [top|bottom] Where the bar sits (no arg: show current)
@@ -231,12 +232,13 @@ function Invoke-Winarchy {
             $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'list' }
             switch ($sub) {
                 'list' { Get-WinarchyBackgroundStatus }
+                'gallery' { Show-WinarchyBackgroundGallery }
                 'next' { Set-WinarchyBackground -Next }
                 'set' {
                     if ($rest.Count -lt 2) { throw 'Usage: winarchy background set <file>' }
                     Set-WinarchyBackground -File ($rest[1..($rest.Count - 1)] -join ' ')
                 }
-                default { throw "Unknown subcommand: background $sub (list|set|next)" }
+                default { throw "Unknown subcommand: background $sub (list|gallery|set|next)" }
             }
         }
         'rules' {

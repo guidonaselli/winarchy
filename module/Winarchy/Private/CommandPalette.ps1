@@ -1,29 +1,30 @@
 ﻿# CommandPalette.ps1 — comandos de Winarchy como accesos directos que Flow indexa
 
 $script:PaletteCommands = @(
-    @{ Name = 'Next theme';        Args = 'theme next' }
-    @{ Name = 'Theme gallery';     Args = 'theme gallery' }
-    @{ Name = 'Next background';   Args = 'background next' }
-    @{ Name = 'Coding agent';      Args = 'agent launch' }
-    @{ Name = 'Menu';              Args = 'menu' }
-    @{ Name = 'Reload stack';      Args = 'reload' }
-    @{ Name = 'Doctor';            Args = 'doctor' }
-    @{ Name = 'Game mode on';      Args = 'game-mode on' }
-    @{ Name = 'Game mode off';     Args = 'game-mode off' }
-    @{ Name = 'Save layout';       Args = 'layout save' }
-    @{ Name = 'Apply layout';      Args = 'layout apply' }
-    @{ Name = 'Order windows';     Args = 'layout order' }
-    @{ Name = 'Sync accent';       Args = 'accent sync' }
-    @{ Name = 'Screenshot region'; Args = 'screenshot region' }
-    @{ Name = 'Screenshot window'; Args = 'screenshot window' }
-    @{ Name = 'Screen recording';  Args = 'screenshot record' }
-    @{ Name = 'Stop recording';    Args = 'screenshot stop' }
-    @{ Name = 'Text from screen';  Args = 'screenshot ocr' }
-    @{ Name = 'Bar top';           Args = 'bar position top' }
-    @{ Name = 'Bar bottom';        Args = 'bar position bottom' }
-    @{ Name = 'Bar transparent';   Args = 'bar transparent' }
-    @{ Name = 'Update';            Args = 'update' }
-    @{ Name = 'Update Winarchy';   Args = 'update --self' }
+    @{ Name = 'Next theme';        NameEs = 'Siguiente theme';             Args = 'theme next' }
+    @{ Name = 'Theme gallery';     NameEs = 'Galería de temas';            Args = 'theme gallery' }
+    @{ Name = 'Wallpaper gallery'; NameEs = 'Galería de fondos';           Args = 'background gallery' }
+    @{ Name = 'Next background';   NameEs = 'Siguiente fondo';             Args = 'background next' }
+    @{ Name = 'Coding agent';      NameEs = 'Agente de código';            Args = 'agent launch' }
+    @{ Name = 'Menu';              NameEs = 'Menú Winarchy';               Args = 'menu' }
+    @{ Name = 'Reload stack';      NameEs = 'Recargar entorno';            Args = 'reload' }
+    @{ Name = 'Doctor';            NameEs = 'Diagnóstico';                  Args = 'doctor' }
+    @{ Name = 'Game mode on';      NameEs = 'Activar modo de juego';        Args = 'game-mode on' }
+    @{ Name = 'Game mode off';     NameEs = 'Desactivar modo de juego';     Args = 'game-mode off' }
+    @{ Name = 'Save layout';       NameEs = 'Guardar distribución';        Args = 'layout save' }
+    @{ Name = 'Apply layout';      NameEs = 'Aplicar distribución';         Args = 'layout apply' }
+    @{ Name = 'Order windows';     NameEs = 'Ordenar ventanas';             Args = 'layout order' }
+    @{ Name = 'Sync accent';       NameEs = 'Sincronizar accent';           Args = 'accent sync' }
+    @{ Name = 'Screenshot region'; NameEs = 'Capturar región';              Args = 'screenshot region' }
+    @{ Name = 'Screenshot window'; NameEs = 'Capturar ventana';             Args = 'screenshot window' }
+    @{ Name = 'Screen recording';  NameEs = 'Grabar pantalla';              Args = 'screenshot record' }
+    @{ Name = 'Stop recording';    NameEs = 'Detener grabación';            Args = 'screenshot stop' }
+    @{ Name = 'Text from screen';  NameEs = 'Leer texto de pantalla';       Args = 'screenshot ocr' }
+    @{ Name = 'Bar top';           NameEs = 'Barra arriba';                 Args = 'bar position top' }
+    @{ Name = 'Bar bottom';        NameEs = 'Barra abajo';                  Args = 'bar position bottom' }
+    @{ Name = 'Bar transparent';   NameEs = 'Alternar transparencia';       Args = 'bar transparent' }
+    @{ Name = 'Update';            NameEs = 'Actualizar aplicaciones';      Args = 'update' }
+    @{ Name = 'Update Winarchy';   NameEs = 'Actualizar Winarchy';          Args = 'update --self' }
 )
 
 function Get-WinarchyPaletteDir {
@@ -40,8 +41,10 @@ function Sync-WinarchyPalette {
     $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue)?.Source ?? (Get-Command powershell).Source
     $shell = New-Object -ComObject WScript.Shell
 
+    $language = Get-WinarchyUiLanguage
     $expected = foreach ($cmd in $script:PaletteCommands) {
-        $file = "Winarchy $($cmd.Name).lnk"
+        $name = if ($language -eq 'es') { $cmd.NameEs } else { $cmd.Name }
+        $file = "Winarchy $name.lnk"
         $lnk = $shell.CreateShortcut((Join-Path $dir $file))
         $lnk.TargetPath = $pwsh
         $lnk.Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$shim`" $($cmd.Args)"

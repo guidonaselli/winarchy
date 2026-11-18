@@ -62,6 +62,7 @@ winarchy theme set <name>          # apply a theme to every surface
 winarchy theme next                # cycle to the next theme
 winarchy theme list                # list themes (* = active)
 winarchy theme gallery             # visual WPF theme picker
+winarchy background gallery        # visual wallpaper picker for the active theme
 winarchy update                    # update third-party apps (winget+scoop); warns if a new Winarchy release exists
 winarchy update --core             # also bump pinned komorebi/YASB and rewrite versions.lock.toml
 winarchy update --self             # update Winarchy itself (git pull release + idempotent migration)

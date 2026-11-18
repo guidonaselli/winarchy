@@ -18,7 +18,7 @@ function Show-WinarchyThemeGallery {
 
     $window = [System.Windows.Window]::new()
     # Title doubles as komorebi ignore-rule match (floats instead of tiling)
-    $window.Title = 'Winarchy — Themes'
+    $window.Title = "Winarchy — $(Get-WinarchyUiText -Key 'theme-gallery-title')"
     $ico = Join-Path (Get-WinarchyRoot) 'assets\logo\winarchy.ico'
     if (Test-Path $ico) { $window.Icon = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]::new($ico)) }
     $window.Width = 1180; $window.Height = 760
@@ -74,7 +74,7 @@ function Show-WinarchyThemeGallery {
         $img.Margin = [System.Windows.Thickness]::new(4, 4, 4, 0)
 
         $label = [System.Windows.Controls.TextBlock]::new()
-        $label.Text = if ($name -eq $current) { "$name  (active)" } else { $name }
+        $label.Text = if ($name -eq $current) { "$name  ($(Get-WinarchyUiText -Key 'theme-gallery-active'))" } else { $name }
         $label.Foreground = $fgBrush
         $label.FontSize = 13
         $label.HorizontalAlignment = 'Center'

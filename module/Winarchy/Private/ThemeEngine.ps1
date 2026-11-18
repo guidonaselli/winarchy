@@ -160,6 +160,8 @@ function Build-WinarchyThemeContext {
     # apps con fondo del theme, y on_accent el texto legible sobre ese accent_ui.
     $ctx['colors.accent_ui'] = Get-WinarchyReadableAccentHex -Accent $Theme['colors']['accent'] -Background $Theme['colors']['background']
     $ctx['colors.on_accent'] = Get-WinarchyOnAccentHex -Hex $ctx['colors.accent_ui']
+    $urgent = if ($Theme.ContainsKey('borders') -and $Theme['borders'].ContainsKey('urgent')) { $Theme['borders']['urgent'] } else { $Theme['colors']['accent'] }
+    $ctx['colors.urgent_ui'] = Get-WinarchyReadableAccentHex -Accent $urgent -Background $Theme['colors']['background']
     # Colores semanticos de la barra. color0-15 son la paleta ANSI (terminal, btop,
     # nvim), donde el rojo tiene que ser rojo; la barra los reusaba como colores de UI.
     # Por default siguen cayendo en los mismos slots, pero un theme puede declarar [ui]
@@ -763,7 +765,10 @@ function Invoke-WinarchyReload {
     $env:YASB_CONFIG_HOME = Join-Path $root 'config\yasb'
     if (-not (Test-WinarchyProcess 'komorebi')) { Start-WinarchyKomorebi }
     # -Light corre solo (sync de accent, cambio de barra): ahí nunca se reinicia komorebi
-    elseif ($Light -or -not (Repair-WinarchyKomorebiMonitors)) { komorebic reload-configuration 2>$null | Out-Null }
+    elseif ($Light -or -not (Repair-WinarchyKomorebiMonitors)) {
+        komorebic replace-configuration (Join-Path $env:KOMOREBI_CONFIG_HOME 'komorebi.json') 2>$null | Out-Null
+        Write-WinarchyStaleIgnoreWarning -ConfigPath (Join-Path $env:KOMOREBI_CONFIG_HOME 'komorebi.json')
+    }
     # YASB: reinicio limpio (kill + start) en vez de `yasbc reload`. El hot-reload de
     # YASB re-suscribe su widget de komorebi al named pipe pero deja viva la suscripción
     # anterior; con >1 reactor vivo las barras pelean el foco y mandan FocusWorkspaceNumber(0),

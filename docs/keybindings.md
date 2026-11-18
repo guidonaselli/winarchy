@@ -23,7 +23,7 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 ## Menu (popup, Omarchy-style)
 | Keybinding | Action |
 |---|---|
-| `SUPER+Alt+Space` | Winarchy menu (Apps/Themes/Reload/Game mode/Doctor/Update/System/Quit) — same content as right-clicking the tray icon, or the rightmost button on the YASB bar |
+| `SUPER+Alt+Space` | Winarchy menu (Apps/Appearance/Reload/Game mode/Doctor/Update/System/Quit) — same content as right-clicking the tray icon, or the rightmost button on the YASB bar |
 | `SUPER+Esc` | System / power submenu directly (Screensaver/Lock/Sleep/Hibernate/Sign out/Restart/Shut down) |
 
 The menu's **Apps** entry opens Flow Launcher pre-scoped to the `Program` plugin
@@ -146,6 +146,7 @@ control panels. `SUPER+Ctrl+W` is the background switcher, as in Omarchy, so Net
 | `SUPER+Shift+T` | Next theme (`winarchy theme next`) |
 | `SUPER+Ctrl+T` or `SUPER+Ctrl+Shift+Space` | Theme gallery (`winarchy theme gallery`) |
 | `SUPER+Ctrl+Space` or `SUPER+Ctrl+W` | Next background of the active theme (`winarchy background next`) |
+| Winarchy menu → Appearance | Theme and wallpaper galleries (`winarchy theme gallery`, `winarchy background gallery`) |
 | `SUPER+Ctrl+Shift+A` | Launch the preferred coding agent (`winarchy agent launch`) |
 | `SUPER+Ctrl+Shift+Return` | Promote the focused window to the largest tile |
 | `SUPER+Ctrl+Return` | Focus the window at the top of the tree |

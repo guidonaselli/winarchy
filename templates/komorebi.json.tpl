@@ -112,7 +112,7 @@
     { "kind": "Exe", "id": "Twinkle Tray.exe", "matching_strategy": "Equals" },
     { "kind": "Class", "id": "TaskManagerWindow", "matching_strategy": "Equals" },
     { "kind": "Title", "id": "Picture-in-Picture", "matching_strategy": "Equals" },
-    { "kind": "Title", "id": "Winarchy — Themes", "matching_strategy": "Equals" },
+    { "kind": "Title", "id": "^Winarchy — (Themes|Temas|Wallpapers — .+|Fondos — .+)$", "matching_strategy": "Regex" },
     { "kind": "Class", "id": "ReunionWindowingCaptionControls", "matching_strategy": "Equals" },
     { "kind": "Class", "id": "InputNonClientPointerSource", "matching_strategy": "Equals" },
     { "kind": "Exe", "id": "winarchy-shell.exe", "matching_strategy": "Equals" },

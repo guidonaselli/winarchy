@@ -209,7 +209,7 @@ and the winget pins. Run it from an admin PowerShell to also remove the Defender
 
 ```text
 winarchy theme set <name> | next | list
-winarchy background list | set <file> | next
+winarchy background list | gallery | set <file> | next
 winarchy agent list | set <id> | launch
 winarchy bar position [top|bottom]
 winarchy bar dock <on|off>
@@ -263,8 +263,9 @@ themes/my-theme/
 ```
 
 Everything in `backgrounds/` is a wallpaper the theme offers. Applying the theme sets the
-one you picked last time for it (the first one otherwise); `winarchy background next` and
-`SUPER + CTRL + SPACE` cycle through the rest. A theme without the folder leaves the
+one you picked last time for it (the first one otherwise); `winarchy background gallery` opens
+ a visual picker. `winarchy background next` or `SUPER + CTRL + SPACE` cycles through the
+rest. A theme without the folder leaves the
 wallpaper alone, and `wallpaper-engine.txt` wins over it when Wallpaper Engine is installed.
 
 Applying a theme also sets the lock screen image, which the sign-in screen reuses: the

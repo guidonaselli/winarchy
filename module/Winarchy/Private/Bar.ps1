@@ -67,7 +67,7 @@ function Test-WinarchyTaskbarHidden { Test-Path (Get-WinarchyTaskbarHiddenPath) 
 
 function Get-WinarchyDockWorkAreaOffset {
     <# Lo que komorebi reserva para el dock, en px. Espeja BAR_DIP + MARGIN_DIP (+2 de la franja de la taskbar nativa, solo abajo) de shell/src/dock.rs. En float y hide no reserva nada. #>
-    if ((Get-WinarchyDockMode) -in 'float', 'hide') { return [pscustomobject]@{ Top = 0; Bottom = 2 } }
+    if ((Get-WinarchyDockMode) -in 'float', 'hide') { return [pscustomobject]@{ Top = 0; Bottom = if (Test-WinarchyTaskbarHidden) { 0 } else { 2 } } }
     $dpi = (Get-ItemProperty 'HKCU:\Control Panel\Desktop\WindowMetrics' -ErrorAction SilentlyContinue).AppliedDPI
     if (-not $dpi) { $dpi = 96 }
     $dockEdge = if ((Get-WinarchyBarPosition) -eq 'top') { 'bottom' } else { 'top' }

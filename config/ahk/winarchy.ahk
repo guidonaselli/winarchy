@@ -17,6 +17,7 @@ RepoRoot := RegExReplace(A_ScriptDir, "\\config\\ahk$")
 StateDir := RepoRoot "\state"
 GameFlag := StateDir "\game-mode.flag"
 MenuFlag := StateDir "\show-menu.flag"
+StartFlag := StateDir "\show-start.flag"
 AwakeFlag := StateDir "\stay-awake.flag"
 GamesTomls := [RepoRoot "\games.toml", RepoRoot "\games.user.toml"]
 WinarchyPs1 := RepoRoot "\bin\winarchy.ps1"
@@ -71,7 +72,10 @@ ReconcileModifiers() {
 }
 
 ; Fallback instantáneo: presionar Escape limpia modificadores fantasma
-~*Esc::ReconcileModifiers()
+~*Esc::{
+    ReconcileModifiers()
+    ShellIsland('dock.tray.dismiss')
+}
 
 ; --- Config de usuario ---------------------------------------------------------
 ; true  = Win sola abre el menú Inicio (comportamiento nativo de Windows)
@@ -95,6 +99,8 @@ WeztermExe := FileExist(A_ProgramFiles "\WezTerm\wezterm-gui.exe")
 ; arrancado antes de instalar WezTerm) y ahi WezTerm cae a sus defaults, sin theme ni pwsh.
 Wezterm(args := '') {
     global WeztermExe, RepoRoot
+    ; El hook se traga el Enter y WinActivate puede inyectar Alt: sin otra tecla, Windows toma el Win-up como Win solo y abre Inicio.
+    Send('{Blind}{vkE8}')
     DllCall('user32\AllowSetForegroundWindow', 'int', -1)
     Run('"' WeztermExe '" --config-file "' RepoRoot '\config\wezterm\wezterm.lua"' (args ? ' ' args : ''), , , &pid)
     if (pid && hwnd := WinWait('ahk_pid ' pid, , 2)) {
@@ -498,7 +504,13 @@ FillNativeMenu(m, items) {
 SetTimer(MenuWatch, 150)
 
 MenuWatch() {
-    global MenuFlag
+    global MenuFlag, StartFlag
+    if FileExist(StartFlag) {
+        try FileDelete(StartFlag)
+        catch
+            return
+        Send('{LWin}')
+    }
     if FileExist(MenuFlag) {
         try FileDelete(MenuFlag)
         catch
@@ -594,12 +606,12 @@ HealMonitors() {
 WinarchyText(text) {
     global WinarchyLocale
     static es := Map(
-        'System tray', 'Bandeja del sistema', 'Apps', 'Aplicaciones', 'Themes', 'Temas',
+        'System tray', 'Bandeja del sistema', 'Apps', 'Aplicaciones', 'Themes', 'Temas', 'Appearance', 'Apariencia',
         'Capture', 'Capturas', 'Tiling', 'Mosaico', 'Bar', 'Barra', 'Coding agent', 'Agente de código',
         'Keybindings', 'Atajos de teclado', 'Reload stack', 'Recargar entorno', 'Game mode', 'Modo de juego',
         'Stay awake', 'Mantener activo', 'On', 'Activado', 'Off', 'Desactivado', 'Doctor', 'Diagnóstico',
         'Check for updates', 'Buscar actualizaciones', 'System', 'Sistema', 'Quit Winarchy', 'Cerrar Winarchy',
-        'Next theme', 'Siguiente tema', 'Theme gallery', 'Galería de temas', 'Next background', 'Siguiente fondo',
+        'Next theme', 'Siguiente tema', 'Theme gallery', 'Galería de temas', 'Wallpaper gallery', 'Galería de fondos', 'Next background', 'Siguiente fondo',
         'Layout', 'Distribución', 'Manage this window', 'Administrar esta ventana',
         'Unmanage this window', 'Dejar de administrar esta ventana', 'Stop tiling this workspace', 'Desactivar mosaico en este escritorio',
         'New windows: stack / tile', 'Nuevas ventanas: apilar / mosaico', 'Title bars', 'Barras de título',
@@ -630,6 +642,7 @@ WinarchyText(text) {
         'Obsidian', 'Obsidian', 'calculator', 'Calculadora', 'coding agent', 'Agente de código', 'Winarchy menu', 'Menú de Winarchy',
         'system / power menu', 'Menú del sistema y energía', 'this keybindings list', 'Esta lista de atajos de teclado',
         'native shell: show CPU / RAM in the island', 'Mostrar CPU / RAM en la isla nativa',
+        'focus the dock', 'Enfocar el dock',
         'hold to talk to the voice assistant (needs `winarchy assistant on`)', 'Mantener para hablar con el asistente (requiere `winarchy assistant on`)',
         'ChatGPT', 'ChatGPT', 'Claude', 'Claude', 'YouTube', 'YouTube', 'X', 'X', 'Google Calendar', 'Google Calendar', 'WhatsApp', 'WhatsApp',
         'select all', 'Seleccionar todo', 'copy', 'Copiar', 'cut', 'Cortar', 'clipboard history', 'Historial del portapapeles',
@@ -694,7 +707,7 @@ WinarchyMenuItems() {
     return [
         {text:'Apps',          hint:'SUPER+Space',        action:(*)=>ToggleFlowScoped('app ')},
         {text:'System tray',                              action:(*)=>ShellIsland('dock.tray')},
-        {text:'Themes',                                   sub: WinarchyThemeItems()},
+        {text:'Appearance',                               sub: WinarchyAppearanceItems()},
         {text:'Capture',                                  sub: WinarchyCaptureItems()},
         {text:'Tiling',                                   sub: WinarchyTilingItems()},
         {text:'Bar',                                      sub: WinarchyBarItems()},
@@ -718,11 +731,12 @@ WinarchyMenuItemsWithUser() {
     return items
 }
 
-WinarchyThemeItems() {
+WinarchyAppearanceItems() {
     return [
         {text:'Next theme',      hint:'SUPER+Shift+T',    action:(*)=>Winarchy('theme next')},
-        {text:'Theme gallery',   hint:'SUPER+Ctrl+T',     action:(*)=>Winarchy('theme gallery')},
-        {text:'Next background', hint:'SUPER+Ctrl+Space', action:(*)=>Winarchy('background next')} ]
+        {text:'Theme gallery',    hint:'SUPER+Ctrl+T',     action:(*)=>Winarchy('theme gallery')},
+        {text:'Wallpaper gallery',                     action:(*)=>Winarchy('background gallery')},
+        {text:'Next background',  hint:'SUPER+Ctrl+Space', action:(*)=>Winarchy('background next')} ]
 }
 
 WinarchyTilingItems() {
@@ -803,6 +817,13 @@ ShellIsland(cmd) {
         pipe := FileOpen('\\.\pipe\winarchy-shell', 'w')   ; 'rw' lee para detectar BOM y se cuelga esperando
         pipe.Write('{"v":1,"id":1,"cmd":"' cmd '"}`n')
         pipe.Close()
+    }
+}
+
+FocusDock() {
+    if (pid := ProcessExist('winarchy-shell.exe')) {
+        DllCall('user32\AllowSetForegroundWindow', 'uint', pid)
+        ShellIsland('dock.focus')
     }
 }
 
@@ -1409,6 +1430,7 @@ AccentWatch() {
 #Esc::ShowSystemMenu()                           ; system / power menu
 #k::ToggleKeyOverlay()                           ; this keybindings list
 #i::ShellIsland('island.expand')                 ; native shell: show CPU / RAM in the island
+#!t::FocusDock()                                 ; focus the dock
 #HotIf AssistantReady()
 #CapsLock::AssistantPtt()                        ; hold to talk to the voice assistant (needs `winarchy assistant on`)
 #HotIf

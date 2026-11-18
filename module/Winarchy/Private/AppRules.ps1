@@ -260,6 +260,27 @@ function Add-WinarchyAppRulesToKomorebiJson {
     $config | ConvertTo-Json -Depth 50
 }
 
+function Get-WinarchyStaleIgnores {
+    <# Ignores que komorebi tiene en memoria y el config ya no: replace-configuration suma reglas pero nunca las saca. #>
+    param($Live, $Config)
+    $keep = @{}
+    foreach ($rule in @($Config)) { if ($null -ne $rule) { $keep[(ConvertTo-WinarchyRuleTarget -Rule $rule)] = $true } }
+    foreach ($rule in @($Live)) {
+        if ($null -eq $rule) { continue }
+        $target = ConvertTo-WinarchyRuleTarget -Rule $rule
+        if (-not $keep.ContainsKey($target)) { $target }
+    }
+}
+
+function Write-WinarchyStaleIgnoreWarning {
+    param([Parameter(Mandatory)][string]$ConfigPath)
+    $live = komorebic global-state 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
+    if (-not $live) { return }
+    $stale = @(Get-WinarchyStaleIgnores -Live $live.ignore_identifiers -Config (Get-Content -Raw $ConfigPath | ConvertFrom-Json).ignore_rules)
+    if ($stale.Count -eq 0) { return }
+    Write-WinarchyWarn "komorebi still ignores $($stale -join ', ') until it restarts: komorebic stop; winarchy reload (open windows of those apps may stay hidden)."
+}
+
 function Get-WinarchyAppRuleReport {
     <#
       Qué reglas aplican a un identificador y qué capa ganó. Sin esto, 226 entradas que

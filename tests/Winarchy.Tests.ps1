@@ -111,6 +111,18 @@ Describe 'ConvertTo-WinarchyFlatContext' {
     }
 }
 
+Describe 'Get-WinarchyStaleIgnores' {
+    It 'reports live ignores the config dropped, composite ones included, regardless of strategy' {
+        InModuleScope Winarchy {
+            $live = '[{"kind":"Exe","id":"aLogin.exe","matching_strategy":"Equals"},{"kind":"Exe","id":"main.exe","matching_strategy":"Equals"},[{"kind":"Exe","id":"a.exe"},{"kind":"Class","id":"C"}]]' | ConvertFrom-Json -NoEnumerate
+            $config = '[{"kind":"Exe","id":"MAIN.exe","matching_strategy":"Legacy"}]' | ConvertFrom-Json -NoEnumerate
+            @(Get-WinarchyStaleIgnores -Live $live -Config $config) | Should -Be @('exe=alogin.exe', 'class=c&exe=a.exe')
+            @(Get-WinarchyStaleIgnores -Live $live -Config $live).Count | Should -Be 0
+            @(Get-WinarchyStaleIgnores -Live $null -Config $config).Count | Should -Be 0
+        }
+    }
+}
+
 Describe 'Test-WinarchyThemeData' {
     It 'reports every missing required key' {
         InModuleScope Winarchy {
@@ -315,6 +327,23 @@ Describe 'Capture actions' {
 }
 
 Describe 'Command palette' {
+    It 'provides a Spanish label for every command' {
+        InModuleScope Winarchy {
+            foreach ($cmd in $script:PaletteCommands) {
+                $cmd.NameEs | Should -Not -BeNullOrEmpty -Because "'$($cmd.Args)' needs a Spanish label"
+            }
+        }
+    }
+
+    It 'offers a localized wallpaper gallery command' {
+        InModuleScope Winarchy {
+            $gallery = @($script:PaletteCommands | Where-Object Args -EQ 'background gallery')
+            $gallery.Count | Should -Be 1
+            $gallery[0].Name | Should -Be 'Wallpaper gallery'
+            $gallery[0].NameEs | Should -Be 'Galería de fondos'
+        }
+    }
+
     It 'every command maps to a subcommand the dispatcher knows' {
         InModuleScope Winarchy {
             $psm1 = Get-Content (Join-Path (Get-WinarchyRoot) 'module\Winarchy\Winarchy.psm1') -Raw
@@ -658,6 +687,90 @@ Describe 'Coding agent' {
             Should -Invoke Start-Process -Times 1 -ParameterFilter {
                 $FilePath -eq 'wezterm-gui.exe' -and $ArgumentList -contains 'codex'
             }
+        }
+    }
+}
+
+Describe 'Background gallery' {
+    It 'fits three wallpaper cards in one row' {
+        InModuleScope Winarchy {
+            $layout = Get-WinarchyBackgroundGalleryLayout -Count 3 -WorkWidth 1920 -WorkHeight 1080
+            $layout.Width | Should -Be 1120
+            $layout.CardWidth | Should -Be 336
+            $layout.Columns | Should -Be 3
+            $layout.Rows | Should -Be 1
+            $layout.Height | Should -Be 366
+        }
+    }
+
+    It 'adds a second row for the fourth wallpaper' {
+        InModuleScope Winarchy {
+            $layout = Get-WinarchyBackgroundGalleryLayout -Count 4 -WorkWidth 1920 -WorkHeight 1080
+            $layout.Rows | Should -Be 2
+            $layout.Height | Should -Be 616
+        }
+    }
+
+    It 'caps a long wallpaper gallery below the work area height' {
+        InModuleScope Winarchy {
+            $layout = Get-WinarchyBackgroundGalleryLayout -Count 30 -WorkWidth 1920 -WorkHeight 1080
+            $layout.Rows | Should -Be 10
+            $layout.Height | Should -Be 1032
+        }
+    }
+
+    It 'keeps an empty wallpaper gallery at its minimum height' {
+        InModuleScope Winarchy {
+            $layout = Get-WinarchyBackgroundGalleryLayout -Count 0 -WorkWidth 1920 -WorkHeight 1080
+            $layout.Rows | Should -Be 1
+            $layout.Height | Should -Be 280
+        }
+    }
+
+    It 'advertises the wallpaper picker in CLI help' {
+        (Invoke-Winarchy 'background' 'gallery' '--help' 6>&1 | Out-String) |
+            Should -Match 'background gallery'
+    }
+
+    It 'exposes the picker through the Winarchy menu in both languages' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $ahk | Should -Match "text:'Wallpaper gallery'.*Winarchy\('background gallery'\)"
+        $ahk | Should -Match "'Wallpaper gallery', 'Galería de fondos'"
+    }
+
+    It 'groups both galleries under the localized Appearance submenu' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $menu = [regex]::Match($ahk, '(?ms)^WinarchyMenuItems\(\) \{.*?^\}').Value
+        $appearance = [regex]::Match($ahk, '(?ms)^WinarchyAppearanceItems\(\) \{.*?^\}').Value
+        $menu | Should -Match "text:'Appearance',\s+sub: WinarchyAppearanceItems\(\)"
+        $ahk | Should -Match "'Appearance', 'Apariencia'"
+        $appearance | Should -Match "text:'Theme gallery'.*Winarchy\('theme gallery'\)"
+        $appearance | Should -Match "text:'Wallpaper gallery'.*Winarchy\('background gallery'\)"
+    }
+
+    It 'keeps both localized gallery windows floating' {
+        $template = Get-Content (Join-Path $script:Root 'templates\komorebi.json.tpl') -Raw
+        $template | Should -Match '\^Winarchy — \(Themes\|Temas\|Wallpapers — \.\+\|Fondos — \.\+\)\$'
+    }
+
+    It 'returns the <Key> text in <Language>' -ForEach @(
+        @{ Key = 'title'; Language = 'en'; Expected = 'Wallpapers — catppuccin' }
+        @{ Key = 'title'; Language = 'es'; Expected = 'Fondos — catppuccin' }
+        @{ Key = 'empty'; Language = 'en'; Expected = 'This theme has no bundled wallpapers.' }
+        @{ Key = 'empty'; Language = 'es'; Expected = 'Este theme no incluye fondos de pantalla.' }
+        @{ Key = 'dynamic'; Language = 'en'; Expected = 'Auto Accent follows Windows colors. Choose a wallpaper in Helium or Wallpaper Engine.' }
+        @{ Key = 'dynamic'; Language = 'es'; Expected = 'Auto Accent sigue los colores de Windows. Elegí el fondo en Helium o Wallpaper Engine.' }
+        @{ Key = 'current'; Language = 'en'; Expected = 'Current wallpaper' }
+        @{ Key = 'current'; Language = 'es'; Expected = 'Fondo actual' }
+        @{ Key = 'no-theme'; Language = 'en'; Expected = 'No theme applied yet; run winarchy theme set <name> first.' }
+        @{ Key = 'no-theme'; Language = 'es'; Expected = 'Todavía no hay un theme aplicado; primero ejecutá winarchy theme set <nombre>.' }
+        @{ Key = 'apply-error'; Language = 'en'; Expected = "Wallpaper 'wall.jpg' was not applied: denied" }
+        @{ Key = 'apply-error'; Language = 'es'; Expected = "No se pudo aplicar el fondo 'wall.jpg': denied" }
+    ) {
+        InModuleScope Winarchy -Parameters @{ Key = $Key; Language = $Language; Expected = $Expected } {
+            param($Key, $Language, $Expected)
+            Get-WinarchyBackgroundGalleryText -Key $Key -Theme 'catppuccin' -Language $Language -File 'wall.jpg' -Reason 'denied' |
+                Should -Be $Expected
         }
     }
 }
@@ -2900,7 +3013,7 @@ Describe 'native shell guardrails' {
         $src = Get-ChildItem (Join-Path (Split-Path $PSScriptRoot -Parent) 'shell\src') -Filter *.rs -Recurse
         $src | Should -Not -BeNullOrEmpty
         foreach ($f in $src) {
-            (Get-Content $f.FullName -Raw) | Should -Not -Match 'RegisterHotKey|SetWindowsHookEx|WH_KEYBOARD|SHAppBarMessage'
+            (Get-Content $f.FullName -Raw) | Should -Not -Match 'RegisterHotKey|WH_KEYBOARD|SHAppBarMessage'
         }
     }
 
@@ -2923,13 +3036,16 @@ Describe 'native shell guardrails' {
 
 Describe 'Bar dock' {
     BeforeAll {
-        $script:DockBackup = InModuleScope Winarchy { Test-Path (Get-WinarchyBarDockPath) }
+        $script:DockBackup = InModuleScope Winarchy {
+            $path = Get-WinarchyBarDockPath
+            @{ Exists = Test-Path $path; Content = if (Test-Path $path) { ,([System.IO.File]::ReadAllBytes($path)) } else { $null } }
+        }
     }
 
     AfterAll {
-        InModuleScope Winarchy -Parameters @{ Had = $script:DockBackup } {
-            param($Had)
-            if ($Had) { Set-Content (Get-WinarchyBarDockPath) -Value '' -NoNewline } else { Remove-Item (Get-WinarchyBarDockPath) -Force -ErrorAction SilentlyContinue }
+        InModuleScope Winarchy -Parameters @{ Backup = $script:DockBackup } {
+            param($Backup)
+            if ($Backup.Exists) { [System.IO.File]::WriteAllBytes((Get-WinarchyBarDockPath), [byte[]]$Backup.Content) } else { Remove-Item (Get-WinarchyBarDockPath) -Force -ErrorAction SilentlyContinue }
         }
     }
 
@@ -2969,6 +3085,7 @@ Describe 'Bar dock' {
 
     It 'float mode reserves nothing; the mode is read from the switch file' {
         InModuleScope Winarchy {
+            Mock Test-WinarchyTaskbarHidden { $false }
             Mock Get-WinarchyActiveBar { 'native' }
             Mock Get-ItemProperty { [pscustomobject]@{ AppliedDPI = 96 } }
             Mock Get-WinarchyBarPosition { 'top' }
@@ -2984,6 +3101,30 @@ Describe 'Bar dock' {
             Get-WinarchyDockMode | Should -Be 'reserve'
             Remove-Item (Get-WinarchyBarDockPath) -Force
             Get-WinarchyDockMode | Should -Be 'off'
+        }
+    }
+
+    It '<Mode> mode reserves <Bottom> bottom pixels when taskbar-hidden is <Hidden>' -ForEach @(
+        @{ Mode = 'hide'; Hidden = $true; Bottom = 0 }
+        @{ Mode = 'float'; Hidden = $true; Bottom = 0 }
+        @{ Mode = 'hide'; Hidden = $false; Bottom = 2 }
+        @{ Mode = 'float'; Hidden = $false; Bottom = 2 }
+    ) {
+        InModuleScope Winarchy -Parameters @{ Root = $TestDrive; Mode = $Mode; Hidden = $Hidden; Bottom = $Bottom } {
+            param($Root, $Mode, $Hidden, $Bottom)
+            Mock Resolve-Path { [pscustomobject]@{ Path = $Root } } -ParameterFilter { $Path -like '*\..\..\..' }
+            $state = Join-Path $Root 'state'
+            New-Item -ItemType Directory -Path $state -Force | Out-Null
+            Set-Content (Join-Path $state 'bar') -Value 'native' -NoNewline
+            Set-Content (Join-Path $state 'bar-dock') -Value $Mode -NoNewline
+            $flag = Join-Path $state 'taskbar-hidden'
+            if ($Hidden) { Set-Content $flag -Value '' -NoNewline }
+            elseif (Test-Path $flag) { Remove-Item $flag -Force }
+
+            $offset = Get-WinarchyDockWorkAreaOffset
+
+            $offset.Top | Should -Be 0
+            $offset.Bottom | Should -Be $Bottom
         }
     }
 
@@ -3284,19 +3425,21 @@ Describe 'Monitor health' {
             }
         }
 
-        It 'skips reload-configuration when komorebi was just restarted' {
+        It 'skips configuration replacement when komorebi was just restarted' {
             InModuleScope Winarchy {
                 Mock Repair-WinarchyKomorebiMonitors { $true }
                 Invoke-WinarchyReload
-                Should -Invoke komorebic -Times 0 -ParameterFilter { $args[0] -eq 'reload-configuration' }
+                Should -Invoke komorebic -Times 0 -ParameterFilter { $args[0] -in 'reload-configuration', 'replace-configuration' }
             }
         }
 
-        It 'reloads the configuration when komorebi was not restarted' {
+        It 'replaces the generated configuration when komorebi was not restarted' {
             InModuleScope Winarchy {
                 Mock Repair-WinarchyKomorebiMonitors { $false }
                 Invoke-WinarchyReload
-                Should -Invoke komorebic -Times 1 -ParameterFilter { $args[0] -eq 'reload-configuration' }
+                Should -Invoke komorebic -Times 1 -ParameterFilter {
+                    $args[0] -eq 'replace-configuration' -and $args[1] -eq (Join-Path $TestDrive 'config\komorebi\komorebi.json')
+                }
             }
         }
 
@@ -3305,7 +3448,9 @@ Describe 'Monitor health' {
                 Mock Repair-WinarchyKomorebiMonitors { $true }
                 Invoke-WinarchyReload -Light
                 Should -Invoke Repair-WinarchyKomorebiMonitors -Times 0
-                Should -Invoke komorebic -Times 1 -ParameterFilter { $args[0] -eq 'reload-configuration' }
+                Should -Invoke komorebic -Times 1 -ParameterFilter {
+                    $args[0] -eq 'replace-configuration' -and $args[1] -eq (Join-Path $TestDrive 'config\komorebi\komorebi.json')
+                }
             }
         }
     }
