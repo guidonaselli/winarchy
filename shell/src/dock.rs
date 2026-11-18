@@ -1765,12 +1765,14 @@ unsafe fn raise(hwnd: HWND) {
     }
 }
 
+unsafe fn start_in_front() -> bool {
+    apps::is_start_surface(exe_of(GetForegroundWindow()).rsplit(['\\', '/']).next().unwrap_or(""))
+}
+
 unsafe fn close_start() -> bool {
     let down = |k: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| GetAsyncKeyState(k.0 as i32) < 0;
     // Con un modificador apretado el Escape sintético sería Ctrl+Esc/Alt+Esc.
-    if !apps::is_start_surface(exe_of(GetForegroundWindow()).rsplit(['\\', '/']).next().unwrap_or(""))
-        || !apps::tray_activation_ready(down(VK_LWIN) || down(VK_RWIN), down(VK_CONTROL), down(VK_MENU), down(VK_SHIFT))
-    {
+    if !apps::tray_activation_ready(down(VK_LWIN) || down(VK_RWIN), down(VK_CONTROL), down(VK_MENU), down(VK_SHIFT)) {
         return false;
     }
     let key = |flags| INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VK_ESCAPE, dwFlags: flags, ..Default::default() } } };
@@ -1805,14 +1807,15 @@ pub(crate) unsafe fn focus_window(hwnd: HWND) {
 
 enum Replay { Click(String), Menu(String), Overflow }
 
-// Con Inicio al frente Windows rechaza el foco y el menú: se cierra Inicio y la acción se repite después, hasta 3 veces.
+// Con Inicio al frente Windows rechaza el foco y el menú: se cierra Inicio con un Escape y la acción espera a que
+// deje el frente; sobre un juego tarda más de un segundo, de ahí hasta 10 ticks (~2 s).
 unsafe fn replay(act: Replay, tries: u8) {
     let dock = with(|d| {
         d.pending_click = None;
         d.hwnd
     });
     let _ = KillTimer(dock, T_CLICK);
-    if tries < 3 && close_start() {
+    if tries < 10 && start_in_front() && (tries > 0 || close_start()) {
         with(|d| d.pending_click = Some((act, tries + 1)));
         SetTimer(dock, T_CLICK, FOCUS_DELAY_MS, None);
         return;
