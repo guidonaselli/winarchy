@@ -84,16 +84,36 @@ unsafe extern "system" fn on_foreground(_: windows::Win32::UI::Accessibility::HW
     if DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut _ as *mut _, 4).is_err() || cloaked == 0 {
         return;
     }
-    let target = hwnd.0 as isize;
-    if let Some((m, ws)) = window_slot(target) {
-        // Al cambiar de workspace komorebi enfoca su última ventana de ahí, no la pedida: se la vuelve a traer.
-        std::thread::spawn(move || {
-            let cmd = std::process::Command::new("komorebic.exe").args(["focus-monitor-workspace", &m.to_string(), &ws.to_string()]).creation_flags(CREATE_NO_WINDOW).spawn();
-            if let Ok(mut child) = cmd { let _ = child.wait(); }
-            std::thread::sleep(std::time::Duration::from_millis(150));
-            unsafe { crate::dock::raise(HWND(target as *mut _)) };
-        });
+    if window_slot(hwnd.0 as isize).is_some() {
+        bring_to_front(hwnd.0 as isize);
     }
+}
+
+// Lee el estado de komorebi en el momento: el mapa en caché puede ir atrás de una mudanza de ventana y llevar al workspace equivocado.
+fn fresh_slot(hwnd: isize) -> Option<(usize, usize)> {
+    let out = std::process::Command::new("komorebic.exe").arg("state").creation_flags(CREATE_NO_WINDOW).output().ok()?;
+    let state = serde_json::from_slice::<Value>(&out.stdout).ok()?;
+    let map = parse_windows(&serde_json::json!({ "state": state }))?;
+    let slot = map.get(&hwnd).copied();
+    let changed = WINDOWS.lock().unwrap().replace(map.clone()).as_ref() != Some(&map);
+    if changed {
+        notify_windows();
+    }
+    slot
+}
+
+// Lleva la vista al workspace de la ventana y la sube. Al cambiar de workspace komorebi enfoca su última ventana de ahí, no la pedida: se la vuelve a traer.
+pub fn bring_to_front(target: isize) {
+    std::thread::spawn(move || {
+        if let Some((m, ws)) = fresh_slot(target) {
+            let cmd = std::process::Command::new("komorebic.exe").args(crate::dock::focus_args(m, ws)).creation_flags(CREATE_NO_WINDOW).spawn();
+            if let Ok(mut child) = cmd {
+                let _ = child.wait();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+        unsafe { crate::dock::raise(HWND(target as *mut _)) };
+    });
 }
 
 pub fn focus_workspace(index: usize) {

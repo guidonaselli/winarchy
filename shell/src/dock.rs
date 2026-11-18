@@ -5,7 +5,6 @@ use crate::layout::{px, R};
 use crate::theme::{rgb, Theme};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
-use std::os::windows::process::CommandExt;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use windows::core::{w, PCWSTR};
@@ -206,7 +205,6 @@ fn arrange(pins: &[Pin], mut groups: Vec<Item>) -> Vec<Item> {
 const WM_ICON: u32 = WM_APP + 21;
 const T_REFRESH: usize = 1;
 const T_TICK: usize = 2;
-const T_FOCUS: usize = 3;
 const T_ANIM: usize = 4;
 const T_EDGE: usize = 5;
 const T_TIP: usize = 6;
@@ -215,13 +213,13 @@ const WM_TRAY_FOREGROUND: u32 = WM_APP + 23;
 const T_TRAY_FOCUS: usize = 7;
 const T_TRAY_ACTIVATE: usize = 8;
 const T_CLICK: usize = 9;
+const FOCUS_DELAY_MS: u32 = 220;
 const TIP_FADE_MS: u128 = 130;
 const GLIDE_TAU_MS: f32 = 55.0;
 const EDGE_MS: u32 = 60;
 const LEAVE_MS: u128 = 450;
 const ANIM_MS: u32 = 16;
 const REFRESH_MS: u32 = 60;
-const FOCUS_DELAY_MS: u32 = 220;
 
 #[derive(Clone, PartialEq)]
 struct Item {
@@ -260,7 +258,6 @@ struct Dock {
     mon: MonRect,
     sig: u64,
     hidden: bool,
-    pending_focus: Option<isize>,
     pending_click: Option<(Replay, u8)>,
     pins: Vec<Pin>,
     ident: HashMap<isize, (String, Option<String>, std::time::Instant)>,
@@ -396,7 +393,6 @@ unsafe fn create_dock(r: &RECT, theme: &Theme, pins_path: &std::path::Path) -> O
         mon,
         sig: 0,
         hidden: false,
-        pending_focus: None,
         pending_click: None,
         pins: load_pins(pins_path),
         ident: HashMap::new(),
@@ -1792,13 +1788,10 @@ pub(crate) unsafe fn focus_window(hwnd: HWND) {
     if IsIconic(hwnd).as_bool() {
         let _ = ShowWindow(hwnd, SW_RESTORE);
     }
-    match komorebi::window_slot(id) {
-        Some((m, ws)) if is_cloaked(hwnd) => {
-            let _ = std::process::Command::new("komorebic.exe").args(focus_args(m, ws)).creation_flags(0x0800_0000).spawn();
-            with(|d| d.pending_focus = Some(id));
-            SetTimer(dock, T_FOCUS, FOCUS_DELAY_MS, None);
-        }
-        _ => raise(hwnd),
+    if is_cloaked(hwnd) {
+        komorebi::bring_to_front(id);
+    } else {
+        raise(hwnd);
     }
 }
 
@@ -2466,16 +2459,6 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             let _ = KillTimer(h, T_CLICK);
             if let Some((act, tries)) = with(|d| d.pending_click.take()) {
                 replay(act, tries);
-            }
-            LRESULT(0)
-        }
-        WM_TIMER if wp.0 == T_FOCUS => {
-            let _ = KillTimer(h, T_FOCUS);
-            if let Some(id) = with(|d| d.pending_focus.take()) {
-                let t = HWND(id as *mut _);
-                if IsWindow(t).as_bool() {
-                    raise(t);
-                }
             }
             LRESULT(0)
         }
