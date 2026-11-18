@@ -1751,7 +1751,7 @@ unsafe fn tick() {
 }
 
 // Windows niega SetForegroundWindow a quien no es el foreground: se comparte la cola de entrada con él un instante.
-unsafe fn raise(hwnd: HWND) {
+pub(crate) unsafe fn raise(hwnd: HWND) {
     if SetForegroundWindow(hwnd).as_bool() {
         return;
     }

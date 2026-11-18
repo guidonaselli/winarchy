@@ -70,6 +70,32 @@ pub fn parse(event: &Value) -> Option<Workspaces> {
     Some(Workspaces { occupied, focused, layout })
 }
 
+// komorebi no sigue el foco a una ventana flotante de otro workspace (Alt+Tab, una notificación, la app que se activa
+// sola): queda al frente pero oculta. Si la ventana que pasa al frente está oculta y komorebi la ubica, se va a su workspace.
+pub fn follow_foreground() {
+    use windows::Win32::UI::Accessibility::SetWinEventHook;
+    use windows::Win32::UI::WindowsAndMessaging::{EVENT_SYSTEM_FOREGROUND, WINEVENT_OUTOFCONTEXT};
+    unsafe { SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, None, Some(on_foreground), 0, 0, WINEVENT_OUTOFCONTEXT) };
+}
+
+unsafe extern "system" fn on_foreground(_: windows::Win32::UI::Accessibility::HWINEVENTHOOK, _: u32, hwnd: HWND, _: i32, _: i32, _: u32, _: u32) {
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+    let mut cloaked = 0u32;
+    if DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut _ as *mut _, 4).is_err() || cloaked == 0 {
+        return;
+    }
+    let target = hwnd.0 as isize;
+    if let Some((m, ws)) = window_slot(target) {
+        // Al cambiar de workspace komorebi enfoca su última ventana de ahí, no la pedida: se la vuelve a traer.
+        std::thread::spawn(move || {
+            let cmd = std::process::Command::new("komorebic.exe").args(["focus-monitor-workspace", &m.to_string(), &ws.to_string()]).creation_flags(CREATE_NO_WINDOW).spawn();
+            if let Ok(mut child) = cmd { let _ = child.wait(); }
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            unsafe { crate::dock::raise(HWND(target as *mut _)) };
+        });
+    }
+}
+
 pub fn focus_workspace(index: usize) {
     let _ = std::process::Command::new("komorebic.exe").args(["focus-workspace", &index.to_string()]).creation_flags(CREATE_NO_WINDOW).spawn();
 }

@@ -1136,6 +1136,7 @@ fn main() {
         komorebi::spawn(move || {
             let _ = PostMessageW(HWND(target as *mut _), WM_WORKSPACES, WPARAM(0), LPARAM(0));
         });
+        komorebi::follow_foreground();
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
