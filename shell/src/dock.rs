@@ -1765,19 +1765,16 @@ unsafe fn raise(hwnd: HWND) {
     }
 }
 
-unsafe fn start_in_front() -> bool {
-    apps::is_start_surface(exe_of(GetForegroundWindow()).rsplit(['\\', '/']).next().unwrap_or(""))
+unsafe fn set_activatable(h: HWND, on: bool) {
+    let ex = GetWindowLongW(h, GWL_EXSTYLE);
+    let want = if on { ex & !(WS_EX_NOACTIVATE.0 as i32) } else { ex | WS_EX_NOACTIVATE.0 as i32 };
+    if want != ex {
+        SetWindowLongW(h, GWL_EXSTYLE, want);
+    }
 }
 
-unsafe fn close_start() -> bool {
-    let down = |k: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| GetAsyncKeyState(k.0 as i32) < 0;
-    // Con un modificador apretado el Escape sintético sería Ctrl+Esc/Alt+Esc.
-    if !apps::tray_activation_ready(down(VK_LWIN) || down(VK_RWIN), down(VK_CONTROL), down(VK_MENU), down(VK_SHIFT)) {
-        return false;
-    }
-    let key = |flags| INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VK_ESCAPE, dwFlags: flags, ..Default::default() } } };
-    SendInput(&[key(Default::default()), key(KEYEVENTF_KEYUP)], std::mem::size_of::<INPUT>() as i32);
-    true
+unsafe fn start_in_front() -> bool {
+    apps::is_start_surface(exe_of(GetForegroundWindow()).rsplit(['\\', '/']).next().unwrap_or(""))
 }
 
 pub(crate) unsafe fn focus_window(hwnd: HWND) {
@@ -1807,19 +1804,20 @@ pub(crate) unsafe fn focus_window(hwnd: HWND) {
 
 enum Replay { Click(String), Menu(String), Overflow }
 
-// Con Inicio al frente Windows rechaza el foco y el menú: se cierra Inicio con un Escape y la acción espera a que
-// deje el frente; sobre un juego tarda más de un segundo, de ahí hasta 10 ticks (~2 s).
+// Con Inicio al frente Windows rechaza el foco y el menú: la acción espera a que Inicio deje el frente (lo cierra la
+// activación del dock en WM_MOUSEACTIVATE); sobre un juego tarda más de un segundo, de ahí hasta 10 ticks (~2 s).
 unsafe fn replay(act: Replay, tries: u8) {
     let dock = with(|d| {
         d.pending_click = None;
         d.hwnd
     });
     let _ = KillTimer(dock, T_CLICK);
-    if tries < 10 && start_in_front() && (tries > 0 || close_start()) {
+    if tries < 10 && start_in_front() {
         with(|d| d.pending_click = Some((act, tries + 1)));
         SetTimer(dock, T_CLICK, FOCUS_DELAY_MS, None);
         return;
     }
+    set_activatable(dock, false);
     let index = |key: &str| with(|d| d.items.iter().position(|i| i.key == key));
     let ctx = match act {
         Replay::Click(key) => {
@@ -2529,9 +2527,14 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             end_keyboard(false);
             LRESULT(0)
         }
+        // Inicio rechaza el input sintético y solo se cierra cuando otra ventana se activa, como con la taskbar nativa:
+        // con Inicio al frente el dock deja de ser NOACTIVATE (WM_MOUSEMOVE, antes del clic) y el clic lo activa.
+        WM_MOUSEACTIVATE if start_in_front() => LRESULT(MA_ACTIVATE as isize),
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_MOUSEMOVE => {
             let (x, y) = xy(lp);
+            // El logo y la bandeja con Inicio abierto actúan sobre Inicio mismo: activar el dock los rompería.
+            set_activatable(h, start_in_front() && matches!(with(|d| display_hit(d, x, y)), Some(Hit::Item(_) | Hit::Overflow)));
             let dragged = with(|d| {
                 let hit = match hit_test(&d.layout, x + d.layout.bar.x, y + d.layout.bar.y) {
                     Some(Hit::Item(i)) => d.items.get(i).map(|it| it.key.clone()),
