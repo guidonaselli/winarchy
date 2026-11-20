@@ -234,7 +234,12 @@ WindowDrag(move, held := 0) {
             Sleep(10)
         return
     }
-    WinActivate(hwnd), WinWaitActive(hwnd, , 0.5)
+    try WinActivate(hwnd), WinWaitActive(hwnd, , 0.5)
+    if !WinExist(hwnd) {                          ; closed between the click and the drag
+        while held()
+            Sleep(10)
+        return
+    }
     move ? DragMove(hwnd, x, y, held) : DragResize(hwnd, x, y, held)
 }
 
