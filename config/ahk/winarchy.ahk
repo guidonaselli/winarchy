@@ -679,7 +679,9 @@ SetTimer(ShellWatch, 5000)
 
 ShellWatch() {
     global ShellMisses, ShellRelaunches, BarFile, YasbcExe, RepoRoot
-    native := FileExist(BarFile) ? Trim(FileRead(BarFile)) = 'native' : !YasbcExe
+    try native := FileExist(BarFile) ? Trim(FileRead(BarFile)) = 'native' : !YasbcExe
+    catch
+        return   ; state\bar en reemplazo: se vuelve a mirar en 5 s
     if !native || ProcessExist('winarchy-shell.exe') {
         ShellMisses := 0
         return
@@ -695,8 +697,12 @@ ShellWatch() {
         }
     while ShellRelaunches.Length && A_TickCount - ShellRelaunches[1] > 300000
         ShellRelaunches.RemoveAt(1)
-    if !exe || ShellRelaunches.Length >= 3
+    if !exe
         return
+    if ShellRelaunches.Length >= 3 {
+        TrayTip('The shell keeps crashing; relaunch paused. Run: winarchy doctor', 'Winarchy')
+        return
+    }
     ShellRelaunches.Push(A_TickCount)
     Run('"' exe '"', , 'Hide')
 }

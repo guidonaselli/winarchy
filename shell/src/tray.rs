@@ -311,6 +311,8 @@ fn read_loop(pipe: isize, on_change: impl Fn()) {
     loop {
         unsafe {
             if ConnectNamedPipe(handle, None).is_err() && GetLastError() != ERROR_PIPE_CONNECTED {
+                // Un cliente que conectó y cerró antes de este punto deja el pipe en cierre hasta que se desconecte.
+                let _ = DisconnectNamedPipe(handle);
                 std::thread::sleep(std::time::Duration::from_millis(RETRY_MS));
                 continue;
             }

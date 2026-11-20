@@ -377,7 +377,10 @@ unsafe fn watch(h: HWND) {
     if !down || GetCursorPos(&mut p).is_err() {
         return;
     }
-    if GetAncestor(WindowFromPoint(p), GA_ROOT) != h {
+    let a = with(|f| f.anchor).unwrap_or_default();
+    let on_anchor = p.x >= a.x && p.x < a.x + a.w && p.y >= a.y && p.y < a.y + a.h;
+    // Sobre el botón que lo abrió el cierre lo decide `toggle`; si no, soltar el clic lo reabriría.
+    if !on_anchor && GetAncestor(WindowFromPoint(p), GA_ROOT) != h {
         close();
     }
 }
