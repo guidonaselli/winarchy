@@ -7,6 +7,12 @@ function Get-WinarchyScreenCount {
     [System.Windows.Forms.Screen]::AllScreens.Count
 }
 
+function Get-WinarchyScreenSignature {
+    <# Disposición actual de pantallas: cambia al conectar, desconectar o mover un monitor. #>
+    Add-Type -AssemblyName System.Windows.Forms
+    (@([System.Windows.Forms.Screen]::AllScreens | ForEach-Object { $b = $_.Bounds; "$($b.X),$($b.Y),$($b.Width),$($b.Height)" }) | Sort-Object) -join ';'
+}
+
 function Get-WinarchyKomorebiMonitors {
     @(Invoke-WinarchyKomorebic monitor-information | ConvertFrom-Json)
 }
@@ -31,8 +37,10 @@ function Test-WinarchyMonitorHealth {
 function Repair-WinarchyKomorebiMonitors {
     <#
       Reinicia komorebi si perdió un monitor. Devuelve $true si lo reinició.
-      -Throttled (el watchdog de AHK): a lo sumo un reinicio cada 5 minutos, para que una
-      pantalla que parpadea no lo deje reiniciando en loop.
+      -Throttled (el watchdog de AHK): a lo sumo un reinicio cada 5 minutos con la misma
+      disposición de pantallas, para que una pantalla que parpadea no lo deje reiniciando en
+      loop. Si la disposición cambió (p. ej. reconectar el monitor que se acababa de perder),
+      el límite no aplica: komorebi se reinició con el estado anterior y hay que repetirlo.
     #>
     param([switch]$Throttled)
     if (-not (Test-WinarchyProcess 'komorebi')) { return $false }
@@ -48,10 +56,11 @@ function Repair-WinarchyKomorebiMonitors {
         return $false
     }
     $stamp = Join-Path (Get-WinarchyStateDir) 'monitor-heal'
-    if ($Throttled -and (Test-Path $stamp) -and ((Get-Date) - (Get-Item $stamp).LastWriteTime).TotalMinutes -lt 5) {
+    $layout = Get-WinarchyScreenSignature
+    if ($Throttled -and (Test-Path $stamp) -and ((Get-Date) - (Get-Item $stamp).LastWriteTime).TotalMinutes -lt 5 -and (Get-Content $stamp -Raw).Trim() -eq $layout) {
         return $false
     }
-    Set-Content -Path $stamp -Value (Get-Date -Format o)
+    Set-Content -Path $stamp -Value $layout
 
     $null = Invoke-WinarchyKomorebic stop
     $deadline = (Get-Date).AddSeconds(10)

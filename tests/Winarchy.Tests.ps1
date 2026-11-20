@@ -3478,6 +3478,8 @@ Describe 'Monitor health' {
                 Mock Get-WinarchyStateDir { $script:stateDir }
                 Mock Get-WinarchyGameModeFlag { Join-Path $script:stateDir 'game-mode' }
                 Mock Get-WinarchyScreenCount { 2 }
+                $script:layout = '-1920,0,1920,1080;0,0,2560,1440'
+                Mock Get-WinarchyScreenSignature { $script:layout }
                 Mock Start-Sleep { }
                 Mock Write-WinarchyOk { }
                 Mock Write-WinarchyWarn { }
@@ -3530,6 +3532,15 @@ Describe 'Monitor health' {
                 Repair-WinarchyKomorebiMonitors -Throttled | Should -BeFalse
                 Should -Invoke Start-WinarchyKomorebi -Times 1
                 Repair-WinarchyKomorebiMonitors | Should -BeTrue
+                Should -Invoke Start-WinarchyKomorebi -Times 2
+            }
+        }
+
+        It 'does not throttle a restart when the screen layout changed since the last one' {
+            InModuleScope Winarchy {
+                Repair-WinarchyKomorebiMonitors -Throttled | Should -BeTrue
+                $script:layout = '0,0,2560,1440'
+                Repair-WinarchyKomorebiMonitors -Throttled | Should -BeTrue
                 Should -Invoke Start-WinarchyKomorebi -Times 2
             }
         }
