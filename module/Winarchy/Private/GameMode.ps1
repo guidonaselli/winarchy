@@ -102,7 +102,9 @@ function Get-WinarchyGames {
 }
 
 function Update-WinarchyKomorebiRules {
-    <# Re-renderiza komorebi.json (con las ignore-rules nuevas) y recarga komorebi. #>
+    <# Re-renderiza komorebi.json (con las ignore-rules nuevas) y recarga komorebi.
+       Con -NoReload solo escribe el archivo: el próximo arranque de komorebi lo toma. #>
+    param([switch]$NoReload)
     $current = Get-WinarchyCurrentTheme
     if (-not $current) {
         Write-WinarchyWarn 'No active theme yet; the rules will apply with the first `winarchy theme set`.'
@@ -118,7 +120,7 @@ function Update-WinarchyKomorebiRules {
     $rendered = Add-WinarchyWindowRulesToKomorebiJson -Json $rendered
     $rendered | ConvertFrom-Json | Out-Null
     Set-WinarchyFileAtomic -Path (Join-Path $root 'config\komorebi\komorebi.json') -Value $rendered
-    if (Test-WinarchyProcess 'komorebi') {
+    if (-not $NoReload -and (Test-WinarchyProcess 'komorebi')) {
         Invoke-WinarchyKomorebiReplace -ConfigPath (Join-Path $root 'config\komorebi\komorebi.json')
     }
 }

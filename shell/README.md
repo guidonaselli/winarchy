@@ -8,7 +8,7 @@ Shell nativa opcional de Winarchy (franja reservada + isla). Se activa con `stat
 
 ## Dock
 
-`winarchy bar dock on|float|hide|off` agrega un dock con las apps abiertas y ancladas en cada monitor, en el borde opuesto al de la isla; `hide` no reserva nada y se esconde hasta llevar el mouse al borde. `on` reserva su franja en komorebi; `float` flota sobre las ventanas sin reservar nada.
+El cluster del sistema (Quick Settings, reloj y notificaciones) vive en el dock del monitor primario; `winarchy bar cluster primary|off|N` elige otro. `winarchy bar dock on|float|hide|auto|off` agrega un dock con las apps abiertas y ancladas en cada monitor, en el borde opuesto al de la isla; `hide` no reserva nada y se esconde hasta llevar el mouse al borde. `on` reserva su franja en komorebi; `float` flota sobre las ventanas sin reservar nada; `auto` se esconde como `hide` salvo en un workspace floating, donde se ve.
 
 - **Ventanas**: agrupa por AppUserModelID (respaldo: exe). Clic enfoca (restaura minimizadas, cambia de workspace con `komorebic`); clic en la app que ya está al frente la minimiza; con varias ventanas el clic abre un selector con sus títulos; clic medio abre una instancia nueva. La celda "+N" abre el selector de los grupos que no entraron.
 - **Logo del dock**: clic izquierdo abre Inicio; clic derecho abre el menú de control de Winarchy.
@@ -27,5 +27,7 @@ Shell nativa opcional de Winarchy (franja reservada + isla). Se activa con `stat
 `winarchy taskbar autohide` (por defecto con el dock) la deja en auto-hide y sigue alojando la bandeja de íconos. `winarchy taskbar hide` la oculta del todo (requiere dock) y la shell la vuelve a ocultar si Windows la muestra; se devuelve con `taskbar autohide|show`, al cerrar la shell, al apagar el dock y ante un panic. Con la taskbar oculta:
 
 - Siguen andando: Win+N (calendario y notificaciones), Inicio, búsqueda; el volumen, la red, la batería y el contador de notificaciones los muestra la Island.
-- El botón `^` al extremo del dock abre la bandeja del sistema; su tooltip está localizado. La bandeja se cierra al hacer clic fuera, pulsar Escape o cambiar el foco. Explorer dibuja los íconos de la bandeja y sus textos; Winarchy no los reimplementa.
+- El botón `^` al extremo del dock abre la bandeja del sistema; su tooltip está localizado. Con la `YASBTrayHook.dll` del YASB pinneado instalada, la shell muestra un flyout propio con los íconos reales (hover animado, nombre del ícono, clic izquierdo, derecho y medio reenviados al ícono, accesible por UI Automation) y se cierra con un clic fuera. Sin la DLL, o con YASB corriendo, abre la bandeja nativa (clic fuera, Escape o cambio de foco la cierran) y `winarchy doctor` lo avisa.
+- Hasta 4 íconos de bandeja se fijan a la vista en la píldora derecha: en el flyout, el marcador de pin de cada ícono los fija o los quita (`state/tray-pins.json`, clave ejecutable:id). En la píldora llevan clic izquierdo, derecho y medio a la app.
+- Al extremo derecho de la píldora, una franja fina muestra el escritorio (minimiza todo) y al segundo clic lo restaura, con los comandos de `Shell_TrayWnd`, sin mandar teclas.
 - Al abrir Inicio o Search, el dock `hide` se muestra en el monitor correspondiente.

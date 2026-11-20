@@ -1020,7 +1020,7 @@ Describe 'Window placement' {
             $live = @(Get-WinarchyLiveWorkspaceLayouts -State $state)
             $live.Count | Should -Be 1
             $live[0].Layout | Should -Be 'Grid'
-            Export-WinarchyWindowPrefs -Pref @() -Layout (@($live) + [pscustomobject]@{ Monitor = 'GONE'; Workspace = 4; Layout = 'Columns' })
+            Export-WinarchyWindowPrefs -Pref @() -Layout (@($live) + [pscustomobject]@{ Monitor = 'GONE'; Workspace = 4; Layout = 'Columns'; Mode = 'tiling' })
             Export-WinarchyWindowPrefs -Pref @([pscustomobject]@{ Exe = 'a.exe'; Monitor = 'AAA1'; Workspace = 0; WorkspaceName = '1'; Slot = $null; Pin = $false })
             $back = @(Import-WinarchyWorkspaceLayouts)
             $back.Count | Should -Be 2
@@ -1031,14 +1031,121 @@ Describe 'Window placement' {
         }
     }
 
+    It 'tells tiling, scrolling and floating apart from the komorebi workspace state' {
+        InModuleScope Winarchy {
+            $ws = { param($layout, $tile) $o = [pscustomobject]@{ layout = [pscustomobject]@{ Default = $layout } }; if ($null -ne $tile) { $o | Add-Member tile $tile }; $o }
+            Get-WinarchyWorkspaceMode -Workspace (& $ws 'BSP' $true)       | Should -Be 'tiling'
+            Get-WinarchyWorkspaceMode -Workspace (& $ws 'Grid' $null)      | Should -Be 'tiling'
+            Get-WinarchyWorkspaceMode -Workspace (& $ws 'Scrolling' $true) | Should -Be 'scrolling'
+            Get-WinarchyWorkspaceMode -Workspace (& $ws 'BSP' $false)      | Should -Be 'floating'
+            # tile apagado gana sobre el layout: así lo resuelve komorebi
+            Get-WinarchyWorkspaceMode -Workspace (& $ws 'Scrolling' $false) | Should -Be 'floating'
+        }
+    }
+
+    It 'captures the modes that differ from the default and nothing else' {
+        InModuleScope Winarchy {
+            $mk = { param($layout, $tile) [pscustomobject]@{ layout = [pscustomobject]@{ Default = $layout }; tile = $tile } }
+            $state = [pscustomobject]@{ monitors = [pscustomobject]@{ elements = @(
+                [pscustomobject]@{ device_id = 'AAA1'; workspaces = [pscustomobject]@{ elements = @(
+                    (& $mk 'BSP' $true), (& $mk 'Scrolling' $true), (& $mk 'BSP' $false)) } }) } }
+            $live = @(Get-WinarchyLiveWorkspaceLayouts -State $state)
+            $live.Count | Should -Be 2
+            ($live | Where-Object Workspace -eq 1).Mode | Should -Be 'scrolling'
+            ($live | Where-Object Workspace -eq 2).Mode | Should -Be 'floating'
+            ($live | Where-Object Workspace -eq 2).Layout | Should -Be 'BSP'
+            # con default floating, lo que se aparta es el tiling y el scrolling, no el floating
+            $viaFloating = @(Get-WinarchyLiveWorkspaceLayouts -State $state -DefaultMode 'floating')
+            $viaFloating.Workspace | Should -Be @(0, 1)
+        }
+    }
+
+    It 'round-trips the mode and default_mode through windows.toml' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            New-Item -ItemType Directory -Path (Join-Path $TestDrive 'config') -Force | Out-Null
+            Export-WinarchyWindowPrefs -Pref @() -DefaultMode 'floating' -Layout @(
+                [pscustomobject]@{ Monitor = 'AAA1'; Workspace = 0; Layout = 'BSP'; Mode = 'tiling' }
+                [pscustomobject]@{ Monitor = 'AAA1'; Workspace = 2; Layout = 'Scrolling'; Mode = 'scrolling' })
+            Import-WinarchyDefaultMode | Should -Be 'floating'
+            $back = @(Import-WinarchyWorkspaceLayouts)
+            ($back | Where-Object Workspace -eq 0).Mode | Should -Be 'tiling'
+            ($back | Where-Object Workspace -eq 2).Mode | Should -Be 'scrolling'
+            # guardar solo ventanas no pisa el default ni los modos
+            Export-WinarchyWindowPrefs -Pref @([pscustomobject]@{ Exe = 'a.exe'; Monitor = 'AAA1'; Workspace = 0; WorkspaceName = '1'; Slot = $null; Pin = $false })
+            Import-WinarchyDefaultMode | Should -Be 'floating'
+            @(Import-WinarchyWorkspaceLayouts).Count | Should -Be 2
+        }
+    }
+
+    It 'reads an old windows.toml that only has layout, and falls back to tiling without default_mode' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            New-Item -ItemType Directory -Path (Join-Path $TestDrive 'config') -Force | Out-Null
+            Set-Content (Join-Path $TestDrive 'config\windows.toml') "[[workspaces]]`nmonitor = `"AAA1`"`nworkspace = 1`nlayout = `"Scrolling`"`n`n[[workspaces]]`nmonitor = `"AAA1`"`nworkspace = 2`nlayout = `"Grid`""
+            $back = @(Import-WinarchyWorkspaceLayouts)
+            ($back | Where-Object Workspace -eq 1).Mode | Should -Be 'scrolling'
+            ($back | Where-Object Workspace -eq 2).Mode | Should -Be 'tiling'
+            Import-WinarchyDefaultMode | Should -Be 'tiling'
+        }
+    }
+
+    It 'saving the modes refreshes komorebi.json on disk without reloading komorebi' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            New-Item -ItemType Directory -Path (Join-Path $TestDrive 'config') -Force | Out-Null
+            Mock Get-WinarchyKomorebiState { [pscustomobject]@{ monitors = [pscustomobject]@{ elements = @(
+                [pscustomobject]@{ device_id = 'AAA1'; workspaces = [pscustomobject]@{ elements = @(
+                    [pscustomobject]@{ name = '1'; layout = [pscustomobject]@{ Default = 'BSP' }; tile = $false }) } }) } } }
+            Mock Update-WinarchyKomorebiRules { }
+            Save-WinarchyWorkspaceModes
+            Should -Invoke Update-WinarchyKomorebiRules -Times 1 -ParameterFilter { $NoReload }
+            (@(Import-WinarchyWorkspaceLayouts))[0].Mode | Should -Be 'floating'
+        }
+    }
+
+    It 'writes floating as tile=false and scrolling as the Scrolling layout into komorebi.json' {
+        InModuleScope Winarchy {
+            Mock Test-WinarchyProcess { $true }
+            Mock Get-WinarchyKomorebiState { [pscustomobject]@{ monitors = [pscustomobject]@{ elements = @([pscustomobject]@{ device_id = 'AAA1' }) } } }
+            Mock Import-WinarchyWindowPrefs { }
+            Mock Import-WinarchyDefaultMode { 'tiling' }
+            Mock Import-WinarchyWorkspaceLayouts {
+                [pscustomobject]@{ Monitor = 'AAA1'; Workspace = 1; Layout = 'BSP'; Mode = 'floating' }
+                [pscustomobject]@{ Monitor = 'AAA1'; Workspace = 2; Layout = 'BSP'; Mode = 'scrolling' }
+            }
+            $json = '{"monitors":[{"workspaces":[{"name":"1","layout":"BSP"},{"name":"2","layout":"BSP"},{"name":"3","layout":"BSP"}]}]}'
+            $out = Add-WinarchyWindowRulesToKomorebiJson -Json $json | ConvertFrom-Json
+            $out.monitors[0].workspaces[0].PSObject.Properties['tile']  | Should -BeNullOrEmpty
+            $out.monitors[0].workspaces[1].tile   | Should -BeFalse
+            $out.monitors[0].workspaces[1].layout | Should -Be 'BSP'
+            $out.monitors[0].workspaces[2].layout | Should -Be 'Scrolling'
+            $out.monitors[0].workspaces[2].PSObject.Properties['tile'] | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'applies default_mode only to workspaces without a saved mode' {
+        InModuleScope Winarchy {
+            Mock Test-WinarchyProcess { $true }
+            Mock Get-WinarchyKomorebiState { [pscustomobject]@{ monitors = [pscustomobject]@{ elements = @([pscustomobject]@{ device_id = 'AAA1' }) } } }
+            Mock Import-WinarchyWindowPrefs { }
+            Mock Import-WinarchyDefaultMode { 'floating' }
+            Mock Import-WinarchyWorkspaceLayouts { [pscustomobject]@{ Monitor = 'AAA1'; Workspace = 0; Layout = 'BSP'; Mode = 'tiling' } }
+            $json = '{"monitors":[{"workspaces":[{"name":"1","layout":"BSP"},{"name":"2","layout":"BSP"}]}]}'
+            $out = Add-WinarchyWindowRulesToKomorebiJson -Json $json | ConvertFrom-Json
+            $out.monitors[0].workspaces[0].PSObject.Properties['tile'] | Should -BeNullOrEmpty
+            $out.monitors[0].workspaces[1].tile | Should -BeFalse
+        }
+    }
+
     It 'writes saved layouts into the generated komorebi.json only for connected monitors' {
         InModuleScope Winarchy {
             Mock Test-WinarchyProcess { $true }
             Mock Get-WinarchyKomorebiState { [pscustomobject]@{ monitors = [pscustomobject]@{ elements = @([pscustomobject]@{ device_id = 'AAA1' }) } } }
             Mock Import-WinarchyWindowPrefs { }
             Mock Import-WinarchyWorkspaceLayouts {
-                [pscustomobject]@{ Monitor = 'AAA1'; Workspace = 1; Layout = 'Columns' }
-                [pscustomobject]@{ Monitor = 'GONE'; Workspace = 0; Layout = 'Rows' }
+                [pscustomobject]@{ Monitor = 'AAA1'; Workspace = 1; Layout = 'Columns'; Mode = 'tiling' }
+                [pscustomobject]@{ Monitor = 'GONE'; Workspace = 0; Layout = 'Rows'; Mode = 'tiling' }
             }
             $json = '{"monitors":[{"workspaces":[{"name":"1","layout":"BSP"},{"name":"2","layout":"BSP"}]}]}'
             $out = Add-WinarchyWindowRulesToKomorebiJson -Json $json | ConvertFrom-Json
@@ -3110,10 +3217,31 @@ Describe 'Bar dock' {
             Set-Content (Get-WinarchyBarDockPath) -Value 'hide' -NoNewline
             Get-WinarchyDockMode | Should -Be 'hide'
             (Get-WinarchyDockWorkAreaOffset).Bottom | Should -Be 2
+            Set-Content (Get-WinarchyBarDockPath) -Value 'auto' -NoNewline
+            Get-WinarchyDockMode | Should -Be 'auto'
             Set-Content (Get-WinarchyBarDockPath) -Value 'on' -NoNewline
             Get-WinarchyDockMode | Should -Be 'reserve'
             Remove-Item (Get-WinarchyBarDockPath) -Force
             Get-WinarchyDockMode | Should -Be 'off'
+        }
+    }
+
+    It 'the cluster monitor defaults to primary and reads primary, off or a position from its file' {
+        InModuleScope Winarchy {
+            $path = Get-WinarchyClusterMonitorPath
+            $saved = if (Test-Path $path) { [System.IO.File]::ReadAllBytes($path) }
+            try {
+                Remove-Item $path -Force -ErrorAction SilentlyContinue
+                Get-WinarchyClusterMonitor | Should -Be 'primary'
+                foreach ($v in 'off', '2', 'primary') { Set-Content $path -Value $v -NoNewline; Get-WinarchyClusterMonitor | Should -Be $v }
+                Set-Content $path -Value 'Off' -NoNewline
+                Get-WinarchyClusterMonitor | Should -Be 'off'
+                Set-Content $path -Value 'banana' -NoNewline
+                Get-WinarchyClusterMonitor | Should -Be 'primary'
+            }
+            finally {
+                if ($saved) { [System.IO.File]::WriteAllBytes($path, $saved) } else { Remove-Item $path -Force -ErrorAction SilentlyContinue }
+            }
         }
     }
 
@@ -3122,6 +3250,8 @@ Describe 'Bar dock' {
         @{ Mode = 'float'; Hidden = $true; Bottom = 0 }
         @{ Mode = 'hide'; Hidden = $false; Bottom = 2 }
         @{ Mode = 'float'; Hidden = $false; Bottom = 2 }
+        @{ Mode = 'auto'; Hidden = $true; Bottom = 0 }
+        @{ Mode = 'auto'; Hidden = $false; Bottom = 2 }
     ) {
         InModuleScope Winarchy -Parameters @{ Root = $TestDrive; Mode = $Mode; Hidden = $Hidden; Bottom = $Bottom } {
             param($Root, $Mode, $Hidden, $Bottom)
@@ -3465,6 +3595,78 @@ Describe 'Monitor health' {
                     $args[0] -eq 'replace-configuration' -and $args[1] -eq (Join-Path $TestDrive 'config\komorebi\komorebi.json')
                 }
             }
+        }
+    }
+}
+
+Describe 'Windows accent palette' {
+    It 'builds the 8-color RGBA palette with the theme accent in the fourth slot' {
+        InModuleScope Winarchy {
+            $p = Get-WinarchyAccentPalette -Hex '#f38d70'
+            $p.Length | Should -Be 32
+            $p[12..15] | Should -Be @(0xf3, 0x8d, 0x70, 0x00)
+            $p[28..31] | Should -Be @(0x88, 0x17, 0x98, 0x00)
+            # claros crecen hacia blanco y oscuros hacia negro
+            $p[1] | Should -BeGreaterThan $p[9]
+            $p[9] | Should -BeGreaterThan 0x8d
+            $p[17] | Should -BeLessThan 0x8d
+        }
+    }
+}
+
+Describe 'Flow theme copy' {
+    BeforeAll {
+        $script:OldAppData = $env:APPDATA
+        $env:APPDATA = Join-Path $TestDrive 'appdata'
+        New-Item -ItemType Directory -Path (Join-Path $env:APPDATA 'FlowLauncher') -Force | Out-Null
+        $script:Xaml = Join-Path $TestDrive 'Winarchy.xaml'
+        Set-Content $script:Xaml -Value '<a/>' -NoNewline
+        $script:Target = Join-Path $env:APPDATA 'FlowLauncher\Themes\Winarchy.xaml'
+    }
+    AfterAll { $env:APPDATA = $script:OldAppData }
+
+    It 'does not touch the target when the content is identical' {
+        InModuleScope Winarchy -Parameters @{ Xaml = $script:Xaml; Target = $script:Target } {
+            param($Xaml, $Target)
+            Set-WinarchyFlowTheme -XamlPath $Xaml
+            $stamp = (Get-Item $Target).LastWriteTimeUtc
+            Start-Sleep -Milliseconds 50
+            $lock = [System.IO.File]::Open($Target, 'Open', 'Read', 'Read')
+            try { Set-WinarchyFlowTheme -XamlPath $Xaml } finally { $lock.Dispose() }
+            (Get-Item $Target).LastWriteTimeUtc | Should -Be $stamp
+        }
+    }
+
+    It 'retries a short lock when the content changed' {
+        InModuleScope Winarchy -Parameters @{ Xaml = $script:Xaml; Target = $script:Target } {
+            param($Xaml, $Target)
+            Set-Content $Xaml -Value '<b/>' -NoNewline
+            $lock = [System.IO.File]::Open($Target, 'Open', 'Read', 'Read')
+            if (-not ('WinarchyTestRelease' -as [type])) {
+                Add-Type -TypeDefinition 'public static class WinarchyTestRelease { public static void After(System.IDisposable d, int ms) { new System.Threading.Thread(() => { System.Threading.Thread.Sleep(ms); d.Dispose(); }).Start(); } }'
+            }
+            [WinarchyTestRelease]::After($lock, 500)
+            Set-WinarchyFlowTheme -XamlPath $Xaml
+            Get-Content $Target -Raw | Should -Be '<b/>'
+        }
+    }
+}
+
+Describe 'Tray hook lookup' {
+    It 'finds the YASB tray hook under Program Files and is null without it' {
+        InModuleScope Winarchy -Parameters @{ Root = $TestDrive } {
+            param($Root)
+            $saved = @($env:ProgramW6432, $env:ProgramFiles)
+            try {
+                $env:ProgramW6432 = Join-Path $Root 'w6432'
+                $env:ProgramFiles = Join-Path $Root 'pf'
+                Get-WinarchyTrayHookPath | Should -BeNullOrEmpty
+                $lib = Join-Path $env:ProgramFiles 'YASB\lib'
+                New-Item -ItemType Directory -Path $lib -Force | Out-Null
+                Set-Content (Join-Path $lib 'YASBTrayHook.dll') 'x'
+                Get-WinarchyTrayHookPath | Should -Be (Join-Path $lib 'YASBTrayHook.dll')
+            }
+            finally { $env:ProgramW6432, $env:ProgramFiles = $saved }
         }
     }
 }

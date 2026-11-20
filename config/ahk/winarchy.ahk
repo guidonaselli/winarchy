@@ -18,6 +18,8 @@ StateDir := RepoRoot "\state"
 GameFlag := StateDir "\game-mode.flag"
 MenuFlag := StateDir "\show-menu.flag"
 StartFlag := StateDir "\show-start.flag"
+QuickFlag := StateDir "\show-quick-settings.flag"
+NotifFlag := StateDir "\show-notifications.flag"
 AwakeFlag := StateDir "\stay-awake.flag"
 GamesTomls := [RepoRoot "\games.toml", RepoRoot "\games.user.toml"]
 WinarchyPs1 := RepoRoot "\bin\winarchy.ps1"
@@ -193,6 +195,72 @@ CycleOccupied(dir, wrap := true) {
     } catch {
         Komorebic('cycle-workspace ' (dir > 0 ? 'next' : 'previous'))   ; sin estado legible, el ciclo plano
     }
+}
+
+; Un workspace con `tile` apagado no se reacomoda: es el floating de Windows. El ciclo va
+; tiling, scrolling, floating como Omarchy, y el modo se guarda para sobrevivir un reinicio.
+WorkspaceModeOf(ws) {
+    if !ws.tile
+        return 'floating'
+    try return ws.layout.Default = 'Scrolling' ? 'scrolling' : 'tiling'
+    return 'tiling'
+}
+
+CycleWorkspaceMode(dir := 1) {
+    static last := 0, modes := ['tiling', 'scrolling', 'floating']
+    if (A_TickCount - last < 150)
+        return
+    last := A_TickCount
+    try {
+        cur := WorkspaceModeOf(FocusedWorkspace(&m, &w))
+        at := 1
+        for i, name in modes {
+            if (name = cur)
+                at := i
+        }
+        SetWorkspaceMode(modes[Mod(at - 1 + dir + 3, 3) + 1], , m, w)
+    }
+}
+
+; Estado del workspace enfocado del monitor bajo el cursor; m y w salen por referencia.
+FocusedWorkspace(&m, &w, atCursor := true) {
+    state := KomorebiState(atCursor ? 'focus-monitor-at-cursor' : '')
+    m := state.monitors.focused
+    wss := state.monitors.elements.%m%.workspaces
+    w := wss.focused
+    return wss.elements.%w%
+}
+
+; En un workspace deslizante (scrolling) izquierda/derecha recorre las columnas del propio workspace: komorebi, al llegar al borde, saltaría al monitor vecino.
+; Se lee el workspace del foco real (no el del cursor) y, ante cualquier fallo, se cae al comando espacial de siempre.
+HorizontalNav(verb, dir) {
+    try {
+        if (WorkspaceModeOf(FocusedWorkspace(&m, &w, false)) = 'scrolling') {
+            Komorebic('cycle-' verb ' ' (dir = 'left' ? 'previous' : 'next'))
+            return
+        }
+    }
+    Komorebic(verb ' ' dir)
+}
+
+; layout vacío = BSP. Con m y w omitidos actúa sobre el workspace enfocado.
+SetWorkspaceMode(mode, layout := '', m := '', w := '') {
+    global KomorebicExe
+    if (m = '')
+        FocusedWorkspace(&m, &w)
+    k := '"' KomorebicExe '" '
+    if (mode = 'floating') {
+        RunWait(k 'workspace-tiling ' m ' ' w ' disable', , 'Hide')
+    } else {
+        RunWait(k 'workspace-layout ' m ' ' w ' ' (layout ? layout : mode = 'scrolling' ? 'scrolling' : 'bsp'), , 'Hide')
+        RunWait(k 'workspace-tiling ' m ' ' w ' enable', , 'Hide')
+        RunWait(k 'retile', , 'Hide')
+    }
+    SetTimer(PersistWorkspaceModes, -600)   ; una ráfaga de ciclos guarda una sola vez
+}
+
+PersistWorkspaceModes() {
+    Winarchy('mode save')
 }
 
 ; WM_CLOSE to the active window, never to the desktop or taskbar.
@@ -509,7 +577,20 @@ FillNativeMenu(m, items) {
 SetTimer(MenuWatch, 150)
 
 MenuWatch() {
-    global MenuFlag, StartFlag
+    global MenuFlag, StartFlag, QuickFlag, NotifFlag
+    ; Win+A y Win+N nativos: lo que manda AHK no dispara los hotkeys propios (#a es Ctrl+A) y abre y cierra el panel como la taskbar.
+    if FileExist(QuickFlag) {
+        try FileDelete(QuickFlag)
+        catch
+            return
+        Send('#a')
+    }
+    if FileExist(NotifFlag) {
+        try FileDelete(NotifFlag)
+        catch
+            return
+        Send('#n')
+    }
     if FileExist(StartFlag) {
         try FileDelete(StartFlag)
         catch
@@ -547,6 +628,7 @@ ToggleStayAwake() {
 QuitStack() {
     ; parada ordenada y NO elevada: komorebi primero, luego barra/launcher, AHK al final
     SetTimer(YasbWatch, 0)   ; si no, relanza la barra que acabamos de matar
+    SetTimer(ShellWatch, 0)
     try Komorebic('stop')
     try RunWait('taskkill /IM yasb.exe /F', , 'Hide')
     try RunWait('taskkill /IM winarchy-shell.exe /F', , 'Hide')
@@ -589,10 +671,41 @@ YasbWatch() {
     Run('"' YasbcExe '" start', , 'Hide')
 }
 
+; --- Native shell watchdog ----------------------------------------------------------
+; Same policy as YasbWatch: two missed checks (a reload restarts it within seconds), at most 3 relaunches in 5 min.
+ShellMisses := 0
+ShellRelaunches := []
+SetTimer(ShellWatch, 5000)
+
+ShellWatch() {
+    global ShellMisses, ShellRelaunches, BarFile, YasbcExe, RepoRoot
+    native := FileExist(BarFile) ? Trim(FileRead(BarFile)) = 'native' : !YasbcExe
+    if !native || ProcessExist('winarchy-shell.exe') {
+        ShellMisses := 0
+        return
+    }
+    if (++ShellMisses < 2)
+        return
+    ShellMisses := 0
+    exe := ''
+    for p in [RepoRoot '\state\bin\winarchy-shell.exe', RepoRoot '\shell\target\release\winarchy-shell.exe']
+        if FileExist(p) {
+            exe := p
+            break
+        }
+    while ShellRelaunches.Length && A_TickCount - ShellRelaunches[1] > 300000
+        ShellRelaunches.RemoveAt(1)
+    if !exe || ShellRelaunches.Length >= 3
+        return
+    ShellRelaunches.Push(A_TickCount)
+    Run('"' exe '"', , 'Hide')
+}
+
 ; --- Monitor watchdog -------------------------------------------------------------
 ; komorebi can lose a monitor when a display powers off and on, and only a restart brings it
 ; back. No polling: WM_DISPLAYCHANGE, checked once komorebi had time to reconcile the burst.
 OnMessage(0x7E, (*) => SetTimer(HealMonitors, -20000))
+OnMessage(0x8000 + 21, (*) => CycleWorkspaceMode(1))   ; clic en el glifo de modo de la Isla
 
 HealMonitors() {
     global GameModeActive, GameFlag, WinarchyPs1
@@ -627,7 +740,7 @@ WinarchyText(text) {
         'Right main stack', 'Pila con principal derecha', 'main right', 'principal a la derecha',
         'Horizontal stack', 'Pila horizontal', 'main on top', 'principal arriba',
         'Ultrawide stack', 'Pila ultrapanorámica', 'main in centre', 'principal al centro',
-        'Scrolling', 'Desplazamiento', 'scrolling strip', 'tira desplazable', 'Next layout', 'Siguiente distribución',
+        'Scrolling', 'Desplazamiento', 'scrolling strip', 'tira desplazable', 'Next mode', 'Modo siguiente', 'Floating', 'Flotante', 'windows stay where you put them', 'Las ventanas quedan donde las pongas',
         'Move to top', 'Mover arriba', 'Move to bottom', 'Mover abajo', 'Toggle transparency', 'Alternar transparencia',
         'Lock', 'Bloquear', 'Screensaver', 'Protector de pantalla', 'Sleep', 'Suspender', 'Hibernate', 'Hibernar',
         'Sign out', 'Cerrar sesión', 'Restart', 'Reiniciar', 'Shut down', 'Apagar', 'Settings', 'Configuración',
@@ -654,7 +767,7 @@ WinarchyText(text) {
         'close window', 'Cerrar ventana', 'monocle (fill the workspace)', 'Monocle (ocupar el espacio de trabajo)',
         'maximize', 'Maximizar', 'minimize', 'Minimizar', 'float / tile', 'Flotar / mosaico', 'pause tiling', 'Pausar mosaico',
         'retile', 'Reaplicar mosaico', 'reload the whole stack', 'Recargar todo el entorno', 'promote to the largest tile', 'Promover al mosaico más grande',
-        'next layout', 'Distribución siguiente', 'previous layout', 'Distribución anterior',
+        'next mode (tiling, scrolling, floating)', 'Modo siguiente (mosaico, desplazamiento, flotante)', 'previous mode', 'Modo anterior',
         'next occupied workspace', 'Espacio de trabajo ocupado siguiente', 'previous occupied workspace', 'Espacio de trabajo ocupado anterior',
         'back to the workspace you came from', 'Volver al espacio de trabajo anterior',
         'scroll down = previous occupied workspace', 'Desplazarse hacia abajo: espacio ocupado anterior',
@@ -757,7 +870,7 @@ WinarchyTilingItems() {
 }
 
 WinarchyLayoutItems() {
-    L := (name, glyph, what, cmd) => {text: name, hint: glyph '  ' WinarchyText(what), layout: cmd, action: (*) => Komorebic('change-layout ' cmd)}
+    L := (name, glyph, what, cmd) => {text: name, hint: glyph '  ' WinarchyText(what), layout: cmd, action: (*) => SetWorkspaceMode(cmd = 'scrolling' ? 'scrolling' : 'tiling', cmd)}
     return [
         L('BSP', Chr(0x25E9), 'split in halves', 'bsp'),
         L('Grid', Chr(0x25A6), 'even 2' Chr(0xD7) '2 grid', 'grid'),
@@ -768,7 +881,8 @@ WinarchyLayoutItems() {
         L('Horizontal stack', Chr(0x2B13), 'main on top', 'horizontal-stack'),
         L('Ultrawide stack', Chr(0x25EB), 'main in centre', 'ultrawide-vertical-stack'),
         L('Scrolling', Chr(0x25A3), 'scrolling strip', 'scrolling'),
-        {text: 'Next layout', hint: 'SUPER+Shift+L', action: (*) => Komorebic('cycle-layout next')} ]
+        {text: 'Floating', hint: Chr(0x25B3) '  ' WinarchyText('windows stay where you put them'), layout: 'floating', action: (*) => SetWorkspaceMode('floating')},
+        {text: 'Next mode', hint: 'SUPER+Shift+L', action: (*) => CycleWorkspaceMode(1)} ]
 }
 
 WinarchyCaptureItems() {
@@ -817,12 +931,16 @@ ShowSystemMenu(*) {
         PalOpen('system', WinarchyLocalize(WinarchySysItems()), WinarchyText('System'))
 }
 
-ShellIsland(cmd) {
+ShellIsland(cmd, extra := '') {
     try {
         pipe := FileOpen('\\.\pipe\winarchy-shell', 'w')   ; 'rw' lee para detectar BOM y se cuelga esperando
-        pipe.Write('{"v":1,"id":1,"cmd":"' cmd '"}`n')
+        pipe.Write('{"v":1,"id":1,"cmd":"' cmd '"' extra '}`n')
         pipe.Close()
     }
+}
+
+DockPin(n) {
+    ShellIsland('dock.pin', ',"params":{"n":' n '}')
 }
 
 FocusDock() {
@@ -1159,6 +1277,7 @@ LayoutRects(name) {
         case 'horizontal-stack': return [[0, 0, 1, .5], [0, .5, 1 / 3, .5], [1 / 3, .5, 1 / 3, .5], [2 / 3, .5, 1 / 3, .5]]
         case 'ultrawide-vertical-stack': return [[.25, 0, .5, 1], [0, 0, .25, 1], [.75, 0, .25, .5], [.75, .5, .25, .5]]
         case 'scrolling': return [[0, 0, .4, 1], [.4, 0, .4, 1], [.8, 0, .2, 1], [0, 0, 0, 0]]
+        case 'floating': return [[.04, .06, .5, .55], [.34, .18, .5, .55], [.16, .36, .5, .55], [.46, .4, .5, .55]]
     }
     return [[0, 0, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
 }
@@ -1466,8 +1585,8 @@ $#v::Send(InTerminal() ? '^+v' : '^v')           ; paste ($: SUPER+Ctrl+V sends 
 #r::Komorebic('retile')                          ; retile
 #+r::Winarchy('reload')                          ; reload the whole stack
 #^+Enter::Komorebic('promote')                   ; promote to the largest tile
-#+l::Komorebic('cycle-layout next')              ; next layout
-#!+l::Komorebic('cycle-layout previous')         ; previous layout
+#+l::CycleWorkspaceMode(1)                       ; next mode (tiling, scrolling, floating)
+#!+l::CycleWorkspaceMode(-1)                      ; previous mode
 #Tab::CycleOccupied(1)                           ; next occupied workspace
 #+Tab::CycleOccupied(-1)                         ; previous occupied workspace
 #^Tab::Komorebic('focus-last-workspace')         ; back to the workspace you came from
@@ -1491,14 +1610,14 @@ $#v::Send(InTerminal() ? '^+v' : '^v')           ; paste ($: SUPER+Ctrl+V sends 
 #RButton::WindowDrag(false)                      ; drag to resize it (grab the nearest edge or corner)
 
 ; --- Focus ---------------------------------------------------------------------
-#Left::Komorebic('focus left')                   ; move focus
-#Right::Komorebic('focus right')
+#Left::HorizontalNav('focus', 'left')            ; move focus
+#Right::HorizontalNav('focus', 'right')
 #Up::Komorebic('focus up')
 #Down::Komorebic('focus down')
 
 ; --- Move window ---------------------------------------------------------------
-#+Left::Komorebic('move left')                   ; move window
-#+Right::Komorebic('move right')
+#+Left::HorizontalNav('move', 'left')            ; move window
+#+Right::HorizontalNav('move', 'right')
 #+Up::Komorebic('move up')
 #+Down::Komorebic('move down')
 
@@ -1551,6 +1670,15 @@ $#v::Send(InTerminal() ? '^+v' : '^v')           ; paste ($: SUPER+Ctrl+V sends 
 #9::FocusWorkspace(8)
 #0::FocusWorkspace(9)
 
+#^+1::DockPin(1)                                  ; open or focus dock app N
+#^+2::DockPin(2)
+#^+3::DockPin(3)
+#^+4::DockPin(4)
+#^+5::DockPin(5)
+#^+6::DockPin(6)
+#^+7::DockPin(7)
+#^+8::DockPin(8)
+#^+9::DockPin(9)
 #+1::Komorebic('move-to-workspace 0')            ; move window to workspace
 #+2::Komorebic('move-to-workspace 1')
 #+3::Komorebic('move-to-workspace 2')

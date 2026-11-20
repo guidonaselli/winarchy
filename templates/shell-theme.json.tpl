@@ -13,5 +13,7 @@
   "dock": {{computed.dock}},
   "dock_float": {{computed.dock_float}},
   "dock_hide": {{computed.dock_hide}},
+  "dock_auto": {{computed.dock_auto}},
+  "cluster_monitor": "{{computed.cluster_monitor}}",
   "hide_native_taskbar": {{computed.hide_native}}
 }

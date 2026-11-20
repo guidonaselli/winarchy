@@ -19,6 +19,7 @@ type MonRect = (i32, i32, i32, i32);
 pub enum Act {
     Focus(isize),
     Group(usize),
+    Recent(usize),
     Open,
     Pin,
     Unpin,
@@ -34,10 +35,11 @@ pub struct Caps {
     pub pinnable: bool,
     pub picker: bool,
     pub closable: bool,
+    pub recents: usize,
 }
 
 pub fn acts(wins: &[isize], c: Caps) -> Vec<Act> {
-    let Caps { launchable, pinned, pinnable, picker, closable } = c;
+    let Caps { launchable, pinned, pinnable, picker, closable, recents } = c;
     let windows = wins.len();
     let mut v = Vec::new();
     if picker || windows > 1 {
@@ -46,6 +48,7 @@ pub fn acts(wins: &[isize], c: Caps) -> Vec<Act> {
     if picker {
         return v;
     }
+    v.extend((0..recents).map(Act::Recent));
     if launchable {
         v.push(Act::Open);
     }
@@ -67,6 +70,7 @@ pub fn acts(wins: &[isize], c: Caps) -> Vec<Act> {
 fn label(a: Act, windows: usize) -> &'static str {
     t(match a {
         Act::Focus(_) | Act::Group(_) => K::MenuOpen,
+        Act::Recent(_) => K::MenuOpen,
         Act::Open if windows > 0 => K::MenuNewWindow,
         Act::Open => K::MenuOpen,
         Act::Pin => K::MenuPin,
@@ -149,6 +153,7 @@ pub(crate) struct Ctx {
     pub pinnable: bool,
     pub closable: bool,
     pub closeable_wins: Vec<isize>,
+    pub recents: Vec<(String, String)>,
 }
 
 struct Menu {
@@ -162,6 +167,7 @@ struct Menu {
     groups: Vec<(crate::dock::GroupId, String, Option<(isize, u32)>)>,
     anchor: crate::dock::PopupAnchor,
     launch: Option<(String, String)>,
+    recents: Vec<(String, String)>,
     key: String,
     hover: Option<usize>,
     keyboard_selected: Option<usize>,
@@ -222,7 +228,7 @@ unsafe fn font_for(theme: &Theme, scale: f32) -> HFONT {
 pub(crate) unsafe fn show(c: Ctx) {
     dismiss();
     let (target, close_all) = close_actions(&c.wins, &c.closeable_wins, c.last);
-    let mut list = if c.groups.is_empty() { acts(&c.wins, Caps { launchable: c.launch.is_some(), pinned: c.pinned, pinnable: c.pinnable, picker: c.picker, closable: c.closable }) } else { (0..c.groups.len()).map(Act::Group).collect() };
+    let mut list = if c.groups.is_empty() { acts(&c.wins, Caps { launchable: c.launch.is_some(), pinned: c.pinned, pinnable: c.pinnable, picker: c.picker, closable: c.closable, recents: c.recents.len() }) } else { (0..c.groups.len()).map(Act::Group).collect() };
     list.retain(|action| match action { Act::Close => target.is_some(), Act::CloseAll => !close_all.is_empty(), _ => true });
     if list.is_empty() {
         return;
@@ -232,6 +238,7 @@ pub(crate) unsafe fn show(c: Ctx) {
         .iter()
         .map(|a| match a {
             Act::Group(i) => c.groups[*i].1.clone(),
+            Act::Recent(i) => crate::dock::clip_title(&c.recents[*i].0, 40),
             Act::Focus(id) => {
                 let i = c.wins.iter().position(|w| w == id).unwrap_or(0);
                 let title = c.titles.get(i).filter(|t| !t.is_empty()).cloned().unwrap_or_else(|| "…".into());
@@ -272,7 +279,7 @@ pub(crate) unsafe fn show(c: Ctx) {
     let owners = c.wins.iter().map(|id| { let mut pid = 0; GetWindowThreadProcessId(HWND(*id as *mut _), Some(&mut pid)); (*id, pid) }).collect();
     let closeable_wins = if c.picker { c.closeable_wins } else { Vec::new() };
     let anchor = crate::dock::PopupAnchor { owner: c.owner, cx: c.cx, bar: c.bar, bottom: c.bottom, mon: c.mon, scale: c.scale };
-    let menu = Menu { hwnd, acts: list, labels, target, close_all, owners, groups: c.groups, anchor, wins: c.wins, closeable_wins, launch: c.launch, key: c.key, hover: None, keyboard_selected: None, keyboard_close: false, close_hover: None, close_x, pos: POINT { x, y }, size: (w, h), row, pad, first: 0, visible, wheel_remainder: 0, animate: crate::dock::motion_enabled(&c.theme), theme: c.theme, scale: c.scale, born: std::time::Instant::now(), bottom: c.bottom, hl_y: 0.0, hl_a: 0.0, tick_at: std::time::Instant::now(), tracking: false };
+    let menu = Menu { hwnd, acts: list, labels, target, close_all, owners, groups: c.groups, anchor, wins: c.wins, closeable_wins, launch: c.launch, recents: c.recents, key: c.key, hover: None, keyboard_selected: None, keyboard_close: false, close_hover: None, close_x, pos: POINT { x, y }, size: (w, h), row, pad, first: 0, visible, wheel_remainder: 0, animate: crate::dock::motion_enabled(&c.theme), theme: c.theme, scale: c.scale, born: std::time::Instant::now(), bottom: c.bottom, hl_y: 0.0, hl_a: 0.0, tick_at: std::time::Instant::now(), tracking: false };
     paint(&menu);
     let animate = menu.animate;
     MENU.with(|m| *m.borrow_mut() = Some(menu));
@@ -309,6 +316,7 @@ fn a11y_row_keys(action: Act, owner: Option<(isize, u32)>, group: Option<&crate:
             Some(crate::dock::GroupId::Pin(id)) => vec![format!("group:pin:{id}")],
             None => Vec::new(),
         },
+        Act::Recent(i) => vec![format!("action:recent:{i}")],
         Act::Open => vec!["action:open".into()],
         Act::Pin => vec!["action:pin".into()],
         Act::Unpin => vec!["action:unpin".into()],
@@ -542,6 +550,7 @@ fn activate(i: usize) {
                 crate::dock::focus_window(h);
             }
         },
+        Some(Act::Recent(index)) => if let Some((_, path)) = m.recents.get(*index) { launch(path, ""); },
         Some(Act::Open) => m.launch.iter().for_each(|(o, a)| launch(o, a)),
         Some(Act::Pin | Act::Unpin) => crate::dock::toggle_pin(&m.key),
         Some(Act::Close) => m.target.into_iter().for_each(close),
@@ -761,7 +770,14 @@ mod tests {
     use super::*;
 
     fn caps(l: bool, pinned: bool, pinnable: bool, picker: bool) -> Caps {
-        Caps { launchable: l, pinned, pinnable, picker, closable: true }
+        Caps { launchable: l, pinned, pinnable, picker, closable: true, recents: 0 }
+    }
+
+    #[test]
+    fn recents_go_before_the_app_actions_and_never_in_the_picker() {
+        let with = |picker| Caps { recents: 2, ..caps(true, false, true, picker) };
+        assert_eq!(acts(&[1], with(false)), [Act::Recent(0), Act::Recent(1), Act::Open, Act::Pin, Act::Close]);
+        assert_eq!(acts(&[1, 2], with(true)), [Act::Focus(1), Act::Focus(2)]);
     }
 
     #[test]

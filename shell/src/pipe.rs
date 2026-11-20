@@ -56,6 +56,7 @@ pub enum Command {
     Tray,
     TrayDismiss,
     DockFocus,
+    DockPin(usize),
 }
 
 // Un cliente por vez; el hilo de UI recibe Reload/Quit por `dispatch`, nunca bloquea acá.
@@ -158,6 +159,13 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
             dispatch(Command::DockFocus);
             ok(json!({}))
         }
+        "dock.pin" => match req.params["n"].as_u64().filter(|n| (1..=9).contains(n)) {
+            Some(n) => {
+                dispatch(Command::DockPin(n as usize));
+                ok(json!({}))
+            }
+            None => json!({"v": VERSION, "id": req.id, "ok": false, "error": "bad n"}),
+        },
         "dock.tray" => {
             dispatch(Command::Tray);
             ok(json!({}))
@@ -230,5 +238,15 @@ mod tests {
         called.set(false);
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"dock.tray.dismiss"}"#, &|c| { assert!(matches!(c, Command::TrayDismiss)); called.set(true); })["ok"], true);
         assert!(called.get());
+    }
+
+    #[test]
+    fn dock_pin_validates_the_slot_and_dispatches_it() {
+        let got = std::cell::Cell::new(0);
+        let r = handle(br#"{"v":1,"id":1,"cmd":"dock.pin","params":{"n":3}}"#, &|c| if let Command::DockPin(n) = c { got.set(n) });
+        assert_eq!((r["ok"].as_bool(), got.get()), (Some(true), 3));
+        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"dock.pin","params":{"n":0}}"#, &|_| {})["ok"], false);
+        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"dock.pin","params":{"n":10}}"#, &|_| {})["ok"], false);
+        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"dock.pin"}"#, &|_| {})["ok"], false);
     }
 }

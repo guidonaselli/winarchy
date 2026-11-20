@@ -49,7 +49,7 @@ fn run_probe(scroll_only: bool, lifetime: ProbeLifetime) {
             bar: R { x: 200, y: 200, w: 400, h: 32 }, bottom: false,
             mon: (0, 0, 900, 330), wins: ids.clone(), last: None,
             launch: None, key: String::new(), pinned: false, pinnable: false,
-            closable: true, closeable_wins: ids.clone(),
+            closable: true, closeable_wins: ids.clone(), recents: Vec::new(),
         };
         show(context());
         let menu = MENU.with(|m| m.borrow().as_ref().unwrap().hwnd);

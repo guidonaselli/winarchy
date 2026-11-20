@@ -18,6 +18,7 @@ const SECTION_GAP_DIP: i32 = 10;
 const CHIP_W_DIP: i32 = 26;
 const CHIP_H_DIP: i32 = 22;
 const CHIP_GAP_DIP: i32 = 6;
+const MODE_W_DIP: i32 = 64;
 const PANEL_TOP_DIP: i32 = 4;
 const PANEL_BOTTOM_DIP: i32 = 14;
 const PROGRESS_BAND_DIP: i32 = 6;
@@ -60,6 +61,8 @@ pub enum Hit {
     Meter(usize, Option<f32>),
     Clock,
     Temp,
+    // Botón del modo del workspace (tiling, scrolling, floating): cicla al siguiente.
+    Mode,
     CalPrev,
     CalNext,
     // Celda de la grilla del mes, por índice.
@@ -95,6 +98,7 @@ pub struct PanelRects {
     pub next: R,
     pub meters: Vec<Meter>,
     pub chips: Vec<Item>,
+    pub mode: R,
     pub notes: R,
     pub cal_title: R,
     pub cal_prev: R,
@@ -327,6 +331,8 @@ impl Layout {
             p.chips.push(Item { r: R::new(x, y, cw, ch), ws, focused });
             x += cw + cg;
         }
+        p.mode = R::new(x, y, px(MODE_W_DIP, s), ch);
+        x += p.mode.w + cg;
         p.notes = R::new(x + gap - cg, y, right - (x + gap - cg), ch);
         p
     }
@@ -367,6 +373,9 @@ impl Layout {
             }
             if let Some(c) = p.chips.iter().find(|c| c.r.contains(x, y)) {
                 return Some(Hit::Workspace(c.ws));
+            }
+            if p.mode.w > 0 && p.mode.contains(x, y) {
+                return Some(Hit::Mode);
             }
             if p.weather.w > 0 && p.weather.contains(x, y) {
                 return Some(Hit::Weather);
@@ -450,6 +459,8 @@ mod tests {
         assert_eq!(l.hit(p.next.x + 2, p.next.y + 2), Some(Hit::Next));
         let c = &p.chips[1];
         assert_eq!(l.hit(c.r.x + 2, c.r.y + 2), Some(Hit::Workspace(1)));
+        assert_eq!(l.hit(p.mode.x + 2, p.mode.y + 2), Some(Hit::Mode));
+        assert!(c.r.x + c.r.w <= p.mode.x && p.mode.x + p.mode.w <= p.notes.x);
         assert_eq!(l.hit(p.title.x + 2, p.title.y + 2), Some(Hit::Surface));
         assert_eq!(l.hit(l.pin.x + 2, l.pin.y + 2), Some(Hit::Pin));
         assert_eq!(l.hit(p.weather.x + 2, p.weather.y + 2), Some(Hit::Weather));
@@ -482,7 +493,7 @@ mod tests {
             let height = bar_h(scale) + panel_height(scale, shape.unwrap());
             let l = Layout::new(&Inputs { scale, width, height, flip: false, clock_w: px(40, scale), orb: true, temp_w: 0, dots: &dots, panel: shape });
             let p = l.panel.as_ref().unwrap();
-            let rects = [p.title, p.artist, p.weather, p.weather_title, p.weather_range, p.weather_detail, p.weather_detail2, p.prev, p.toggle, p.next, p.notes, l.clock].into_iter().chain(p.chips.iter().map(|c| c.r)).chain(p.meters.iter().flat_map(|m| [m.label, m.track, m.value]));
+            let rects = [p.title, p.artist, p.weather, p.weather_title, p.weather_range, p.weather_detail, p.weather_detail2, p.prev, p.toggle, p.next, p.mode, p.notes, l.clock].into_iter().chain(p.chips.iter().map(|c| c.r)).chain(p.meters.iter().flat_map(|m| [m.label, m.track, m.value]));
             for r in rects {
                 assert!(r.x >= 0 && r.w >= 0 && r.x + r.w <= width && r.y >= 0 && r.y + r.h <= height, "{r:?} fuera de {width}x{height} a {scale}");
             }

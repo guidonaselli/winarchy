@@ -55,10 +55,26 @@ function Test-WinarchyBarDock {
 }
 
 function Get-WinarchyDockMode {
-    <# off | reserve (komorebi deja libre el área del dock) | float (flota sobre las ventanas, sin reservar) | hide (como float, y se esconde hasta llevar el mouse al borde). #>
+    <# off | reserve (komorebi deja libre el área del dock) | float (flota sobre las ventanas, sin reservar) | hide (como float, y se esconde hasta llevar el mouse al borde) | auto (como hide salvo en un workspace floating, donde se ve). #>
     if (-not (Test-WinarchyBarDock)) { return 'off' }
     $raw = Get-Content (Get-WinarchyBarDockPath) -Raw -ErrorAction SilentlyContinue
-    if ($raw -match 'hide') { 'hide' } elseif ($raw -match 'float') { 'float' } else { 'reserve' }
+    if ($raw -match 'auto') { 'auto' } elseif ($raw -match 'hide') { 'hide' } elseif ($raw -match 'float') { 'float' } else { 'reserve' }
+}
+
+function Get-WinarchyClusterMonitorPath { Join-Path (Get-WinarchyStateDir) 'bar-cluster' }
+
+function Get-WinarchyClusterMonitor {
+    <# Dock que lleva el cluster del sistema: primary (monitor con origen 0,0), off o la posicion 1-based entre los docks. #>
+    $raw = (Get-Content (Get-WinarchyClusterMonitorPath) -Raw -ErrorAction SilentlyContinue)
+    if ($raw -and $raw.Trim() -match '^(primary|off|[1-9]\d*)$') { $Matches[1].ToLower() } else { 'primary' }
+}
+
+function Set-WinarchyClusterMonitor {
+    param([Parameter(Mandatory)][ValidatePattern('^(primary|off|[1-9]\d*)$')][string]$Value)
+    Set-WinarchyFileAtomic -Path (Get-WinarchyClusterMonitorPath) -Value $Value
+    $theme = Get-WinarchyCurrentTheme
+    if ($theme) { Set-WinarchyTheme -Name $theme }
+    else { Write-WinarchyOk "Cluster: $Value (applies on the next `winarchy theme set`)." }
 }
 
 function Get-WinarchyTaskbarHiddenPath { Join-Path (Get-WinarchyStateDir) 'taskbar-hidden' }
@@ -67,7 +83,7 @@ function Test-WinarchyTaskbarHidden { Test-Path (Get-WinarchyTaskbarHiddenPath) 
 
 function Get-WinarchyDockWorkAreaOffset {
     <# Lo que komorebi reserva para el dock, en px. Espeja BAR_DIP + MARGIN_DIP (+2 de la franja de la taskbar nativa, solo abajo) de shell/src/dock.rs. En float y hide no reserva nada. #>
-    if ((Get-WinarchyDockMode) -in 'float', 'hide') { return [pscustomobject]@{ Top = 0; Bottom = if (Test-WinarchyTaskbarHidden) { 0 } else { 2 } } }
+    if ((Get-WinarchyDockMode) -in 'float', 'hide', 'auto') { return [pscustomobject]@{ Top = 0; Bottom = if (Test-WinarchyTaskbarHidden) { 0 } else { 2 } } }
     $dpi = (Get-ItemProperty 'HKCU:\Control Panel\Desktop\WindowMetrics' -ErrorAction SilentlyContinue).AppliedDPI
     if (-not $dpi) { $dpi = 96 }
     $dockEdge = if ((Get-WinarchyBarPosition) -eq 'top') { 'bottom' } else { 'top' }
@@ -80,9 +96,9 @@ function Get-WinarchyDockWorkAreaOffset {
 }
 
 function Set-WinarchyBarDock {
-    param([Parameter(Mandatory)][ValidateSet('on', 'float', 'hide', 'off')][string]$Mode)
+    param([Parameter(Mandatory)][ValidateSet('on', 'float', 'hide', 'auto', 'off')][string]$Mode)
     $path = Get-WinarchyBarDockPath
-    if ($Mode -ne 'off') { Set-WinarchyFileAtomic -Path $path -Value $(if ($Mode -in 'float', 'hide') { $Mode } else { 'on' }) }
+    if ($Mode -ne 'off') { Set-WinarchyFileAtomic -Path $path -Value $(if ($Mode -in 'float', 'hide', 'auto') { $Mode } else { 'on' }) }
     elseif (Test-Path $path) { Remove-Item $path -Force; if (Test-WinarchyTaskbarHidden) { Restore-WinarchyNativeTaskbar } }
     if ($Mode -ne 'off' -and (Get-WinarchyActiveBar) -ne 'native') { Write-WinarchyWarn 'The dock needs the native shell: run `winarchy bar use native`.' }
     $theme = Get-WinarchyCurrentTheme

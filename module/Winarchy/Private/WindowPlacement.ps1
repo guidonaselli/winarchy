@@ -64,11 +64,23 @@ function Add-WinarchyWindowRulesToKomorebiJson {
             $workspace | Add-Member -NotePropertyName $key -NotePropertyValue @($rule)
         }
     }
-    foreach ($saved in @(Import-WinarchyWorkspaceLayouts)) {
+    $savedModes = @(Import-WinarchyWorkspaceLayouts)
+    $defaultMode = Import-WinarchyDefaultMode
+    $explicit = [System.Collections.Generic.HashSet[string]]::new()
+    foreach ($saved in $savedModes) {
         if (-not $map.ContainsKey($saved.Monitor)) { continue }
         $monitor = $config.monitors[$map[$saved.Monitor]]
         if (-not $monitor -or $saved.Workspace -ge @($monitor.workspaces).Count) { continue }
-        $monitor.workspaces[$saved.Workspace] | Add-Member -NotePropertyName layout -NotePropertyValue $saved.Layout -Force
+        $null = $explicit.Add("$($map[$saved.Monitor]):$($saved.Workspace)")
+        Set-WinarchyWorkspaceConfigMode -Workspace $monitor.workspaces[$saved.Workspace] -Layout $saved.Layout -Mode $saved.Mode
+    }
+    if ($defaultMode -ne 'tiling') {
+        for ($m = 0; $m -lt @($config.monitors).Count; $m++) {
+            for ($w = 0; $w -lt @($config.monitors[$m].workspaces).Count; $w++) {
+                if ($explicit.Contains("${m}:$w")) { continue }
+                Set-WinarchyWorkspaceConfigMode -Workspace $config.monitors[$m].workspaces[$w] -Layout 'BSP' -Mode $defaultMode
+            }
+        }
     }
     $config | ConvertTo-Json -Depth 50
 }
@@ -108,20 +120,48 @@ function Get-WinarchyWindowPlacements {
     $out
 }
 
+function Get-WinarchyWorkspaceMode {
+    <# tiling | scrolling | floating de un workspace del estado de komorebi: `tile` apagado es
+       floating, el layout Scrolling es scrolling, todo lo demás es tiling. #>
+    param([Parameter(Mandatory)]$Workspace)
+    if ($Workspace.PSObject.Properties['tile'] -and $Workspace.tile -eq $false) { return 'floating' }
+    if ($Workspace.layout.PSObject.Properties['Default']?.Value -eq 'Scrolling') { return 'scrolling' }
+    'tiling'
+}
+
+function Set-WinarchyWorkspaceConfigMode {
+    <# Traduce un modo guardado a las claves del workspace de komorebi.json. Un workspace
+       con `tile: false` no se reacomoda solo: es el floating de Windows. #>
+    param([Parameter(Mandatory)]$Workspace, [string]$Layout, [Parameter(Mandatory)][string]$Mode)
+    $name = if ($Mode -eq 'scrolling') { 'Scrolling' } elseif ($Layout) { $Layout } else { 'BSP' }
+    $Workspace | Add-Member -NotePropertyName layout -NotePropertyValue $name -Force
+    if ($Mode -eq 'floating') { $Workspace | Add-Member -NotePropertyName tile -NotePropertyValue $false -Force }
+}
+
 function Get-WinarchyLiveWorkspaceLayouts {
-    <# Layout de cada workspace vivo que no sea el de fábrica (BSP). Los Custom se ignoran:
-       no hay forma de volcarlos a un nombre. #>
-    param([Parameter(Mandatory)]$State)
+    <# Workspaces vivos que se apartan de lo de fábrica: un modo distinto del default o un layout
+       que no sea BSP. Los Custom se ignoran: no hay forma de volcarlos a un nombre. #>
+    param([Parameter(Mandatory)]$State, [string]$DefaultMode = 'tiling')
     foreach ($monitor in $State.monitors.elements) {
         $index = -1
         foreach ($workspace in $monitor.workspaces.elements) {
             $index++
+            if (-not $monitor.device_id) { continue }
             $name = $workspace.layout.PSObject.Properties['Default']?.Value
-            if ($monitor.device_id -and $name -and $name -ne 'BSP') {
-                [pscustomobject]@{ Monitor = $monitor.device_id; Workspace = $index; Layout = $name }
+            $mode = Get-WinarchyWorkspaceMode -Workspace $workspace
+            $customLayout = $mode -eq 'tiling' -and $name -and $name -ne 'BSP'
+            if ($mode -ne $DefaultMode -or $customLayout) {
+                [pscustomobject]@{ Monitor = $monitor.device_id; Workspace = $index; Layout = $(if ($name) { $name } else { 'BSP' }); Mode = $mode }
             }
         }
     }
+}
+
+function Import-WinarchyDefaultMode {
+    $path = Get-WinarchyWindowPrefsPath
+    if (-not (Test-Path $path)) { return 'tiling' }
+    $value = (Import-WinarchyToml -Path $path)['default_mode']
+    if ($value -in 'tiling', 'scrolling', 'floating') { $value } else { 'tiling' }
 }
 
 function Import-WinarchyWorkspaceLayouts {
@@ -130,8 +170,10 @@ function Import-WinarchyWorkspaceLayouts {
     $data = Import-WinarchyToml -Path $path
     if (-not $data.ContainsKey('workspaces')) { return }
     foreach ($entry in $data['workspaces']) {
-        if (-not $entry['monitor'] -or -not $entry['layout']) { continue }
-        [pscustomobject]@{ Monitor = $entry['monitor']; Workspace = [int]$entry['workspace']; Layout = $entry['layout'] }
+        if (-not $entry['monitor'] -or -not ($entry['layout'] -or $entry['mode'])) { continue }
+        $layout = if ($entry['layout']) { $entry['layout'] } else { 'BSP' }
+        $mode = if ($entry['mode']) { $entry['mode'] } elseif ($layout -eq 'Scrolling') { 'scrolling' } else { 'tiling' }
+        [pscustomobject]@{ Monitor = $entry['monitor']; Workspace = [int]$entry['workspace']; Layout = $layout; Mode = $mode }
     }
 }
 
@@ -186,9 +228,10 @@ function Import-WinarchyWindowPrefs {
 }
 
 function Export-WinarchyWindowPrefs {
-    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Pref, [object[]]$Layout)
-    # sin -Layout se conservan los guardados: quien solo toca ventanas no debe borrarlos
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Pref, [object[]]$Layout, [string]$DefaultMode)
+    # sin -Layout / -DefaultMode se conservan los guardados: quien solo toca ventanas no debe borrarlos
     if (-not $PSBoundParameters.ContainsKey('Layout')) { $Layout = @(Import-WinarchyWorkspaceLayouts) }
+    if (-not $PSBoundParameters.ContainsKey('DefaultMode')) { $DefaultMode = Import-WinarchyDefaultMode }
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add('# Preferencias de ubicación de ventanas de ESTA máquina.')
     $lines.Add('# Se captura con `winarchy layout save` y se reproduce con `winarchy layout apply`.')
@@ -196,7 +239,9 @@ function Export-WinarchyWindowPrefs {
     $lines.Add('# `pin = true` fija la ventana permanentemente en vez de solo al abrirla.')
     $lines.Add('# `slot` es la posición del tile dentro del workspace (0 = el primero); solo se guarda y')
     $lines.Add('# se aplica en apps con `pin = true`. El resto se ubica al abrir y nadie las reordena.')
-    $lines.Add('# `[[workspaces]]` guarda el layout de teselado de los workspaces que no usan BSP.')
+    $lines.Add('# `[[workspaces]]` guarda el modo (tiling / scrolling / floating) y el layout de los workspaces que se apartan del default.')
+    $lines.Add('# `default_mode` es el modo de los workspaces sin entrada: tiling, scrolling o floating.')
+    if ($DefaultMode -ne 'tiling') { $lines.Add("default_mode = `"$DefaultMode`"") }
     foreach ($p in ($Pref | Sort-Object Exe)) {
         $lines.Add('')
         $lines.Add('[[windows]]')
@@ -212,7 +257,8 @@ function Export-WinarchyWindowPrefs {
         $lines.Add('[[workspaces]]')
         $lines.Add("monitor = `"$($l.Monitor)`"")
         $lines.Add("workspace = $($l.Workspace)")
-        $lines.Add("layout = `"$($l.Layout)`"")
+        if ($l.Layout) { $lines.Add("layout = `"$($l.Layout)`"") }
+        if ($l.Mode) { $lines.Add("mode = `"$($l.Mode)`"") }
     }
     Set-WinarchyFileAtomic -Path (Get-WinarchyWindowPrefsPath) -Value ($lines -join "`r`n")
 }
@@ -220,11 +266,41 @@ function Export-WinarchyWindowPrefs {
 function Save-WinarchyWorkspaceLayouts {
     <# Layouts a guardar: los vivos reemplazan a los de los monitores conectados; los de
        monitores desconectados se conservan. Con -Keep (captura de una sola app) no se toca nada. #>
-    param([Parameter(Mandatory)]$State, [switch]$Keep)
+    param([Parameter(Mandatory)]$State, [switch]$Keep, [string]$DefaultMode = (Import-WinarchyDefaultMode))
     $saved = @(Import-WinarchyWorkspaceLayouts)
     if ($Keep) { return $saved }
     $map = Get-WinarchyMonitorIndexMap -State $State
-    @($saved | Where-Object { -not $map.ContainsKey($_.Monitor) }) + @(Get-WinarchyLiveWorkspaceLayouts -State $State)
+    @($saved | Where-Object { -not $map.ContainsKey($_.Monitor) }) + @(Get-WinarchyLiveWorkspaceLayouts -State $State -DefaultMode $DefaultMode)
+}
+
+function Save-WinarchyWorkspaceModes {
+    <# Guarda el modo vivo de cada workspace sin tocar las preferencias de ventanas, y deja
+       komorebi.json al día para que un reinicio de komorebi (sin reload) lo restaure. #>
+    $state = Get-WinarchyKomorebiState
+    Export-WinarchyWindowPrefs -Pref @(Import-WinarchyWindowPrefs) -Layout @(Save-WinarchyWorkspaceLayouts -State $state)
+    Update-WinarchyKomorebiRules -NoReload
+}
+
+function Set-WinarchyDefaultMode {
+    <# default_mode de los workspaces sin entrada propia; queda en windows.toml y entra con el próximo render. #>
+    param([Parameter(Mandatory)][ValidateSet('tiling', 'scrolling', 'floating')][string]$Mode)
+    Export-WinarchyWindowPrefs -Pref @(Import-WinarchyWindowPrefs) -DefaultMode $Mode
+    Write-WinarchyOk "default_mode = $Mode"
+    Write-WinarchyInfo 'Applies to workspaces without their own mode on the next: winarchy layout apply'
+}
+
+function Get-WinarchyWorkspaceModes {
+    <# Modo vivo de cada workspace, por monitor. #>
+    $state = Get-WinarchyKomorebiState
+    $m = -1
+    foreach ($monitor in $state.monitors.elements) {
+        $m++
+        $w = -1
+        foreach ($workspace in $monitor.workspaces.elements) {
+            $w++
+            [pscustomobject]@{ Monitor = $m; Workspace = $w; Name = $workspace.name; Mode = Get-WinarchyWorkspaceMode -Workspace $workspace }
+        }
+    }
 }
 
 function Save-WinarchyWindowLayout {

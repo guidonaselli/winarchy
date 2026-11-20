@@ -25,7 +25,8 @@ function Show-WinarchyHelp {
     background set <file>     Apply one of them
     background next           Cycle to the next background
     bar position [top|bottom] Where the bar sits (no arg: show current)
-    bar dock <on|float|hide|off>   Dock of open apps on every monitor (float: no reserved area; hide: also auto-hides)
+    bar cluster <primary|off|N>         Dock that carries the system cluster (clock, notifications, quick settings): primary monitor, off, or the Nth dock
+    bar dock <on|float|hide|auto|off>   Dock of open apps on every monitor (float: no reserved area; hide: also auto-hides; auto: shown only in floating workspaces)
     bar transparent [on|off]  See through the bar (no arg: toggle)
     assistant on|off|status   Voice assistant (hold Right Ctrl+Space to talk); on installs its local speech
                               runtime and signs in with ChatGPT; also: assistant login|logout
@@ -53,6 +54,9 @@ function Show-WinarchyHelp {
     layout order              Move every window to its saved slot (tile position)
     layout list               Show saved placements (* = monitor not connected)
     layout forget <exe>       Drop a saved placement
+    mode [list]               Show each workspace's mode (tiling, scrolling or floating)
+    mode save                 Remember the live mode of every workspace (survives reload and restart)
+    mode default [mode]       Show or set the mode of workspaces with no saved mode
     game-mode add <exe>       Register a game (no tiling/hotkeys, excluded from Quick Accent)
     game-mode remove <exe>    Unregister a game
     accent sync [--force]     Re-sync the dynamic theme with the Windows accent
@@ -165,6 +169,18 @@ function Invoke-Winarchy {
                 default { throw "Unknown subcommand: game-mode $sub (on|off|status|add|remove)" }
             }
         }
+        'mode' {
+            $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'list' }
+            switch ($sub) {
+                'list' { Get-WinarchyWorkspaceModes | Format-Table -AutoSize }
+                'save' { Save-WinarchyWorkspaceModes }
+                'default' {
+                    if ($rest.Count -ge 2) { Set-WinarchyDefaultMode -Mode $rest[1].ToLower() }
+                    else { Import-WinarchyDefaultMode }
+                }
+                default { throw "Unknown subcommand: mode $sub (list|save|default)" }
+            }
+        }
         'layout' {
             $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'list' }
             switch ($sub) {
@@ -209,10 +225,15 @@ function Invoke-Winarchy {
                 }
                 'dock' {
                     $mode = if ($rest.Count -ge 2) { $rest[1].ToLower() } else { '' }
-                    if ($mode -notin 'on', 'float', 'hide', 'off') { throw 'Usage: winarchy bar dock <on|float|hide|off>' }
+                    if ($mode -notin 'on', 'float', 'hide', 'auto', 'off') { throw 'Usage: winarchy bar dock <on|float|hide|auto|off>' }
                     Set-WinarchyBarDock -Mode $mode
                 }
-                default { throw "Unknown subcommand: bar $sub (position|transparent|use|dock)" }
+                'cluster' {
+                    $value = if ($rest.Count -ge 2) { $rest[1].ToLower() } else { '' }
+                    if ($value -notmatch '^(primary|off|[1-9]\d*)$') { throw 'Usage: winarchy bar cluster <primary|off|N>' }
+                    Set-WinarchyClusterMonitor -Value $value
+                }
+                default { throw "Unknown subcommand: bar $sub (position|transparent|use|dock|cluster)" }
             }
         }
         'assistant' { Invoke-WinarchyAssistant -Sub $(if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'status' }) }

@@ -150,6 +150,8 @@ function Build-WinarchyThemeContext {
     $ctx['computed.dock'] = if ($dockOn) { 'true' } else { 'false' }
     $ctx['computed.dock_float'] = if ((Get-WinarchyDockMode) -eq 'float') { 'true' } else { 'false' }
     $ctx['computed.dock_hide'] = if ((Get-WinarchyDockMode) -eq 'hide') { 'true' } else { 'false' }
+    $ctx['computed.cluster_monitor'] = Get-WinarchyClusterMonitor
+    $ctx['computed.dock_auto'] = if ((Get-WinarchyDockMode) -eq 'auto') { 'true' } else { 'false' }
     $ctx['computed.hide_native'] = if ($dockOn -and (Test-WinarchyTaskbarHidden)) { 'true' } else { 'false' }
     $ctx['computed.work_top'] = if ($offset) { $offset.Top } else { 0 }
     $ctx['computed.work_bottom'] = if ($offset) { $offset.Bottom } else { 2 }
@@ -316,7 +318,16 @@ function Set-WinarchyFlowTheme {
     }
     $themesDir = Join-Path $flowDir 'Themes'
     if (-not (Test-Path $themesDir)) { New-Item -ItemType Directory -Path $themesDir -Force | Out-Null }
-    Copy-Item $XamlPath (Join-Path $themesDir 'Winarchy.xaml') -Force
+    $target = Join-Path $themesDir 'Winarchy.xaml'
+    # Flow vigila el archivo y lo abre al cambiar: sin cambio no se toca, y un bloqueo breve se reintenta.
+    for ($try = 1; ; $try++) {
+        try {
+            if ((Test-Path $target) -and (Get-FileHash $XamlPath -ErrorAction Stop).Hash -eq (Get-FileHash $target -ErrorAction Stop).Hash) { break }
+            Copy-Item $XamlPath $target -Force -ErrorAction Stop
+            break
+        }
+        catch [System.IO.IOException] { if ($try -ge 5) { throw }; Start-Sleep -Milliseconds 300 }
+    }
 
     $settingsPath = Join-Path $flowDir 'Settings\Settings.json'
     if (Test-Path $settingsPath) {
@@ -658,6 +669,18 @@ function Get-WinarchyReadableAccentHex {
     $hex
 }
 
+function Get-WinarchyAccentPalette {
+    <# AccentPalette de Windows 11: 8 colores RGBA (tres claros, el accent, tres oscuros y el magenta fijo que escribe Windows). Quick Settings, Ajustes y la taskbar leen esto y no AccentColorMenu. #>
+    param([Parameter(Mandatory)][string]$Hex)
+    $shades = @(
+        (Get-WinarchyShadedHex -Hex $Hex -Factor 0.75), (Get-WinarchyShadedHex -Hex $Hex -Factor 0.5), (Get-WinarchyShadedHex -Hex $Hex -Factor 0.13),
+        $Hex,
+        (Get-WinarchyShadedHex -Hex $Hex -Factor -0.2), (Get-WinarchyShadedHex -Hex $Hex -Factor -0.46), (Get-WinarchyShadedHex -Hex $Hex -Factor -0.77)
+    )
+    $bytes = foreach ($c in $shades) { foreach ($i in 1, 3, 5) { [Convert]::ToByte($c.Substring($i, 2), 16) }; [byte]0 }
+    [byte[]]($bytes + @(0x88, 0x17, 0x98, 0x00))
+}
+
 function Set-WinarchyWindowsAppearance {
     <# Dark/light + accent de Windows vía registry (best-effort, revertible). #>
     param(
@@ -687,12 +710,36 @@ function Set-WinarchyWindowsAppearance {
             if (-not (Test-Path $explorerAccent)) { New-Item -Path $explorerAccent -Force | Out-Null }
             Set-ItemProperty -Path $explorerAccent -Name 'AccentColorMenu' -Value $abgr -Type DWord
             Set-ItemProperty -Path $explorerAccent -Name 'StartColorMenu' -Value $abgr -Type DWord
+            Set-ItemProperty -Path $explorerAccent -Name 'AccentPalette' -Value (Get-WinarchyAccentPalette -Hex $AccentHex) -Type Binary
             Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\DWM' -Name 'AccentColor' -Value $abgr -Type DWord
             Set-ItemProperty -Path 'HKCU:\SOFTWARE\Microsoft\Windows\DWM' -Name 'ColorizationColor' -Value $abgr -Type DWord
+            Update-WinarchyShellAccent -Abgr $abgr
         }
         catch { Write-WinarchyWarn "Accent not applied: $($_.Exception.Message)" }
     }
     Send-WinarchyColorSetChange
+}
+
+function Update-WinarchyShellAccent {
+    <# La shell de Windows 11 cachea el accent: sin esto Quick Settings sigue con el color viejo hasta reiniciar sesion. Ordinal #122 de uxtheme (SetUserColorPreference), no documentado. #>
+    param([Parameter(Mandatory)][int]$Abgr)
+    try {
+        if (-not ('Winarchy.Native.UxColor' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+namespace Winarchy.Native {
+    [StructLayout(LayoutKind.Sequential)] public struct UxColorPref { public int Start; public int Accent; }
+    public static class UxColor {
+        [DllImport("uxtheme.dll", EntryPoint = "#122")] public static extern int SetUserColorPreference(ref UxColorPref pref, bool forceReload);
+    }
+}
+'@
+        }
+        $pref = New-Object Winarchy.Native.UxColorPref
+        $pref.Start = $Abgr; $pref.Accent = $Abgr
+        $null = [Winarchy.Native.UxColor]::SetUserColorPreference([ref]$pref, $true)
+    }
+    catch { Write-WinarchyWarn "Shell accent cache not refreshed: $($_.Exception.Message)" }
 }
 
 function Send-WinarchyColorSetChange {

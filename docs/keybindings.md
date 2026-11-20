@@ -71,7 +71,7 @@ so `Ctrl+C` still interrupts.
 ## Focus and movement
 | Keybinding | Action |
 |---|---|
-| `SUPER+←/→/↑/↓` | Move focus directionally |
+| `SUPER+←/→/↑/↓` | Move focus directionally (in a scrolling workspace ←/→ walk its columns and never cross to another monitor) |
 | `SUPER+Shift+←/→/↑/↓` | Move window within the layout |
 | `SUPER+=` / `SUPER+-` | Horizontal resize +/- |
 | `SUPER+Shift+=` / `SUPER+Shift+-` | Vertical resize +/- |
@@ -96,6 +96,7 @@ so `Ctrl+C` still interrupts.
 |---|---|
 | `SUPER+1..0` | Go to workspace N (1–10) of the monitor under the cursor |
 | `SUPER+Shift+1..0` | Move window to workspace N |
+| `SUPER+Ctrl+Shift+1..9` | Open or focus the Nth app of the dock (the pinned ones, in order) |
 | `SUPER+Ctrl+1..0` or `SUPER+Shift+Alt+1..0` | Send window to workspace N without following it |
 | `SUPER+Tab` / `SUPER+Shift+Tab` | Next / previous occupied workspace (empty ones are skipped, wraps around) |
 | `SUPER+Ctrl+Tab` | Back to the workspace you came from |
@@ -152,8 +153,10 @@ control panels. `SUPER+Ctrl+W` is the background switcher, as in Omarchy, so Net
 | `SUPER+Ctrl+Return` | Focus the window at the top of the tree |
 | `SUPER+Shift+H` / `SUPER+Shift+J` | Mirror the layout left/right or up/down |
 | `SUPER+Shift+Z` | Stop tiling this workspace |
-| `SUPER+Shift+L` / `SUPER+Alt+Shift+L` | Cycle to the next / previous layout (BSP, columns, rows, grid, scrolling, …) |
-| `SUPER+Alt+Space` → Tiling → Layout | Pick any layout (BSP, grid, columns, rows, the stacks, scrolling) |
+| `SUPER+Shift+L` / `SUPER+Alt+Shift+L` | Cycle this workspace's mode forward / back: tiling, scrolling, floating. Each workspace keeps its own and it survives a reload or restart (`winarchy mode`) |
+| `SUPER+Alt+Space` → Tiling → Layout | Pick any layout (BSP, grid, columns, rows, the stacks, scrolling) or Floating |
+| `SUPER+Ctrl+F` | Switch the tiling / floating layer (per window, not the workspace mode) |
+| `SUPER+Ctrl+Shift+L` | Lock the focused tile in place |
 | `SUPER+Alt+Home` | Remember the current tile sizes |
 | `SUPER+Home` | Restore the remembered tile sizes |
 | `SUPER+Shift+D` | Dim unfocused windows (toggle transparency) |
@@ -223,7 +226,7 @@ it launches would inherit admin rights.
   native keyboard layout switcher on `Win+Space` is **overridden** — use the language bar if needed.
 - Keys Omarchy 4.5 assigns to things Winarchy does not have (Maps, Photos, Signal, Docker,
   Omawrite, Activity on `SUPER+Shift+S/P/G/D/W/T`) keep Winarchy's own actions (ShareX
-  captures, dim, next theme). `SUPER+L` is Windows' lock, so cycling layouts stays on `SUPER+Shift+L`.
+  captures, dim, next theme). `SUPER+L` is Windows' lock, so cycling modes stays on `SUPER+Shift+L`.
 - The main menu and system/power submenu are native AHK popup menus (Windows
   context-menu styling), not a custom-themed translucent box like Omarchy's.
 - Notifications: native Windows system (no mako equivalent).

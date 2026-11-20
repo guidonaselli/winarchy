@@ -212,13 +212,15 @@ winarchy theme set <name> | next | list
 winarchy background list | gallery | set <file> | next
 winarchy agent list | set <id> | launch
 winarchy bar position [top|bottom]
-winarchy bar dock <on|off>
+winarchy bar dock <on|float|hide|auto|off>
+winarchy bar cluster <primary|off|N>   # dock que lleva reloj, notificaciones y Quick Settings
 winarchy update [--core | --self]
 winarchy menu
 winarchy webapp install <name> <url> | remove <name> | list
 winarchy screenshot [region|window|full|last|scrolling|record|record-gif|stop|ocr|qr|color|ruler|pin]
 winarchy game-mode on|off|status|add <exe>|remove <exe>
 winarchy layout save | apply | order | list | forget <exe>
+winarchy mode [list | save | default [tiling|scrolling|floating]]
 winarchy accent sync [--force] | status
 winarchy reload
 winarchy doctor
@@ -450,6 +452,20 @@ winarchy game-mode add <exe>
 `game-mode add` writes to `games.user.toml` (yours, gitignored), so `winarchy update --self`
 never collides with it. The shipped catalog stays in `games.toml`. Names with spaces work
 quoted or not: `winarchy game-mode add The iTero Coach.exe`.
+
+---
+
+## Workspace modes
+
+Every workspace is in one of three modes, like Omarchy 4.5: **tiling** (BSP), **scrolling**
+(a strip of columns) or **floating** (windows stay where you put them, as in plain Windows).
+`SUPER+Shift+L` cycles the focused workspace forward and `SUPER+Alt+Shift+L` back; the
+`SUPER+Alt+Space` layout menu picks one directly. Each workspace keeps its own mode.
+
+The mode is saved to `config/windows.toml` (machine data, gitignored) a moment after you
+change it, and `winarchy reload` or a komorebi restart restores it. `winarchy mode` lists the
+live modes and `winarchy mode default floating` sets the mode of workspaces with no saved one
+(applied by the next `winarchy layout apply`). The default stays `tiling`.
 
 ---
 

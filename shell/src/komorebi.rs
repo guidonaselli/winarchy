@@ -18,6 +18,55 @@ pub struct Workspaces {
     pub occupied: Vec<bool>,
     pub focused: usize,
     pub layout: String,
+    pub mode: Mode,
+    // Modo del workspace enfocado de cada monitor, por (left, top) del monitor.
+    pub monitor_modes: Vec<((i32, i32), Mode)>,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub enum Mode {
+    #[default]
+    Tiling,
+    Scrolling,
+    Floating,
+}
+
+impl Mode {
+    pub fn of(ws: &Value) -> Mode {
+        if ws["tile"] == false {
+            Mode::Floating
+        } else if ws["layout"]["Default"] == "Scrolling" {
+            Mode::Scrolling
+        } else {
+            Mode::Tiling
+        }
+    }
+}
+
+// El ciclo y su persistencia viven en AHK; la shell solo le avisa con un mensaje a su ventana oculta.
+pub const WM_CYCLE_MODE: u32 = 0x8000 + 21;
+
+fn ahk_window() -> Option<HWND> {
+    use windows::core::w;
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowExW, GetWindowTextW};
+    let mut prev = HWND::default();
+    while let Ok(h) = unsafe { FindWindowExW(None, Some(&prev), w!("AutoHotkey"), PCWSTR::null()) } {
+        let mut title = [0u16; 260];
+        let n = unsafe { GetWindowTextW(h, &mut title) } as usize;
+        if String::from_utf16_lossy(&title[..n]).contains("winarchy.ahk") {
+            return Some(h);
+        }
+        prev = h;
+    }
+    None
+}
+
+pub fn cycle_mode() {
+    if let Some(h) = ahk_window() {
+        unsafe {
+            let _ = PostMessageW(h, WM_CYCLE_MODE, WPARAM(0), LPARAM(0));
+        }
+    }
 }
 
 pub static CURRENT: Mutex<Option<Workspaces>> = Mutex::new(None);
@@ -67,7 +116,16 @@ pub fn parse(event: &Value) -> Option<Workspaces> {
         .collect();
     let focused = ws["focused"].as_u64()? as usize;
     let layout = ws["elements"][focused]["layout"]["Default"].as_str().unwrap_or_default().to_string();
-    Some(Workspaces { occupied, focused, layout })
+    let mode = Mode::of(&ws["elements"][focused]);
+    let monitor_modes = monitors
+        .iter()
+        .filter_map(|m| {
+            let wss = &m["workspaces"];
+            let at = wss["focused"].as_u64()? as usize;
+            Some(((m["size"]["left"].as_i64()? as i32, m["size"]["top"].as_i64()? as i32), Mode::of(&wss["elements"][at])))
+        })
+        .collect();
+    Some(Workspaces { occupied, focused, layout, mode, monitor_modes })
 }
 
 // komorebi no sigue el foco a una ventana flotante de otro workspace (Alt+Tab, una notificación, la app que se activa
@@ -189,9 +247,13 @@ unsafe fn read_events(h: HANDLE, on_change: &impl Fn()) {
             if let Some(ws) = ev.as_ref().and_then(parse) {
                 let mut cur = CURRENT.lock().unwrap();
                 if cur.as_ref() != Some(&ws) {
+                    let modes_changed = cur.as_ref().map(|w| &w.monitor_modes) != Some(&ws.monitor_modes);
                     *cur = Some(ws);
                     drop(cur);
                     on_change();
+                    if modes_changed {
+                        notify_windows();
+                    }
                 }
             }
         }
@@ -231,6 +293,22 @@ mod tests {
     #[test]
     fn events_without_state_leave_the_window_map_alone() {
         assert!(parse_windows(&serde_json::json!({"event":{}})).is_none());
+    }
+
+    #[test]
+    fn reads_the_mode_of_each_monitors_focused_workspace() {
+        let ev = serde_json::json!({"state":{"monitors":{"elements":[
+            {"size":{"left":0,"top":0},"workspaces":{"focused":1,"elements":[{"tile":true},{"tile":false}]}},
+            {"size":{"left":2560,"top":0},"workspaces":{"focused":0,"elements":[{"tile":true,"layout":{"Default":"Scrolling"}}]}}]}}});
+        let ws = parse(&ev).unwrap();
+        assert_eq!(ws.mode, Mode::Floating);
+        assert_eq!(ws.monitor_modes, vec![((0, 0), Mode::Floating), ((2560, 0), Mode::Scrolling)]);
+    }
+
+    #[test]
+    #[ignore = "needs the winarchy.ahk host running on the desktop"]
+    fn finds_the_ahk_host_window() {
+        assert!(ahk_window().is_some());
     }
 
     #[test]

@@ -66,6 +66,12 @@ function Invoke-WinarchyDoctor {
         Add-Check 'dock reserved area in komorebi' ($have -and $have.top -eq $want.Top -and $have.bottom -eq $want.Bottom) `
             "dock on: komorebi reserves top=$($want.Top) bottom=$($want.Bottom)" 'winarchy bar dock on  (re-renders komorebi.json)'
     }
+    if ((Test-WinarchyBarDock) -and (Get-WinarchyActiveBar) -ne 'yasb') {
+        $hook = Get-WinarchyTrayHookPath
+        Add-Check 'tray icons in the dock (YASB tray hook)' ([bool]$hook) `
+            $(if ($hook) { $hook } else { 'not found: the dock tray button opens the native tray instead' }) `
+            'winarchy bar use yasb; winarchy bar use native  (installs the pinned YASB, which ships the hook)'
+    }
     if (Test-WinarchyProcess 'komorebi') {
         Add-Check 'komorebi sees every monitor' (Test-WinarchyMonitorHealth) `
             'one komorebi monitor per connected display' 'winarchy reload'

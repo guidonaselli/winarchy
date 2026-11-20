@@ -23,7 +23,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 const CELL_DIP: i32 = 40;
 const PAD_DIP: i32 = 8;
 pub const BAR_DIP: i32 = 48;
-const MARGIN_DIP: i32 = 6;
+pub(crate) const MARGIN_DIP: i32 = 6;
 const DOT_DIP: i32 = 4;
 const MAX_ICONS: usize = 64;
 // Altura que komorebi reserva: alto del dock + su margen + los 2 px de la franja de la taskbar nativa.
@@ -44,7 +44,7 @@ pub fn style(t: &Theme) -> Style {
     Style { icon: t.dock_icon.clamp(16, 32), radius: t.dock_radius.clamp(0, 24), gap: t.dock_gap.clamp(0, 12), opacity: t.dock_opacity.unwrap_or(t.opacity).clamp(0.4, 1.0) }
 }
 
-const HOVER_MS: f32 = 120.0;
+pub(crate) const HOVER_MS: f32 = 120.0;
 const ENTRY_MS: f32 = 220.0;
 const FADE_MS: f32 = 160.0;
 
@@ -85,7 +85,8 @@ const TRAY_INDEX: usize = usize::MAX - 1;
 // El dock vive en el borde opuesto al de la isla: `bottom` es el borde del dock. `bar` va en coordenadas de pantalla, `cells` relativas a `bar`.
 pub fn layout(n: usize, scale: f32, mon: MonRect, bottom: bool, gap_dip: i32) -> Layout {
     let (cell, gap, pad) = (px(CELL_DIP, scale), px(gap_dip, scale), px(PAD_DIP, scale));
-    let max_w = (mon.2 - mon.0) * 4 / 5;
+    // El dock va centrado: deja a cada lado el ancho del cluster para que la píldora entre en cualquier monitor.
+    let max_w = ((mon.2 - mon.0) * 4 / 5).min(mon.2 - mon.0 - 2 * px(crate::cluster::RESERVE_DIP, scale));
     let cap = (((max_w - 2 * pad + gap) / (cell + gap)).max(1)) as usize;
     let app_cap = cap.saturating_sub(2);
     let (shown, overflow) = if n <= app_cap { (n, 0) } else { (app_cap.saturating_sub(1), n - app_cap.saturating_sub(1)) };
@@ -289,8 +290,21 @@ struct Dock {
 
 impl Dock {
     fn want_visible(&self) -> bool {
-        self.start_visible || self.key_target.is_some() || !(self.hidden || (self.theme.dock_hide && !self.peek))
+        self.start_visible || self.key_target.is_some() || !(self.hidden || (self.hides() && !self.peek))
     }
+
+    fn hides(&self) -> bool {
+        dock_hides(&self.theme, self.mon)
+    }
+}
+
+// `auto` esconde el dock salvo en un workspace floating; sin datos de komorebi lo deja a la vista.
+fn dock_hides(theme: &Theme, mon: MonRect) -> bool {
+    if theme.dock_hide {
+        return true;
+    }
+    theme.dock_auto
+        && komorebi::CURRENT.lock().unwrap().as_ref().and_then(|w| w.monitor_modes.iter().find(|(at, _)| *at == (mon.0, mon.1)).map(|(_, m)| *m)).is_some_and(|m| m != komorebi::Mode::Floating)
 }
 
 struct Drag {
@@ -355,6 +369,7 @@ pub fn init(theme: &Theme, state_dir: &std::path::Path) -> Option<HWND> {
         DOCKS.with(|v| *v.borrow_mut() = docks);
         spawn_icon_worker(first.0 as isize);
         komorebi::NOTIFY.store(first.0 as isize, std::sync::atomic::Ordering::Relaxed);
+        crate::cluster::init(theme, state_dir);
         for_each_dock(|| {
             let h = with(|d| d.hwnd);
             register(h);
@@ -372,6 +387,7 @@ unsafe fn create_dock(r: &RECT, theme: &Theme, pins_path: &std::path::Path) -> O
     let hwnd = CreateWindowExW(ex, w!("WinarchyShellDock"), w!(""), WS_POPUP, 0, 0, 1, 1, None, None, inst, None).ok()?;
     let tip = CreateWindowExW(ex | WS_EX_TRANSPARENT, w!("WinarchyShellDockTip"), w!(""), WS_POPUP, 0, 0, 1, 1, None, None, inst, None).ok()?;
     crate::accessibility::create(hwnd, "Winarchy", accesskit::Role::Toolbar);
+    crate::dock_drop::register(hwnd);
     let mon = (r.left, r.top, r.right, r.bottom);
     let scale = crate::mon_scale(r);
     Some(Dock {
@@ -482,6 +498,7 @@ unsafe fn sync_docks() -> bool {
     });
     for d in &extra {
         crate::accessibility::destroy(d.hwnd);
+        crate::dock_drop::revoke(d.hwnd);
         let _ = DestroyWindow(d.tip);
         let _ = DestroyWindow(d.hwnd);
     }
@@ -501,7 +518,7 @@ unsafe fn sync_docks() -> bool {
 
 // El timer del borde solo corre en modo `hide`; fuera de él el dock siempre se ve.
 unsafe fn sync_edge_timer(h: HWND) {
-    if with(|d| d.theme.dock_hide) {
+    if with(|d| d.theme.dock_hide || d.theme.dock_auto) {
         SetTimer(h, T_EDGE, EDGE_MS, None);
     } else {
         let _ = KillTimer(h, T_EDGE);
@@ -545,10 +562,12 @@ unsafe fn edge_tick(h: HWND) {
     let changed = with(|d| {
         let before_start = d.start_visible;
         d.start_visible = apps::show_start_surface(name, IsWindowVisible(fg).as_bool(), is_cloaked(fg), on_monitor && (info.rcMonitor.left, info.rcMonitor.top) == (d.mon.0, d.mon.1));
-        if !d.theme.dock_hide {
+        if !d.hides() {
             return false;
         }
         let (at_edge, on_bar) = reveal_zones(d.mon, d.layout.bar, d.theme.position != "bottom", (p.x, p.y));
+        let at_edge = at_edge || crate::cluster::at_edge(d.mon, p);
+        let on_bar = on_bar || crate::cluster::contains(p);
         let before = d.peek;
         if at_edge || (d.peek && (on_bar || crate::dock_menu::is_open())) {
             d.peek = true;
@@ -571,6 +590,7 @@ unsafe fn edge_tick(h: HWND) {
 }
 
 pub fn set_theme(theme: &Theme) {
+    crate::cluster::set_theme(theme);
     for_each_dock(|| {
         with(|d| {
             d.theme = theme.clone();
@@ -625,6 +645,14 @@ pub fn restore_native_taskbar() {
 // Al arrancar: una shell anterior matada a la fuerza no pudo devolverla.
 pub fn restore_native_taskbar_at_start() {
     unsafe { set_native_taskbar(false) }
+}
+
+// Con el host de bandeja activo abre el flyout propio sobre el botón; sin él, la bandeja nativa.
+fn open_tray() {
+    let (button, mon, bottom, scale, theme) = with(|d| (R { x: d.layout.bar.x + d.layout.tray.x, y: d.layout.bar.y + d.layout.tray.y, w: d.layout.tray.w, h: d.layout.tray.h }, d.mon, d.theme.position != "bottom", d.scale, d.theme.clone()));
+    if !crate::tray_flyout::toggle(button, mon, bottom, scale, &theme) {
+        show_tray();
+    }
 }
 
 pub fn show_tray() {
@@ -1080,7 +1108,7 @@ unsafe fn process_started(h: HWND) -> Option<u64> {
     ok.then(|| (t[0].dwHighDateTime as u64) << 32 | t[0].dwLowDateTime as u64)
 }
 
-unsafe fn exe_of(h: HWND) -> String {
+pub(crate) unsafe fn exe_of(h: HWND) -> String {
     let mut pid = 0u32;
     GetWindowThreadProcessId(h, Some(&mut pid));
     let Ok(p) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return String::new() };
@@ -1244,7 +1272,7 @@ fn signature(d: &Dock) -> u64 {
     for i in &d.items {
         (&i.key, i.wins.len(), i.active, i.other_ws, i.wins.iter().any(|w| d.flashing.contains(w)), d.accessible_titles.get(&accessible_group(i))).hash(&mut h);
     }
-    (&d.key_target, d.hover, d.pressed, d.icons.len(), d.scale.to_bits(), d.mon, d.hidden, d.vis.to_bits(), d.peek, d.start_visible, d.theme.dock_hide).hash(&mut h);
+    (&d.key_target, d.hover, d.pressed, d.icons.len(), d.scale.to_bits(), d.mon, d.hidden, d.vis.to_bits(), d.peek, d.start_visible, d.hides()).hash(&mut h);
     (&d.theme.background, &d.theme.accent, &d.theme.position).hash(&mut h);
     d.bar_glide.map(|(x, w)| (x.to_bits(), w.to_bits())).hash(&mut h);
     for i in &d.items {
@@ -1398,10 +1426,10 @@ fn draw_attention_marker(buf: &mut [u32], w: i32, h: i32, marker: R, border: i32
 }
 
 // Texto centrado en una celda: GDI dibuja blanco sobre negro y la luminancia pasa a cobertura (como el tooltip).
-unsafe fn draw_label(buf: &mut [u32], stride: i32, rows: i32, cell: R, text: &str, theme: &Theme, scale: f32, fg: (u8, u8, u8), font_size: i32) {
+pub(crate) unsafe fn draw_label(buf: &mut [u32], stride: i32, rows: i32, cell: R, text: &str, family: &str, scale: f32, fg: (u8, u8, u8), font_size: i32) {
     let (w, h) = (cell.w, cell.h);
     let wide: Vec<u16> = text.encode_utf16().collect();
-    let family: Vec<u16> = theme.font_family.encode_utf16().chain(std::iter::once(0)).collect();
+    let family: Vec<u16> = family.encode_utf16().chain(std::iter::once(0)).collect();
     let screen = GetDC(None);
     let mem = CreateCompatibleDC(screen);
     let bmi = BITMAPINFO { bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: w, biHeight: -h, biPlanes: 1, biBitCount: 32, biCompression: 0, ..Default::default() }, ..Default::default() };
@@ -1416,7 +1444,7 @@ unsafe fn draw_label(buf: &mut [u32], stride: i32, rows: i32, cell: R, text: &st
         SetTextColor(mem, COLORREF(0x00FF_FFFF));
         let mut rc = RECT { left: 0, top: 0, right: w, bottom: h };
         let mut tmp = wide.clone();
-        DrawTextW(mem, &mut tmp, &mut rc, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE);
+        DrawTextW(mem, &mut tmp, &mut rc, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS);
         for y in 0..h {
             for x in 0..w {
                 let p = src[(y * w + x) as usize];
@@ -1484,8 +1512,13 @@ fn render() {
         if want_vis == 0.0 {
             let _ = ShowWindow(with(|d| d.tip), SW_HIDE);
         }
+        let (mon, index) = with(|d| (d.mon, CUR.get()));
+        let cluster = crate::cluster::owns(&theme.cluster_monitor, mon, index);
         if vis == 0.0 && want_vis == 0.0 {
             let _ = ShowWindow(hwnd, SW_HIDE);
+            if cluster {
+                crate::cluster::sync(&theme, mon, scale, bar_disp.x + bar_disp.w, 0.0, 0);
+            }
             return;
         }
         let (w, h) = (bar_disp.w, bar_disp.h);
@@ -1524,7 +1557,7 @@ fn render() {
                 let cell = &R { x: xs[idx], ..*cell };
                 if layout_.overflow > 0 && idx == layout_.cells.len() - 1 {
                     fill_round_a(buf, w, h, *cell, px(10, scale), if key_target == Some(KeyTarget::Overflow) { accent } else { fg }, if key_target == Some(KeyTarget::Overflow) { 0.50 } else { 0.12 });
-                    draw_label(buf, w, h, *cell, &format!("+{}", layout_.overflow), &theme, scale, fg, theme.font_size);
+                    draw_label(buf, w, h, *cell, &format!("+{}", layout_.overflow), &theme.font_family, scale, fg, theme.font_size);
                     continue;
                 }
                 let Some(item) = items.get(idx) else { continue };
@@ -1561,7 +1594,7 @@ fn render() {
             }
         });
         // En `hide` el dock se desliza hacia su borde al esconderse.
-        let slide = if theme.dock_hide { ((1.0 - ease(vis)) * px(16, scale) as f32) as i32 } else { 0 };
+        let slide = if with(|d| d.hides()) { ((1.0 - ease(vis)) * px(16, scale) as f32) as i32 } else { 0 };
         let pos = POINT { x: bar_disp.x, y: bar_disp.y + if theme.position != "bottom" { slide } else { -slide } };
         let sz = SIZE { cx: w, cy: h };
         let src = POINT::default();
@@ -1572,6 +1605,9 @@ fn render() {
         let _ = DeleteDC(mem);
         ReleaseDC(None, screen);
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        if cluster {
+            crate::cluster::sync(&theme, mon, scale, bar_disp.x + bar_disp.w, vis, slide);
+        }
     }
 }
 
@@ -1966,6 +2002,28 @@ fn keyboard_step(targets: &[KeyTarget], current: &KeyTarget, direction: i32) -> 
     targets[next].clone()
 }
 
+// Atajo del ancla N (1-based): lleva a esa app como un clic en su celda; la lanza si no corre.
+pub fn launch_pin(n: usize) {
+    unsafe {
+        let mut at = POINT::default();
+        let _ = GetCursorPos(&mut at);
+        let owner = DOCKS.with(|v| {
+            let v = v.borrow();
+            let m = MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST);
+            let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+            let mon = GetMonitorInfoW(m, &mut info).as_bool().then_some((info.rcMonitor.left, info.rcMonitor.top, info.rcMonitor.right, info.rcMonitor.bottom));
+            v.iter().find(|d| Some(d.mon) == mon).or(v.first()).map(|d| d.hwnd.0 as isize)
+        });
+        let Some(owner) = owner else { return };
+        on_dock(owner, || {
+            let idx = with(|d| d.items.iter().enumerate().filter(|(_, i)| i.pin.is_some()).nth(n.saturating_sub(1)).map(|(i, _)| i));
+            if let Some(i) = idx {
+                activate(i, false);
+            }
+        });
+    }
+}
+
 pub fn focus_keyboard() {
     if KEY_SESSION.get().is_some() { end_keyboard(true); return; }
     unsafe {
@@ -2048,7 +2106,7 @@ unsafe fn keyboard_action(context: bool) {
     let target = with(|d| d.key_target.clone());
     match target {
         Some(KeyTarget::Brand) => { end_keyboard(false); if context { request_control_center(); } else { request_start(); } }
-        Some(KeyTarget::Tray) if !context => { end_keyboard(false); show_tray(); }
+        Some(KeyTarget::Tray) if !context => { end_keyboard(false); open_tray(); }
         Some(KeyTarget::Item(id)) => {
             let index = with(|d| d.items.iter().position(|item| group_id(item) == id));
             if let Some(index) = index {
@@ -2087,6 +2145,21 @@ pub(crate) struct PopupAnchor {
     pub bottom: bool,
     pub mon: MonRect,
     pub scale: f32,
+}
+
+// Qué lanzaría soltar archivos en el punto de pantalla (sx, sy) de este dock; None si no hay celda o la app no los acepta.
+pub(crate) fn drop_launch(owner: isize, sx: i32, sy: i32) -> Option<(String, String)> {
+    let mut out = None;
+    on_dock(owner, || unsafe {
+        let mut p = POINT { x: sx, y: sy };
+        let _ = ScreenToClient(HWND(owner as *mut _), &mut p);
+        out = with(|d| match display_hit(d, p.x, p.y) {
+            Some(Hit::Item(i)) => d.items.get(i).and_then(|it| launch_of(&d.pins, it)),
+            _ => None,
+        })
+        .filter(|(o, a)| crate::dock_drop::droppable(o, a));
+    });
+    out
 }
 
 pub(crate) fn on_dock(owner: isize, f: impl FnOnce()) {
@@ -2149,6 +2222,7 @@ unsafe fn overflow_ctx(first_hidden: usize) -> Option<crate::dock_menu::Ctx> {
             pinnable: false,
             launch: None,
             closable: false,
+            recents: Vec::new(),
         }, groups))
     })?;
     ctx.groups = groups.into_iter().map(|(id, first, fallback, count)| {
@@ -2181,11 +2255,11 @@ unsafe fn menu_ctx(idx: usize, picker: bool) -> Option<crate::dock_menu::Ctx> {
 }
 
 unsafe fn menu_ctx_at(idx: usize, picker: bool, anchor: Option<PopupAnchor>) -> Option<crate::dock_menu::Ctx> {
-    let mut ctx = with(|d| {
+    let (mut ctx, aumid) = with(|d| {
         let it = d.items.get(idx)?;
         let cell = *d.layout.cells.get(idx).or_else(|| d.layout.cells.last())?;
         let anchor = anchor.unwrap_or(PopupAnchor { owner: d.hwnd.0 as isize, cx: d.layout.bar.x + cell.x + cell.w / 2, bar: d.layout.bar, bottom: d.theme.position != "bottom", mon: d.mon, scale: d.scale });
-        Some(crate::dock_menu::Ctx {
+        Some((crate::dock_menu::Ctx {
             owner: anchor.owner,
             groups: Vec::new(),
             picker,
@@ -2205,12 +2279,16 @@ unsafe fn menu_ctx_at(idx: usize, picker: bool, anchor: Option<PopupAnchor>) -> 
             pinnable: pin_for(it, |p| p.exists()).is_some(),
             launch: launch_of(&d.pins, it),
             closable: true,
-        })
+            recents: Vec::new(),
+        }, it.aumid.clone()))
     })?;
     ctx.closeable_wins = ctx.wins.iter().copied().filter(|w| IsWindow(HWND(*w as *mut _)).as_bool() && !is_elevated(HWND(*w as *mut _))).collect();
     ctx.closable = !ctx.closeable_wins.is_empty();
     ctx.active = Some(GetForegroundWindow().0 as isize);
     ctx.titles = window_titles(&ctx.wins);
+    if !picker {
+        ctx.recents = aumid.map(|a| crate::dock_recent::list(&a)).unwrap_or_default();
+    }
     Some(ctx)
 }
 
@@ -2259,6 +2337,16 @@ unsafe fn hide_tip() {
         d.tip
     });
     let _ = ShowWindow(tip, SW_HIDE);
+    crate::dock_thumb::hide();
+}
+
+// Ventana que enfocaría el clic en la celda, para su miniatura; ni el hub, ni la bandeja ni el desborde la tienen.
+unsafe fn thumb_target(idx: usize) -> Option<isize> {
+    if idx == HUB_INDEX || idx == TRAY_INDEX || with(|d| d.layout.overflow > 0 && idx + 1 == d.layout.cells.len()) {
+        return None;
+    }
+    let (wins, last) = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), d.last_active.get(&i.key).copied())))?;
+    pick_target(&wins, 0, last)
 }
 
 // Tooltip propio (ventana layered chica): el texto se dibuja con GDI sobre negro y su luminancia pasa a alfa.
@@ -2319,6 +2407,10 @@ unsafe fn show_tip(idx: usize) {
     let _ = DeleteDC(mem);
     ReleaseDC(None, screen);
     let _ = ShowWindow(tip, SW_SHOWNOACTIVATE);
+    match thumb_target(idx) {
+        Some(target) => crate::dock_thumb::show(target, bar.x + cell.x + cell.w / 2, (x, y, w, h), bottom, mon, scale, &theme),
+        None => crate::dock_thumb::hide(),
+    }
     if animate {
         let dock = with(|d| {
             d.tip_born = Some(std::time::Instant::now());
@@ -2388,7 +2480,7 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 if action != accesskit::Action::Click { continue }
                 match key.as_str() {
                     "start" => request_start(),
-                    "tray" => show_tray(),
+                    "tray" => open_tray(),
                     "overflow" => {
                         let first = with(|d| (d.layout.overflow > 0).then(|| d.layout.cells.len().saturating_sub(1)));
                         if let Some(ctx) = first.and_then(|first| overflow_ctx(first)) { crate::dock_menu::show(ctx); }
@@ -2646,7 +2738,7 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             if !activate { return LRESULT(0); }
             match hit {
                 Some(Hit::Brand) => request_start(),
-                Some(Hit::Tray) => { hide_tip(); show_tray(); },
+                Some(Hit::Tray) => { hide_tip(); open_tray(); },
                 Some(Hit::Item(i)) => click(i),
                 Some(Hit::Overflow) => replay(Replay::Overflow, 0),
                 None => {}

@@ -45,6 +45,15 @@ function Install-WinarchyYasb {
     if (-not (Get-Command yasbc -ErrorAction SilentlyContinue)) { throw 'YASB was installed but yasbc is not on PATH yet: open a new terminal and retry.' }
 }
 
+function Get-WinarchyTrayHookPath {
+    <# La DLL de bandeja de YASB (MIT, firmada) que la shell carga en explorer para mostrar los íconos reales en el dock; $null si YASB no está instalado. #>
+    foreach ($root in $env:ProgramW6432, $env:ProgramFiles) {
+        if (-not $root) { continue }
+        $path = Join-Path $root 'YASB\lib\YASBTrayHook.dll'
+        if (Test-Path -LiteralPath $path) { return $path }
+    }
+}
+
 function Initialize-WinarchyBar {
     <# Barra por defecto de la instalación: la shell nativa (YASB solo si ya estaba). Deja el binario verificado en su lugar. #>
     $bar = Get-WinarchyActiveBar

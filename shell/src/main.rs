@@ -3,9 +3,13 @@
 mod apps;
 mod accessibility;
 mod dock;
+mod dock_drop;
 mod dock_menu;
+mod dock_recent;
+mod dock_thumb;
 mod brightness;
 mod calendar;
+mod cluster;
 mod world;
 mod extras;
 mod i18n;
@@ -15,7 +19,10 @@ mod metrics;
 mod komorebi;
 mod pipe;
 mod spirit;
+mod system;
 mod theme;
+mod tray;
+mod tray_flyout;
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -39,6 +46,7 @@ const WM_WORKSPACES: u32 = WM_APP + 4;
 const WM_CMD_TRAY: u32 = WM_APP + 8;
 const WM_CMD_TRAY_DISMISS: u32 = WM_APP + 9;
 const WM_CMD_DOCK_FOCUS: u32 = WM_APP + 10;
+const WM_CMD_DOCK_PIN: u32 = WM_APP + 43;
 const WM_EXPAND: u32 = WM_APP + 5;
 const WM_COLLAPSE: u32 = WM_APP + 6;
 const WM_BRIGHTNESS: u32 = WM_APP + 7;
@@ -82,6 +90,7 @@ struct State {
     panel: Option<Panel>,
     panel_shown: Option<Panel>,
     last_layout: String,
+    last_mode: Option<komorebi::Mode>,
     layout: Layout,
     pill_mon: RECT,
     layout_sig: Vec<(i32, i32, i32, i32, u32)>,
@@ -267,6 +276,14 @@ pub(crate) unsafe fn mon_scale(r: &RECT) -> f32 {
     } else {
         1.0
     }
+}
+
+fn mode_label(m: komorebi::Mode) -> &'static str {
+    tr(match m {
+        komorebi::Mode::Tiling => K::ModeTiling,
+        komorebi::Mode::Scrolling => K::ModeScrolling,
+        komorebi::Mode::Floating => K::ModeFloating,
+    })
 }
 
 // Firma de la disposición de monitores y sus escalas: si cambia, hay que redibujar la pastilla.
@@ -537,6 +554,10 @@ unsafe fn render_pill(pill: HWND) {
             fill_round(pixels, width, height, r, px(7, scale), if c.focused { accent } else { chip_bg }, bg);
             draw_text(mem, &(c.ws + 1).to_string(), r, if c.focused { bg_c } else { muted_c }, DT_CENTER | DT_VCENTER);
         }
+        let mode_r = lay.place(pr.mode);
+        fill_round(pixels, width, height, mode_r, px(7, scale), chip_bg, bg);
+        let mode = komorebi::CURRENT.lock().unwrap().as_ref().map(|w| w.mode).unwrap_or_default();
+        draw_text(mem, mode_label(mode), mode_r, fg_c, DT_CENTER | DT_VCENTER);
         draw_text(mem, &p.notes, lay.place(pr.notes), muted_c, DT_VCENTER | DT_RIGHT);
     }
     let fade = layout::ease(with(|s| s.fade));
@@ -658,7 +679,7 @@ fn expand_step() -> bool {
         s.expand_until
     });
     if !until.is_some_and(|t| t > now) {
-        let vol = metrics::volume();
+        let vol = system::snapshot().volume;
         let early = with(|s| {
             let changed = s.last_vol.is_some() && vol.is_some() && vol != s.last_vol;
             s.last_vol = vol;
@@ -694,7 +715,8 @@ fn expand_step() -> bool {
             let mut meter = |kind: Meter, v: Option<u32>| meters.extend(v.map(|v| (kind, v, format!("{v}%"))));
             meter(Meter::Cpu, cpu);
             meter(Meter::Ram, ram);
-            if let Some((v, muted)) = metrics::volume() {
+            let snap = system::snapshot();
+            if let Some((v, muted)) = snap.volume {
                 meters.push((Meter::Vol, if muted { 0 } else { v }, if muted { tr(K::MuteValue).into() } else { format!("{v}%") }));
             }
             brightness::refresh_if_stale();
@@ -706,13 +728,13 @@ fn expand_step() -> bool {
             if let Some(g) = sampler.gpu().filter(|g| *g > 50.0) {
                 notes.push(format!("{} {g:.0}%", tr(K::Gpu)));
             }
-            if let Some((b, ac)) = metrics::battery().filter(|(b, ac)| !ac || *b < 20) {
+            if let Some((b, ac)) = snap.battery.filter(|(b, ac)| !ac || *b < 20) {
                 notes.push(format!("{} {b}%{}", tr(K::Battery), if ac { "+" } else { "" }));
             }
-            if let Some(n) = metrics::notification_count().filter(|n| *n > 0) {
+            if let Some(n) = snap.notifications.filter(|n| *n > 0) {
                 notes.push(format!("{} {n}", tr(K::Notifications)));
             }
-            if metrics::online() == Some(false) {
+            if snap.online == Some(false) {
                 notes.push(tr(K::NetOff).into());
             }
             let state_dir = theme_path.ancestors().nth(3).map(|r| r.join("state")).unwrap_or_default();
@@ -844,6 +866,10 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             tick(h);
             LRESULT(0)
         }
+        WM_CMD_DOCK_PIN => {
+            dock::launch_pin(wp.0);
+            LRESULT(0)
+        }
         WM_CMD_DOCK_FOCUS => {
             dock::focus_keyboard();
             LRESULT(0)
@@ -874,19 +900,22 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             LRESULT(0)
         }
         WM_WORKSPACES => {
-            let (cur, layout) = komorebi::CURRENT.lock().unwrap().as_ref().map(|w| (Some(w.focused), w.layout.clone())).unwrap_or_default();
-            let (ws_changed, layout_changed) = with(|s| {
+            let (cur, layout, mode) = komorebi::CURRENT.lock().unwrap().as_ref().map(|w| (Some(w.focused), w.layout.clone(), w.mode)).unwrap_or_default();
+            let (ws_changed, layout_changed, mode_changed) = with(|s| {
                 let ws = workspace_changed(s.last_ws, cur);
                 s.last_ws = cur.or(s.last_ws);
                 let lay = !ws && !layout.is_empty() && !s.last_layout.is_empty() && s.last_layout != layout;
                 if !layout.is_empty() {
                     s.last_layout = layout.clone();
                 }
-                (ws, lay)
+                let md = !ws && s.last_mode.is_some_and(|m| m != mode);
+                s.last_mode = Some(mode);
+                (ws, lay, md)
             });
-            let title = match (ws_changed, layout_changed, cur) {
-                (true, _, Some(n)) => Some(format!("{} {}", tr(K::Workspace), n + 1)),
-                (_, true, _) => Some(format!("{} {layout}", tr(K::Layout))),
+            let title = match (ws_changed, mode_changed, layout_changed, cur) {
+                (true, _, _, Some(n)) => Some(format!("{} {}", tr(K::Workspace), n + 1)),
+                (_, true, _, _) => Some(mode_label(mode).to_string()),
+                (_, _, true, _) => Some(format!("{} {layout}", tr(K::Layout))),
                 _ => None,
             };
             if let Some(title) = title {
@@ -1021,6 +1050,7 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                         (None, _) => {}
                     }
                 }
+                Some(Hit::Mode) => komorebi::cycle_mode(),
                 Some(Hit::Surface) | None => {}
             }
             return LRESULT(0);
@@ -1100,7 +1130,7 @@ fn main() {
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, layout::bar_h(scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path: theme_path.clone(), scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig(), fade: 1.0, was_open: false, clock_open: false, cal_ym: (1970, 1), cal_sel: 0, countdown: None, countdown_minute: 99 })
+            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path: theme_path.clone(), scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), last_mode: None, layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig(), fade: 1.0, was_open: false, clock_open: false, cal_ym: (1970, 1), cal_sel: 0, countdown: None, countdown_minute: 99 })
         });
         ics::spawn_feed(theme_path.clone());
         extras::spawn_weather(theme_path);
@@ -1121,6 +1151,7 @@ fn main() {
             let _ = PostMessageW(HWND(target as *mut _), WM_BRIGHTNESS, WPARAM(0), LPARAM(0));
         });
         pipe::serve(move |c| {
+            let mut arg = 0;
             let m = match c {
                 pipe::Command::Reload => WM_CMD_RELOAD,
                 pipe::Command::Quit => WM_CMD_QUIT,
@@ -1129,14 +1160,24 @@ fn main() {
                 pipe::Command::Tray => WM_CMD_TRAY,
                 pipe::Command::TrayDismiss => WM_CMD_TRAY_DISMISS,
                 pipe::Command::DockFocus => WM_CMD_DOCK_FOCUS,
+                pipe::Command::DockPin(n) => {
+                    arg = n;
+                    WM_CMD_DOCK_PIN
+                }
             };
-            let _ = PostMessageW(HWND(target as *mut _), m, WPARAM(0), LPARAM(0));
+            let _ = PostMessageW(HWND(target as *mut _), m, WPARAM(arg), LPARAM(0));
         });
 
         komorebi::spawn(move || {
             let _ = PostMessageW(HWND(target as *mut _), WM_WORKSPACES, WPARAM(0), LPARAM(0));
         });
         komorebi::follow_foreground();
+        system::spawn(cluster::notify);
+        tray::load_pins(&with(|s| s.theme_path.ancestors().nth(3).map(|r| r.join("state")).unwrap_or_default()));
+        let _ = tray::spawn(|| {
+            tray_flyout::notify();
+            cluster::notify();
+        });
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {

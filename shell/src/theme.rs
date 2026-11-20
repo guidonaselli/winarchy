@@ -17,8 +17,14 @@ pub struct Theme {
     pub dock: bool,
     #[serde(default)]
     pub dock_hide: bool,
+    // Solo se ve en los workspaces floating; en los demás se esconde como `dock_hide`.
+    #[serde(default)]
+    pub dock_auto: bool,
     #[serde(default)]
     pub hide_native_taskbar: bool,
+    // Monitor del cluster de sistema: `primary`, `off` o la posición 1-based del monitor.
+    #[serde(default = "d_cluster")]
+    pub cluster_monitor: String,
     #[serde(default = "d_icon")]
     pub dock_icon: i32,
     #[serde(default = "d_radius")]
@@ -80,6 +86,10 @@ fn d_radius() -> i32 {
     16
 }
 
+fn d_cluster() -> String {
+    "primary".into()
+}
+
 fn d_gap() -> i32 {
     4
 }
@@ -98,7 +108,9 @@ impl Default for Theme {
             position: "top".into(),
             dock: false,
             dock_hide: false,
+            dock_auto: false,
             hide_native_taskbar: false,
+            cluster_monitor: d_cluster(),
             dock_icon: d_icon(),
             dock_radius: d_radius(),
             dock_gap: d_gap(),
