@@ -84,9 +84,15 @@ const TRAY_INDEX: usize = usize::MAX - 1;
 
 // El dock vive en el borde opuesto al de la isla: `bottom` es el borde del dock. `bar` va en coordenadas de pantalla, `cells` relativas a `bar`.
 pub fn layout(n: usize, scale: f32, mon: MonRect, bottom: bool, gap_dip: i32) -> Layout {
+    layout_for(n, scale, mon, bottom, gap_dip, true)
+}
+
+// `reserve` deja a cada lado el ancho del cluster; solo el dock que lo dibuja lo necesita.
+fn layout_for(n: usize, scale: f32, mon: MonRect, bottom: bool, gap_dip: i32, reserve: bool) -> Layout {
     let (cell, gap, pad) = (px(CELL_DIP, scale), px(gap_dip, scale), px(PAD_DIP, scale));
     // El dock va centrado: deja a cada lado el ancho del cluster para que la píldora entre en cualquier monitor.
-    let max_w = ((mon.2 - mon.0) * 4 / 5).min(mon.2 - mon.0 - 2 * px(crate::cluster::RESERVE_DIP, scale));
+    let side = if reserve { px(crate::cluster::RESERVE_DIP, scale) } else { 0 };
+    let max_w = ((mon.2 - mon.0) * 4 / 5).min(mon.2 - mon.0 - 2 * side);
     let cap = (((max_w - 2 * pad + gap) / (cell + gap)).max(1)) as usize;
     let app_cap = cap.saturating_sub(2);
     let (shown, overflow) = if n <= app_cap { (n, 0) } else { (app_cap.saturating_sub(1), n - app_cap.saturating_sub(1)) };
@@ -1467,7 +1473,8 @@ pub(crate) unsafe fn draw_label(buf: &mut [u32], stride: i32, rows: i32, cell: R
 fn render() {
     let flashing = with(|d| d.flashing.clone());
     let (hwnd, theme, items, layout_, hover, scale, want_vis, motion, pressed) = with(|d| {
-        d.layout = layout(d.items.len(), d.scale, d.mon, d.theme.position != "bottom", style(&d.theme).gap);
+        let reserve = crate::cluster::owns(&d.theme.cluster_monitor, d.mon, CUR.get());
+        d.layout = layout_for(d.items.len(), d.scale, d.mon, d.theme.position != "bottom", style(&d.theme).gap, reserve);
         if let Some(target) = d.key_target.as_ref() {
             let visible = d.layout.cells.len().saturating_sub(usize::from(d.layout.overflow > 0));
             let normalized = normalize_keyboard_target(target, &d.items, visible, d.layout.overflow);
