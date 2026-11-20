@@ -3670,3 +3670,13 @@ Describe 'Tray hook lookup' {
         }
     }
 }
+
+Describe 'Floating apps already open' {
+    It 'lists only the exes with a floating rule that komorebi holds in a container' {
+        InModuleScope Winarchy {
+            $config = '{"floating_applications":[{"kind":"Exe","id":"aLogin.exe","matching_strategy":"Equals"},{"kind":"Exe","id":"Free.exe","matching_strategy":"Equals"},{"kind":"Class","id":"X","matching_strategy":"Equals"}]}' | ConvertFrom-Json
+            $state = '{"monitors":{"elements":[{"workspaces":{"elements":[{"containers":{"elements":[{"windows":{"elements":[{"exe":"alogin.exe"}]}},{"windows":{"elements":[{"exe":"code.exe"}]}}]},"floating_windows":{"elements":[{"exe":"Free.exe"}]}}]}}]}}' | ConvertFrom-Json
+            @(Get-WinarchyTiledFloatingExes -State $state -Config $config) | Should -Be @('alogin.exe')
+        }
+    }
+}

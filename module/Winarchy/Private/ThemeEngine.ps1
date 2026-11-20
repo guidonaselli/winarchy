@@ -810,7 +810,11 @@ function Invoke-WinarchyReload {
     $root = Get-WinarchyRoot
     $env:KOMOREBI_CONFIG_HOME = Join-Path $root 'config\komorebi'
     $env:YASB_CONFIG_HOME = Join-Path $root 'config\yasb'
-    if (-not (Test-WinarchyProcess 'komorebi')) { Start-WinarchyKomorebi }
+    if (-not (Test-WinarchyProcess 'komorebi')) {
+        Start-WinarchyKomorebi
+        Start-Sleep -Seconds 4
+        Restore-WinarchyFloatingApps -ConfigPath (Join-Path $env:KOMOREBI_CONFIG_HOME 'komorebi.json')
+    }
     # -Light corre solo (sync de accent, cambio de barra): ahí nunca se reinicia komorebi
     elseif ($Light -or -not (Repair-WinarchyKomorebiMonitors)) {
         Invoke-WinarchyKomorebiReplace -ConfigPath (Join-Path $env:KOMOREBI_CONFIG_HOME 'komorebi.json')

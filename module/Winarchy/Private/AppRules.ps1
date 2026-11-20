@@ -326,7 +326,50 @@ public static bool Show(long hwnd) {
         }
         Start-Sleep -Milliseconds 200
     }
+    Restore-WinarchyFloatingApps -ConfigPath $ConfigPath
     Write-WinarchyStaleIgnoreWarning -ConfigPath $ConfigPath
+}
+
+function Get-WinarchyTiledFloatingExes {
+    <# Exes con regla `floating_applications` que komorebi tiene dentro de un container: la regla solo rige para ventanas
+       nuevas, así que tras un reinicio o un replace las que ya estaban abiertas quedan tileadas. #>
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)]$Config)
+    $floating = @($Config.floating_applications | Where-Object { $_ -and $_.kind -eq 'Exe' -and $_.matching_strategy -eq 'Equals' } | ForEach-Object { $_.id.ToLowerInvariant() })
+    if (-not $floating) { return }
+    $tiled = foreach ($m in $State.monitors.elements) {
+        foreach ($w in $m.workspaces.elements) {
+            @($w.containers.elements) | ForEach-Object { @($_.windows.elements) } | Where-Object { $_ } | ForEach-Object { $_.exe }
+        }
+    }
+    @($tiled | Where-Object { $_ -and $floating -contains $_.ToLowerInvariant() } | Select-Object -Unique)
+}
+
+function Restore-WinarchyFloatingApps {
+    <# Pasa a flotante las ventanas ya abiertas que una regla `floating` debería tener así. Enfoca cada una un instante
+       (komorebi solo alterna la enfocada) y devuelve el foco a la ventana de antes. #>
+    param([Parameter(Mandatory)][string]$ConfigPath)
+    Add-Type -Namespace Winarchy.Native -Name Fg -ErrorAction SilentlyContinue -MemberDefinition @'
+[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+'@
+    if (-not (Test-Path -LiteralPath $ConfigPath)) { return }
+    $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json -ErrorAction SilentlyContinue
+    $state = komorebic state 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
+    if (-not $config -or -not $state) { return }
+    $exes = @(Get-WinarchyTiledFloatingExes -State $state -Config $config)
+    if (-not $exes) { return }
+    $fg = [Winarchy.Native.Fg]::GetForegroundWindow()
+    foreach ($exe in $exes) {
+        for ($n = 0; $n -lt 8; $n++) {
+            komorebic eager-focus $exe 2>$null | Out-Null
+            Start-Sleep -Milliseconds 250
+            komorebic toggle-float 2>$null | Out-Null
+            Start-Sleep -Milliseconds 250
+            $state = komorebic state 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
+            if (-not $state -or $exe -notin @(Get-WinarchyTiledFloatingExes -State $state -Config $config)) { break }
+        }
+    }
+    $null = [Winarchy.Native.Fg]::SetForegroundWindow($fg)
 }
 
 function Write-WinarchyStaleIgnoreWarning {
