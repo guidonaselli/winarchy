@@ -29,6 +29,7 @@ Describe 'Komorebi configuration replacement' {
             Mock komorebic { }
             Mock Get-Process { [pscustomobject]@{ ProcessName = 'komorebi' } } -ParameterFilter { $Name -eq 'komorebi' }
             Mock Stop-Process { }
+            Mock Stop-WinarchyShell { }
             Mock Start-Process { }
         }
     }

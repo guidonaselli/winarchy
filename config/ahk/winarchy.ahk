@@ -625,13 +625,27 @@ ToggleStayAwake() {
     }
 }
 
+ShowTaskbars() {
+    ; una shell matada a la fuerza no devuelve la taskbar que ocultó
+    prev := A_DetectHiddenWindows
+    DetectHiddenWindows(true)
+    for class in ['Shell_TrayWnd', 'Shell_SecondaryTrayWnd']
+        for hwnd in WinGetList('ahk_class ' class)
+            DllCall('ShowWindow', 'Ptr', hwnd, 'Int', 8)
+    DetectHiddenWindows(prev)
+}
+
 QuitStack() {
     ; parada ordenada y NO elevada: komorebi primero, luego barra/launcher, AHK al final
     SetTimer(YasbWatch, 0)   ; si no, relanza la barra que acabamos de matar
     SetTimer(ShellWatch, 0)
     try Komorebic('stop')
     try RunWait('taskkill /IM yasb.exe /F', , 'Hide')
-    try RunWait('taskkill /IM winarchy-shell.exe /F', , 'Hide')
+    ShellIsland('quit')   ; la shell limpia lo suyo (región, taskbar oculta); el /F es solo si no sale
+    if ProcessWaitClose('winarchy-shell.exe', 1.5) {
+        try RunWait('taskkill /IM winarchy-shell.exe /F', , 'Hide')
+        ShowTaskbars()
+    }
     try RunWait('taskkill /IM Flow.Launcher.exe /F', , 'Hide')
     ExitApp()
 }

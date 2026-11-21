@@ -838,12 +838,12 @@ function Invoke-WinarchyReload {
     }
     if ((Get-WinarchyActiveBar) -eq 'native') {
         Stop-Process -Name 'yasb' -Force -ErrorAction SilentlyContinue
-        Stop-Process -Name 'winarchy-shell' -Force -ErrorAction SilentlyContinue
+        Stop-WinarchyShell
         $shellExe = Get-WinarchyShellExe
         if ($shellExe) { Start-Process $shellExe -WindowStyle Hidden }
     }
     else {
-        Stop-Process -Name 'winarchy-shell' -Force -ErrorAction SilentlyContinue
+        Stop-WinarchyShell
         if (Test-WinarchyTaskbarHidden) { Restore-WinarchyNativeTaskbar }
     }
     if ($Light) { return }

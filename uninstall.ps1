@@ -45,7 +45,8 @@ Invoke-Step 'Stop komorebi, YASB and the Winarchy AHK script' {
         & $komorebic stop 2>$null | Out-Null
         $komorebi | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
     }
-    Stop-Process -Name yasb, winarchy-shell -Force -ErrorAction SilentlyContinue
+    Stop-Process -Name yasb -Force -ErrorAction SilentlyContinue
+    Stop-WinarchyShell
     Get-Process -Name powershell, pwsh -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -like '*Start-NetIcon.ps1*' } |
         Stop-Process -Force -ErrorAction SilentlyContinue

@@ -2285,6 +2285,7 @@ Describe 'Runtime configuration environment' {
                 Mock Get-Command { [pscustomobject]@{ Source = 'C:\Program Files\YASB\yasbc.exe' } } -ParameterFilter { $Name -eq 'yasbc' }
                 Mock Start-Process {}
                 Mock Stop-Process {}
+                Mock Stop-WinarchyShell { }
 
                 foreach ($initial in @($null, 'C:\stale')) {
                     $env:KOMOREBI_CONFIG_HOME = $initial
@@ -2316,6 +2317,7 @@ Describe 'Runtime configuration environment' {
                 Mock Get-Command { [pscustomobject]@{ Source = 'C:\Program Files\YASB\yasbc.exe' } } -ParameterFilter { $Name -eq 'yasbc' }
                 Mock Start-Process {}
                 Mock Stop-Process {}
+                Mock Stop-WinarchyShell { }
 
                 Invoke-WinarchyReload
                 $env:CLAUDE_CODE_CHILD_SESSION | Should -BeNullOrEmpty
@@ -3572,6 +3574,7 @@ Describe 'Monitor health' {
                 Mock Get-WinarchyShellExe { $null }
                 Mock Start-Process { }
                 Mock Stop-Process { }
+                Mock Stop-WinarchyShell { }
                 Mock Start-WinarchyWindowSlots { }
                 Mock Get-WinarchyAhkExe { $null }
                 if (-not (Get-Command komorebic -ErrorAction SilentlyContinue)) { function komorebic { } }
@@ -3689,5 +3692,108 @@ Describe 'Floating apps already open' {
             $state = '{"monitors":{"elements":[{"workspaces":{"elements":[{"containers":{"elements":[{"windows":{"elements":[{"exe":"alogin.exe"}]}},{"windows":{"elements":[{"exe":"code.exe"}]}}]},"floating_windows":{"elements":[{"exe":"Free.exe"}]}}]}}]}}' | ConvertFrom-Json
             @(Get-WinarchyTiledFloatingExes -State $state -Config $config) | Should -Be @('alogin.exe')
         }
+    }
+}
+
+Describe 'Stop-WinarchyShell' {
+    BeforeEach {
+        InModuleScope Winarchy {
+            $script:log = [System.Collections.Generic.List[string]]::new()
+            $script:alive = $true
+            $script:written = $null
+            $script:connectFails = $false
+            Mock Get-Process {
+                if ($script:alive) {
+                    $p = [pscustomobject]@{ Name = 'winarchy-shell' }
+                    $p | Add-Member ScriptMethod WaitForExit { param($ms) $script:log.Add("wait:$ms"); if ($script:exitsOnWait) { $script:alive = $false }; -not $script:alive }
+                    $p
+                }
+            }
+            Mock Stop-Process { $script:log.Add('stop') }
+            Mock Restore-WinarchyNativeTaskbar { $script:log.Add('restore') }
+            Mock New-Object {
+                $pipe = [pscustomobject]@{}
+                $pipe | Add-Member ScriptMethod Connect { param($ms) $script:log.Add("connect:$ms"); if ($script:connectFails) { throw 'timeout' } }
+                $pipe | Add-Member ScriptMethod Write { param($b, $o, $n) $script:written = [Text.Encoding]::UTF8.GetString($b, $o, $n) }
+                $pipe | Add-Member ScriptMethod Flush { }
+                $pipe | Add-Member ScriptMethod Dispose { $script:log.Add('dispose') }
+                $pipe
+            }
+            $script:exitsOnWait = $false
+        }
+    }
+
+    It 'returns without touching the pipe or killing anything when no shell runs' {
+        InModuleScope Winarchy {
+            $script:alive = $false
+            Stop-WinarchyShell
+            Should -Invoke New-Object -Times 0
+            Should -Invoke Stop-Process -Times 0
+        }
+    }
+
+    It 'sends quit with a trailing LF, waits, and does not force a shell that exited' {
+        InModuleScope Winarchy {
+            $script:exitsOnWait = $true
+            Stop-WinarchyShell
+            $script:written | Should -Be "{`"v`":1,`"id`":1,`"cmd`":`"quit`"}`n"
+            $script:log[0] | Should -Be 'connect:200'
+            $script:log -contains 'wait:1500' | Should -BeTrue
+            Should -Invoke Stop-Process -Times 0
+            Should -Invoke Restore-WinarchyNativeTaskbar -Times 0
+        }
+    }
+
+    It 'forces the shell only after the wait when it is still alive' {
+        InModuleScope Winarchy {
+            Stop-WinarchyShell
+            ($script:log -join ',') | Should -Be 'connect:200,wait:1500,dispose,stop,restore'
+            Should -Invoke Stop-Process -Times 1 -ParameterFilter { $Force }
+        }
+    }
+
+    It 'waits exactly ShellQuitWaitMs milliseconds' {
+        InModuleScope Winarchy {
+            $script:exitsOnWait = $true
+            Stop-WinarchyShell
+            $script:log -contains "wait:$($script:ShellQuitWaitMs)" | Should -BeTrue
+        }
+    }
+
+    It 'forces without waiting when Connect throws and the shell is alive' {
+        InModuleScope Winarchy {
+            $script:connectFails = $true
+            Stop-WinarchyShell
+            ($script:log | Where-Object { $_ -like 'wait:*' }) | Should -BeNullOrEmpty
+            Should -Invoke Stop-Process -Times 1 -ParameterFilter { $Force }
+            Should -Invoke Restore-WinarchyNativeTaskbar -Times 1
+        }
+    }
+}
+
+Describe 'Shell stop callers' {
+    BeforeAll {
+        $script:Theme = Get-Content (Join-Path $script:Root 'module\Winarchy\Private\ThemeEngine.ps1') -Raw
+        $script:Uninstall = Get-Content (Join-Path $script:Root 'uninstall.ps1') -Raw
+        $script:Rollback = Get-Content (Join-Path $script:Root 'scripts\rollback-to-seelen.ps1') -Raw
+    }
+
+    It 'uninstall and rollback call Stop-WinarchyShell' {
+        $script:Uninstall | Should -Match 'Stop-WinarchyShell'
+        $script:Rollback | Should -Match 'Stop-WinarchyShell'
+    }
+
+    It 'no caller kills winarchy-shell by name with Stop-Process' {
+        foreach ($text in $script:Theme, $script:Uninstall, $script:Rollback) {
+            $text | Should -Not -Match 'Stop-Process[^\r\n]*winarchy-shell'
+        }
+    }
+
+    It 'the AHK QuitStack wait matches ShellQuitWaitMs' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        ($ahk -match "ProcessWaitClose\('winarchy-shell\.exe', ([\d.]+)\)") | Should -BeTrue
+        $ms = [double]$Matches[1] * 1000
+        $shellMs = InModuleScope Winarchy { $script:ShellQuitWaitMs }
+        $ms | Should -Be $shellMs
     }
 }

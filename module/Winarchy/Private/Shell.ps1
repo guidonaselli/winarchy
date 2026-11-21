@@ -1,3 +1,26 @@
+$script:ShellPipeConnectMs = 200
+$script:ShellQuitWaitMs = 1500
+
+function Stop-WinarchyShell {
+    <# Pide `quit` por el pipe para que la shell limpie lo suyo; si no sale la fuerza y muestra la taskbar. Sin shell vuelve sin conectar. #>
+    if (-not (Get-Process -Name 'winarchy-shell' -ErrorAction SilentlyContinue)) { return }
+    $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'winarchy-shell', [System.IO.Pipes.PipeDirection]::Out)
+    try {
+        $pipe.Connect($script:ShellPipeConnectMs)
+        $bytes = [Text.Encoding]::UTF8.GetBytes("{`"v`":1,`"id`":1,`"cmd`":`"quit`"}`n")
+        $pipe.Write($bytes, 0, $bytes.Length)
+        $pipe.Flush()
+        foreach ($p in Get-Process -Name 'winarchy-shell' -ErrorAction SilentlyContinue) { $null = $p.WaitForExit($script:ShellQuitWaitMs) }
+    }
+    catch { }   # Connect vencido o pipe roto: shell colgada, se fuerza sin esperar
+    finally { $pipe.Dispose() }
+    $alive = @(Get-Process -Name 'winarchy-shell' -ErrorAction SilentlyContinue)
+    if ($alive) {
+        $alive | Stop-Process -Force -ErrorAction SilentlyContinue
+        Restore-WinarchyNativeTaskbar   # una shell forzada no devuelve la taskbar que ocultó
+    }
+}
+
 function Get-WinarchyShellExe {
     <# Binario de la shell nativa: el instalado (verificado) y, en desarrollo, el build local. #>
     $root = Get-WinarchyRoot

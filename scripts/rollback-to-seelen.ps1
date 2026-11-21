@@ -18,6 +18,7 @@ Write-Host "`n== Rollback Winarchy → Seelen ==" -ForegroundColor Cyan
 # 1. Parar Winarchy y sacar su autostart
 if (Get-Process -Name komorebi -ErrorAction SilentlyContinue) { komorebic stop 2>$null | Out-Null }
 Stop-Process -Name yasb -Force -ErrorAction SilentlyContinue
+Stop-WinarchyShell
 Get-Process -Name 'AutoHotkey*' -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -like '*winarchy.ahk*' } |
     Stop-Process -Force -ErrorAction SilentlyContinue
