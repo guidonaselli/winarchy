@@ -598,12 +598,12 @@ pub fn drag_out(paths: &[PathBuf]) -> Result<(), String> {
             Foundation::{DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, S_OK},
             System::{
                 Com::CoTaskMemFree,
-                Ole::{DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_LINK, DROPEFFECT_MOVE, DoDragDrop, IDropSource, IDropSource_Impl, OleInitialize},
+                Ole::{DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_LINK, DROPEFFECT_MOVE, IDropSource, IDropSource_Impl, OleInitialize},
                 SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS},
             },
             UI::{
-                Input::KeyboardAndMouse::ReleaseCapture,
-                Shell::{SHCreateDataObject, SHParseDisplayName},
+                Shell::{SHCreateDataObject, SHDoDragDrop, SHParseDisplayName},
+                WindowsAndMessaging::GetForegroundWindow,
             },
         },
         core::{BOOL, HRESULT, PCWSTR, implement},
@@ -642,11 +642,8 @@ pub fn drag_out(paths: &[PathBuf]) -> Result<(), String> {
         }
         let data = SHCreateDataObject(None, Some(&identifiers), None);
         let source: IDropSource = Source.into();
-        let _ = ReleaseCapture();
-        let mut effect = DROPEFFECT::default();
         let outcome = data.and_then(|data: windows::Win32::System::Com::IDataObject| {
-            let result = DoDragDrop(&data, &source, DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK, &mut effect);
-            if result == DRAGDROP_S_DROP || result == DRAGDROP_S_CANCEL { Ok(()) } else { result.ok() }
+            SHDoDragDrop(Some(GetForegroundWindow()), &data, &source, DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK).map(|_| ())
         });
         for identifier in identifiers {
             CoTaskMemFree(Some(identifier.cast()));

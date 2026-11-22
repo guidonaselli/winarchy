@@ -539,6 +539,8 @@ enum Message {
     RowClick(PathBuf),
     OpenInTab(PathBuf),
     RowHover(Option<PathBuf>),
+    RowDrag(PathBuf, f64, f64),
+    DroppedOnSidebar(DroppedData),
     NativeMenu,
     ContextKey(Option<PathBuf>, Option<(f64, f64)>),
     NativeMenuRun,
@@ -586,7 +588,7 @@ struct Explorer {
     menu_focus: Option<usize>,
     menu_closed_at: Option<std::time::Instant>,
     hovered_row: Option<PathBuf>,
-    press_row: Option<PathBuf>,
+    drag_origin: Option<(PathBuf, f64, f64, std::time::Instant)>,
     type_ahead: (String, std::time::Instant),
     filter_ref: ElementRef<TextBox>,
     hovered_handle: Option<Column>,
@@ -730,7 +732,7 @@ impl Component for Explorer {
             favorites: saved.favorites.clone(),
             in_favorites: false,
             pin_armed: None,
-            press_row: None,
+            drag_origin: None,
             list_width: DEFAULT_LIST_WIDTH,
         };
         app.queue_load(path, context);
@@ -1041,8 +1043,7 @@ impl Component for Explorer {
                 self.selected.clear();
                 self.entries.clear();
                 self.status = tr("Loading folder…").to_owned();
-        self.loaded = false;
-        self.in_favorites = false;
+                self.loaded = false;
                 self.queue_load(self.path.clone(), context);
             }
             Message::CycleLayout => {
@@ -1566,6 +1567,43 @@ impl Component for Explorer {
                 }
             }
             Message::RowHover(path) => self.hovered_row = path,
+            // A button swallows the press, so a drag is recognised from the first pointer moves that arrive with the left button held.
+            Message::RowDrag(path, x, y) => {
+                let now = std::time::Instant::now();
+                let streak = self.drag_origin.take().filter(|(_, _, _, at)| now.duration_since(*at) < DRAG_STREAK);
+                let Some((origin, ox, oy, _)) = streak else {
+                    self.drag_origin = Some((path, x, y, now));
+                    return;
+                };
+                if (x - ox).hypot(y - oy) < DRAG_THRESHOLD {
+                    self.drag_origin = Some((origin, ox, oy, now));
+                    return;
+                }
+                if self.deleting || self.transferring {
+                    return;
+                }
+                if !self.selected.contains(&origin) {
+                    self.selected = HashSet::from([origin]);
+                    self.refresh_status();
+                }
+                let paths: Vec<PathBuf> = self.selected.iter().cloned().collect();
+                if let Err(error) = shell::drag_out(&paths) {
+                    self.status = format!("{}: {error}", tr("Drag failed"));
+                    self.has_error = true;
+                }
+                self.update(Message::Refresh, context);
+            }
+            Message::DroppedOnSidebar(DroppedData::StorageItems(items)) => {
+                self.pinned = settings::load().pinned;
+                for item in items {
+                    let path = PathBuf::from(item.path);
+                    if !self.pinned.contains(&path) {
+                        self.pinned.push(path);
+                    }
+                }
+                self.write_settings(self.pinned.clone(), self.favorites.clone());
+            }
+            Message::DroppedOnSidebar(_) => {}
             // The shell menu blocks until it closes, so our own menu is dismissed and repainted first.
             // shortcut: without a selected row the menu opens at a fixed spot below the toolbar.
             Message::ContextKey(target, at) => {
@@ -1716,7 +1754,14 @@ impl Component for Explorer {
                 let build = |entry: &Entry| -> View {
                     let path = entry.path.clone();
                     let entered = entry.path.clone();
+                    let dragged = entry.path.clone();
+                    let drag_sender = sender.clone();
                     Border::new()
+                        .on_pointer_moved(move |info: PointerEventInfo| {
+                            if info.is_left_button_pressed {
+                                let _ = drag_sender.send(Message::RowDrag(dragged.clone(), info.window_x, info.window_y));
+                            }
+                        })
                         .on_pointer_entered(sender.callback(move |_: PointerEventInfo| Message::RowHover(Some(entered.clone()))))
                         .on_pointer_exited(sender.callback(|_: PointerEventInfo| Message::RowHover(None)))
                         .on_pointer_pressed(sender.callback(move |info: PointerEventInfo| {
@@ -1865,7 +1910,11 @@ impl Component for Explorer {
                 ),
         )];
         if self.loaded && !self.has_error && visible.is_empty() {
-            let message = if self.filter.is_empty() { "This folder is empty" } else { "No items match the filter" };
+            let message = match (self.filter.is_empty(), self.entries.is_empty()) {
+                (true, true) => "This folder is empty",
+                (true, false) => "All items here are hidden",
+                _ => "No items match the filter",
+            };
             body_items.push(KeyedView::new(
                 2usize,
                 text(tr(message), self.theme.as_ref().map(Theme::muted))
@@ -2163,10 +2212,15 @@ impl Component for Explorer {
             .grid_row(1)
             .columns([GridLength::Auto, GridLength::Auto, GridLength::STAR])
             .children((
-                Grid::new().grid_column(0).width(self.sidebar_width).rows([GridLength::STAR, GridLength::Auto]).children((
-                    ScrollViewer::new().grid_row(0).content(StackPanel::new().spacing(TIGHT_GAP).keyed_children(sidebar_items)),
-                    StackPanel::new().grid_row(1).spacing(TIGHT_GAP).keyed_children(device_items),
-                )),
+                Border::new()
+                    .grid_column(0)
+                    .width(self.sidebar_width)
+                    .drop_policy(DragDropPolicy::new().storage_items(DragDropAction::new(DragDropOperation::Link).caption(tr("Pin to sidebar"))))
+                    .on_drop(context.callback(Message::DroppedOnSidebar))
+                    .content(Grid::new().rows([GridLength::STAR, GridLength::Auto]).children((
+                        ScrollViewer::new().grid_row(0).content(StackPanel::new().spacing(TIGHT_GAP).keyed_children(sidebar_items)),
+                        StackPanel::new().grid_row(1).spacing(TIGHT_GAP).keyed_children(device_items),
+                    ))),
                 splitter,
                 Border::new()
                     .grid_column(2)
@@ -2395,23 +2449,6 @@ impl Explorer {
                 if let Some(target) = visible.iter().position(|entry| entry.name.to_lowercase().starts_with(&self.type_ahead.0)) {
                     self.focus_entry(&visible, target, false, context);
                 }
-            }
-            keys::Key::MouseDown => self.press_row = self.hovered_row.clone(),
-            keys::Key::DragStart => {
-                let Some(pressed) = self.press_row.take() else { return };
-                if self.deleting || self.transferring {
-                    return;
-                }
-                if !self.selected.contains(&pressed) {
-                    self.selected = HashSet::from([pressed]);
-                    self.refresh_status();
-                }
-                let paths: Vec<PathBuf> = self.selected.iter().cloned().collect();
-                if let Err(error) = shell::drag_out(&paths) {
-                    self.status = format!("{}: {error}", tr("Drag failed"));
-                    self.has_error = true;
-                }
-                self.update(Message::Refresh, context);
             }
             keys::Key::PinUp => self.update(Message::MovePin(-1), context),
             keys::Key::PinDown => self.update(Message::MovePin(1), context),
@@ -2907,6 +2944,8 @@ impl Explorer {
         self.entries.clear();
         self.git_branch = None;
         self.status = tr("Loading folder…").to_owned();
+        self.loaded = false;
+        self.in_favorites = false;
         self.has_error = false;
         self.queue_load(path, context);
     }

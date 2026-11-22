@@ -76,3 +76,5 @@ pub const DEVICES_HEADER_KEY: usize = 10_003;
 pub const DEVICES_RULE_OPACITY: f64 = 0.3;
 pub const DEVICES_HEADER_GAP: f64 = 10.0;
 pub const DRIVE_RESCAN_DELAY_MS: u64 = 1500;
+pub const DRAG_STREAK: std::time::Duration = std::time::Duration::from_millis(150);
+pub const DRAG_THRESHOLD: f64 = 6.0;

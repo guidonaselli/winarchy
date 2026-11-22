@@ -89,6 +89,7 @@ const ES: &[(&str, &str)] = &[
     ("Add to favorites", "Agregar a favoritos"),
     ("Remove from favorites", "Quitar de favoritos"),
     ("This folder is empty", "Esta carpeta está vacía"),
+    ("All items here are hidden", "Todos los elementos están ocultos"),
     ("No items match the filter", "Ningún elemento coincide con el filtro"),
     ("Subfolders", "Subcarpetas"),
     ("Settings file", "Archivo de configuración"),
