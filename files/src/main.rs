@@ -1933,7 +1933,8 @@ impl Explorer {
             {
                 self.details = directory::properties(entry);
                 if let Some(tags) = self.tags.get(&entry.path) {
-                    self.details.push_str(&format!(" · {}: {}", tr("Tags"), tags.join(", ")));
+                    self.details.push_str(&format!("
+{}: {}", tr("Tags"), tags.join(", ")));
                 }
                 self.preview = if directory::is_pdf(entry) { String::new() } else { directory::preview(entry).unwrap_or_default() };
                 self.preview_image = if directory::is_image(entry) {

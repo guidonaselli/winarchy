@@ -192,7 +192,9 @@ pub fn icon(entry: &Entry) -> windows_reactor::Symbol {
 
 pub fn properties(entry: &Entry) -> String {
     format!(
-        "{}: {} · {}: {} · {}: {}",
+        "{}: {}
+{}: {}
+{}: {}",
         tr("Path"),
         entry.path.display(),
         tr("Created"),
@@ -203,15 +205,42 @@ pub fn properties(entry: &Entry) -> String {
 }
 
 fn format_time(time: Option<std::time::SystemTime>) -> String {
-    let Some(modified) = time else {
+    let Some(secs) = time
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|seconds| seconds.as_secs() as i64)
+    else {
         return String::new();
     };
-    let Ok(seconds) = modified.duration_since(std::time::UNIX_EPOCH) else {
-        return String::new();
-    };
-    let secs = seconds.as_secs() as i64;
+    local_text(secs).unwrap_or_else(|| format!("{} UTC", utc_text(secs)))
+}
+
+#[cfg(windows)]
+fn local_text(secs: i64) -> Option<String> {
+    use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
+    use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
+    const EPOCH_GAP: i64 = 11_644_473_600;
+    let ticks = u64::try_from((secs + EPOCH_GAP) * 10_000_000).ok()?;
+    let file_time = FILETIME { dwLowDateTime: ticks as u32, dwHighDateTime: (ticks >> 32) as u32 };
+    let (mut utc, mut local) = (SYSTEMTIME::default(), SYSTEMTIME::default());
+    // SAFETY: both SYSTEMTIME values outlive the calls
+    unsafe {
+        FileTimeToSystemTime(&file_time, &mut utc).ok()?;
+        SystemTimeToTzSpecificLocalTime(None, &utc, &mut local).ok()?;
+    }
+    Some(format!(
+        "{}-{:02}-{:02} {:02}:{:02}",
+        local.wYear, local.wMonth, local.wDay, local.wHour, local.wMinute
+    ))
+}
+
+#[cfg(not(windows))]
+fn local_text(_secs: i64) -> Option<String> {
+    None
+}
+
+fn utc_text(secs: i64) -> String {
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
-    // civil-from-days (Howard Hinnant), UTC
+    // civil-from-days (Howard Hinnant)
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -221,11 +250,7 @@ fn format_time(time: Option<std::time::SystemTime>) -> String {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year}-{month:02}-{day:02} {:02}:{:02} UTC",
-        rem / 3_600,
-        rem % 3_600 / 60
-    )
+    format!("{year}-{month:02}-{day:02} {:02}:{:02}", rem / 3_600, rem % 3_600 / 60)
 }
 
 #[cfg(test)]
@@ -251,10 +276,7 @@ mod tests {
         assert_eq!(format_size(&entry(512, 0, false)), "512 B");
         assert_eq!(format_size(&entry(1536, 0, false)), "1.5 KB");
         assert_eq!(format_size(&entry(9, 0, true)), "");
-        assert_eq!(
-            format_modified(&entry(0, 951_782_400, false)),
-            "2000-02-29 00:00 UTC"
-        );
+        assert_eq!(utc_text(951_782_400), "2000-02-29 00:00");
     }
 
     #[test]
