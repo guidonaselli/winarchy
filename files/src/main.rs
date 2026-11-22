@@ -1455,10 +1455,12 @@ impl Component for Explorer {
         let muted = self.theme.as_ref().map(Theme::muted);
         let mut info_items = Vec::new();
         if !self.details.is_empty() {
-            info_items.push(KeyedView::new(0usize, wrapped_text(&self.details, muted.clone(), DETAILS_LINES)));
+            let name = self.selected.iter().next().and_then(|path| path.file_name()).map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+            info_items.push(KeyedView::new(4usize, text(&name, self.theme.as_ref().map(Theme::foreground))));
+            info_items.push(KeyedView::new(0usize, wrapped_text(&self.details, muted, DETAILS_LINES)));
         }
         if !self.preview.is_empty() {
-            info_items.push(KeyedView::new(1usize, wrapped_text(&self.preview, muted, PREVIEW_LINES)));
+            info_items.push(KeyedView::new(1usize, wrapped_text(&self.preview, self.theme.as_ref().map(Theme::foreground), PREVIEW_LINES)));
         }
         if let Some(branch) = &self.git_branch {
             info_items.push(KeyedView::new(3usize, text(&format!("Git: {branch}"), self.theme.as_ref().map(Theme::accent))));
@@ -1507,7 +1509,7 @@ impl Component for Explorer {
                     .content(
                         StackPanel::new()
                             .spacing(STACK_GAP)
-                            .margin(Thickness::new(CONTENT_MARGIN, 0.0, CONTENT_MARGIN, 0.0))
+                            .margin(Thickness::new(CONTENT_MARGIN, STACK_GAP, CONTENT_MARGIN, 0.0))
                             .keyed_children(info_items),
                     ),
             ));
