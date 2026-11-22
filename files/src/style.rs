@@ -9,6 +9,8 @@ pub const GRID_CELL_WIDTH: f64 = 140.0;
 pub const SIZE_WIDTH: f64 = 90.0;
 pub const MODIFIED_WIDTH: f64 = 170.0;
 pub const CONTENT_MARGIN: f64 = 12.0;
+// Inner horizontal padding WinUI gives a button; header labels cancel it to line up with row values.
+pub const BUTTON_INSET: f64 = 11.0;
 pub const ICON_WIDTH: f64 = 28.0;
 pub const DETAILS_LINES: i32 = 2;
 pub const PREVIEW_LINES: i32 = 6;

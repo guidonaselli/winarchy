@@ -1237,6 +1237,7 @@ impl Component for Explorer {
             ));
         }
         let details_header = Grid::new()
+            .width(self.list_width)
             .columns([
                 GridLength::Pixel(CHECK_WIDTH),
                 GridLength::STAR,
@@ -1264,7 +1265,7 @@ impl Component for Explorer {
         };
         let footer = StackPanel::new()
             .spacing(STACK_GAP)
-            .margin(Thickness::new(0.0, 0.0, CONTENT_MARGIN, 0.0))
+            .margin(Thickness::new(0.0, STACK_GAP, CONTENT_MARGIN, 0.0))
             .children((
                 StackPanel::new().spacing(STACK_GAP).keyed_children(info_items),
                 text(
@@ -1272,6 +1273,46 @@ impl Component for Explorer {
                     self.theme.as_ref().map(|theme| if self.has_error { theme.urgent() } else { theme.muted() }),
                 ),
             ));
+        let has_selection = !self.selected.is_empty();
+        let mut transfer_row = vec![KeyedView::new(
+            0usize,
+            TextBox::new()
+                .grid_column(0)
+                .grid_column_span(if has_selection { 1 } else { 4 })
+                .text(&self.new_folder_name)
+                .automation_name(tr("Item name"))
+                .placeholder_text(tr("Name for a new folder or file, or the new name"))
+                .on_text_changed(folder_name_changed),
+        )];
+        if has_selection {
+            let busy = self.deleting || self.transferring;
+            transfer_row.push(KeyedView::new(
+                1usize,
+                TextBox::new()
+                    .text(&self.transfer_destination)
+                    .automation_name(tr("Destination folder path"))
+                    .placeholder_text(tr("Copy or move the selection to this folder"))
+                    .is_enabled(!self.transferring)
+                    .grid_column(1)
+                    .on_text_changed(transfer_destination_changed),
+            ));
+            transfer_row.push(KeyedView::new(
+                2usize,
+                Button::new()
+                    .grid_column(2)
+                    .is_enabled(!busy)
+                    .on_click(context.message(Message::TransferSelected(false)))
+                    .content(tr("Copy selected")),
+            ));
+            transfer_row.push(KeyedView::new(
+                3usize,
+                Button::new()
+                    .grid_column(3)
+                    .is_enabled(!busy)
+                    .on_click(context.message(Message::TransferSelected(true)))
+                    .content(tr("Move selected")),
+            ));
+        }
         let toolbar = StackPanel::new().spacing(STACK_GAP).margin(Thickness::new(0.0, 0.0, CONTENT_MARGIN, 0.0)).children((
             StackPanel::new()
                 .orientation(Orientation::Horizontal)
@@ -1347,35 +1388,7 @@ impl Component for Explorer {
             Grid::new()
                 .columns([GridLength::STAR, GridLength::STAR, GridLength::Auto, GridLength::Auto])
                 .column_spacing(ROW_GAP)
-                .children((
-                    TextBox::new()
-                        .grid_column(0)
-                        .text(&self.new_folder_name)
-                        .automation_name(tr("Item name"))
-                        .placeholder_text(tr("Name for a new folder or file, or the new name"))
-                        .on_text_changed(folder_name_changed),
-                    TextBox::new()
-                        .text(&self.transfer_destination)
-                        .automation_name(tr("Destination folder path"))
-                        .placeholder_text(if self.selected.is_empty() {
-                            tr("Select items to copy or move")
-                        } else {
-                            tr("Copy or move the selection to this folder")
-                        })
-                        .is_enabled(!self.transferring)
-                        .grid_column(1)
-                        .on_text_changed(transfer_destination_changed),
-                    Button::new()
-                        .grid_column(2)
-                        .is_enabled(!self.selected.is_empty() && !self.deleting && !self.transferring)
-                        .on_click(context.message(Message::TransferSelected(false)))
-                        .content(tr("Copy selected")),
-                    Button::new()
-                        .grid_column(3)
-                        .is_enabled(!self.selected.is_empty() && !self.deleting && !self.transferring)
-                        .on_click(context.message(Message::TransferSelected(true)))
-                        .content(tr("Move selected")),
-                )),
+                .keyed_children(transfer_row),
             header,
         ));
         let content = Grid::new()
@@ -1470,9 +1483,10 @@ impl Explorer {
                     if down { selected.last() } else { selected.next() }.map(|(index, _)| index)
                 };
                 let down = key == keys::Key::MoveDown;
+                let step = self.layout.cell_width().map_or(1, |cell| ((self.list_width / cell) as usize).max(1));
                 let target = match (position(down), down) {
-                    (Some(index), true) => (index + 1).min(visible.len().saturating_sub(1)),
-                    (Some(index), false) => index.saturating_sub(1),
+                    (Some(index), true) => (index + step).min(visible.len().saturating_sub(1)),
+                    (Some(index), false) => index.saturating_sub(step),
                     (None, true) => 0,
                     (None, false) => visible.len().saturating_sub(1),
                 };
@@ -1558,7 +1572,17 @@ impl Explorer {
         };
         Button::new()
             .grid_column(column)
-            .margin(Thickness::new(if matches!(align, HorizontalAlignment::Left) { ICON_WIDTH } else { 0.0 }, 0.0, 0.0, 0.0))
+            .min_width(0.0)
+            .margin(Thickness::new(
+                if matches!(align, HorizontalAlignment::Left) { ICON_WIDTH } else { 0.0 },
+                0.0,
+                match (align, key == SortKey::Modified && self.layout == Layout::Details) {
+                    (HorizontalAlignment::Right, true) => ROW_TRAILING - BUTTON_INSET,
+                    (HorizontalAlignment::Right, false) => -BUTTON_INSET,
+                    _ => 0.0,
+                },
+                0.0,
+            ))
             .horizontal_alignment(HorizontalAlignment::Stretch)
             .horizontal_content_alignment(align)
             .style(ButtonStyle::Subtle)

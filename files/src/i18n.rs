@@ -87,7 +87,6 @@ const ES: &[(&str, &str)] = &[
     ("Storage settings", "Configuración de almacenamiento"),
     ("Group by type: on", "Agrupar por tipo: sí"),
     ("Group by type: off", "Agrupar por tipo: no"),
-    ("Select items to copy or move", "Seleccioná elementos para copiar o mover"),
     ("Paste as shortcut", "Pegar como acceso directo"),
     ("Git init", "Git: inicializar repositorio"),
     ("Git clone (URL in name field)", "Git: clonar (URL en el campo de nombre)"),
