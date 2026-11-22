@@ -206,7 +206,7 @@ function Build-WinarchyThemeContext {
         icls_vcs_modified = @($c['background'], $ctx['colors.accent_ui'], 0.15)
         icls_warning     = @($c['background'], $c['color3'], 0.30)
         files_surface    = @($c['background'], $c['foreground'], 0.06)
-        files_selection  = @($c['background'], $ctx['colors.accent_ui'], 0.18)
+        files_selection  = @($c['background'], $ctx['colors.accent_ui'], 0.28)
     } }
     foreach ($k in $mixes.Keys) {
         $ctx["computed.$k"] = (Get-WinarchyMixedHex -A $mixes[$k][0] -B $mixes[$k][1] -Weight $mixes[$k][2]).TrimStart('#')
