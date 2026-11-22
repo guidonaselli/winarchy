@@ -148,6 +148,10 @@ enum Message {
     CopyPath,
     OpenTerminal,
     CloseTab,
+    DuplicateTab,
+    ReopenTab,
+    CloseOtherTabs,
+    NextTab,
     SwitchTab(usize),
     ToggleRecursive,
     ToggleHidden,
@@ -189,6 +193,7 @@ enum Message {
 struct Explorer {
     address: String,
     tabs: Vec<PathBuf>,
+    closed_tabs: Vec<PathBuf>,
     back: Vec<PathBuf>,
     forward: Vec<PathBuf>,
     active_tab: usize,
@@ -249,6 +254,7 @@ impl Component for Explorer {
         let mut app = Self {
             address: path.to_string_lossy().into_owned(),
             tabs: vec![path.clone()],
+            closed_tabs: Vec::new(),
             back: Vec::new(),
             forward: Vec::new(),
             active_tab: 0,
@@ -412,12 +418,35 @@ impl Component for Explorer {
             }
             Message::CloseTab => {
                 if self.tabs.len() > 1 {
-                    self.tabs.remove(self.active_tab);
+                    self.closed_tabs.push(self.tabs.remove(self.active_tab));
                     self.active_tab = self.active_tab.min(self.tabs.len() - 1);
                     self.back.clear();
                     self.forward.clear();
                     self.load_path(self.tabs[self.active_tab].clone(), context);
                 }
+            }
+            Message::DuplicateTab => {
+                self.tabs.insert(self.active_tab + 1, self.path.clone());
+                self.active_tab += 1;
+            }
+            Message::ReopenTab => {
+                if let Some(path) = self.closed_tabs.pop() {
+                    self.tabs.push(path.clone());
+                    self.active_tab = self.tabs.len() - 1;
+                    self.back.clear();
+                    self.forward.clear();
+                    self.load_path(path, context);
+                }
+            }
+            Message::CloseOtherTabs => {
+                let keep = self.tabs.swap_remove(self.active_tab);
+                self.closed_tabs.append(&mut self.tabs);
+                self.tabs.push(keep);
+                self.active_tab = 0;
+            }
+            Message::NextTab => {
+                let next = (self.active_tab + 1) % self.tabs.len();
+                self.update(Message::SwitchTab(next), context);
             }
             Message::SwitchTab(index) => {
                 if index < self.tabs.len() && index != self.active_tab {
@@ -683,6 +712,20 @@ impl Component for Explorer {
                         .is_enabled(self.tabs.len() > 1)
                         .on_click(context.message(Message::CloseTab))
                         .content("×"),
+                    Button::new()
+                        .automation_name(tr("Duplicate tab"))
+                        .on_click(context.message(Message::DuplicateTab))
+                        .content("⧉"),
+                    Button::new()
+                        .automation_name(tr("Reopen closed tab"))
+                        .is_enabled(!self.closed_tabs.is_empty())
+                        .on_click(context.message(Message::ReopenTab))
+                        .content("↶"),
+                    Button::new()
+                        .automation_name(tr("Close other tabs"))
+                        .is_enabled(self.tabs.len() > 1)
+                        .on_click(context.message(Message::CloseOtherTabs))
+                        .content("⊗"),
                 )),
             Grid::new()
                 .columns([GridLength::Auto, GridLength::Auto, GridLength::Auto, GridLength::STAR, GridLength::Auto])
@@ -963,6 +1006,7 @@ impl Explorer {
             keys::Key::NewWindow => self.update(Message::NewWindow, context),
             keys::Key::NewTab => self.update(Message::NewTab, context),
             keys::Key::CloseTab => self.update(Message::CloseTab, context),
+            keys::Key::NextTab => self.update(Message::NextTab, context),
             keys::Key::Redo => self.update(Message::Redo, context),
             keys::Key::Delete => self.update(Message::DeleteSelected, context),
             keys::Key::Up => self.update(Message::Parent, context),
