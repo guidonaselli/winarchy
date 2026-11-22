@@ -13,6 +13,8 @@ pub struct Settings {
     pub language: String,
     #[serde(default)]
     pub hide_extensions: bool,
+    #[serde(default)]
+    pub layout: String,
 }
 
 fn location() -> Option<PathBuf> {

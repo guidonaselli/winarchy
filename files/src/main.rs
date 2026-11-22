@@ -46,6 +46,60 @@ impl SortKey {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Layout {
+    Details,
+    List,
+    Tiles,
+    Grid,
+}
+
+impl Layout {
+    fn name(self) -> &'static str {
+        match self {
+            Layout::Details => "details",
+            Layout::List => "list",
+            Layout::Tiles => "tiles",
+            Layout::Grid => "grid",
+        }
+    }
+
+    fn from_name(name: &str) -> Self {
+        match name {
+            "list" => Layout::List,
+            "tiles" => Layout::Tiles,
+            "grid" => Layout::Grid,
+            _ => Layout::Details,
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Layout::Details => Layout::List,
+            Layout::List => Layout::Tiles,
+            Layout::Tiles => Layout::Grid,
+            Layout::Grid => Layout::Details,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Layout::Details => "Layout: details",
+            Layout::List => "Layout: list",
+            Layout::Tiles => "Layout: tiles",
+            Layout::Grid => "Layout: grid",
+        }
+    }
+
+    fn cell_width(self) -> Option<f64> {
+        match self {
+            Layout::Tiles => Some(TILE_CELL_WIDTH),
+            Layout::Grid => Some(GRID_CELL_WIDTH),
+            _ => None,
+        }
+    }
+}
+
 fn count_word(count: usize, one: &'static str, many: &'static str) -> &'static str {
     tr(if count == 1 { one } else { many })
 }
@@ -120,6 +174,7 @@ impl Explorer {
             command("Git push", Message::Git("push"), None, self.git_branch.is_some() && !self.transferring, false),
             command("Open Recycle Bin", Message::OpenRecycleBin, None, true, false),
             command("Empty Recycle Bin", Message::EmptyRecycleBin, None, true, false),
+            command(self.layout.label(), Message::CycleLayout, None, true, false),
             command("Select none", Message::SelectNone, None, some, false),
             command("Invert selection", Message::InvertSelection, None, true, false),
             command(if self.hide_extensions { "Extensions: hidden" } else { "Extensions: shown" }, Message::ToggleExtensions, None, true, false),
@@ -267,6 +322,7 @@ enum Message {
     SelectNone,
     InvertSelection,
     CycleLanguage,
+    CycleLayout,
     Undo,
     Redo,
     UndoComplete(Result<bool, String>),
@@ -323,6 +379,7 @@ struct Explorer {
     show_hidden: bool,
     hide_extensions: bool,
     language: &'static str,
+    layout: Layout,
     recursive: bool,
     sort: SortKey,
     descending: bool,
@@ -386,6 +443,7 @@ impl Component for Explorer {
             show_hidden: saved.show_hidden,
             hide_extensions: saved.hide_extensions,
             language: i18n::choice(),
+            layout: Layout::from_name(&saved.layout),
             recursive: false,
             sort: SortKey::from_name(&saved.sort),
             descending: saved.descending,
@@ -593,6 +651,10 @@ impl Component for Explorer {
                 self.entries.clear();
                 self.status = tr("Loading folder…").to_owned();
                 self.queue_load(self.path.clone(), context);
+            }
+            Message::CycleLayout => {
+                self.layout = self.layout.next();
+                self.save_settings();
             }
             Message::CycleLanguage => {
                 let choices = i18n::choices();
@@ -990,21 +1052,41 @@ impl Component for Explorer {
         );
         let width = self.list_width;
         let hide_extensions = self.hide_extensions;
+        let layout = self.layout;
+        let per_row = layout.cell_width().map_or(1, |cell| ((width / cell) as usize).max(1));
         let source = VirtualSource::new(
             revision,
-            visible.len(),
+            visible.len().div_ceil(per_row),
             |index| index,
             move |index| {
-                let entry = &visible[index];
-                row(
-                    entry,
-                    selected.contains(&entry.path),
-                    theme.as_ref(),
-                    &sender,
-                    busy,
-                    width,
-                    hide_extensions,
-                )
+                let build = |entry: &Entry| match layout {
+                    Layout::Details | Layout::List => row(
+                        entry,
+                        selected.contains(&entry.path),
+                        theme.as_ref(),
+                        &sender,
+                        busy,
+                        width,
+                        hide_extensions,
+                        layout == Layout::List,
+                    ),
+                    Layout::Tiles | Layout::Grid => {
+                        tile(entry, selected.contains(&entry.path), theme.as_ref(), &sender, busy, layout, hide_extensions)
+                    }
+                };
+                if per_row == 1 {
+                    return build(&visible[index]);
+                }
+                StackPanel::new()
+                    .orientation(Orientation::Horizontal)
+                    .keyed_children(
+                        visible[index * per_row..((index + 1) * per_row).min(visible.len())]
+                            .iter()
+                            .enumerate()
+                            .map(|(slot, entry)| KeyedView::new(slot, build(entry)))
+                            .collect::<Vec<_>>(),
+                    )
+                    .into()
             },
         );
 
@@ -1339,6 +1421,7 @@ impl Explorer {
             visible,
             self.theme_version,
             self.hide_extensions,
+            self.layout,
             self.deleting || self.transferring,
             self.list_width.to_bits(),
         )
@@ -1462,6 +1545,7 @@ impl Explorer {
             sort: self.sort.name().to_owned(),
             descending: self.descending,
             language: self.language.to_owned(),
+            layout: self.layout.name().to_owned(),
         });
     }
 
@@ -1805,6 +1889,46 @@ impl Explorer {
 }
 
 
+fn display_name(entry: &Entry, hide_extensions: bool) -> String {
+    if hide_extensions && !entry.is_directory {
+        Path::new(&entry.name).with_extension("").to_string_lossy().into_owned()
+    } else {
+        entry.name.clone()
+    }
+}
+
+fn select_box(entry: &Entry, is_selected: bool, sender: &LocalSender<Message>, busy: bool) -> CheckBox {
+    let selected_path = entry.path.clone();
+    CheckBox::new()
+        .automation_name(format!("{} {}", tr("Select"), entry.name))
+        .min_width(0.0)
+        .width(CHECK_WIDTH)
+        .is_enabled(!busy)
+        .is_checked(is_selected)
+        .on_is_checked_changed(
+            sender.callback(move |checked| Message::Selection(selected_path.clone(), checked)),
+        )
+}
+
+fn open_button(entry: &Entry, sender: &LocalSender<Message>, column: i32, content: impl Into<View>) -> View {
+    let action = if entry.is_directory {
+        Message::OpenFolder(entry.path.clone())
+    } else {
+        Message::OpenFile(entry.path.clone())
+    };
+    Button::new()
+        .grid_column(column)
+        .horizontal_content_alignment(HorizontalAlignment::Left)
+        .style(ButtonStyle::Subtle)
+        .automation_name(entry.name.clone())
+        .on_click(sender.message(action))
+        .content(content)
+}
+
+fn selection_background(is_selected: bool, theme: Option<&Theme>) -> Option<Brush> {
+    if is_selected { theme.and_then(Theme::selection) } else { None }
+}
+
 fn row(
     entry: &Entry,
     is_selected: bool,
@@ -1813,64 +1937,29 @@ fn row(
     busy: bool,
     width: f64,
     hide_extensions: bool,
+    compact: bool,
 ) -> View {
-    let path = entry.path.clone();
-    let selected_path = path.clone();
-    let action = if entry.is_directory {
-        Message::OpenFolder(path)
-    } else {
-        Message::OpenFile(path)
-    };
-    Grid::new()
-        .width(width)
-        .background_optional(if is_selected {
-            theme.and_then(Theme::selection)
-        } else {
-            None
-        })
-        .columns([
-            GridLength::Auto,
-            GridLength::STAR,
-            GridLength::Auto,
-            GridLength::Auto,
-        ])
-        .column_spacing(COLUMN_GAP)
+    let name = StackPanel::new()
+        .horizontal_alignment(HorizontalAlignment::Left)
+        .orientation(Orientation::Horizontal)
+        .spacing(ROW_GAP)
         .children((
-            CheckBox::new()
-                .automation_name(format!("{} {}", tr("Select"), entry.name))
-                .grid_column(0)
-                .min_width(0.0)
-                .width(CHECK_WIDTH)
-                .is_enabled(!busy)
-                .is_checked(is_selected)
-                .on_is_checked_changed(
-                    sender.callback(move |checked| {
-                        Message::Selection(selected_path.clone(), checked)
-                    }),
-                ),
-            Button::new()
-                .grid_column(1)
-                .horizontal_content_alignment(HorizontalAlignment::Left)
-                .style(ButtonStyle::Subtle)
-                .automation_name(entry.name.clone())
-                .on_click(sender.message(action))
-                .content(
-                    StackPanel::new()
-                        .horizontal_alignment(HorizontalAlignment::Left)
-                        .orientation(Orientation::Horizontal)
-                        .spacing(ROW_GAP)
-                        .children((
-                            SymbolIcon::new().symbol(directory::icon(entry)),
-                            text(
-                                &if hide_extensions && !entry.is_directory {
-                                    Path::new(&entry.name).with_extension("").to_string_lossy().into_owned()
-                                } else {
-                                    entry.name.clone()
-                                },
-                                theme.map(Theme::foreground),
-                            ),
-                        )),
-                ),
+            SymbolIcon::new().symbol(directory::icon(entry)),
+            text(&display_name(entry, hide_extensions), theme.map(Theme::foreground)),
+        ));
+    let check = select_box(entry, is_selected, sender, busy).grid_column(0);
+    let button = open_button(entry, sender, 1, name);
+    let grid = Grid::new()
+        .width(width)
+        .background_optional(selection_background(is_selected, theme))
+        .column_spacing(COLUMN_GAP);
+    if compact {
+        return grid.columns([GridLength::Auto, GridLength::STAR]).children((check, button)).into();
+    }
+    grid.columns([GridLength::Auto, GridLength::STAR, GridLength::Auto, GridLength::Auto])
+        .children((
+            check,
+            button,
             text(&directory::format_size(entry), theme.map(Theme::muted))
                 .grid_column(2)
                 .vertical_alignment(VerticalAlignment::Center),
@@ -1879,6 +1968,43 @@ fn row(
                 .vertical_alignment(VerticalAlignment::Center)
                 .margin(Thickness::new(0.0, 0.0, ROW_TRAILING, 0.0)),
         ))
+        .into()
+}
+
+// Tiles show the name with its size beside the icon; the grid stacks a larger icon over the name.
+fn tile(
+    entry: &Entry,
+    is_selected: bool,
+    theme: Option<&Theme>,
+    sender: &LocalSender<Message>,
+    busy: bool,
+    layout: Layout,
+    hide_extensions: bool,
+) -> View {
+    let name = text(&display_name(entry, hide_extensions), theme.map(Theme::foreground));
+    let icon = SymbolIcon::new().symbol(directory::icon(entry));
+    let content: View = if layout == Layout::Grid {
+        StackPanel::new().spacing(TIGHT_GAP).horizontal_alignment(HorizontalAlignment::Center).children((icon, name)).into()
+    } else {
+        StackPanel::new()
+            .orientation(Orientation::Horizontal)
+            .spacing(ROW_GAP)
+            .children((
+                icon,
+                StackPanel::new().children((name, text(&directory::format_size(entry), theme.map(Theme::muted)))),
+            ))
+            .into()
+    };
+    let width = if layout == Layout::Grid { GRID_CELL_WIDTH } else { TILE_CELL_WIDTH };
+    Grid::new()
+        .width(width)
+        .background_optional(selection_background(is_selected, theme))
+        .columns([GridLength::Auto, GridLength::STAR])
+        .children((
+            select_box(entry, is_selected, sender, busy).grid_column(0),
+            open_button(entry, sender, 1, content),
+        ))
+        .into()
 }
 
 fn is_single_name(name: &str) -> bool {
