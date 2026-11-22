@@ -241,6 +241,7 @@ impl Explorer {
             command("Compress to zip", Message::Compress, None, some && !self.transferring, false),
             command("Extract here", Message::Extract, None, one && !self.transferring, false),
             command("Edit in Notepad", Message::RunVerb("notepad"), None, one, false),
+            command("Share", Message::Share, Some(Symbol::Share), some, false),
             command("Properties", Message::RunVerb("properties"), None, one, false),
             command("Terminal here", Message::OpenTerminal, None, true, false),
             command("Terminal as administrator", Message::RunVerb("admin-terminal"), None, true, false),
@@ -422,6 +423,7 @@ enum Message {
     CycleLanguage,
     CycleLayout,
     CycleGroup,
+    Share,
     Undo,
     Redo,
     UndoComplete(Result<bool, String>),
@@ -800,6 +802,15 @@ impl Component for Explorer {
             Message::CycleLayout => {
                 self.layout = self.layout.next();
                 self.save_settings();
+            }
+            Message::Share => {
+                let files: Vec<PathBuf> = self.selected.iter().filter(|path| path.is_file()).cloned().collect();
+                if files.is_empty() {
+                    self.status = tr("Select files to share").to_owned();
+                } else if let Err(error) = shell::share(&files) {
+                    self.status = format!("{}: {error}", tr("Could not share"));
+                    self.has_error = true;
+                }
             }
             Message::CycleGroup => {
                 self.group = self.group.next();

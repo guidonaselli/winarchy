@@ -373,3 +373,43 @@ pub fn cursor_x() -> f64 {
 pub fn cursor_x() -> f64 {
     0.0
 }
+
+// Unpackaged apps cannot use GetForCurrentView, so the share UI is opened through the window interop factory.
+#[cfg(windows)]
+pub fn share(paths: &[PathBuf]) -> Result<(), String> {
+    use windows::{
+        ApplicationModel::DataTransfer::{DataRequestedEventArgs, DataTransferManager},
+        Foundation::TypedEventHandler,
+        Storage::{IStorageItem, StorageFile},
+        Win32::UI::{Shell::IDataTransferManagerInterop, WindowsAndMessaging::GetForegroundWindow},
+        core::{HSTRING, Interface, factory},
+    };
+    use windows_collections::IIterable;
+
+    let failed = |error: windows::core::Error| error.message();
+    let interop = factory::<DataTransferManager, IDataTransferManagerInterop>().map_err(failed)?;
+    let window = unsafe { GetForegroundWindow() };
+    let manager: DataTransferManager = unsafe { interop.GetForWindow(window) }.map_err(failed)?;
+    let paths = paths.to_vec();
+    manager
+        .DataRequested(&TypedEventHandler::new(move |_, arguments: windows::core::Ref<DataRequestedEventArgs>| {
+            if let Some(arguments) = arguments.as_ref() {
+                let mut items = Vec::new();
+                for path in &paths {
+                    let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path.to_string_lossy().as_ref()))?.join()?;
+                    items.push(Some(file.cast::<IStorageItem>()?));
+                }
+                let data = arguments.Request()?.Data()?;
+                data.Properties()?.SetTitle(&HSTRING::from("Files"))?;
+                data.SetStorageItems(&IIterable::<IStorageItem>::from(items), true)?;
+            }
+            Ok(())
+        }))
+        .map_err(failed)?;
+    unsafe { interop.ShowShareUIForWindow(window) }.map_err(failed)
+}
+
+#[cfg(not(windows))]
+pub fn share(_paths: &[PathBuf]) -> Result<(), String> {
+    Err("sharing needs Windows".to_owned())
+}
