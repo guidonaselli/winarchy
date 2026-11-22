@@ -5,6 +5,8 @@ mod group;
 mod i18n;
 mod pdf;
 mod clipboard;
+mod iconset;
+mod icons;
 mod keys;
 mod settings;
 mod shell;
@@ -147,23 +149,24 @@ fn places_with(pinned: &[PathBuf]) -> Vec<(String, PathBuf)> {
     places
 }
 
-fn place_icon(path: &Path, pinned: bool) -> Symbol {
+fn place_icon(path: &Path, pinned: bool) -> icons::Icon {
+    use icons::Icon;
     if path.parent().is_none() {
-        return Symbol::SaveLocal;
+        return Icon::HardDrive;
     }
     let home = std::env::var_os("USERPROFILE").map(PathBuf::from);
     if home.as_deref() == Some(path) {
-        return Symbol::Home;
+        return Icon::House;
     }
     match path.file_name().and_then(|name| name.to_str()) {
-        Some("Documents") if home.as_deref() == path.parent() => Symbol::Document,
-        Some("Downloads") if home.as_deref() == path.parent() => Symbol::Download,
-        Some("Pictures") if home.as_deref() == path.parent() => Symbol::Pictures,
-        Some("Music") if home.as_deref() == path.parent() => Symbol::Audio,
-        Some("Videos") if home.as_deref() == path.parent() => Symbol::Video,
-        Some("Desktop") if home.as_deref() == path.parent() => Symbol::Library,
-        _ if pinned => Symbol::Pin,
-        _ => Symbol::Folder,
+        Some("Documents") if home.as_deref() == path.parent() => Icon::FileText,
+        Some("Downloads") if home.as_deref() == path.parent() => Icon::DownloadSimple,
+        Some("Pictures") if home.as_deref() == path.parent() => Icon::Image,
+        Some("Music") if home.as_deref() == path.parent() => Icon::MusicNotes,
+        Some("Videos") if home.as_deref() == path.parent() => Icon::VideoCamera,
+        Some("Desktop") if home.as_deref() == path.parent() => Icon::Desktop,
+        _ if pinned => Icon::PushPin,
+        _ => Icon::Folder,
     }
 }
 
@@ -174,9 +177,8 @@ fn count_word(count: usize, one: &'static str, many: &'static str) -> &'static s
 struct Command {
     label: String,
     message: Option<Message>,
-    icon: Option<Symbol>,
+    icon: Option<icons::Icon>,
     enabled: bool,
-    primary: bool,
 }
 
 // Breadcrumb clicks return only the item text, so each one carries its position as trailing zero-width spaces.
@@ -214,46 +216,45 @@ impl Explorer {
     fn commands(&self) -> Vec<Command> {
         let (some, one) = (!self.selected.is_empty(), self.selected.len() == 1);
         let idle = !self.deleting && !self.transferring;
-        let command = |label: &str, message: Message, icon: Option<Symbol>, enabled: bool, primary: bool| Command {
+        let command = |label: &str, message: Message, icon: Option<icons::Icon>, enabled: bool| Command {
             label: tr_dynamic(label),
             message: Some(message),
             icon,
             enabled,
-            primary,
         };
-        let separator = || Command { label: String::new(), message: None, icon: None, enabled: true, primary: true };
+        let separator = || Command { label: String::new(), message: None, icon: None, enabled: true };
         vec![
-            command("Create folder", Message::Ask(Prompt::NewFolder), Some(Symbol::NewFolder), idle, true),
-            command("Create file", Message::Ask(Prompt::NewFile), Some(Symbol::Add), idle, true),
+            command("Create folder", Message::Ask(Prompt::NewFolder), Some(icons::Icon::FolderPlus), idle),
+            command("Create file", Message::Ask(Prompt::NewFile), Some(icons::Icon::FilePlus), idle),
             separator(),
-            command("Cut", Message::Clip(true), Some(Symbol::Cut), some, true),
-            command("Copy", Message::Clip(false), Some(Symbol::Copy), some, true),
-            command("Paste here", Message::Paste, Some(Symbol::Paste), clipboard::has_files() && idle, true),
+            command("Cut", Message::Clip(true), Some(icons::Icon::Scissors), some),
+            command("Copy", Message::Clip(false), Some(icons::Icon::Copy), some),
+            command("Paste here", Message::Paste, Some(icons::Icon::ClipboardText), clipboard::has_files() && idle),
             separator(),
-            command("Rename selected", Message::Ask(Prompt::Rename), Some(Symbol::Rename), one && idle, true),
-            command("Copy to…", Message::Ask(Prompt::CopyTo), None, some && idle, false),
-            command("Move to…", Message::Ask(Prompt::MoveTo), None, some && idle, false),
-            command("Delete to Recycle Bin", Message::DeleteSelected, Some(Symbol::Delete), some && idle, true),
-            command("Delete permanently", Message::DeletePermanently, None, some && idle, false),
-            command("Copy path", Message::CopyPath(false), None, true, false),
-            command("Copy path with quotes", Message::CopyPath(true), None, true, false),
-            command("Show in folder", Message::ShowInFolder, None, one, false),
-            command("Paste as shortcut", Message::PasteShortcut, None, clipboard::has_files() && idle, false),
-            command("Create shortcut", Message::CreateShortcut, None, one, false),
-            command("Compress to zip", Message::Compress, None, some && !self.transferring, false),
-            command("Extract here", Message::Extract, None, one && !self.transferring && self.selected.iter().next().is_some_and(|path| path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip"))), false),
-            command("Edit in Notepad", Message::RunVerb("notepad"), None, one, false),
-            command("Share", Message::Share, Some(Symbol::Share), some, false),
-            command("Add tags", Message::Ask(Prompt::Tags), Some(Symbol::Tag), some, false),
-            command("Clear tags", Message::Tag(false), None, some, false),
-            command("Properties", Message::RunVerb("properties"), None, one, false),
-            command("Terminal here", Message::OpenTerminal, None, true, false),
-            command("Terminal as administrator", Message::RunVerb("admin-terminal"), None, true, false),
-            command("Git init", Message::Git("init"), None, !self.transferring, false),
-            command("Git clone", Message::Ask(Prompt::GitClone), None, !self.transferring, false),
-            command("Git fetch", Message::Git("fetch"), None, self.git_branch.is_some() && !self.transferring, false),
-            command("Git pull", Message::Git("pull"), None, self.git_branch.is_some() && !self.transferring, false),
-            command("Git push", Message::Git("push"), None, self.git_branch.is_some() && !self.transferring, false),
+            command("Rename selected", Message::Ask(Prompt::Rename), Some(icons::Icon::PencilSimple), one && idle),
+            command("Copy to…", Message::Ask(Prompt::CopyTo), Some(icons::Icon::Copy), some && idle),
+            command("Move to…", Message::Ask(Prompt::MoveTo), Some(icons::Icon::Scissors), some && idle),
+            command("Delete to Recycle Bin", Message::DeleteSelected, Some(icons::Icon::Trash), some && idle),
+            command("Delete permanently", Message::DeletePermanently, Some(icons::Icon::Trash), some && idle),
+            command("Copy path", Message::CopyPath(false), Some(icons::Icon::LinkSimple), true),
+            command("Copy path with quotes", Message::CopyPath(true), Some(icons::Icon::LinkSimple), true),
+            command("Show in folder", Message::ShowInFolder, Some(icons::Icon::FolderOpen), one),
+            command("Paste as shortcut", Message::PasteShortcut, Some(icons::Icon::LinkSimple), clipboard::has_files() && idle),
+            command("Create shortcut", Message::CreateShortcut, Some(icons::Icon::LinkSimple), one),
+            command("Compress to zip", Message::Compress, Some(icons::Icon::FileZip), some && !self.transferring),
+            command("Extract here", Message::Extract, Some(icons::Icon::FileZip), one && !self.transferring && self.selected.iter().next().is_some_and(|path| path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")))),
+            command("Edit in Notepad", Message::RunVerb("notepad"), Some(icons::Icon::PencilSimple), one),
+            command("Share", Message::Share, Some(icons::Icon::ShareNetwork), some),
+            command("Add tags", Message::Ask(Prompt::Tags), Some(icons::Icon::Tag), some),
+            command("Clear tags", Message::Tag(false), Some(icons::Icon::Tag), some),
+            command("Properties", Message::RunVerb("properties"), Some(icons::Icon::Info), one),
+            command("Terminal here", Message::OpenTerminal, Some(icons::Icon::TerminalWindow), true),
+            command("Terminal as administrator", Message::RunVerb("admin-terminal"), Some(icons::Icon::TerminalWindow), true),
+            command("Git init", Message::Git("init"), Some(icons::Icon::GitBranch), !self.transferring),
+            command("Git clone", Message::Ask(Prompt::GitClone), Some(icons::Icon::GitBranch), !self.transferring),
+            command("Git fetch", Message::Git("fetch"), Some(icons::Icon::GitBranch), self.git_branch.is_some() && !self.transferring),
+            command("Git pull", Message::Git("pull"), Some(icons::Icon::GitBranch), self.git_branch.is_some() && !self.transferring),
+            command("Git push", Message::Git("push"), Some(icons::Icon::GitBranch), self.git_branch.is_some() && !self.transferring),
             command(
                 if self.pinned.contains(&self.pin_target()) {
                     "Unpin from sidebar"
@@ -263,28 +264,27 @@ impl Explorer {
                 Message::TogglePin,
                 None,
                 true,
-                false,
             ),
-            command("Open in editor", Message::OpenEditor, None, true, false),
-            command("Storage settings", Message::OpenStorageSense, None, true, false),
-            command("Open Recycle Bin", Message::OpenRecycleBin, None, true, false),
-            command("Empty Recycle Bin", Message::EmptyRecycleBin, None, true, false),
-            command(self.sort_label(SortKey::Name, "Sort by name"), Message::Sort(SortKey::Name), None, true, false),
-            command(self.sort_label(SortKey::Size, "Sort by size"), Message::Sort(SortKey::Size), None, true, false),
-            command(self.sort_label(SortKey::Modified, "Sort by date"), Message::Sort(SortKey::Modified), None, true, false),
-            command(self.group.label(), Message::CycleGroup, None, true, false),
-            command(if self.hide_pane { "Preview pane: off" } else { "Preview pane: on" }, Message::TogglePane, None, true, false),
-            command(self.layout.label(), Message::CycleLayout, None, true, false),
-            command("Reset column widths", Message::ResetColumns, None, self.layout == Layout::Details, false),
-            command("Duplicate tab", Message::DuplicateTab, None, true, false),
-            command("Reopen closed tab", Message::ReopenTab, None, !self.closed_tabs.is_empty(), false),
-            command("Close other tabs", Message::CloseOtherTabs, None, self.tabs.len() > 1, false),
-            command("Select none", Message::SelectNone, None, some, false),
-            command("Invert selection", Message::InvertSelection, None, true, false),
-            command(if self.hide_extensions { "Extensions: hidden" } else { "Extensions: shown" }, Message::ToggleExtensions, None, true, false),
-            command(if self.show_hidden { "Hidden: shown" } else { "Hidden: off" }, Message::ToggleHidden, None, true, false),
-            command(if self.recursive { "Subfolders: on" } else { "Subfolders: off" }, Message::ToggleRecursive, None, true, false),
-            command("New window", Message::NewWindow, None, true, false),
+            command("Open in editor", Message::OpenEditor, Some(icons::Icon::PencilSimple), true),
+            command("Storage settings", Message::OpenStorageSense, None, true),
+            command("Open Recycle Bin", Message::OpenRecycleBin, Some(icons::Icon::Trash), true),
+            command("Empty Recycle Bin", Message::EmptyRecycleBin, Some(icons::Icon::Trash), true),
+            command(self.sort_label(SortKey::Name, "Sort by name"), Message::Sort(SortKey::Name), None, true),
+            command(self.sort_label(SortKey::Size, "Sort by size"), Message::Sort(SortKey::Size), None, true),
+            command(self.sort_label(SortKey::Modified, "Sort by date"), Message::Sort(SortKey::Modified), None, true),
+            command(self.group.label(), Message::CycleGroup, None, true),
+            command(if self.hide_pane { "Preview pane: off" } else { "Preview pane: on" }, Message::TogglePane, None, true),
+            command(self.layout.label(), Message::CycleLayout, None, true),
+            command("Reset column widths", Message::ResetColumns, None, self.layout == Layout::Details),
+            command("Duplicate tab", Message::DuplicateTab, None, true),
+            command("Reopen closed tab", Message::ReopenTab, None, !self.closed_tabs.is_empty()),
+            command("Close other tabs", Message::CloseOtherTabs, None, self.tabs.len() > 1),
+            command("Select none", Message::SelectNone, None, some),
+            command("Invert selection", Message::InvertSelection, None, true),
+            command(if self.hide_extensions { "Extensions: hidden" } else { "Extensions: shown" }, Message::ToggleExtensions, None, true),
+            command(if self.show_hidden { "Hidden: shown" } else { "Hidden: off" }, Message::ToggleHidden, None, true),
+            command(if self.recursive { "Subfolders: on" } else { "Subfolders: off" }, Message::ToggleRecursive, None, true),
+            command("New window", Message::NewWindow, None, true),
             command(
                 match self.language {
                     "es" => "Language: Spanish",
@@ -294,7 +294,6 @@ impl Explorer {
                 Message::CycleLanguage,
                 None,
                 true,
-                false,
             ),
         ]
     }
@@ -1504,34 +1503,7 @@ impl Component for Explorer {
                     .tooltip(path.to_string_lossy().into_owned()),
             )
         });
-        let (primary, secondary) = {
-            let commands = self.commands();
-            let build = |primary: bool| {
-                commands
-                    .iter()
-                    .filter(|command| command.primary == primary)
-                    .enumerate()
-                    .map(|(index, command)| match (&command.message, command.icon) {
-                        (None, _) => CommandBarCommand::separator(index),
-                        (Some(_), Some(icon)) => {
-                            match CommandBarCommand::button_with_icon(index, command.label.clone(), icon) {
-                                CommandBarCommand::Button { key, label, icon, .. } => {
-                                    CommandBarCommand::Button { key, label, icon, enabled: command.enabled }
-                                }
-                                other => other,
-                            }
-                        }
-                        (Some(_), None) => CommandBarCommand::Button {
-                            key: index.into(),
-                            label: command.label.clone(),
-                            icon: None,
-                            enabled: command.enabled,
-                        },
-                    })
-                    .collect::<Vec<_>>()
-            };
-            (build(true), build(false))
-        };
+        let command_bar = self.command_bar(context);
         let muted = self.theme.as_ref().map(Theme::muted);
         let mut info_items = Vec::new();
         if !self.details.is_empty() {
@@ -1643,14 +1615,15 @@ impl Component for Explorer {
                 Button::new().grid_column(3).on_click(context.message(Message::CancelPrompt)).content(tr("Cancel")),
             ));
         }
-        let icon_button = |glyph: &str, name: &str, enabled: bool, column: i32, message: Message| {
+        let ui_theme = self.theme.as_ref();
+        let icon_button = |glyph: icons::Icon, name: &str, enabled: bool, column: i32, message: Message| {
             Button::new()
                 .grid_column(column)
                 .automation_name(name)
                 .style(ButtonStyle::Subtle)
                 .is_enabled(enabled)
                 .on_click(context.message(message))
-                .content(TextBlock::new().text(glyph).font_size(NAV_GLYPH_SIZE))
+                .content(icon_state(glyph, ICON_SIZE, ui_theme, enabled))
                 .tooltip(name)
         };
         let address_view: View = if self.editing_address {
@@ -1706,10 +1679,10 @@ impl Component for Explorer {
                 ])
                 .column_spacing(ROW_GAP)
                 .children((
-                    icon_button("←", tr("Back"), !self.back.is_empty(), 0, Message::Back),
-                    icon_button("→", tr("Forward"), !self.forward.is_empty(), 1, Message::Forward),
-                    icon_button("↑", tr("Up"), true, 2, Message::Parent),
-                    icon_button("⟳", tr("Refresh"), true, 3, Message::Refresh),
+                    icon_button(icons::Icon::ArrowLeft, tr("Back"), !self.back.is_empty(), 0, Message::Back),
+                    icon_button(icons::Icon::ArrowRight, tr("Forward"), !self.forward.is_empty(), 1, Message::Forward),
+                    icon_button(icons::Icon::ArrowUp, tr("Up"), true, 2, Message::Parent),
+                    icon_button(icons::Icon::ArrowClockwise, tr("Refresh"), true, 3, Message::Refresh),
                     address_view,
                     TextBox::new()
                         .grid_column(5)
@@ -1719,9 +1692,7 @@ impl Component for Explorer {
                         .placeholder_text(tr("Filter by name"))
                         .on_text_changed(context.callback(Message::Filter)),
                 )),
-            CommandBar::new()
-                .horizontal_alignment(HorizontalAlignment::Left)
-                .owned_commands(primary, secondary, context.callback(Message::Command)),
+            command_bar,
             Grid::new()
                 .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto, GridLength::Auto])
                 .column_spacing(ROW_GAP)
@@ -1766,7 +1737,7 @@ impl Component for Explorer {
                                 .orientation(Orientation::Horizontal)
                                 .spacing(ROW_GAP)
                                 .children((
-                                    SymbolIcon::new().symbol(place_icon(path, self.pinned.contains(path))),
+                                    icon(place_icon(path, self.pinned.contains(path)), ICON_SIZE, self.theme.as_ref()),
                                     text(label, self.theme.as_ref().map(Theme::foreground)),
                                 )),
                         )
@@ -1859,7 +1830,18 @@ impl Explorer {
                     .height(MENU_ITEM_HEIGHT)
                     .is_enabled(command.enabled)
                     .on_click(context.message(Message::MenuCommand(command.label.clone())))
-                    .content(command.label.clone()),
+                    .content(
+                        StackPanel::new()
+                            .orientation(Orientation::Horizontal)
+                            .spacing(ROW_GAP)
+                            .children((
+                                match command.icon {
+                                    Some(glyph) => icon_state(glyph, ICON_SIZE, self.theme.as_ref(), command.enabled),
+                                    None => StackPanel::new().width(ICON_SIZE).into(),
+                                },
+                                text(&command.label, self.theme.as_ref().map(Theme::foreground)),
+                            )),
+                    ),
             )
         });
         let backdrop = Border::new()
@@ -2110,6 +2092,105 @@ impl Explorer {
         self.has_error = false;
         self.status = tr(if redo { "Redoing…" } else { "Undoing…" }).to_owned();
         let _task = context.spawn_background(move |_| Message::UndoComplete(action.run()));
+    }
+
+    fn command_bar(&self, context: &ViewContext<Self>) -> View {
+        let theme = self.theme.as_ref();
+        let commands = self.commands();
+        let find = |label: &str| {
+            let label = tr_dynamic(label);
+            commands.iter().find(|command| command.label == label)
+        };
+        let menu_of = |labels: &[&str]| {
+            let items = labels.iter().enumerate().filter_map(|(index, label)| {
+                find(label).map(|command| {
+                    if command.enabled { MenuItem::item(index, command.label.clone()) } else { MenuItem::disabled(index, command.label.clone()) }
+                })
+            });
+            Menu::new(items, context.callback(Message::Command))
+        };
+        let dropdown = |glyph: icons::Icon, label: &str, menu: Menu| -> View {
+            Button::new()
+                .style(ButtonStyle::Subtle)
+                .automation_name(label)
+                .content(
+                    StackPanel::new()
+                        .orientation(Orientation::Horizontal)
+                        .spacing(ROW_GAP)
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .children((
+                            icon(glyph, ICON_SIZE, theme),
+                            text(label, theme.map(Theme::foreground)),
+                            icon(icons::Icon::CaretDown, ICON_SIZE_SMALL, theme),
+                        )),
+                )
+                .menu(menu)
+        };
+        let tool = |label: &str| -> Option<View> {
+            let command = find(label)?;
+            let hint = match shortcut_of(label) {
+                Some(keys) => format!("{} ({keys})", command.label),
+                None => command.label.clone(),
+            };
+            Some(
+                Button::new()
+                    .style(ButtonStyle::Subtle)
+                    .automation_name(command.label.clone())
+                    .is_enabled(command.enabled)
+                    .on_click(context.message(Message::Command(command.label.clone())))
+                    .content(icon_state(command.icon?, ICON_SIZE, theme, command.enabled))
+                    .tooltip(hint),
+            )
+        };
+        let separator = || Border::new().width(DIVIDER).height(BAR_DIVIDER_HEIGHT).margin(Thickness::new(ROW_GAP, 0.0, ROW_GAP, 0.0)).background_optional(theme.map(Theme::muted)).into();
+        const NEW: [&str; 4] = ["Create folder", "Create file", "Create shortcut", "Git clone"];
+        let sort_labels = [self.sort_label(SortKey::Name, "Sort by name"), self.sort_label(SortKey::Size, "Sort by size"), self.sort_label(SortKey::Modified, "Sort by date"), self.group.label(), self.layout.label()];
+        const TOOLS: [&str; 6] = ["Cut", "Copy", "Paste here", "Rename selected", "Share", "Delete to Recycle Bin"];
+        let shown: Vec<String> = NEW.iter().chain(&TOOLS).copied().chain(sort_labels).map(tr_dynamic).collect();
+        let more_items = commands
+            .iter()
+            .filter(|command| command.message.is_some() && !shown.contains(&command.label))
+            .enumerate()
+            .map(|(index, command)| if command.enabled { MenuItem::item(index, command.label.clone()) } else { MenuItem::disabled(index, command.label.clone()) });
+        let more = Button::new()
+            .style(ButtonStyle::Subtle)
+            .automation_name(tr("More"))
+            .content(icon(icons::Icon::DotsThree, ICON_SIZE, theme))
+            .tooltip(tr("More"))
+            .menu(Menu::new(more_items, context.callback(Message::Command)));
+        let mut left: Vec<View> = vec![dropdown(icons::Icon::Plus, tr("New"), menu_of(&NEW)), separator()];
+        left.extend(TOOLS.iter().filter_map(|label| tool(label)));
+        left.push(separator());
+        left.push(dropdown(icons::Icon::SortAscending, tr("Sort"), menu_of(&sort_labels)));
+        left.push(more);
+        let details = Border::new()
+            .grid_column(1)
+            .corner_radius(CornerRadius::uniform(CARD_RADIUS))
+            .background_optional(if self.hide_pane { None } else { theme.and_then(Theme::selection) })
+            .content(
+                Button::new()
+                    .style(ButtonStyle::Subtle)
+                    .automation_name(tr("Details"))
+                    .on_click(context.message(Message::TogglePane))
+                    .content(
+                        StackPanel::new()
+                            .orientation(Orientation::Horizontal)
+                            .spacing(ROW_GAP)
+                            .children((icon(icons::Icon::SidebarSimple, ICON_SIZE, theme), text(tr("Details"), theme.map(Theme::foreground)))),
+                    )
+                    .tooltip(tr("Preview pane")),
+            );
+        Grid::new()
+            .columns([GridLength::STAR, GridLength::Auto])
+            .children((
+                StackPanel::new()
+                    .grid_column(0)
+                    .orientation(Orientation::Horizontal)
+                    .vertical_alignment(VerticalAlignment::Center)
+                    .keyed_children(left.into_iter().enumerate().map(|(index, view)| KeyedView::new(index, view)).collect::<Vec<_>>()),
+                details,
+            ))
+            .into()
     }
 
     fn pane_hidden(&self) -> bool {
@@ -2626,7 +2707,7 @@ fn row(
         .orientation(Orientation::Horizontal)
         .spacing(ROW_GAP)
         .children((
-            SymbolIcon::new().symbol(directory::icon(entry)),
+            icon(directory::icon(entry), ICON_SIZE, theme),
             text(&display_name(entry, hide_extensions), theme.map(Theme::foreground)),
         ));
     let check = select_box(entry, is_selected, sender, busy).grid_column(0);
@@ -2671,7 +2752,7 @@ fn tile(
     hide_extensions: bool,
 ) -> View {
     let name = text(&display_name(entry, hide_extensions), theme.map(Theme::foreground));
-    let icon = SymbolIcon::new().symbol(directory::icon(entry));
+    let icon = icon(directory::icon(entry), if layout == Layout::Grid { ICON_SIZE_LARGE } else { ICON_SIZE }, theme);
     let content: View = if layout == Layout::Grid {
         StackPanel::new().spacing(TIGHT_GAP).horizontal_alignment(HorizontalAlignment::Center).children((icon, name)).into()
     } else {
@@ -2723,6 +2804,30 @@ fn group_header(title: &str, theme: Option<&Theme>) -> View {
 fn wrapped_text(value: &str, foreground: Option<Brush>, lines: i32) -> TextBlock {
     let block = TextBlock::new().text(value).text_wrapping(TextWrapping::Wrap).max_lines(lines).text_trimming(TextTrimming::CharacterEllipsis);
     foreground.map(|brush| block.clone().foreground(brush)).unwrap_or(block)
+}
+
+fn shortcut_of(label: &str) -> Option<&'static str> {
+    match label {
+        "Cut" => Some("Ctrl+X"),
+        "Copy" => Some("Ctrl+C"),
+        "Paste here" => Some("Ctrl+V"),
+        "Delete to Recycle Bin" => Some("Del"),
+        _ => None,
+    }
+}
+
+// A disabled control dims its icon too, since images ignore the button's disabled state.
+fn icon_state(glyph: icons::Icon, size: f64, theme: Option<&Theme>, enabled: bool) -> View {
+    Border::new().opacity(if enabled { 1.0 } else { ICON_DISABLED_OPACITY }).content(icon(glyph, size, theme)).into()
+}
+
+// Duotone icon: an accent-tinted layer under a foreground outline, drawn from a themed SVG.
+fn icon(icon: icons::Icon, size: f64, theme: Option<&Theme>) -> View {
+    let colors = theme.and_then(Theme::icon_colors).map(|[foreground, accent, _]| [foreground, accent]);
+    match iconset::file(icon, colors).and_then(|path| Image::new().source_file(path).ok()) {
+        Some(image) => image.width(size).height(size).stretch(Stretch::Uniform).into(),
+        None => StackPanel::new().width(size).height(size).into(),
+    }
 }
 
 fn text(value: &str, foreground: Option<Brush>) -> TextBlock {

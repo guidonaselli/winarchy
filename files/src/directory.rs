@@ -174,19 +174,24 @@ pub fn is_pdf(entry: &Entry) -> bool {
     !entry.is_directory && entry.path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
 }
 
-pub fn icon(entry: &Entry) -> windows_reactor::Symbol {
-    use windows_reactor::Symbol;
+pub fn icon(entry: &Entry) -> crate::icons::Icon {
+    use crate::icons::Icon;
     if entry.is_directory {
-        return Symbol::Folder;
+        return Icon::Folder;
     }
     let ext = entry.path.extension().and_then(|ext| ext.to_str()).unwrap_or_default().to_lowercase();
     match ext.as_str() {
-        _ if is_image(entry) => Symbol::Pictures,
-        "mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac" => Symbol::Audio,
-        "mp4" | "mkv" | "avi" | "mov" | "wmv" | "webm" => Symbol::Video,
-        "pdf" | "doc" | "docx" | "txt" | "md" | "rtf" | "odt" | "xls" | "xlsx" | "ppt" | "pptx" => Symbol::Document,
-        "zip" | "7z" | "rar" | "tar" | "gz" => Symbol::MoveToFolder,
-        _ => Symbol::Page,
+        _ if is_image(entry) => Icon::FileImage,
+        "mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac" => Icon::FileAudio,
+        "mp4" | "mkv" | "avi" | "mov" | "wmv" | "webm" => Icon::FileVideo,
+        "pdf" => Icon::FilePdf,
+        "doc" | "docx" | "rtf" | "odt" => Icon::FileDoc,
+        "xls" | "xlsx" | "csv" => Icon::FileXls,
+        "ppt" | "pptx" => Icon::FilePpt,
+        "txt" | "md" | "log" => Icon::FileText,
+        "zip" | "7z" | "rar" | "tar" | "gz" => Icon::FileZip,
+        "rs" | "py" | "js" | "ts" | "tsx" | "jsx" | "json" | "toml" | "yml" | "yaml" | "html" | "css" | "c" | "h" | "cpp" | "cs" | "java" | "go" | "sh" | "ps1" | "psm1" | "ahk" | "xml" | "sql" => Icon::FileCode,
+        _ => Icon::File,
     }
 }
 
