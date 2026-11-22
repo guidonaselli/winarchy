@@ -86,6 +86,7 @@ fn undo_for_transfer(paths: &[PathBuf], destination: &Path, cut: bool) -> Option
 
 #[derive(Clone)]
 enum Message {
+    ToggleHidden,
     Undo,
     Redo,
     UndoComplete(Result<bool, String>),
@@ -130,6 +131,7 @@ struct Explorer {
     redo: Vec<Undo>,
     pending_inverse: Option<Undo>,
     redoing: bool,
+    show_hidden: bool,
     sort: SortKey,
     descending: bool,
     new_folder_name: String,
@@ -178,6 +180,7 @@ impl Component for Explorer {
             redo: Vec::new(),
             pending_inverse: None,
             redoing: false,
+            show_hidden: false,
             sort: SortKey::Name,
             descending: false,
             new_folder_name: String::new(),
@@ -244,6 +247,11 @@ impl Component for Explorer {
             Message::Paste => self.paste(context),
             Message::Undo => self.step_history(false, context),
             Message::Redo => self.step_history(true, context),
+            Message::ToggleHidden => {
+                self.show_hidden = !self.show_hidden;
+                self.selected.clear();
+                self.refresh_status();
+            }
             Message::UndoComplete(result) => {
                 self.transferring = false;
                 self.entries.clear();
@@ -406,7 +414,7 @@ impl Component for Explorer {
         let visible: Vec<Entry> = self
             .entries
             .iter()
-            .filter(|entry| needle.is_empty() || entry.name.to_lowercase().contains(&needle))
+            .filter(|entry| self.matches(entry, &needle))
             .cloned()
             .collect();
         let revision = self.list_revision(&needle, visible.len());
@@ -546,12 +554,17 @@ impl Component for Explorer {
                 .placeholder_text("Filter by name")
                 .on_text_changed(context.callback(Message::Filter)),
             Grid::new()
-                .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto])
+                .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto, GridLength::Auto])
                 .column_spacing(6.0)
                 .children((
                     self.sort_button(context, SortKey::Name, "Name", 0),
                     self.sort_button(context, SortKey::Size, "Size", 1),
                     self.sort_button(context, SortKey::Modified, "Modified", 2),
+                    Button::new()
+                        .grid_column(3)
+                        .automation_name("Show hidden items")
+                        .on_click(context.message(Message::ToggleHidden))
+                        .content(if self.show_hidden { "Hidden: shown" } else { "Hidden: off" }),
                 )),
             text(
                 &self.path.to_string_lossy(),
@@ -643,7 +656,7 @@ impl Explorer {
                 self.selected = self
                     .entries
                     .iter()
-                    .filter(|entry| entry.name.to_lowercase().contains(&needle))
+                    .filter(|entry| self.matches(entry, &needle))
                     .map(|entry| entry.path.clone())
                     .collect();
                 self.refresh_status();
@@ -778,13 +791,17 @@ impl Explorer {
         });
     }
 
+    fn matches(&self, entry: &Entry, needle: &str) -> bool {
+        (self.show_hidden || !entry.hidden) && entry.name.to_lowercase().contains(needle)
+    }
+
     fn refresh_status(&mut self) {
         if !self.has_error {
             let needle = self.filter.to_lowercase();
             let shown = self
                 .entries
                 .iter()
-                .filter(|entry| entry.name.to_lowercase().contains(&needle))
+                .filter(|entry| self.matches(entry, &needle))
                 .count();
             self.status = if shown == self.entries.len() {
                 format!("{shown} items · {} selected", self.selected.len())

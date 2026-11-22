@@ -1,10 +1,17 @@
-use std::{fs, io, os::windows::fs::FileTypeExt, path::PathBuf};
+use std::{
+    fs, io,
+    os::windows::fs::{FileTypeExt, MetadataExt},
+    path::PathBuf,
+};
+
+const HIDDEN_OR_SYSTEM: u32 = 0x2 | 0x4;
 
 #[derive(Clone)]
 pub struct Entry {
     pub name: String,
     pub path: PathBuf,
     pub is_directory: bool,
+    pub hidden: bool,
     pub size: u64,
     pub modified: Option<std::time::SystemTime>,
 }
@@ -19,6 +26,9 @@ pub fn read(path: &PathBuf) -> io::Result<Vec<Entry>> {
                 name: entry.file_name().to_string_lossy().into_owned(),
                 path: entry.path(),
                 is_directory: file_type.is_dir() || file_type.is_symlink_dir(),
+                hidden: metadata
+                    .as_ref()
+                    .is_some_and(|m| m.file_attributes() & HIDDEN_OR_SYSTEM != 0),
                 size: metadata.as_ref().map_or(0, |m| m.len()),
                 modified: metadata.and_then(|m| m.modified().ok()),
             })
@@ -111,6 +121,7 @@ mod tests {
             name: String::new(),
             path: PathBuf::new(),
             is_directory: dir,
+            hidden: false,
             size,
             modified: Some(UNIX_EPOCH + Duration::from_secs(secs)),
         }
