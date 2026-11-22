@@ -447,7 +447,7 @@ Describe 'Generated JetBrains scheme' {
             $bare | Should -Not -BeNullOrEmpty
             foreach ($name in $bare) {
                 Set-WinarchyTheme -Name $name -StageOnly | Out-Null
-                $xml = [xml](Get-Content (Join-Path (Get-WinarchyStateDir) 'staging\winarchy.icls') -Raw)
+                $xml = [xml](Get-Content (Join-Path (Get-WinarchyStateDir) 'staging\config\jetbrains\winarchy.icls') -Raw)
                 $xml.scheme.name | Should -Be "Winarchy $((Import-WinarchyToml -Path (Join-Path (Get-WinarchyThemesDir) "$name\theme.toml"))['name'])"
                 $shipped = [xml](Get-Content (Join-Path (Get-WinarchyThemesDir) 'catppuccin\jetbrains.icls') -Raw)
                 $xml.SelectNodes('//option[@value]').Count | Should -Be $shipped.SelectNodes('//option[@value]').Count
@@ -517,7 +517,7 @@ Describe 'Bar position' {
         InModuleScope Winarchy {
             Set-Content (Get-WinarchyBarPositionPath) -Value 'bottom' -NoNewline -Encoding UTF8
             Set-WinarchyTheme -Name 'catppuccin' -StageOnly | Out-Null
-            (Get-Content (Join-Path (Get-WinarchyStateDir) 'staging\config.yaml') -Raw) | Should -Match 'position: "bottom"'
+            (Get-Content (Join-Path (Get-WinarchyStateDir) 'staging\config\yasb\config.yaml') -Raw) | Should -Match 'position: "bottom"'
         }
     }
 }
@@ -1443,7 +1443,7 @@ Describe 'Shipped themes' {
         # config.yaml de YASB no tiene validador de sintaxis en el pipeline (no hay parser
         # YAML en PowerShell): al menos la geometria inyectada tiene que quedar numerica,
         # que es lo unico que un theme puede romper ahi.
-        $staged = Join-Path (Get-WinarchyStateDir) 'staging\config.yaml'
+        $staged = Join-Path (Get-WinarchyStateDir) 'staging\config\yasb\config.yaml'
         (Get-Content $staged -Raw) | Should -Match '(?m)^\s+height: \d+\s*$'
     }
 }
@@ -1505,7 +1505,7 @@ Describe 'WezTerm terminal' {
             try {
                 Set-Content -Path $userLua -Value 'return { font_size = 42.0 }' -Encoding UTF8 -NoNewline
                 Set-WinarchyTheme -Name 'tokyo-night' -StageOnly
-                $staged = Get-Content (Join-Path (Get-WinarchyStateDir) 'staging\wezterm.lua') -Raw
+                $staged = Get-Content (Join-Path (Get-WinarchyStateDir) 'staging\config\wezterm\wezterm.lua') -Raw
 
                 $staged | Should -Match 'config/wezterm/user\.lua'
                 $staged | Should -Match 'pcall\(dofile'
@@ -1789,7 +1789,7 @@ Describe 'App rules (community ASC + user layer)' {
 
     It 'compiles the community rules into the generated komorebi.json' {
         Set-WinarchyTheme -Name (Get-WinarchyThemes | Select-Object -First 1) -StageOnly
-        $json = Get-Content (Join-Path (Get-WinarchyStateDir) 'staging\komorebi.json') -Raw -Encoding UTF8
+        $json = Get-Content (Join-Path (Get-WinarchyStateDir) 'staging\config\komorebi\komorebi.json') -Raw -Encoding UTF8
         # MozillaDialogClass solo puede venir de ASC.
         $json | Should -Match 'MozillaDialogClass'
         ($json | ConvertFrom-Json).layered_applications.id | Should -Contain 'Discord.exe'
@@ -3401,6 +3401,46 @@ Describe 'Install-WinarchyAssistantBinary' {
             Set-Content (Join-Path $Repo 'versions.lock.toml') "[assistant]`nsha256 = `"$hash`""
             Install-WinarchyAssistantBinary -Source $Exe
             Test-Path $dest | Should -BeTrue
+        }
+    }
+}
+
+Describe 'Install-WinarchyFilesBinary' {
+    It 'installs only a binary whose SHA256 matches the pin and keeps the previous one' {
+        $repo = Join-Path $TestDrive 'repo'
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        $exe = Join-Path $TestDrive 'winarchy-files.exe'
+        Set-Content $exe 'fake binary' -NoNewline
+        InModuleScope Winarchy -Parameters @{ Repo = $repo; Exe = $exe } {
+            param($Repo, $Exe)
+            Mock Get-WinarchyRoot { $Repo }
+            $dest = Join-Path $Repo 'state\bin\winarchy-files.exe'
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[core]`nkomorebi = `"1`""
+            { Install-WinarchyFilesBinary -Source $Exe } | Should -Throw '*no [[]files[]] sha256*'
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[files]`nsha256 = `"$('0' * 64)`""
+            { Install-WinarchyFilesBinary -Source $Exe } | Should -Throw '*mismatch*'
+            Test-Path $dest | Should -BeFalse
+            $hash = (Get-FileHash $Exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[files]`nsha256 = `"$hash`""
+            Install-WinarchyFilesBinary -Source $Exe
+            Test-Path $dest | Should -BeTrue
+            Test-Path "$dest.prev" | Should -BeFalse
+            Install-WinarchyFilesBinary -Source $Exe
+            Test-Path "$dest.prev" | Should -BeTrue
+        }
+    }
+}
+
+Describe 'Start-WinarchyFiles' {
+    It 'tries the release when no binary exists and explains how to build when that fails' {
+        $repo = Join-Path $TestDrive 'repo-files'
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        InModuleScope Winarchy -Parameters @{ Repo = $repo } {
+            param($Repo)
+            Mock Get-WinarchyRoot { $Repo }
+            Mock Install-WinarchyFilesRelease { throw 'offline' }
+            { Start-WinarchyFiles } | Should -Throw '*release download failed (offline)*cargo build*'
+            Should -Invoke Install-WinarchyFilesRelease -Times 1 -Exactly
         }
     }
 }

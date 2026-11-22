@@ -20,6 +20,7 @@ function Show-WinarchyHelp {
     theme preview [name]      Render synthetic preview cards (all themes by default)
     theme gallery             Visual theme picker (WPF grid)
     theme add <git-url> [name]  Install a theme from a repository
+    files [folder]              Open the Rust file manager
     background list           Backgrounds shipped by the active theme (* = applied)
     background gallery        Visual wallpaper picker for the active theme
     background set <file>     Apply one of them
@@ -129,6 +130,7 @@ function Invoke-Winarchy {
                 -Self:($rest -contains '--self' -or $rest -contains '-self')
         }
         'menu' { Show-WinarchyMenu }
+        'files' { Start-WinarchyFiles -Path ($rest -join ' ') }
         'webapp' {
             $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'list' }
             switch ($sub) {

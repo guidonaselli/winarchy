@@ -37,6 +37,8 @@ sync con el tag.
    --notes "..."`). La API `releases/latest` es la que consulta el chequeo no intrusivo.
    - **Binario del asistente** (solo si cambió `assistant/`): igual que la shell con `winarchy-assistant.exe` y
    `[assistant] sha256`; `winarchy assistant on` lo baja del Release y lo verifica.
+   - **Binario de Files** (solo si cambió `files/`): igual que la shell con `winarchy-files.exe` y `[files] sha256`;
+     `Install-WinarchyFilesRelease` lo baja del Release, lo verifica y deja el anterior como `winarchy-files.exe.prev`.
 6. **Binario de la shell nativa** (solo si cambió `shell/`): bajar el artefacto `winarchy-shell` del
    CI del commit que se va a taggear, adjuntarlo a la release (`gh release upload vX.Y.Z winarchy-shell.exe`) y fijar su
    `Get-FileHash -Algorithm SHA256` en `[shell] sha256` de `versions.lock.toml` antes de taggear.

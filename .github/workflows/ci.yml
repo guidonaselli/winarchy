@@ -58,3 +58,23 @@ jobs:
         with:
           name: winarchy-assistant
           path: assistant/target/release/winarchy-assistant.exe
+
+  files:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: files
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Tests
+        run: cargo test --locked
+
+      - name: Release build
+        run: cargo build --release --locked
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: winarchy-files
+          path: files/target/release/winarchy-files.exe

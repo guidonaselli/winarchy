@@ -108,14 +108,21 @@ function Write-WinarchyErr  { param([string]$Message) Write-Host "  [XX] $Messag
 
 function New-WinarchySnapshot {
     <# Copia los paths dados a backups/<timestamp>/ antes de tocar nada. Devuelve el dir del snapshot. #>
-    param([string[]]$Path = @(), [string]$Label = 'snapshot')
+    param([string[]]$Path = @(), [string]$Label = 'snapshot', [string]$RelativeRoot)
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $dest = Join-Path (Get-WinarchyBackupsDir) "$stamp-$Label"
     New-Item -ItemType Directory -Path $dest -Force | Out-Null
     foreach ($p in $Path) {
         if (Test-Path $p) {
-            $leaf = Split-Path $p -Leaf
-            Copy-Item -Path $p -Destination (Join-Path $dest $leaf) -Recurse -Force
+            $relative = if ($RelativeRoot) {
+                [IO.Path]::GetRelativePath($RelativeRoot, $p)
+            }
+            else {
+                Split-Path $p -Leaf
+            }
+            $target = Join-Path $dest $relative
+            New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
+            Copy-Item -Path $p -Destination $target -Recurse -Force
         }
     }
     # Poda por label: `theme set` (y `theme next` en hotkey) crea un snapshot por

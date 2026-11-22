@@ -205,6 +205,8 @@ function Build-WinarchyThemeContext {
         icls_vcs_deleted = @($c['background'], $c['color1'], 0.20)
         icls_vcs_modified = @($c['background'], $ctx['colors.accent_ui'], 0.15)
         icls_warning     = @($c['background'], $c['color3'], 0.30)
+        files_surface    = @($c['background'], $c['foreground'], 0.06)
+        files_selection  = @($c['background'], $ctx['colors.accent_ui'], 0.18)
     } }
     foreach ($k in $mixes.Keys) {
         $ctx["computed.$k"] = (Get-WinarchyMixedHex -A $mixes[$k][0] -B $mixes[$k][1] -Weight $mixes[$k][2]).TrimStart('#')
@@ -225,6 +227,7 @@ function Get-WinarchyRenderTargets {
         @{ Template = 'btop.theme.tpl';                   Output = Join-Path $root 'config\btop\winarchy.theme';         Validate = $null }
         @{ Template = 'nvim-theme.lua.tpl';               Output = Join-Path $root 'config\nvim\winarchy-theme.lua';     Validate = $null }
         @{ Template = 'shell-theme.json.tpl';             Output = Join-Path $root 'config\shell\theme.json';           Validate = 'json' }
+        @{ Template = 'files-theme.json.tpl';             Output = Join-Path $root 'config\files\theme.json';           Validate = 'json' }
         @{ Template = 'ahk-theme.ini.tpl';                Output = Join-Path $root 'config\ahk\theme.ini';               Validate = $null }
         @{ Template = 'obsidian.css.tpl';                 Output = Join-Path $root 'config\obsidian\winarchy-theme.css'; Validate = $null }
         @{ Template = 'starship.toml.tpl';                Output = Join-Path $root 'config\pwsh\starship.toml';          Validate = $null }
@@ -914,7 +917,8 @@ function Set-WinarchyTheme {
             $rendered = Add-WinarchyAppRulesToKomorebiJson -Json $rendered
             $rendered = Add-WinarchyWindowRulesToKomorebiJson -Json $rendered
         }
-        $stagedFile = Join-Path $staging (Split-Path $t.Output -Leaf)
+        $stagedFile = Join-Path $staging ([IO.Path]::GetRelativePath($root, $t.Output))
+        New-Item -ItemType Directory -Path (Split-Path $stagedFile -Parent) -Force | Out-Null
         Set-Content -Path $stagedFile -Value $rendered -Encoding UTF8 -NoNewline
         switch ($t.Validate) {
             'json' { Get-Content $stagedFile -Raw | ConvertFrom-Json | Out-Null }
@@ -937,10 +941,15 @@ function Set-WinarchyTheme {
         $snapshot = Join-Path (Get-WinarchyStateDir) 'accent-prev'
         if (Test-Path $snapshot) { Remove-Item $snapshot -Recurse -Force }
         New-Item -ItemType Directory -Path $snapshot -Force | Out-Null
-        foreach ($p in $snapshotPaths) { Copy-Item $p (Join-Path $snapshot (Split-Path $p -Leaf)) -Force }
+        foreach ($p in $snapshotPaths) {
+            $relative = [IO.Path]::GetRelativePath($root, $p)
+            $target = Join-Path $snapshot $relative
+            New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
+            Copy-Item $p $target -Force
+        }
     }
     else {
-        $snapshot = New-WinarchySnapshot -Path $snapshotPaths -Label "theme-rollback"
+        $snapshot = New-WinarchySnapshot -Path $snapshotPaths -Label "theme-rollback" -RelativeRoot $root
     }
     # Settings externos: subruta relativa por superficie/adapter para que los homónimos
     # no se pisen dentro del snapshot (en NTFS case-insensitive, Settings.json de Flow
@@ -1009,7 +1018,8 @@ function Set-WinarchyTheme {
     catch {
         Write-WinarchyErr "Failed to apply theme: $($_.Exception.Message) — starting rollback."
         foreach ($t in $targets) {
-            $bak = Join-Path $snapshot (Split-Path $t.Output -Leaf)
+            $relative = [IO.Path]::GetRelativePath($root, $t.Output)
+            $bak = Join-Path $snapshot $relative
             if (Test-Path $bak) { Copy-Item $bak $t.Output -Force }
         }
         foreach ($b in $adapterBackups) {
