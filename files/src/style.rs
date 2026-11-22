@@ -60,4 +60,6 @@ pub const FONT_BODY: f64 = 14.0;
 pub const FONT_CAPTION: f64 = 12.0;
 pub const FONT_TITLE: f64 = 16.0;
 pub const FOOTER_GAP: f64 = 6.0;
-pub const TAB_CLOSE_SPACE: f64 = 28.0;
+pub const TAB_CLOSE_SIZE: f64 = 24.0;
+pub const TAB_CLOSE_INSET: f64 = 4.0;
+pub const TAB_CLOSE_SPACE: f64 = TAB_CLOSE_SIZE + TAB_CLOSE_INSET;

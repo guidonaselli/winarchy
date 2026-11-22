@@ -491,6 +491,7 @@ enum Message {
     ResizeDrag(f64, bool),
     ResizeEnd,
     HandleHover(Option<Column>),
+    CloseHover(Option<usize>),
     BarAnchor(f64, f64),
     OpenDropdown(MenuKind),
     ContextItem(PathBuf, f64, f64),
@@ -560,6 +561,7 @@ struct Explorer {
     bar_anchor: (f64, f64),
     last_click: Option<(PathBuf, std::time::Instant)>,
     hovered_handle: Option<Column>,
+    hovered_close: Option<usize>,
     drag: Option<(Column, f64, f64)>,
     terminal: String,
     sidebar_width: f64,
@@ -647,6 +649,7 @@ impl Component for Explorer {
             bar_anchor: (0.0, 0.0),
             last_click: None,
             hovered_handle: None,
+            hovered_close: None,
             window_width: DEFAULT_LIST_WIDTH + SIDEBAR_DEFAULT_WIDTH + SPLITTER_WIDTH + SCROLL_ALLOWANCE + 2.0 * WINDOW_MARGIN,
             recursive: false,
             sort: SortKey::from_name(&saved.sort),
@@ -1162,6 +1165,7 @@ impl Component for Explorer {
                 }
             }
             Message::HandleHover(column) => self.hovered_handle = column,
+            Message::CloseHover(index) => self.hovered_close = index,
             Message::ResizeEnd => {
                 if self.drag.take().is_some() {
                     self.save_settings();
@@ -1546,14 +1550,21 @@ impl Component for Explorer {
                             Border::new().margin(Thickness::new(0.0, 0.0, if closable { TAB_CLOSE_SPACE } else { 0.0 }, 0.0)).content(text(&name, theme.map(if active { Theme::foreground } else { Theme::muted }))),
                         )
                         .tooltip(path.to_string_lossy().into_owned());
+                    // A Button's template padding clips a fixed-size icon, so the close target is a Border that tracks its own hover.
                     let close = closable.then(|| {
-                        Button::new()
-                            .style(ButtonStyle::Subtle)
+                        let tab_fill = if active { theme.map(Theme::surface) } else { theme.map(Theme::background) };
+                        Border::new()
                             .horizontal_alignment(HorizontalAlignment::Right)
                             .vertical_alignment(VerticalAlignment::Center)
-                            .automation_name(tr("Close tab"))
-                            .on_click(context.message(Message::CloseTabAt(index)))
-                            .content(icon(icons::Icon::X, ICON_SIZE_SMALL, theme))
+                            .width(TAB_CLOSE_SIZE)
+                            .height(TAB_CLOSE_SIZE)
+                            .margin(Thickness::new(0.0, 0.0, TAB_CLOSE_INSET, 0.0))
+                            .corner_radius(CornerRadius::uniform(CARD_RADIUS))
+                            .background_optional(if self.hovered_close == Some(index) { theme.and_then(Theme::selection) } else { tab_fill })
+                            .on_pointer_entered(context.callback(move |_: PointerEventInfo| Message::CloseHover(Some(index))))
+                            .on_pointer_exited(context.callback(|_: PointerEventInfo| Message::CloseHover(None)))
+                            .on_pointer_pressed(context.callback(move |_: PointerEventInfo| Message::CloseTabAt(index)))
+                            .content(Border::new().horizontal_alignment(HorizontalAlignment::Center).vertical_alignment(VerticalAlignment::Center).content(icon(icons::Icon::X, ICON_SIZE_SMALL, theme)))
                             .tooltip(tr("Close tab"))
                     });
                     Border::new()
