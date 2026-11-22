@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod directory;
+mod group;
 mod i18n;
 mod pdf;
 mod clipboard;
@@ -11,6 +12,7 @@ mod style;
 mod theme;
 
 use directory::Entry;
+use group::{Group, Line};
 use std::{
     collections::HashSet,
     fs,
@@ -26,7 +28,6 @@ enum SortKey {
     Name,
     Size,
     Modified,
-    Type,
 }
 
 impl SortKey {
@@ -35,7 +36,6 @@ impl SortKey {
             SortKey::Name => "name",
             SortKey::Size => "size",
             SortKey::Modified => "modified",
-            SortKey::Type => "type",
         }
     }
 
@@ -43,7 +43,6 @@ impl SortKey {
         match name {
             "size" => SortKey::Size,
             "modified" => SortKey::Modified,
-            "type" => SortKey::Type,
             _ => SortKey::Name,
         }
     }
@@ -110,13 +109,6 @@ fn places_with(pinned: &[PathBuf]) -> Vec<(String, PathBuf)> {
         (label, path.clone())
     }));
     places
-}
-
-fn extension_of(entry: &Entry) -> String {
-    if entry.is_directory {
-        return String::new();
-    }
-    entry.path.extension().map(|ext| ext.to_string_lossy().to_lowercase()).unwrap_or_default()
 }
 
 fn count_word(count: usize, one: &'static str, many: &'static str) -> &'static str {
@@ -216,7 +208,7 @@ impl Explorer {
             command("Storage settings", Message::OpenStorageSense, None, true, false),
             command("Open Recycle Bin", Message::OpenRecycleBin, None, true, false),
             command("Empty Recycle Bin", Message::EmptyRecycleBin, None, true, false),
-            command(if self.sort == SortKey::Type { "Group by type: on" } else { "Group by type: off" }, Message::Sort(if self.sort == SortKey::Type { SortKey::Name } else { SortKey::Type }), None, true, false),
+            command(self.group.label(), Message::CycleGroup, None, true, false),
             command(self.layout.label(), Message::CycleLayout, None, true, false),
             command("Duplicate tab", Message::DuplicateTab, None, true, false),
             command("Reopen closed tab", Message::ReopenTab, None, !self.closed_tabs.is_empty(), false),
@@ -372,6 +364,7 @@ enum Message {
     InvertSelection,
     CycleLanguage,
     CycleLayout,
+    CycleGroup,
     Undo,
     Redo,
     UndoComplete(Result<bool, String>),
@@ -429,6 +422,7 @@ struct Explorer {
     hide_extensions: bool,
     language: &'static str,
     layout: Layout,
+    group: Group,
     recursive: bool,
     sort: SortKey,
     descending: bool,
@@ -494,6 +488,7 @@ impl Component for Explorer {
             hide_extensions: saved.hide_extensions,
             language: i18n::choice(),
             layout: Layout::from_name(&saved.layout),
+            group: Group::from_name(&saved.group),
             recursive: false,
             sort: SortKey::from_name(&saved.sort),
             descending: saved.descending,
@@ -739,6 +734,10 @@ impl Component for Explorer {
             }
             Message::CycleLayout => {
                 self.layout = self.layout.next();
+                self.save_settings();
+            }
+            Message::CycleGroup => {
+                self.group = self.group.next();
                 self.save_settings();
             }
             Message::CycleLanguage => {
@@ -1125,12 +1124,8 @@ impl Component for Explorer {
         let folder_name_changed = context.callback(Message::NewFolderName);
         let transfer_destination_changed = context.callback(Message::TransferDestination);
         let needle = self.filter.to_lowercase();
-        let visible: Vec<Entry> = self
-            .entries
-            .iter()
-            .filter(|entry| self.matches(entry, &needle))
-            .cloned()
-            .collect();
+        let now = std::time::SystemTime::now();
+        let visible = self.visible_entries();
         let revision = self.list_revision(&needle, visible.len());
         let (selected, theme, sender, busy) = (
             self.selected.clone(),
@@ -1142,11 +1137,17 @@ impl Component for Explorer {
         let hide_extensions = self.hide_extensions;
         let layout = self.layout;
         let per_row = layout.cell_width().map_or(1, |cell| ((width / cell) as usize).max(1));
+        let group = self.group;
+        let lines = group::lines(&visible, group, per_row, now);
         let source = VirtualSource::new(
             revision,
-            visible.len().div_ceil(per_row),
+            lines.len(),
             |index| index,
             move |index| {
+                let entries = match &lines[index] {
+                    Line::Header(title) => return group_header(title, theme.as_ref()),
+                    Line::Row(entries) => entries,
+                };
                 let build = |entry: &Entry| match layout {
                     Layout::Details | Layout::List => row(
                         entry,
@@ -1163,12 +1164,12 @@ impl Component for Explorer {
                     }
                 };
                 if per_row == 1 {
-                    return build(&visible[index]);
+                    return build(&entries[0]);
                 }
                 StackPanel::new()
                     .orientation(Orientation::Horizontal)
                     .keyed_children(
-                        visible[index * per_row..((index + 1) * per_row).min(visible.len())]
+                        entries
                             .iter()
                             .enumerate()
                             .map(|(slot, entry)| KeyedView::new(slot, build(entry)))
@@ -1476,8 +1477,7 @@ impl Explorer {
             keys::Key::Up => self.update(Message::Parent, context),
             keys::Key::Refresh => self.update(Message::Refresh, context),
             keys::Key::MoveUp | keys::Key::MoveDown => {
-                let needle = self.filter.to_lowercase();
-                let visible: Vec<&Entry> = self.entries.iter().filter(|entry| self.matches(entry, &needle)).collect();
+                let visible = self.visible_entries();
                 let position = |down: bool| {
                     let mut selected = visible.iter().enumerate().filter(|(_, e)| self.selected.contains(&e.path));
                     if down { selected.last() } else { selected.next() }.map(|(index, _)| index)
@@ -1540,6 +1540,7 @@ impl Explorer {
             self.theme_version,
             self.hide_extensions,
             self.layout,
+            self.group,
             self.deleting || self.transferring,
             self.list_width.to_bits(),
         )
@@ -1575,7 +1576,7 @@ impl Explorer {
             .min_width(0.0)
             .margin(if self.layout == Layout::Details {
                 match key {
-                    SortKey::Name | SortKey::Type => Thickness::new(ICON_WIDTH, 0.0, 0.0, 0.0),
+                    SortKey::Name => Thickness::new(ICON_WIDTH, 0.0, 0.0, 0.0),
                     SortKey::Size => Thickness::new(0.0, 0.0, -BUTTON_INSET, 0.0),
                     SortKey::Modified => Thickness::new(0.0, 0.0, ROW_TRAILING - BUTTON_INSET, 0.0),
                 }
@@ -1653,7 +1654,6 @@ impl Explorer {
                 SortKey::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
                 SortKey::Size => a.size.cmp(&b.size),
                 SortKey::Modified => a.modified.cmp(&b.modified),
-                SortKey::Type => extension_of(a).cmp(&extension_of(b)).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
             };
             b.is_directory.cmp(&a.is_directory).then(if descending {
                 order.reverse()
@@ -1683,8 +1683,15 @@ impl Explorer {
             descending: self.descending,
             language: self.language.to_owned(),
             layout: self.layout.name().to_owned(),
+            group: self.group.name().to_owned(),
             pinned,
         });
+    }
+
+    fn visible_entries(&self) -> Vec<Entry> {
+        let needle = self.filter.to_lowercase();
+        let visible = self.entries.iter().filter(|entry| self.matches(entry, &needle)).cloned().collect();
+        group::arrange(visible, self.group, std::time::SystemTime::now())
     }
 
     fn matches(&self, entry: &Entry, needle: &str) -> bool {
@@ -2162,6 +2169,10 @@ fn is_single_name(name: &str) -> bool {
         && !name
             .chars()
             .any(|character| character.is_control() || r#"<>:"/\\|?*"#.contains(character))
+}
+
+fn group_header(title: &str, theme: Option<&Theme>) -> View {
+    text(title, theme.map(Theme::accent)).margin(Thickness::new(ICON_WIDTH, GROUP_GAP, 0.0, ROW_GAP)).into()
 }
 
 // Wraps up to `lines` lines, then ends in an ellipsis.

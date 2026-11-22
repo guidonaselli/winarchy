@@ -19,3 +19,4 @@ pub const PREVIEW_HEIGHT: f64 = 160.0;
 pub const MIN_LIST_WIDTH: f64 = 320.0;
 pub const DEFAULT_LIST_WIDTH: f64 = 800.0;
 pub const SIDEBAR_AND_SCROLL: f64 = 100.0;
+pub const GROUP_GAP: f64 = 12.0;
