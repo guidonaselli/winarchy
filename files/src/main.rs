@@ -490,6 +490,10 @@ enum Message {
     ResizeStart(Column, f64),
     ResizeDrag(f64, bool),
     ResizeEnd,
+    ContextItem(PathBuf, f64, f64),
+    ContextBackground(f64, f64),
+    CloseMenu,
+    MenuCommand(String),
     SidebarStart(f64),
     SidebarDrag(f64, bool),
     SidebarEnd,
@@ -547,6 +551,8 @@ struct Explorer {
     columns: Columns,
     hide_pane: bool,
     window_width: f64,
+    window_height: f64,
+    menu: Option<(f64, f64, Option<PathBuf>)>,
     drag: Option<(Column, f64, f64)>,
     sidebar_width: f64,
     sidebar_drag: Option<(f64, f64)>,
@@ -627,6 +633,8 @@ impl Component for Explorer {
             sidebar_width: if saved.sidebar_width > 0.0 { saved.sidebar_width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH) } else { SIDEBAR_DEFAULT_WIDTH },
             sidebar_drag: None,
             hide_pane: saved.hide_pane,
+            window_height: 600.0,
+            menu: None,
             window_width: DEFAULT_LIST_WIDTH + SIDEBAR_DEFAULT_WIDTH + SPLITTER_WIDTH + SCROLL_ALLOWANCE + 2.0 * WINDOW_MARGIN,
             recursive: false,
             sort: SortKey::from_name(&saved.sort),
@@ -1136,6 +1144,25 @@ impl Component for Explorer {
                     self.save_settings();
                 }
             }
+            Message::ContextItem(path, x, y) => {
+                if !self.selected.contains(&path) {
+                    self.selected = HashSet::from([path.clone()]);
+                    self.refresh_status();
+                }
+                self.menu = Some((x, y, Some(path)));
+            }
+            Message::ContextBackground(x, y) => {
+                if self.menu.is_none() {
+                    self.selected.clear();
+                    self.refresh_status();
+                    self.menu = Some((x, y, None));
+                }
+            }
+            Message::CloseMenu => self.menu = None,
+            Message::MenuCommand(label) => {
+                self.menu = None;
+                self.update(Message::Command(label), context);
+            }
             Message::SidebarStart(x) => self.sidebar_drag = Some((x, self.sidebar_width)),
             Message::SidebarDrag(x, pressed) => {
                 if let (Some((start_x, start_width)), true) = (self.sidebar_drag, pressed) {
@@ -1154,6 +1181,7 @@ impl Component for Explorer {
             }
             Message::Resize(size) => {
                 self.window_width = size.width;
+                self.window_height = size.height;
                 self.fit_list_width();
             }
             Message::TogglePane => {
@@ -1187,6 +1215,7 @@ impl Component for Explorer {
                 }
             }
             Message::CancelPrompt => {
+                self.menu = None;
                 self.prompt = None;
                 self.editing_address = false;
                 self.address = self.path.to_string_lossy().into_owned();
@@ -1415,6 +1444,19 @@ impl Component for Explorer {
                         tile(entry, selected.contains(&entry.path), theme.as_ref(), &sender, busy, layout, hide_extensions)
                     }
                 };
+                let build = |entry: &Entry| -> View {
+                    let path = entry.path.clone();
+                    Border::new()
+                        .on_pointer_pressed(sender.callback(move |info: PointerEventInfo| {
+                            if info.is_right_button_pressed {
+                                Message::ContextItem(path.clone(), info.window_x, info.window_y)
+                            } else {
+                                Message::CloseMenu
+                            }
+                        }))
+                        .content(build(entry))
+                        .into()
+                };
                 if per_row == 1 {
                     return build(&entries[0]);
                 }
@@ -1516,10 +1558,21 @@ impl Component for Explorer {
         };
         let mut body_items = vec![KeyedView::new(
             0usize,
-            ScrollViewer::new()
+            Border::new()
                 .grid_column(0)
-                .horizontal_scroll_bar_visibility(ScrollBarVisibility::Disabled)
-                .content(ItemsRepeater::new().horizontal_alignment(HorizontalAlignment::Stretch).virtual_source(source)),
+                .background_optional(self.theme.as_ref().map(Theme::surface))
+                .on_pointer_pressed(context.callback(|info: PointerEventInfo| {
+                    if info.is_right_button_pressed {
+                        Message::ContextBackground(info.window_x, info.window_y)
+                    } else {
+                        Message::CloseMenu
+                    }
+                }))
+                .content(
+                    ScrollViewer::new()
+                        .horizontal_scroll_bar_visibility(ScrollBarVisibility::Disabled)
+                        .content(ItemsRepeater::new().horizontal_alignment(HorizontalAlignment::Stretch).virtual_source(source)),
+                ),
         )];
         if !self.hide_pane {
             body_items.push(KeyedView::new(
@@ -1737,18 +1790,65 @@ impl Component for Explorer {
                     .on_drop(context.callback(Message::Dropped))
                     .content(content),
             ));
-        if let Some(theme) = &self.theme {
-            Grid::new()
-                .background(theme.background())
-                .children((body,))
-                .into()
-        } else {
-            body
+        let background = self.theme.as_ref().map(Theme::background);
+        let mut items = vec![KeyedView::new(0usize, body)];
+        if let Some((x, y, target)) = &self.menu {
+            items.push(KeyedView::new(1usize, self.context_menu(context, *x, *y, target.is_some())));
         }
+        Grid::new().background_optional(background).keyed_children(items).into()
     }
 }
 
 impl Explorer {
+    fn context_menu(&self, context: &ViewContext<Self>, x: f64, y: f64, on_item: bool) -> View {
+        let wanted: &[&str] = if on_item {
+            &["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Copy path", "Share", "Add tags", "Properties"]
+        } else {
+            &["Paste here", "Paste as shortcut", "Create folder", "Create file", "Terminal here", "Select none"]
+        };
+        let commands = self.commands();
+        let entries: Vec<&Command> = wanted
+            .iter()
+            .filter_map(|label| {
+                let label = tr_dynamic(label);
+                commands.iter().find(|command| command.label == label)
+            })
+            .collect();
+        let height = entries.len() as f64 * MENU_ITEM_HEIGHT + 2.0 * MENU_PADDING;
+        let left = x.min(self.window_width - MENU_WIDTH - WINDOW_MARGIN).max(0.0);
+        let top = y.min(self.window_height - height - WINDOW_MARGIN).max(0.0);
+        let items = entries.into_iter().enumerate().map(|(index, command)| {
+            KeyedView::new(
+                index,
+                Button::new()
+                    .automation_name(command.label.clone())
+                    .style(ButtonStyle::Subtle)
+                    .horizontal_alignment(HorizontalAlignment::Stretch)
+                    .horizontal_content_alignment(HorizontalAlignment::Left)
+                    .height(MENU_ITEM_HEIGHT)
+                    .is_enabled(command.enabled)
+                    .on_click(context.message(Message::MenuCommand(command.label.clone())))
+                    .content(command.label.clone()),
+            )
+        });
+        let backdrop = Border::new()
+            .opacity(MENU_DIM)
+            .background_optional(self.theme.as_ref().map(Theme::background))
+            .on_pointer_pressed(context.callback(|_: PointerEventInfo| Message::CloseMenu));
+        let card = Border::new()
+            .width(MENU_WIDTH)
+            .horizontal_alignment(HorizontalAlignment::Left)
+            .vertical_alignment(VerticalAlignment::Top)
+            .margin(Thickness::new(left, top, 0.0, 0.0))
+            .padding(Thickness::new(MENU_PADDING, MENU_PADDING, MENU_PADDING, MENU_PADDING))
+            .corner_radius(CornerRadius::uniform(MENU_RADIUS))
+            .border_thickness(Thickness::new(DIVIDER, DIVIDER, DIVIDER, DIVIDER))
+            .border_brush_optional(self.theme.as_ref().map(Theme::muted))
+            .background_optional(self.theme.as_ref().map(Theme::surface))
+            .content(StackPanel::new().keyed_children(items));
+        Grid::new().children((backdrop, card)).into()
+    }
+
     fn watch_keys(&self, receiver: keys::Receiver, context: &ComponentContext<Self>) {
         let _task = context.spawn_background(move |cancel| {
             let key = keys::next(&receiver, &cancel);
