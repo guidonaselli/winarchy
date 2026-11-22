@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none" role="img" aria-label="Files icon minimal variant 1">
+  <style>
+    :root {
+      --icon-stroke: currentColor;
+      --icon-accent: currentColor;
+      --icon-back-opacity: 0.38;
+      --icon-accent-opacity: 0.14;
+      --icon-stroke-width: 3.25;
+    }
+    .back {
+      stroke: var(--icon-stroke, currentColor);
+      stroke-opacity: var(--icon-back-opacity, 0.38);
+    }
+    .front {
+      stroke: var(--icon-stroke, currentColor);
+    }
+    .accent {
+      fill: var(--icon-accent, currentColor);
+      fill-opacity: var(--icon-accent-opacity, 0.14);
+    }
+    .dash {
+      fill: var(--icon-stroke, currentColor);
+    }
+    .line {
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: var(--icon-stroke-width, 3.25);
+      vector-effect: non-scaling-stroke;
+    }
+  </style>
+
+  <!-- Back folder -->
+  <path class="back line" d="M18 18.5c0-2.5 2-4.5 4.5-4.5h7.6c1.6 0 2.8.6 3.8 1.6l2.1 2.2c.8.8 1.8 1.2 2.9 1.2H47.5c2.5 0 4.5 2 4.5 4.5v11"/>
+
+  <!-- Front folder accent panel -->
+  <path class="accent" d="M15.5 25.5c0-3 2.4-5.4 5.4-5.4h10c1.5 0 2.7.5 3.7 1.5l1.9 1.9c1 .9 2.1 1.4 3.4 1.4h8.6c3 0 5.5 2.5 5.5 5.5V42c0 4.4-3.6 8-8 8H23.5c-4.4 0-8-3.6-8-8V25.5Z"/>
+
+  <!-- Front folder outline -->
+  <path class="front line" d="M15.5 30.4c0-3 2.4-5.4 5.4-5.4H31c1.5 0 2.7.5 3.7 1.5l1.9 1.9c1 .9 2.1 1.4 3.4 1.4h8.6c3 0 5.5 2.5 5.5 5.5V42c0 4.4-3.6 8-8 8H23.5c-4.4 0-8-3.6-8-8V30.4Z"/>
+
+  <!-- Center dash -->
+  <rect class="dash" x="25.5" y="36.6" width="13" height="3.4" rx="1.7"/>
+</svg>
