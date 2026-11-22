@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod directory;
+mod i18n;
 mod clipboard;
 mod keys;
 mod settings;
@@ -14,6 +15,7 @@ use std::{
     path::{Component as PathComponent, Path, PathBuf},
 };
 use theme::Theme;
+use i18n::tr;
 use windows_reactor::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -190,10 +192,10 @@ impl Component for Explorer {
         #[cfg(windows)]
         let theme_watcher = Theme::start_watching();
         let (theme, status, has_error) = match Theme::load() {
-            Ok(theme) => (theme, "Loading folder…".to_owned(), false),
+            Ok(theme) => (theme, tr("Loading folder…").to_owned(), false),
             Err(error) => (
                 None,
-                format!("Winarchy theme could not be loaded: {error}"),
+                format!("{}: {error}", tr("Winarchy theme could not be loaded")),
                 true,
             ),
         };
@@ -237,7 +239,7 @@ impl Component for Explorer {
         match keys::install() {
             Ok(receiver) => app.watch_keys(receiver, context),
             Err(error) => {
-                app.status = format!("Keyboard shortcuts unavailable: {error}");
+                app.status = format!("{}: {error}", tr("Keyboard shortcuts unavailable"));
                 app.has_error = true;
             }
         }
@@ -245,7 +247,7 @@ impl Component for Explorer {
         match theme_watcher {
             Ok(handle) => app.watch_theme_handle(handle, context),
             Err(error) => {
-                app.status = format!("Theme watch failed: {error}");
+                app.status = format!("{}: {error}", tr("Theme watch failed"));
                 app.has_error = true;
             }
         }
@@ -267,11 +269,12 @@ impl Component for Explorer {
                     self.has_error = shared.is_err();
                     self.status = match shared {
                         Ok(()) => format!(
-                            "{} items {}",
+                            "{} {} {}",
                             self.clipboard.len(),
-                            if cut { "cut" } else { "copied" }
+                            tr("items"),
+                            tr(if cut { "cut" } else { "copied" })
                         ),
-                        Err(error) => format!("Clipboard failed: {error}"),
+                        Err(error) => format!("{}: {error}", tr("Clipboard failed")),
                     };
                 }
             }
@@ -281,7 +284,7 @@ impl Component for Explorer {
             Message::Dropped(DroppedData::StorageItems(items)) => {
                 if !(self.deleting || self.transferring) {
                     let paths = items.into_iter().map(|item| PathBuf::from(item.path)).collect();
-                    self.begin_transfer(paths, false, "Copying dropped items…", context);
+                    self.begin_transfer(paths, false, tr("Copying dropped items…"), context);
                 }
             }
             Message::Dropped(_) => {}
@@ -294,15 +297,15 @@ impl Component for Explorer {
                     .and_then(|exe| std::process::Command::new(exe).arg(&folder).spawn());
                 self.has_error = opened.is_err();
                 self.status = match opened {
-                    Ok(_) => format!("Opened {} in a new window", folder.display()),
-                    Err(error) => format!("New window failed: {error}"),
+                    Ok(_) => format!("{}: {}", tr("Opened in a new window"), folder.display()),
+                    Err(error) => format!("{}: {error}", tr("New window failed")),
                 };
             }
             Message::ToggleRecursive => {
                 self.recursive = !self.recursive;
                 self.selected.clear();
                 self.entries.clear();
-                self.status = "Loading folder…".to_owned();
+                self.status = tr("Loading folder…").to_owned();
                 self.queue_load(self.path.clone(), context);
             }
             Message::ToggleHidden => {
@@ -323,17 +326,17 @@ impl Component for Explorer {
                                 self.redo.push(inverse);
                             }
                         }
-                        self.status = if self.redoing { "Redone" } else { "Undone" }.to_owned();
+                        self.status = tr(if self.redoing { "Redone" } else { "Undone" }).to_owned();
                         self.has_error = false;
                     }
                     Ok(false) => {
                         self.pending_inverse = None;
-                        self.status = "Undo canceled".to_owned();
+                        self.status = tr("Undo canceled").to_owned();
                         self.has_error = true;
                     }
                     Err(error) => {
                         self.pending_inverse = None;
-                        self.status = format!("Undo failed: {error}");
+                        self.status = format!("{}: {error}", tr("Undo failed"));
                         self.has_error = true;
                     }
                 }
@@ -388,7 +391,7 @@ impl Component for Explorer {
             Message::ThemeChanged(Ok(handle)) => {
                 if let Err(error) = Theme::rearm_watcher(handle) {
                     Theme::close_watcher(handle);
-                    self.status = format!("Theme watch failed: {error}");
+                    self.status = format!("{}: {error}", tr("Theme watch failed"));
                     self.has_error = true;
                 } else {
                     self.watch_theme_handle(handle, context);
@@ -400,11 +403,11 @@ impl Component for Explorer {
                             self.refresh_status();
                         }
                         Ok(None) => {
-                            self.status = "Winarchy theme file is missing".to_owned();
+                            self.status = tr("Winarchy theme file is missing").to_owned();
                             self.has_error = true;
                         }
                         Err(error) => {
-                            self.status = format!("Winarchy theme could not be loaded: {error}");
+                            self.status = format!("{}: {error}", tr("Winarchy theme could not be loaded"));
                             self.has_error = true;
                         }
                     }
@@ -412,7 +415,7 @@ impl Component for Explorer {
             }
             #[cfg(windows)]
             Message::ThemeChanged(Err(error)) => {
-                self.status = format!("Theme watch failed: {error}");
+                self.status = format!("{}: {error}", tr("Theme watch failed"));
                 self.has_error = true;
             }
             Message::RenameComplete(parent, name, result) => {
@@ -510,17 +513,17 @@ impl Component for Explorer {
                     Button::new()
                         .grid_column(0)
                         .on_click(context.message(Message::Parent))
-                        .content("Up"),
+                        .content(tr("Up")),
                     TextBox::new()
                         .element_ref(&self.address_ref)
-                        .automation_name("Address")
+                        .automation_name(tr("Address"))
                         .text(&self.address)
                         .grid_column(1)
                         .on_text_changed(address_changed),
                     Button::new()
                         .grid_column(2)
                         .on_click(context.message(Message::Go))
-                        .content("Go"),
+                        .content(tr("Go")),
                 )),
             Grid::new()
                 .columns([GridLength::STAR, GridLength::Auto])
@@ -528,14 +531,14 @@ impl Component for Explorer {
                 .children((
                     TextBox::new()
                         .text(&self.new_folder_name)
-                        .placeholder_text("New folder name")
+                        .placeholder_text(tr("New folder name"))
                         .grid_column(0)
                         .on_text_changed(folder_name_changed),
                     Button::new()
                         .grid_column(1)
                         .is_enabled(!self.deleting && !self.transferring)
                         .on_click(context.message(Message::CreateFolder))
-                        .content("Create folder"),
+                        .content(tr("Create folder")),
                 )),
             Grid::new()
                 .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto])
@@ -543,7 +546,7 @@ impl Component for Explorer {
                 .children((
                     TextBox::new()
                         .text(&self.rename_name)
-                        .placeholder_text("New name for one selected item")
+                        .placeholder_text(tr("New name for one selected item"))
                         .grid_column(0)
                         .on_text_changed(rename_name_changed),
                     Button::new()
@@ -552,14 +555,14 @@ impl Component for Explorer {
                             self.selected.len() == 1 && !self.deleting && !self.transferring,
                         )
                         .on_click(context.message(Message::RenameSelected))
-                        .content("Rename selected"),
+                        .content(tr("Rename selected")),
                     Button::new()
                         .grid_column(2)
                         .is_enabled(
                             !self.selected.is_empty() && !self.deleting && !self.transferring,
                         )
                         .on_click(context.message(Message::DeleteSelected))
-                        .content("Delete to Recycle Bin"),
+                        .content(tr("Delete to Recycle Bin")),
                 )),
             Grid::new()
                 .columns([GridLength::Auto, GridLength::Auto, GridLength::Auto])
@@ -569,28 +572,28 @@ impl Component for Explorer {
                         .grid_column(0)
                         .is_enabled(!self.selected.is_empty())
                         .on_click(context.message(Message::Clip(false)))
-                        .content("Copy"),
+                        .content(tr("Copy")),
                     Button::new()
                         .grid_column(1)
                         .is_enabled(!self.selected.is_empty())
                         .on_click(context.message(Message::Clip(true)))
-                        .content("Cut"),
+                        .content(tr("Cut")),
                     Button::new()
                         .grid_column(2)
                         .is_enabled(
                             clipboard::has_files() && !self.deleting && !self.transferring,
                         )
                         .on_click(context.message(Message::Paste))
-                        .content("Paste here"),
+                        .content(tr("Paste here")),
                 )),
-            text("Destination folder", self.theme.as_ref().map(Theme::muted)),
+            text(tr("Destination folder"), self.theme.as_ref().map(Theme::muted)),
             Grid::new()
                 .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto])
                 .column_spacing(6.0)
                 .children((
                     TextBox::new()
                         .text(&self.transfer_destination)
-                        .automation_name("Destination folder path")
+                        .automation_name(tr("Destination folder path"))
                         .is_enabled(!self.transferring)
                         .grid_column(0)
                         .on_text_changed(transfer_destination_changed),
@@ -600,18 +603,18 @@ impl Component for Explorer {
                             !self.selected.is_empty() && !self.deleting && !self.transferring,
                         )
                         .on_click(context.message(Message::TransferSelected(false)))
-                        .content("Copy selected"),
+                        .content(tr("Copy selected")),
                     Button::new()
                         .grid_column(2)
                         .is_enabled(
                             !self.selected.is_empty() && !self.deleting && !self.transferring,
                         )
                         .on_click(context.message(Message::TransferSelected(true)))
-                        .content("Move selected"),
+                        .content(tr("Move selected")),
                 )),
             TextBox::new()
                 .text(&self.filter)
-                .placeholder_text("Filter by name")
+                .placeholder_text(tr("Filter by name"))
                 .on_text_changed(context.callback(Message::Filter)),
             Grid::new()
                 .columns([
@@ -624,24 +627,24 @@ impl Component for Explorer {
                 ])
                 .column_spacing(6.0)
                 .children((
-                    self.sort_button(context, SortKey::Name, "Name", 0),
-                    self.sort_button(context, SortKey::Size, "Size", 1),
-                    self.sort_button(context, SortKey::Modified, "Modified", 2),
+                    self.sort_button(context, SortKey::Name, tr("Name"), 0),
+                    self.sort_button(context, SortKey::Size, tr("Size"), 1),
+                    self.sort_button(context, SortKey::Modified, tr("Modified"), 2),
                     Button::new()
                         .grid_column(3)
-                        .automation_name("Show hidden items")
+                        .automation_name(tr("Show hidden items"))
                         .on_click(context.message(Message::ToggleHidden))
-                        .content(if self.show_hidden { "Hidden: shown" } else { "Hidden: off" }),
+                        .content(tr(if self.show_hidden { "Hidden: shown" } else { "Hidden: off" })),
                     Button::new()
                         .grid_column(4)
-                        .automation_name("Search subfolders")
+                        .automation_name(tr("Search subfolders"))
                         .on_click(context.message(Message::ToggleRecursive))
-                        .content(if self.recursive { "Subfolders: on" } else { "Subfolders: off" }),
+                        .content(tr(if self.recursive { "Subfolders: on" } else { "Subfolders: off" })),
                     Button::new()
                         .grid_column(5)
-                        .automation_name("New window")
+                        .automation_name(tr("New window"))
                         .on_click(context.message(Message::NewWindow))
-                        .content("New window"),
+                        .content(tr("New window")),
                 )),
             text(
                 &self.path.to_string_lossy(),
@@ -715,7 +718,7 @@ impl Component for Explorer {
                     .background_optional(self.theme.as_ref().map(Theme::background))
                     .drop_policy(
                         DragDropPolicy::new().storage_items(
-                            DragDropAction::new(DragDropOperation::Copy).caption("Copy here"),
+                            DragDropAction::new(DragDropOperation::Copy).caption(tr("Copy here")),
                         ),
                     )
                     .on_drop(context.callback(Message::Dropped))
@@ -830,11 +833,11 @@ impl Explorer {
             Ok(None) => return,
             Err(error) => {
                 self.has_error = true;
-                self.status = format!("Clipboard failed: {error}");
+                self.status = format!("{}: {error}", tr("Clipboard failed"));
                 return;
             }
         };
-        self.begin_transfer(paths, cut, "Pasting…", context);
+        self.begin_transfer(paths, cut, tr("Pasting…"), context);
     }
 
     fn begin_transfer(
@@ -866,7 +869,7 @@ impl Explorer {
         }
         let history = if redo { &mut self.redo } else { &mut self.undo };
         let Some(action) = history.pop() else {
-            self.status = format!("Nothing to {}", if redo { "redo" } else { "undo" });
+            self.status = tr(if redo { "Nothing to redo" } else { "Nothing to undo" }).to_owned();
             self.has_error = false;
             return;
         };
@@ -874,7 +877,7 @@ impl Explorer {
         self.pending_inverse = action.inverse();
         self.transferring = true;
         self.has_error = false;
-        self.status = if redo { "Redoing…" } else { "Undoing…" }.to_owned();
+        self.status = tr(if redo { "Redoing…" } else { "Undoing…" }).to_owned();
         let _task = context.spawn_background(move |_| Message::UndoComplete(action.run()));
     }
 
@@ -922,12 +925,15 @@ impl Explorer {
                 .filter(|entry| self.matches(entry, &needle))
                 .count();
             self.status = if shown == self.entries.len() {
-                format!("{shown} items · {} selected", self.selected.len())
+                format!("{shown} {} · {} {}", tr("items"), self.selected.len(), tr("selected"))
             } else {
                 format!(
-                    "{shown} of {} items · {} selected",
+                    "{shown} {} {} {} · {} {}",
+                    tr("of"),
                     self.entries.len(),
-                    self.selected.len()
+                    tr("items"),
+                    self.selected.len(),
+                    tr("selected")
                 )
             };
             if self.recursive && self.entries.len() >= directory::SEARCH_LIMIT {
@@ -942,7 +948,7 @@ impl Explorer {
                 self.details = directory::properties(entry);
                 self.preview = directory::preview(entry).unwrap_or_default();
                 self.preview_image = directory::is_image(entry).then(|| entry.path.clone());
-                let kind = if entry.is_directory { "Folder" } else { "File" };
+                let kind = tr(if entry.is_directory { "Folder" } else { "File" });
                 self.status.push_str(&format!(
                     " · {kind} “{}” {} {}",
                     entry.name,
@@ -961,7 +967,7 @@ impl Explorer {
         self.rename_name.clear();
         self.selected.clear();
         self.entries.clear();
-        self.status = "Loading folder…".to_owned();
+        self.status = tr("Loading folder…").to_owned();
         self.has_error = false;
         self.queue_load(path, context);
     }
@@ -989,7 +995,7 @@ impl Explorer {
         let paths: Vec<_> = self.selected.iter().cloned().collect();
         let parent = self.path.clone();
         self.deleting = true;
-        self.status = "Deleting to Recycle Bin…".to_owned();
+        self.status = tr("Deleting to Recycle Bin…").to_owned();
         self.has_error = false;
         let _task = context.spawn_background(move |_| {
             let result = shell::recycle(&paths);
@@ -1012,21 +1018,21 @@ impl Explorer {
             Ok(true) => {
                 self.selected.clear();
                 self.entries.clear();
-                self.status = "Loading folder…".to_owned();
+                self.status = tr("Loading folder…").to_owned();
                 self.has_error = false;
                 self.queue_load(parent, context);
             }
             Ok(false) => {
                 self.selected.clear();
                 self.entries.clear();
-                self.status = "Loading folder…".to_owned();
+                self.status = tr("Loading folder…").to_owned();
                 self.has_error = false;
                 self.queue_load(parent, context);
             }
             Err(error) => {
                 self.selected.clear();
                 self.entries.clear();
-                self.status = format!("Delete failed: {error}");
+                self.status = format!("{}: {error}", tr("Delete failed"));
                 self.has_error = true;
                 self.queue_load(parent, context);
             }
@@ -1039,7 +1045,7 @@ impl Explorer {
         }
         let destination = self.transfer_destination.trim();
         if destination.is_empty() {
-            self.status = "Enter a destination folder path".to_owned();
+            self.status = tr("Enter a destination folder path").to_owned();
             self.has_error = true;
             return;
         }
@@ -1049,9 +1055,9 @@ impl Explorer {
         self.pending_undo = undo_for_transfer(&paths, &destination, move_items);
         self.transferring = true;
         self.status = if move_items {
-            "Moving selected items…".to_owned()
+            tr("Moving selected items…").to_owned()
         } else {
-            "Copying selected items…".to_owned()
+            tr("Copying selected items…").to_owned()
         };
         self.has_error = false;
         let _task = context.spawn_background(move |_| {
@@ -1080,18 +1086,18 @@ impl Explorer {
         match result {
             Ok(true) => {
                 self.status = if move_items {
-                    "Move completed".to_owned()
+                    tr("Move completed").to_owned()
                 } else {
-                    "Copy completed".to_owned()
+                    tr("Copy completed").to_owned()
                 };
                 self.has_error = false;
             }
             Ok(false) => {
-                self.status = "Operation canceled; some items may have transferred".to_owned();
+                self.status = tr("Operation canceled; some items may have transferred").to_owned();
                 self.has_error = true;
             }
             Err(error) => {
-                self.status = format!("File operation failed: {error}");
+                self.status = format!("{}: {error}", tr("File operation failed"));
                 self.has_error = true;
             }
         }
@@ -1116,14 +1122,14 @@ impl Explorer {
                 self.selected.clear();
                 self.rename_name.clear();
                 self.entries.clear();
-                self.status = "Loading folder…".to_owned();
+                self.status = tr("Loading folder…").to_owned();
                 self.has_error = false;
                 self.queue_load(parent, context);
             }
             Err(error) => {
                 self.pending_undo = None;
                 self.rename_name = name;
-                self.status = format!("Rename failed: {error}");
+                self.status = format!("{}: {error}", tr("Rename failed"));
                 self.has_error = true;
             }
         }
@@ -1144,7 +1150,7 @@ impl Explorer {
                 self.record(Undo::RemoveDir(parent.join(&name)));
                 self.entries.clear();
                 self.selected.clear();
-                self.status = "Loading folder…".to_owned();
+                self.status = tr("Loading folder…").to_owned();
                 self.has_error = false;
                 self.queue_load(parent, context);
             }
@@ -1167,18 +1173,18 @@ impl Explorer {
             .filter(|_| self.selected.len() == 1)
             .cloned()
         else {
-            self.status = "Select one item to rename".to_owned();
+            self.status = tr("Select one item to rename").to_owned();
             self.has_error = true;
             return;
         };
         let name = self.rename_name.trim();
         if !is_single_name(name) {
-            self.status = "Enter a single item name".to_owned();
+            self.status = tr("Enter a single item name").to_owned();
             self.has_error = true;
             return;
         }
         let Some(parent) = source.parent().map(Path::to_path_buf) else {
-            self.status = "Cannot rename this item".to_owned();
+            self.status = tr("Cannot rename this item").to_owned();
             self.has_error = true;
             return;
         };
@@ -1194,7 +1200,7 @@ impl Explorer {
             from: target.clone(),
             to: source.clone(),
         });
-        self.status = "Renaming…".to_owned();
+        self.status = tr("Renaming…").to_owned();
         self.has_error = false;
         let _task = context.spawn_background(move |_| {
             let result = shell::rename(&source, &target).map_err(|error| error.to_string());
@@ -1208,7 +1214,7 @@ impl Explorer {
         }
         let name = self.new_folder_name.trim();
         if !is_single_name(name) {
-            self.status = "Enter a single folder name".to_owned();
+            self.status = tr("Enter a single folder name").to_owned();
             self.has_error = true;
             return;
         }
@@ -1217,7 +1223,7 @@ impl Explorer {
         let parent = self.path.clone();
         let folder = parent.join(&name);
         self.new_folder_name.clear();
-        self.status = "Creating folder…".to_owned();
+        self.status = tr("Creating folder…").to_owned();
         self.has_error = false;
         let _task = context.spawn_background(move |_| {
             let result = fs::create_dir(folder).map_err(|error| error.to_string());
@@ -1259,7 +1265,7 @@ fn row(
         .column_spacing(12.0)
         .children((
             CheckBox::new()
-                .automation_name(format!("Select {}", entry.name))
+                .automation_name(format!("{} {}", tr("Select"), entry.name))
                 .grid_column(0)
                 .is_enabled(!busy)
                 .is_checked(is_selected)

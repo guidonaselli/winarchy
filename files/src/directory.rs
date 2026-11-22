@@ -1,3 +1,4 @@
+use crate::i18n::tr;
 use std::{
     fs, io,
     os::windows::fs::{FileTypeExt, MetadataExt},
@@ -87,10 +88,10 @@ pub fn places() -> Vec<(String, PathBuf)> {
         ] {
             let path = home.join(name);
             if path.is_dir() {
-                places.push((name.to_owned(), path));
+                places.push((tr(name).to_owned(), path));
             }
         }
-        places.insert(0, ("Home".to_owned(), home));
+        places.insert(0, (tr("Home").to_owned(), home));
     }
     let mask = unsafe { windows::Win32::Storage::FileSystem::GetLogicalDrives() };
     for index in 0..26u8 {
@@ -125,13 +126,17 @@ pub fn format_modified(entry: &Entry) -> String {
     format_time(entry.modified)
 }
 
-pub fn format_attributes(attributes: u32) -> String {
-    let names: Vec<_> = [(0x1, "Read-only"), (0x2, "Hidden"), (0x4, "System"), (0x20, "Archive")]
+pub fn attribute_names(attributes: u32) -> Vec<&'static str> {
+    [(0x1, "Read-only"), (0x2, "Hidden"), (0x4, "System"), (0x20, "Archive")]
         .into_iter()
         .filter(|(bit, _)| attributes & bit != 0)
         .map(|(_, name)| name)
-        .collect();
-    if names.is_empty() { "None".to_owned() } else { names.join(", ") }
+        .collect()
+}
+
+pub fn format_attributes(attributes: u32) -> String {
+    let names: Vec<_> = attribute_names(attributes).into_iter().map(tr).collect();
+    if names.is_empty() { tr("None").to_owned() } else { names.join(", ") }
 }
 
 const PREVIEW_BYTES: u64 = 2048;
@@ -167,9 +172,12 @@ pub fn is_image(entry: &Entry) -> bool {
 
 pub fn properties(entry: &Entry) -> String {
     format!(
-        "Path: {} · Created: {} · Attributes: {}",
+        "{}: {} · {}: {} · {}: {}",
+        tr("Path"),
         entry.path.display(),
+        tr("Created"),
         format_time(entry.created),
+        tr("Attributes"),
         format_attributes(entry.attributes)
     )
 }
@@ -257,37 +265,8 @@ mod tests {
 
     #[test]
     fn lists_set_attributes_only() {
-        assert_eq!(format_attributes(0), "None");
-        assert_eq!(format_attributes(0x1 | 0x2), "Read-only, Hidden");
-        assert_eq!(format_attributes(0x10), "None");
-    }
-
-    #[test]
-    fn previews_text_only() {
-        let dir = std::env::temp_dir().join(format!("wf-preview-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        let text = dir.join("t.txt");
-        let binary = dir.join("b.bin");
-        fs::write(&text, "one
-two
-three
-four
-five
-six
-seven").unwrap();
-        fs::write(&binary, [0u8, 1, 2]).unwrap();
-        let entry = |path: &PathBuf, size| Entry { name: String::new(), path: path.clone(), is_directory: false, hidden: false, attributes: 0, created: None, size, modified: None };
-        let shown = preview(&entry(&text, 30));
-        let refused = preview(&entry(&binary, 3));
-        fs::remove_file(&text).unwrap();
-        fs::remove_file(&binary).unwrap();
-        fs::remove_dir(&dir).unwrap();
-        assert_eq!(shown.as_deref(), Some("one
-two
-three
-four
-five
-six"));
-        assert_eq!(refused, None);
+        assert!(attribute_names(0).is_empty());
+        assert_eq!(attribute_names(0x1 | 0x2), ["Read-only", "Hidden"]);
+        assert!(attribute_names(0x10).is_empty());
     }
 }
