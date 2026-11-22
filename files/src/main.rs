@@ -26,6 +26,7 @@ enum SortKey {
     Name,
     Size,
     Modified,
+    Type,
 }
 
 impl SortKey {
@@ -34,6 +35,7 @@ impl SortKey {
             SortKey::Name => "name",
             SortKey::Size => "size",
             SortKey::Modified => "modified",
+            SortKey::Type => "type",
         }
     }
 
@@ -41,6 +43,7 @@ impl SortKey {
         match name {
             "size" => SortKey::Size,
             "modified" => SortKey::Modified,
+            "type" => SortKey::Type,
             _ => SortKey::Name,
         }
     }
@@ -107,6 +110,10 @@ fn places_with(pinned: &[PathBuf]) -> Vec<(String, PathBuf)> {
         (label, path.clone())
     }));
     places
+}
+
+fn extension_of(entry: &Entry) -> String {
+    entry.path.extension().map(|ext| ext.to_string_lossy().to_lowercase()).unwrap_or_default()
 }
 
 fn count_word(count: usize, one: &'static str, many: &'static str) -> &'static str {
@@ -206,6 +213,7 @@ impl Explorer {
             command("Storage settings", Message::OpenStorageSense, None, true, false),
             command("Open Recycle Bin", Message::OpenRecycleBin, None, true, false),
             command("Empty Recycle Bin", Message::EmptyRecycleBin, None, true, false),
+            command(if self.sort == SortKey::Type { "Group by type: on" } else { "Group by type: off" }, Message::Sort(SortKey::Type), None, true, false),
             command(self.layout.label(), Message::CycleLayout, None, true, false),
             command("Select none", Message::SelectNone, None, some, false),
             command("Invert selection", Message::InvertSelection, None, true, false),
@@ -1600,6 +1608,7 @@ impl Explorer {
                 SortKey::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
                 SortKey::Size => a.size.cmp(&b.size),
                 SortKey::Modified => a.modified.cmp(&b.modified),
+                SortKey::Type => extension_of(a).cmp(&extension_of(b)).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
             };
             b.is_directory.cmp(&a.is_directory).then(if descending {
                 order.reverse()

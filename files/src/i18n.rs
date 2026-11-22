@@ -85,6 +85,8 @@ const ES: &[(&str, &str)] = &[
     ("Unpin from sidebar", "Quitar de la barra lateral"),
     ("Open in editor", "Abrir en el editor (VS Code)"),
     ("Storage settings", "Configuración de almacenamiento"),
+    ("Group by type: on", "Agrupar por tipo: sí"),
+    ("Group by type: off", "Agrupar por tipo: no"),
     ("Paste as shortcut", "Pegar como acceso directo"),
     ("Git init", "Git: inicializar repositorio"),
     ("Git clone (URL in name field)", "Git: clonar (URL en el campo de nombre)"),
