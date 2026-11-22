@@ -315,6 +315,7 @@ struct Explorer {
     redoing: bool,
     details: String,
     git_branch: Option<String>,
+    notice: Option<String>,
     preview: String,
     preview_image: Option<PathBuf>,
     show_hidden: bool,
@@ -377,6 +378,7 @@ impl Component for Explorer {
             redoing: false,
             details: String::new(),
             git_branch: None,
+            notice: None,
             preview: String::new(),
             preview_image: None,
             show_hidden: saved.show_hidden,
@@ -707,9 +709,8 @@ impl Component for Explorer {
                 self.transferring = false;
                 match result {
                     Ok(output) => {
-                        self.status = format!("git {action}: {}", output.lines().last().unwrap_or("OK"));
                         self.load_path(self.path.clone(), context);
-                        self.status = format!("git {action}: {}", output.lines().last().unwrap_or("OK"));
+                        self.notice = Some(format!("git {action}: {}", output.lines().last().unwrap_or("OK")));
                     }
                     Err(error) => {
                         self.status = format!("git {action}: {}", error.lines().last().unwrap_or_default());
@@ -926,6 +927,9 @@ impl Component for Explorer {
                         self.entries = entries;
                         self.apply_sort();
                         self.refresh_status();
+                        if let Some(notice) = self.notice.take() {
+                            self.status = notice;
+                        }
                     }
                     Err(error) => {
                         self.status = error;
