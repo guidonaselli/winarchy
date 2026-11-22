@@ -1236,22 +1236,22 @@ impl Component for Explorer {
                 image.stretch(Stretch::Uniform).horizontal_alignment(HorizontalAlignment::Left).height(PREVIEW_HEIGHT),
             ));
         }
-        let details_header = Grid::new()
-            .width(self.list_width)
-            .columns([
-                GridLength::Pixel(CHECK_WIDTH),
-                GridLength::STAR,
-                GridLength::Pixel(SIZE_WIDTH),
-                GridLength::Pixel(MODIFIED_WIDTH + ROW_TRAILING),
-            ])
-            .column_spacing(COLUMN_GAP)
-            .children((
-                self.sort_button(context, SortKey::Name, tr("Name"), 1, HorizontalAlignment::Left),
-                self.sort_button(context, SortKey::Size, tr("Size"), 2, HorizontalAlignment::Right),
-                self.sort_button(context, SortKey::Modified, tr("Modified"), 3, HorizontalAlignment::Right),
-            ));
         let header: View = if self.layout == Layout::Details {
-            details_header.into()
+            Grid::new()
+                .width(self.list_width)
+                .columns([
+                    GridLength::Pixel(CHECK_WIDTH),
+                    GridLength::STAR,
+                    GridLength::Pixel(SIZE_WIDTH),
+                    GridLength::Pixel(MODIFIED_WIDTH + ROW_TRAILING),
+                ])
+                .column_spacing(COLUMN_GAP)
+                .children((
+                    self.sort_button(context, SortKey::Name, tr("Name"), 1, HorizontalAlignment::Left),
+                    self.sort_button(context, SortKey::Size, tr("Size"), 2, HorizontalAlignment::Right),
+                    self.sort_button(context, SortKey::Modified, tr("Modified"), 3, HorizontalAlignment::Right),
+                ))
+                .into()
         } else {
             StackPanel::new()
                 .orientation(Orientation::Horizontal)
@@ -1573,16 +1573,15 @@ impl Explorer {
         Button::new()
             .grid_column(column)
             .min_width(0.0)
-            .margin(Thickness::new(
-                if matches!(align, HorizontalAlignment::Left) { ICON_WIDTH } else { 0.0 },
-                0.0,
-                match (align, key == SortKey::Modified && self.layout == Layout::Details) {
-                    (HorizontalAlignment::Right, true) => ROW_TRAILING - BUTTON_INSET,
-                    (HorizontalAlignment::Right, false) => -BUTTON_INSET,
-                    _ => 0.0,
-                },
-                0.0,
-            ))
+            .margin(if self.layout == Layout::Details {
+                match key {
+                    SortKey::Name | SortKey::Type => Thickness::new(ICON_WIDTH, 0.0, 0.0, 0.0),
+                    SortKey::Size => Thickness::new(0.0, 0.0, -BUTTON_INSET, 0.0),
+                    SortKey::Modified => Thickness::new(0.0, 0.0, ROW_TRAILING - BUTTON_INSET, 0.0),
+                }
+            } else {
+                Thickness::new(0.0, 0.0, 0.0, 0.0)
+            })
             .horizontal_alignment(HorizontalAlignment::Stretch)
             .horizontal_content_alignment(align)
             .style(ButtonStyle::Subtle)
@@ -2165,7 +2164,7 @@ fn is_single_name(name: &str) -> bool {
             .any(|character| character.is_control() || r#"<>:"/\\|?*"#.contains(character))
 }
 
-// Single line that ends in an ellipsis instead of running past the window edge.
+// Wraps up to `lines` lines, then ends in an ellipsis.
 fn wrapped_text(value: &str, foreground: Option<Brush>, lines: i32) -> TextBlock {
     let block = TextBlock::new().text(value).text_wrapping(TextWrapping::Wrap).max_lines(lines).text_trimming(TextTrimming::CharacterEllipsis);
     foreground.map(|brush| block.clone().foreground(brush)).unwrap_or(block)
