@@ -158,6 +158,9 @@ enum Message {
     SwitchTab(usize),
     ToggleRecursive,
     ToggleHidden,
+    ToggleExtensions,
+    SelectNone,
+    InvertSelection,
     CycleLanguage,
     Undo,
     Redo,
@@ -212,6 +215,7 @@ struct Explorer {
     preview: String,
     preview_image: Option<PathBuf>,
     show_hidden: bool,
+    hide_extensions: bool,
     language: &'static str,
     recursive: bool,
     sort: SortKey,
@@ -273,6 +277,7 @@ impl Component for Explorer {
             preview: String::new(),
             preview_image: None,
             show_hidden: saved.show_hidden,
+            hide_extensions: saved.hide_extensions,
             language: i18n::choice(),
             recursive: false,
             sort: SortKey::from_name(&saved.sort),
@@ -491,6 +496,24 @@ impl Component for Explorer {
                 self.save_settings();
                 self.refresh_status();
             }
+            Message::ToggleExtensions => {
+                self.hide_extensions = !self.hide_extensions;
+                self.save_settings();
+            }
+            Message::SelectNone => {
+                self.selected.clear();
+                self.refresh_status();
+            }
+            Message::InvertSelection => {
+                let needle = self.filter.to_lowercase();
+                self.selected = self
+                    .entries
+                    .iter()
+                    .filter(|entry| self.matches(entry, &needle) && !self.selected.contains(&entry.path))
+                    .map(|entry| entry.path.clone())
+                    .collect();
+                self.refresh_status();
+            }
             Message::ToggleHidden => {
                 self.show_hidden = !self.show_hidden;
                 self.save_settings();
@@ -694,6 +717,7 @@ impl Component for Explorer {
             self.deleting || self.transferring,
         );
         let width = self.list_width;
+        let hide_extensions = self.hide_extensions;
         let source = VirtualSource::new(
             revision,
             visible.len(),
@@ -707,6 +731,7 @@ impl Component for Explorer {
                     &sender,
                     busy,
                     width,
+                    hide_extensions,
                 )
             },
         );
@@ -880,6 +905,24 @@ impl Component for Explorer {
                         .is_enabled(self.selected.len() == 1)
                         .on_click(context.message(Message::CreateShortcut))
                         .content(tr("Create shortcut")),
+                )),
+            StackPanel::new()
+                .orientation(Orientation::Horizontal)
+                .spacing(6.0)
+                .children((
+                    Button::new()
+                        .automation_name(tr("Select none"))
+                        .is_enabled(!self.selected.is_empty())
+                        .on_click(context.message(Message::SelectNone))
+                        .content(tr("Select none")),
+                    Button::new()
+                        .automation_name(tr("Invert selection"))
+                        .on_click(context.message(Message::InvertSelection))
+                        .content(tr("Invert selection")),
+                    Button::new()
+                        .automation_name(tr("Show file extensions"))
+                        .on_click(context.message(Message::ToggleExtensions))
+                        .content(tr(if self.hide_extensions { "Extensions: hidden" } else { "Extensions: shown" })),
                 )),
             text(tr("Destination folder"), self.theme.as_ref().map(Theme::muted)),
             Grid::new()
@@ -1096,6 +1139,7 @@ impl Explorer {
             needle,
             visible,
             self.theme_version,
+            self.hide_extensions,
             self.deleting || self.transferring,
             self.list_width.to_bits(),
         )
@@ -1215,6 +1259,7 @@ impl Explorer {
     fn save_settings(&self) {
         settings::save(&settings::Settings {
             show_hidden: self.show_hidden,
+            hide_extensions: self.hide_extensions,
             sort: self.sort.name().to_owned(),
             descending: self.descending,
             language: self.language.to_owned(),
@@ -1563,6 +1608,7 @@ fn row(
     sender: &LocalSender<Message>,
     busy: bool,
     width: f64,
+    hide_extensions: bool,
 ) -> View {
     let path = entry.path.clone();
     let selected_path = path.clone();
@@ -1601,7 +1647,14 @@ fn row(
                 .horizontal_content_alignment(HorizontalAlignment::Left)
                 .style(ButtonStyle::Subtle)
                 .on_click(sender.message(action))
-                .content(text(&entry.name, theme.map(Theme::foreground))),
+                .content(text(
+                    &if hide_extensions && !entry.is_directory {
+                        Path::new(&entry.name).with_extension("").to_string_lossy().into_owned()
+                    } else {
+                        entry.name.clone()
+                    },
+                    theme.map(Theme::foreground),
+                )),
             text(&directory::format_size(entry), theme.map(Theme::muted)).grid_column(2),
             text(&directory::format_modified(entry), theme.map(Theme::muted))
                 .grid_column(3)
