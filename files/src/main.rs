@@ -218,6 +218,9 @@ impl Explorer {
             command("Empty Recycle Bin", Message::EmptyRecycleBin, None, true, false),
             command(if self.sort == SortKey::Type { "Group by type: on" } else { "Group by type: off" }, Message::Sort(if self.sort == SortKey::Type { SortKey::Name } else { SortKey::Type }), None, true, false),
             command(self.layout.label(), Message::CycleLayout, None, true, false),
+            command("Duplicate tab", Message::DuplicateTab, None, true, false),
+            command("Reopen closed tab", Message::ReopenTab, None, !self.closed_tabs.is_empty(), false),
+            command("Close other tabs", Message::CloseOtherTabs, None, self.tabs.len() > 1, false),
             command("Select none", Message::SelectNone, None, some, false),
             command("Invert selection", Message::InvertSelection, None, true, false),
             command(if self.hide_extensions { "Extensions: hidden" } else { "Extensions: shown" }, Message::ToggleExtensions, None, true, false),
@@ -1179,13 +1182,13 @@ impl Component for Explorer {
             let name = path
                 .file_name()
                 .map_or_else(|| path.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
-            let marker = if index == self.active_tab { "▸ " } else { "" };
             KeyedView::new(
                 index,
                 Button::new()
                     .automation_name(format!("{} {}", tr("Tab"), index + 1))
+                    .style(if index == self.active_tab { ButtonStyle::Accent } else { ButtonStyle::Subtle })
                     .on_click(context.message(Message::SwitchTab(index)))
-                    .content(format!("{marker}{name}")),
+                    .content(name),
             )
         });
         let (primary, secondary) = {
@@ -1219,10 +1222,10 @@ impl Component for Explorer {
         let muted = self.theme.as_ref().map(Theme::muted);
         let mut info_items = Vec::new();
         if !self.details.is_empty() {
-            info_items.push(KeyedView::new(0usize, text(&self.details, muted.clone())));
+            info_items.push(KeyedView::new(0usize, wrapped_text(&self.details, muted.clone(), DETAILS_LINES)));
         }
         if !self.preview.is_empty() {
-            info_items.push(KeyedView::new(1usize, text(&self.preview, muted)));
+            info_items.push(KeyedView::new(1usize, wrapped_text(&self.preview, muted, PREVIEW_LINES)));
         }
         if let Some(branch) = &self.git_branch {
             info_items.push(KeyedView::new(3usize, text(&format!("Git: {branch}"), self.theme.as_ref().map(Theme::accent))));
@@ -1233,7 +1236,43 @@ impl Component for Explorer {
                 image.stretch(Stretch::Uniform).horizontal_alignment(HorizontalAlignment::Left).height(PREVIEW_HEIGHT),
             ));
         }
-        let toolbar = StackPanel::new().spacing(STACK_GAP).children((
+        let details_header = Grid::new()
+            .columns([
+                GridLength::Pixel(CHECK_WIDTH),
+                GridLength::STAR,
+                GridLength::Pixel(SIZE_WIDTH),
+                GridLength::Pixel(MODIFIED_WIDTH + ROW_TRAILING),
+            ])
+            .column_spacing(COLUMN_GAP)
+            .children((
+                self.sort_button(context, SortKey::Name, tr("Name"), 1, HorizontalAlignment::Left),
+                self.sort_button(context, SortKey::Size, tr("Size"), 2, HorizontalAlignment::Right),
+                self.sort_button(context, SortKey::Modified, tr("Modified"), 3, HorizontalAlignment::Right),
+            ));
+        let header: View = if self.layout == Layout::Details {
+            details_header.into()
+        } else {
+            StackPanel::new()
+                .orientation(Orientation::Horizontal)
+                .spacing(ROW_GAP)
+                .children((
+                    self.sort_button(context, SortKey::Name, tr("Name"), 0, HorizontalAlignment::Left),
+                    self.sort_button(context, SortKey::Size, tr("Size"), 1, HorizontalAlignment::Left),
+                    self.sort_button(context, SortKey::Modified, tr("Modified"), 2, HorizontalAlignment::Left),
+                ))
+                .into()
+        };
+        let footer = StackPanel::new()
+            .spacing(STACK_GAP)
+            .margin(Thickness::new(0.0, 0.0, CONTENT_MARGIN, 0.0))
+            .children((
+                StackPanel::new().spacing(STACK_GAP).keyed_children(info_items),
+                text(
+                    &self.status,
+                    self.theme.as_ref().map(|theme| if self.has_error { theme.urgent() } else { theme.muted() }),
+                ),
+            ));
+        let toolbar = StackPanel::new().spacing(STACK_GAP).margin(Thickness::new(0.0, 0.0, CONTENT_MARGIN, 0.0)).children((
             StackPanel::new()
                 .orientation(Orientation::Horizontal)
                 .spacing(ROW_GAP)
@@ -1251,20 +1290,6 @@ impl Component for Explorer {
                         .is_enabled(self.tabs.len() > 1)
                         .on_click(context.message(Message::CloseTab))
                         .content("×"),
-                    Button::new()
-                        .automation_name(tr("Duplicate tab"))
-                        .on_click(context.message(Message::DuplicateTab))
-                        .content("⧉"),
-                    Button::new()
-                        .automation_name(tr("Reopen closed tab"))
-                        .is_enabled(!self.closed_tabs.is_empty())
-                        .on_click(context.message(Message::ReopenTab))
-                        .content("↶"),
-                    Button::new()
-                        .automation_name(tr("Close other tabs"))
-                        .is_enabled(self.tabs.len() > 1)
-                        .on_click(context.message(Message::CloseOtherTabs))
-                        .content("⊗"),
                 )),
             Grid::new()
                 .columns([GridLength::Auto, GridLength::Auto, GridLength::Auto, GridLength::STAR, GridLength::Auto])
@@ -1304,66 +1329,54 @@ impl Component for Explorer {
                         .collect::<Vec<_>>(),
                 )
                 .on_item_clicked(context.callback(Message::Crumb)),
-            CommandBar::new().horizontal_alignment(HorizontalAlignment::Left).owned_commands(primary, secondary, context.callback(Message::Command)),
-            TextBox::new()
-                .text(&self.new_folder_name)
-                .automation_name(tr("Item name"))
-                .placeholder_text(tr("Name for a new folder or file, or the new name"))
-                .on_text_changed(folder_name_changed),
             Grid::new()
-                .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto])
+                .columns([GridLength::Auto, GridLength::STAR])
+                .column_spacing(COLUMN_GAP)
+                .children((
+                    CommandBar::new()
+                        .grid_column(0)
+                        .horizontal_alignment(HorizontalAlignment::Left)
+                        .owned_commands(primary, secondary, context.callback(Message::Command)),
+                    TextBox::new()
+                        .grid_column(1)
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .text(&self.filter)
+                        .placeholder_text(tr("Filter by name"))
+                        .on_text_changed(context.callback(Message::Filter)),
+                )),
+            Grid::new()
+                .columns([GridLength::STAR, GridLength::STAR, GridLength::Auto, GridLength::Auto])
                 .column_spacing(ROW_GAP)
                 .children((
                     TextBox::new()
+                        .grid_column(0)
+                        .text(&self.new_folder_name)
+                        .automation_name(tr("Item name"))
+                        .placeholder_text(tr("Name for a new folder or file, or the new name"))
+                        .on_text_changed(folder_name_changed),
+                    TextBox::new()
                         .text(&self.transfer_destination)
                         .automation_name(tr("Destination folder path"))
-                        .placeholder_text(tr("Copy or move the selection to this folder"))
+                        .placeholder_text(if self.selected.is_empty() {
+                            tr("Select items to copy or move")
+                        } else {
+                            tr("Copy or move the selection to this folder")
+                        })
                         .is_enabled(!self.transferring)
-                        .grid_column(0)
+                        .grid_column(1)
                         .on_text_changed(transfer_destination_changed),
                     Button::new()
-                        .grid_column(1)
-                        .is_enabled(
-                            !self.selected.is_empty() && !self.deleting && !self.transferring,
-                        )
+                        .grid_column(2)
+                        .is_enabled(!self.selected.is_empty() && !self.deleting && !self.transferring)
                         .on_click(context.message(Message::TransferSelected(false)))
                         .content(tr("Copy selected")),
                     Button::new()
-                        .grid_column(2)
-                        .is_enabled(
-                            !self.selected.is_empty() && !self.deleting && !self.transferring,
-                        )
+                        .grid_column(3)
+                        .is_enabled(!self.selected.is_empty() && !self.deleting && !self.transferring)
                         .on_click(context.message(Message::TransferSelected(true)))
                         .content(tr("Move selected")),
                 )),
-            TextBox::new()
-                .text(&self.filter)
-                .placeholder_text(tr("Filter by name"))
-                .on_text_changed(context.callback(Message::Filter)),
-            Grid::new()
-                .columns([
-                    GridLength::Pixel(CHECK_WIDTH),
-                    GridLength::STAR,
-                    GridLength::Pixel(SIZE_WIDTH),
-                    GridLength::Pixel(MODIFIED_WIDTH + ROW_TRAILING),
-                ])
-                .column_spacing(COLUMN_GAP)
-                .children((
-                    self.sort_button(context, SortKey::Name, tr("Name"), 1, HorizontalAlignment::Left),
-                    self.sort_button(context, SortKey::Size, tr("Size"), 2, HorizontalAlignment::Right),
-                    self.sort_button(context, SortKey::Modified, tr("Modified"), 3, HorizontalAlignment::Right),
-                )),
-            StackPanel::new().spacing(STACK_GAP).keyed_children(info_items),
-            text(
-                &self.status,
-                self.theme.as_ref().map(|theme| {
-                    if self.has_error {
-                        theme.urgent()
-                    } else {
-                        theme.accent()
-                    }
-                }),
-            ),
+            header,
         ));
         let content = Grid::new()
             .key_accelerators(KeyAccelerators::new([KeyAccelerator::new(
@@ -1371,7 +1384,7 @@ impl Component for Explorer {
                 AcceleratorModifiers::Control,
                 context.message(Message::Refresh),
             )]))
-            .rows([GridLength::Auto, GridLength::STAR])
+            .rows([GridLength::Auto, GridLength::STAR, GridLength::Auto])
             .children((
                 Grid::new().grid_row(0).children((toolbar,)),
                 Grid::new()
@@ -1384,6 +1397,7 @@ impl Component for Explorer {
                                 .horizontal_alignment(HorizontalAlignment::Stretch)
                                 .virtual_source(source),
                         ),)),
+                Grid::new().grid_row(2).children((footer,)),
             ));
         let sidebar_items = self
             .places
@@ -1544,6 +1558,7 @@ impl Explorer {
         };
         Button::new()
             .grid_column(column)
+            .margin(Thickness::new(if matches!(align, HorizontalAlignment::Left) { ICON_WIDTH } else { 0.0 }, 0.0, 0.0, 0.0))
             .horizontal_alignment(HorizontalAlignment::Stretch)
             .horizontal_content_alignment(align)
             .style(ButtonStyle::Subtle)
@@ -2126,8 +2141,14 @@ fn is_single_name(name: &str) -> bool {
             .any(|character| character.is_control() || r#"<>:"/\\|?*"#.contains(character))
 }
 
+// Single line that ends in an ellipsis instead of running past the window edge.
+fn wrapped_text(value: &str, foreground: Option<Brush>, lines: i32) -> TextBlock {
+    let block = TextBlock::new().text(value).text_wrapping(TextWrapping::Wrap).max_lines(lines).text_trimming(TextTrimming::CharacterEllipsis);
+    foreground.map(|brush| block.clone().foreground(brush)).unwrap_or(block)
+}
+
 fn text(value: &str, foreground: Option<Brush>) -> TextBlock {
-    let block = TextBlock::new().text(value);
+    let block = TextBlock::new().text(value).max_lines(1).text_trimming(TextTrimming::CharacterEllipsis);
     foreground
         .map(|brush| block.clone().foreground(brush))
         .unwrap_or(block)
