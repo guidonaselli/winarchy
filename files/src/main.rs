@@ -490,6 +490,7 @@ enum Message {
     ResizeStart(Column, f64),
     ResizeDrag(f64, bool),
     ResizeEnd,
+    HandleHover(Option<Column>),
     BarAnchor(f64, f64),
     OpenDropdown(MenuKind),
     ContextItem(PathBuf, f64, f64),
@@ -558,6 +559,7 @@ struct Explorer {
     menu: Option<(f64, f64, MenuKind)>,
     bar_anchor: (f64, f64),
     last_click: Option<(PathBuf, std::time::Instant)>,
+    hovered_handle: Option<Column>,
     drag: Option<(Column, f64, f64)>,
     terminal: String,
     sidebar_width: f64,
@@ -644,6 +646,7 @@ impl Component for Explorer {
             menu: None,
             bar_anchor: (0.0, 0.0),
             last_click: None,
+            hovered_handle: None,
             window_width: DEFAULT_LIST_WIDTH + SIDEBAR_DEFAULT_WIDTH + SPLITTER_WIDTH + SCROLL_ALLOWANCE + 2.0 * WINDOW_MARGIN,
             recursive: false,
             sort: SortKey::from_name(&saved.sort),
@@ -1158,6 +1161,7 @@ impl Component for Explorer {
                     self.columns.set(column, start_width + start_x - x);
                 }
             }
+            Message::HandleHover(column) => self.hovered_handle = column,
             Message::ResizeEnd => {
                 if self.drag.take().is_some() {
                     self.save_settings();
@@ -1533,27 +1537,30 @@ impl Component for Explorer {
                     let name = path.file_name().map_or_else(|| path.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
                     let active = index == self.active_tab;
                     let title = Button::new()
-                        .grid_column(0)
                         .style(ButtonStyle::Subtle)
+                        .horizontal_alignment(HorizontalAlignment::Stretch)
                         .horizontal_content_alignment(HorizontalAlignment::Left)
                         .automation_name(name.clone())
                         .on_click(context.message(Message::SwitchTab(index)))
-                        .content(text(&name, theme.map(Theme::foreground)))
+                        .content(
+                            Border::new().margin(Thickness::new(0.0, 0.0, if closable { TAB_CLOSE_SPACE } else { 0.0 }, 0.0)).content(text(&name, theme.map(if active { Theme::foreground } else { Theme::muted }))),
+                        )
                         .tooltip(path.to_string_lossy().into_owned());
                     let close = closable.then(|| {
                         Button::new()
-                            .grid_column(1)
                             .style(ButtonStyle::Subtle)
+                            .horizontal_alignment(HorizontalAlignment::Right)
+                            .vertical_alignment(VerticalAlignment::Center)
                             .automation_name(tr("Close tab"))
                             .on_click(context.message(Message::CloseTabAt(index)))
                             .content(icon(icons::Icon::X, ICON_SIZE_SMALL, theme))
                             .tooltip(tr("Close tab"))
-                    }).unwrap_or_else(|| StackPanel::new().grid_column(1).into());
+                    });
                     Border::new()
                         .max_width(TAB_MAX_WIDTH)
                         .corner_radius(CornerRadius::new(CONTENT_RADIUS, CONTENT_RADIUS, 0.0, 0.0))
                         .background_optional(if active { theme.map(Theme::surface) } else { None })
-                        .content(Grid::new().columns([GridLength::STAR, GridLength::Auto]).children((title, close)))
+                        .content(Grid::new().children((title, close.unwrap_or_else(|| StackPanel::new().into()))))
                         .into()
                 })
                 .collect();
@@ -1573,14 +1580,14 @@ impl Component for Explorer {
         let mut info_items = Vec::new();
         if !self.details.is_empty() {
             let name = self.selected.iter().next().and_then(|path| path.file_name()).map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-            info_items.push(KeyedView::new(4usize, text(&name, self.theme.as_ref().map(Theme::foreground))));
+            info_items.push(KeyedView::new(4usize, title(&name, self.theme.as_ref().map(Theme::foreground))));
             info_items.push(KeyedView::new(0usize, wrapped_text(&self.details, muted, DETAILS_LINES)));
         }
         if !self.preview.is_empty() {
             info_items.push(KeyedView::new(1usize, wrapped_text(&self.preview, self.theme.as_ref().map(Theme::foreground), PREVIEW_LINES)));
         }
         if let Some(branch) = &self.git_branch {
-            info_items.push(KeyedView::new(3usize, text(&format!("Git: {branch}"), self.theme.as_ref().map(Theme::accent))));
+            info_items.push(KeyedView::new(3usize, caption(&format!("Git: {branch}"), self.theme.as_ref().map(Theme::accent))));
         }
         if let Some(image) = self.preview_image.as_ref().and_then(|path| Image::new().source_file(path).ok()) {
             info_items.push(KeyedView::new(
@@ -1644,9 +1651,9 @@ impl Component for Explorer {
         }
         let footer = StackPanel::new()
             .spacing(STACK_GAP)
-            .margin(Thickness::new(0.0, STACK_GAP, CONTENT_MARGIN, 0.0))
+            .margin(Thickness::new(CARD_PADDING, FOOTER_GAP, CONTENT_MARGIN, FOOTER_GAP))
             .children((
-                text(
+                caption(
                     &self.status,
                     self.theme.as_ref().map(|theme| if self.has_error { theme.urgent() } else { theme.muted() }),
                 ),
@@ -2069,11 +2076,13 @@ impl Explorer {
             .on_pointer_pressed(context.callback(move |_: PointerEventInfo| Message::ResizeStart(column, shell::cursor_x())))
             .on_pointer_moved(context.callback(|info: PointerEventInfo| Message::ResizeDrag(shell::cursor_x(), info.is_left_button_pressed)))
             .on_pointer_released(context.callback(|_: PointerEventInfo| Message::ResizeEnd))
+            .on_pointer_entered(context.callback(move |_: PointerEventInfo| Message::HandleHover(Some(column))))
+            .on_pointer_exited(context.callback(|_: PointerEventInfo| Message::HandleHover(None)))
             .content(
                 Border::new()
                     .width(HANDLE_WIDTH)
                     .horizontal_alignment(HorizontalAlignment::Center)
-                    .background_optional(self.theme.as_ref().map(Theme::muted)),
+                    .background_optional(if self.hovered_handle == Some(column) || self.drag.is_some() { self.theme.as_ref().map(Theme::muted) } else { None }),
             )
             .into()
     }
@@ -2082,15 +2091,24 @@ impl Explorer {
         &self,
         context: &ViewContext<Self>,
         key: SortKey,
-        label: &str,
+        name: &str,
         column: i32,
         align: HorizontalAlignment,
     ) -> View {
-        let arrow = match (self.sort == key, self.descending) {
-            (false, _) => "",
-            (true, false) => " ▲",
-            (true, true) => " ▼",
-        };
+        let label = name;
+        let theme = self.theme.as_ref();
+        let active = self.sort == key;
+        let label = TextBlock::new()
+            .text(label)
+            .font_size(FONT_CAPTION)
+            .font_weight(FontWeight::SEMI_BOLD)
+            .foreground_optional(theme.map(if active { Theme::foreground } else { Theme::muted }));
+        let arrow = active.then(|| icon(if self.descending { icons::Icon::CaretDown } else { icons::Icon::CaretUp }, ICON_SIZE_SMALL, theme));
+        let content = StackPanel::new()
+            .orientation(Orientation::Horizontal)
+            .spacing(TIGHT_GAP)
+            .vertical_alignment(VerticalAlignment::Center)
+            .keyed_children(std::iter::once(View::from(label)).chain(arrow).enumerate().map(|(index, view)| KeyedView::new(index, view)).collect::<Vec<_>>());
         Button::new()
             .grid_column(column)
             .min_width(0.0)
@@ -2103,8 +2121,8 @@ impl Explorer {
             .horizontal_content_alignment(align)
             .style(ButtonStyle::Subtle)
             .on_click(context.message(Message::Sort(key)))
-            .content(format!("{label}{arrow}"))
-            .tooltip(format!("{} {}", tr("Sort by"), label))
+            .content(content)
+            .tooltip(format!("{} {}", tr("Sort by"), name))
     }
 
     fn paste(&mut self, context: &ComponentContext<Self>) {
@@ -2778,11 +2796,11 @@ fn row(
         .children((
             check,
             button,
-            text(&directory::format_size(entry), theme.map(Theme::muted))
+            caption(&directory::format_size(entry), theme.map(Theme::muted))
                 .grid_column(2)
                 .horizontal_alignment(HorizontalAlignment::Right)
                 .vertical_alignment(VerticalAlignment::Center),
-            text(&directory::format_modified(entry), theme.map(Theme::muted))
+            caption(&directory::format_modified(entry), theme.map(Theme::muted))
                 .grid_column(3)
                 .horizontal_alignment(HorizontalAlignment::Right)
                 .vertical_alignment(VerticalAlignment::Center)
@@ -2807,7 +2825,7 @@ fn tile(
         StackPanel::new().spacing(TIGHT_GAP).horizontal_alignment(HorizontalAlignment::Center).children((icon, name)).into()
     } else {
         let detail = if entry.is_directory { tr("Folder").to_owned() } else { directory::format_size(entry) };
-        let lines = vec![KeyedView::new(0usize, name), KeyedView::new(1usize, text(&detail, theme.map(Theme::muted)))];
+        let lines = vec![KeyedView::new(0usize, name), KeyedView::new(1usize, caption(&detail, theme.map(Theme::muted)))];
         StackPanel::new()
             .orientation(Orientation::Horizontal)
             .spacing(ROW_GAP)
@@ -2852,7 +2870,7 @@ fn group_header(title: &str, theme: Option<&Theme>) -> View {
 
 // Wraps up to `lines` lines, then ends in an ellipsis.
 fn wrapped_text(value: &str, foreground: Option<Brush>, lines: i32) -> TextBlock {
-    let block = TextBlock::new().text(value).text_wrapping(TextWrapping::Wrap).max_lines(lines).text_trimming(TextTrimming::CharacterEllipsis);
+    let block = TextBlock::new().text(value).font_size(FONT_CAPTION).text_wrapping(TextWrapping::Wrap).max_lines(lines).text_trimming(TextTrimming::CharacterEllipsis);
     foreground.map(|brush| block.clone().foreground(brush)).unwrap_or(block)
 }
 
@@ -2892,8 +2910,16 @@ fn icon(icon: icons::Icon, size: f64, theme: Option<&Theme>) -> View {
     }
 }
 
+fn caption(value: &str, foreground: Option<Brush>) -> TextBlock {
+    text(value, foreground).font_size(FONT_CAPTION)
+}
+
+fn title(value: &str, foreground: Option<Brush>) -> TextBlock {
+    text(value, foreground).font_size(FONT_TITLE).font_weight(FontWeight::SEMI_BOLD)
+}
+
 fn text(value: &str, foreground: Option<Brush>) -> TextBlock {
-    let block = TextBlock::new().text(value).max_lines(1).text_trimming(TextTrimming::CharacterEllipsis);
+    let block = TextBlock::new().text(value).font_size(FONT_BODY).max_lines(1).text_trimming(TextTrimming::CharacterEllipsis);
     foreground
         .map(|brush| block.clone().foreground(brush))
         .unwrap_or(block)
