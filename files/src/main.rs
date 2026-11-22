@@ -113,6 +113,9 @@ fn undo_for_transfer(paths: &[PathBuf], destination: &Path, cut: bool) -> Option
 enum Message {
     Dropped(DroppedData),
     NewWindow,
+    NewTab,
+    CloseTab,
+    SwitchTab(usize),
     ToggleRecursive,
     ToggleHidden,
     CycleLanguage,
@@ -152,6 +155,8 @@ enum Message {
 
 struct Explorer {
     address: String,
+    tabs: Vec<PathBuf>,
+    active_tab: usize,
     filter: String,
     clipboard: Vec<PathBuf>,
     clipboard_cut: bool,
@@ -208,6 +213,8 @@ impl Component for Explorer {
         };
         let mut app = Self {
             address: path.to_string_lossy().into_owned(),
+            tabs: vec![path.clone()],
+            active_tab: 0,
             filter: String::new(),
             clipboard: Vec::new(),
             clipboard_cut: false,
@@ -296,6 +303,23 @@ impl Component for Explorer {
                 }
             }
             Message::Dropped(_) => {}
+            Message::NewTab => {
+                self.tabs.push(self.path.clone());
+                self.active_tab = self.tabs.len() - 1;
+            }
+            Message::CloseTab => {
+                if self.tabs.len() > 1 {
+                    self.tabs.remove(self.active_tab);
+                    self.active_tab = self.active_tab.min(self.tabs.len() - 1);
+                    self.navigate(self.tabs[self.active_tab].clone(), context);
+                }
+            }
+            Message::SwitchTab(index) => {
+                if index < self.tabs.len() && index != self.active_tab {
+                    self.active_tab = index;
+                    self.navigate(self.tabs[index].clone(), context);
+                }
+            }
             Message::NewWindow => {
                 let folder = match self.selected.iter().collect::<Vec<_>>()[..] {
                     [path] if path.is_dir() => path.clone(),
@@ -521,7 +545,38 @@ impl Component for Explorer {
             },
         );
 
+        let tab_buttons = self.tabs.iter().enumerate().map(|(index, path)| {
+            let name = path
+                .file_name()
+                .map_or_else(|| path.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
+            let marker = if index == self.active_tab { "▸ " } else { "" };
+            KeyedView::new(
+                index,
+                Button::new()
+                    .automation_name(format!("{} {}", tr("Tab"), index + 1))
+                    .on_click(context.message(Message::SwitchTab(index)))
+                    .content(format!("{marker}{name}")),
+            )
+        });
         let toolbar = StackPanel::new().spacing(8.0).children((
+            StackPanel::new()
+                .orientation(Orientation::Horizontal)
+                .spacing(6.0)
+                .children((
+                    StackPanel::new()
+                        .orientation(Orientation::Horizontal)
+                        .spacing(6.0)
+                        .keyed_children(tab_buttons),
+                    Button::new()
+                        .automation_name(tr("New tab"))
+                        .on_click(context.message(Message::NewTab))
+                        .content("+"),
+                    Button::new()
+                        .automation_name(tr("Close tab"))
+                        .is_enabled(self.tabs.len() > 1)
+                        .on_click(context.message(Message::CloseTab))
+                        .content("×"),
+                )),
             Grid::new()
                 .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
                 .column_spacing(6.0)
@@ -776,6 +831,8 @@ impl Explorer {
             keys::Key::Paste => self.update(Message::Paste, context),
             keys::Key::Undo => self.update(Message::Undo, context),
             keys::Key::NewWindow => self.update(Message::NewWindow, context),
+            keys::Key::NewTab => self.update(Message::NewTab, context),
+            keys::Key::CloseTab => self.update(Message::CloseTab, context),
             keys::Key::Redo => self.update(Message::Redo, context),
             keys::Key::Delete => self.update(Message::DeleteSelected, context),
             keys::Key::Up => self.update(Message::Parent, context),
@@ -988,6 +1045,7 @@ impl Explorer {
 
     fn navigate(&mut self, path: PathBuf, context: &ComponentContext<Self>) {
         self.path = path.clone();
+        self.tabs[self.active_tab] = path.clone();
         self.recursive = false;
         self.address = path.to_string_lossy().into_owned();
         self.new_folder_name.clear();
