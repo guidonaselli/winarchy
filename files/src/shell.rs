@@ -413,3 +413,49 @@ pub fn share(paths: &[PathBuf]) -> Result<(), String> {
 pub fn share(_paths: &[PathBuf]) -> Result<(), String> {
     Err("sharing needs Windows".to_owned())
 }
+
+// The framework creates the window without an icon; give it the executable's embedded one once it exists.
+#[cfg(windows)]
+pub fn apply_window_icon() {
+    use windows::Win32::{
+        Foundation::{HWND, LPARAM, WPARAM},
+        System::{LibraryLoader::GetModuleHandleW, Threading::GetCurrentProcessId},
+        UI::WindowsAndMessaging::{
+            EnumWindows, GetSystemMetrics, GetWindowThreadProcessId, ICON_BIG, ICON_SMALL, IMAGE_ICON, IsWindowVisible,
+            LR_DEFAULTCOLOR, LoadImageW, SM_CXICON, SM_CXSMICON, SendMessageW, WM_SETICON,
+        },
+    };
+    use windows::core::{BOOL, PCWSTR};
+
+    unsafe extern "system" fn set(window: HWND, _: LPARAM) -> BOOL {
+        let mut process = 0;
+        // SAFETY: plain Win32 queries on a window handle supplied by EnumWindows
+        unsafe {
+            GetWindowThreadProcessId(window, Some(&mut process));
+            if process != GetCurrentProcessId() || !IsWindowVisible(window).as_bool() {
+                return true.into();
+            }
+            let Ok(module) = GetModuleHandleW(None) else { return true.into() };
+            for (kind, metric) in [(ICON_BIG, SM_CXICON), (ICON_SMALL, SM_CXSMICON)] {
+                let size = GetSystemMetrics(metric);
+                if let Ok(icon) = LoadImageW(Some(module.into()), PCWSTR(1 as _), IMAGE_ICON, size, size, LR_DEFAULTCOLOR) {
+                    SendMessageW(window, WM_SETICON, Some(WPARAM(kind as usize)), Some(LPARAM(icon.0 as isize)));
+                }
+            }
+        }
+        false.into()
+    }
+
+    std::thread::spawn(|| {
+        for _ in 0..50 {
+            // SAFETY: `set` matches the WNDENUMPROC contract
+            if unsafe { EnumWindows(Some(set), LPARAM(0)) }.is_err() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    });
+}
+
+#[cfg(not(windows))]
+pub fn apply_window_icon() {}

@@ -2414,6 +2414,7 @@ fn main() {
         .filter(|path| path.is_dir())
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("C:\\"));
+    shell::apply_window_icon();
     App::run_component::<Explorer>(path).unwrap();
 }
 
