@@ -687,6 +687,7 @@ YasbWatch() {
 
 ; --- Native shell watchdog ----------------------------------------------------------
 ; Same policy as YasbWatch: two missed checks (a reload restarts it within seconds), at most 3 relaunches in 5 min.
+; A check is "missing" (no process) or "hung" (a visible window of it does not answer WM_NULL within 2 s).
 ShellMisses := 0
 ShellRelaunches := []
 SetTimer(ShellWatch, 5000)
@@ -696,7 +697,8 @@ ShellWatch() {
     try native := FileExist(BarFile) ? Trim(FileRead(BarFile)) = 'native' : !YasbcExe
     catch
         return   ; state\bar en reemplazo: se vuelve a mirar en 5 s
-    if !native || ProcessExist('winarchy-shell.exe') {
+    state := native ? ShellState() : 'ok'
+    if state = 'ok' {
         ShellMisses := 0
         return
     }
@@ -718,7 +720,20 @@ ShellWatch() {
         return
     }
     ShellRelaunches.Push(A_TickCount)
+    if state = 'hung'
+        ProcessClose('winarchy-shell.exe')
+    ShowTaskbars()   ; the shell hides the system taskbars; without it running they must not stay hidden
     Run('"' exe '"', , 'Hide')
+}
+
+ShellState() {
+    if !ProcessExist('winarchy-shell.exe')
+        return 'missing'
+    for hwnd in WinGetList('ahk_exe winarchy-shell.exe') {
+        if !DllCall('SendMessageTimeoutW', 'Ptr', hwnd, 'UInt', 0, 'UPtr', 0, 'Ptr', 0, 'UInt', 2, 'UInt', 2000, 'UPtr*', &answer := 0, 'Ptr')
+            return 'hung'
+    }
+    return 'ok'
 }
 
 ; --- Monitor watchdog -------------------------------------------------------------
