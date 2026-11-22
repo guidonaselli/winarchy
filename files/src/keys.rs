@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::sync::{Arc, Mutex, OnceLock, atomic::{AtomicBool, Ordering}, mpsc};
 use std::time::Duration;
 use windows::Win32::{
     Foundation::{LPARAM, LRESULT, WPARAM},
@@ -12,8 +12,8 @@ use windows::Win32::{
             UIA_GroupControlTypeId, UIA_ListControlTypeId, UIA_ListItemControlTypeId, UIA_MenuControlTypeId,
             UIA_MenuItemControlTypeId, UIA_PaneControlTypeId, UIA_WindowControlTypeId, UIA_CONTROLTYPE_ID,
         },
-        Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT},
-        WindowsAndMessaging::{CallNextHookEx, HC_ACTION, SetWindowsHookExW, WH_KEYBOARD},
+        Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT},
+        WindowsAndMessaging::{CallNextHookEx, HC_ACTION, MOUSEHOOKSTRUCTEX, SetWindowsHookExW, WH_KEYBOARD, WH_MOUSE},
     },
 };
 use windows_reactor::CancellationToken;
@@ -41,11 +41,37 @@ pub enum Key {
     Confirm,
     Cancel,
     FocusAddress,
+    FocusFilter,
+    Back,
+    Forward,
+    PrevTab,
+    ReopenTab,
+    JumpTab(usize),
+    Rename,
+    NewFolder,
+    CopyPath,
+    Properties,
+    DeletePermanently,
+    MoveLeft,
+    MoveRight,
+    Home,
+    End,
+    Char(char),
 }
 
 pub type Receiver = Arc<Mutex<mpsc::Receiver<Key>>>;
 
 static SENDER: OnceLock<mpsc::Sender<Key>> = OnceLock::new();
+static MENU_OPEN: AtomicBool = AtomicBool::new(false);
+
+// While the overlay menu is open its keys must pass whatever control holds focus.
+pub fn set_menu_open(open: bool) {
+    MENU_OPEN.store(open, Ordering::Relaxed);
+}
+
+pub fn shift_down() -> bool {
+    (unsafe { GetKeyState(VK_SHIFT.0 as i32) }) < 0
+}
 
 // The hook runs on the UI thread and never consumes the key; the focus check happens off-thread
 // because UI Automation calls into this same process would block the UI thread.
@@ -56,6 +82,8 @@ pub fn install() -> Result<Receiver, String> {
         .map_err(|_| "keyboard hook already installed".to_owned())?;
     unsafe { SetWindowsHookExW(WH_KEYBOARD, Some(hook), None, GetCurrentThreadId()) }
         .map_err(|error| error.to_string())?;
+    unsafe { SetWindowsHookExW(WH_MOUSE, Some(mouse_hook), None, GetCurrentThreadId()) }
+        .map_err(|error| error.to_string())?;
     Ok(Arc::new(Mutex::new(receiver)))
 }
 
@@ -64,7 +92,8 @@ unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRE
     if code == HC_ACTION as i32 && key_down {
         let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
         let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
-        let key = if wparam.0 == 0x79 && shift { Some(Key::ContextMenu) } else { map_key(wparam.0 as u32, ctrl) };
+        let alt = unsafe { GetKeyState(VK_MENU.0 as i32) } < 0;
+        let key = if wparam.0 == 0x79 && shift { Some(Key::ContextMenu) } else { map_key(wparam.0 as u32, ctrl, shift, alt) };
         if let (Some(key), Some(sender)) = (key, SENDER.get()) {
             let _ = sender.send(key);
         }
@@ -72,8 +101,56 @@ unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRE
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
-fn map_key(virtual_key: u32, ctrl: bool) -> Option<Key> {
+const WM_XBUTTONUP: usize = 0x020C;
+
+unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code == HC_ACTION as i32 && wparam.0 == WM_XBUTTONUP {
+        let data = unsafe { &*(lparam.0 as *const MOUSEHOOKSTRUCTEX) };
+        let key = match data.mouseData >> 16 {
+            1 => Some(Key::Back),
+            2 => Some(Key::Forward),
+            _ => None,
+        };
+        if let (Some(key), Some(sender)) = (key, SENDER.get()) {
+            let _ = sender.send(key);
+        }
+    }
+    unsafe { CallNextHookEx(None, code, wparam, lparam) }
+}
+
+fn map_key(virtual_key: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Key> {
+    if alt {
+        return match (virtual_key, ctrl) {
+            (0x25, false) => Some(Key::Back),
+            (0x27, false) => Some(Key::Forward),
+            (0x26, false) => Some(Key::Up),
+            (0x0D, false) => Some(Key::Properties),
+            _ => None,
+        };
+    }
+    if ctrl && shift {
+        return match virtual_key {
+            0x4E => Some(Key::NewFolder),
+            0x54 => Some(Key::ReopenTab),
+            0x43 => Some(Key::CopyPath),
+            0x09 => Some(Key::PrevTab),
+            _ => None,
+        };
+    }
+    if ctrl && (0x31..=0x39).contains(&virtual_key) {
+        return Some(Key::JumpTab((virtual_key - 0x31) as usize));
+    }
+    if shift && virtual_key == 0x2E {
+        return Some(Key::DeletePermanently);
+    }
     match (virtual_key, ctrl) {
+        (0x46, true) => Some(Key::FocusFilter),
+        (0x71, false) => Some(Key::Rename),
+        (0x25, false) => Some(Key::MoveLeft),
+        (0x27, false) => Some(Key::MoveRight),
+        (0x24, false) => Some(Key::Home),
+        (0x23, false) => Some(Key::End),
+        (0x30..=0x39 | 0x41..=0x5A, false) => char::from_u32(virtual_key).map(|c| Key::Char(c.to_ascii_lowercase())),
         (0x43, true) => Some(Key::Copy),
         (0x58, true) => Some(Key::Cut),
         (0x56, true) => Some(Key::Paste),
@@ -138,10 +215,13 @@ fn key_allowed(key: Key) -> bool {
         UIA_MenuItemControlTypeId,
     ];
     match key {
+        Key::MoveUp | Key::MoveDown | Key::Open | Key::Cancel if MENU_OPEN.load(Ordering::Relaxed) => true,
         Key::Open => neutral.contains(&kind),
         Key::Cancel => kind != UIA_EditControlTypeId,
-        Key::FocusAddress => true,
-        Key::MoveUp | Key::MoveDown => kind != UIA_EditControlTypeId && !navigating.contains(&kind),
+        Key::FocusAddress | Key::FocusFilter | Key::Back | Key::Forward => true,
+        Key::MoveUp | Key::MoveDown | Key::MoveLeft | Key::MoveRight | Key::Home | Key::End | Key::Char(_) => {
+            kind != UIA_EditControlTypeId && !navigating.contains(&kind)
+        }
         _ => kind != UIA_EditControlTypeId,
     }
 }
@@ -161,21 +241,27 @@ mod tests {
 
     #[test]
     fn maps_shortcuts_and_ignores_the_rest() {
-        assert_eq!(map_key(0x43, true), Some(Key::Copy));
-        assert_eq!(map_key(0x43, false), None);
-        assert_eq!(map_key(0x2E, false), Some(Key::Delete));
-        assert_eq!(map_key(0x2E, true), None);
-        assert_eq!(map_key(0x08, false), Some(Key::Up));
-        assert_eq!(map_key(0x41, true), Some(Key::SelectAll));
-        assert_eq!(map_key(0x5A, true), Some(Key::Undo));
-        assert_eq!(map_key(0x59, true), Some(Key::Redo));
-        assert_eq!(map_key(0x4E, true), Some(Key::NewWindow));
-        assert_eq!(map_key(0x54, true), Some(Key::NewTab));
-        assert_eq!(map_key(0x57, true), Some(Key::CloseTab));
-        assert_eq!(map_key(0x09, true), Some(Key::NextTab));
-        assert_eq!(map_key(0x28, false), Some(Key::MoveDown));
-        assert_eq!(map_key(0x26, false), Some(Key::MoveUp));
-        assert_eq!(map_key(0x0D, false), Some(Key::Open));
-        assert_eq!(map_key(0x5D, false), Some(Key::ContextMenu));
+        assert_eq!(map_key(0x43, true, false, false), Some(Key::Copy));
+        assert_eq!(map_key(0x43, false, false, false), Some(Key::Char('c')));
+        assert_eq!(map_key(0x7A, false, false, false), None);
+        assert_eq!(map_key(0x2E, false, false, false), Some(Key::Delete));
+        assert_eq!(map_key(0x2E, true, false, false), None);
+        assert_eq!(map_key(0x08, false, false, false), Some(Key::Up));
+        assert_eq!(map_key(0x41, true, false, false), Some(Key::SelectAll));
+        assert_eq!(map_key(0x5A, true, false, false), Some(Key::Undo));
+        assert_eq!(map_key(0x59, true, false, false), Some(Key::Redo));
+        assert_eq!(map_key(0x4E, true, false, false), Some(Key::NewWindow));
+        assert_eq!(map_key(0x54, true, false, false), Some(Key::NewTab));
+        assert_eq!(map_key(0x57, true, false, false), Some(Key::CloseTab));
+        assert_eq!(map_key(0x09, true, false, false), Some(Key::NextTab));
+        assert_eq!(map_key(0x28, false, false, false), Some(Key::MoveDown));
+        assert_eq!(map_key(0x26, false, false, false), Some(Key::MoveUp));
+        assert_eq!(map_key(0x0D, false, false, false), Some(Key::Open));
+        assert_eq!(map_key(0x5D, false, false, false), Some(Key::ContextMenu));
+        assert_eq!(map_key(0x25, false, false, true), Some(Key::Back));
+        assert_eq!(map_key(0x4E, true, true, false), Some(Key::NewFolder));
+        assert_eq!(map_key(0x2E, false, true, false), Some(Key::DeletePermanently));
+        assert_eq!(map_key(0x32, true, false, false), Some(Key::JumpTab(1)));
+        assert_eq!(map_key(0x41, false, false, false), Some(Key::Char('a')));
     }
 }

@@ -20,5 +20,8 @@
 - **Error:** el texto de estado usa `urgent`; el normal usa `accent`.
 - **Hover/foco:** los de WinUI sobre el tema; pendiente verificar contraste ≥ 3:1 (tarea 5.5).
 
-## Teclado
-Ctrl+C/X/V/A/Z/Y/N/T/W/Tab, Supr, Retroceso (subir), F5, flechas (mover selección), Enter (abrir la selección cuando el foco no está en un botón o campo).
+## Teclado y mouse
+- **Teclado:** Ctrl+C/X/V/A/Z/Y/N/T/W/F, Ctrl+Mayús+N (carpeta nueva), Ctrl+Mayús+T (reabrir pestaña), Ctrl+Mayús+C (copiar ruta), Ctrl+1…9 (ir a pestaña), Ctrl+Tab y Ctrl+Mayús+Tab, Alt+←/→/↑ (atrás, adelante, subir), Alt+Enter (propiedades), F2 (renombrar), F5, Supr y Mayús+Supr, Retroceso (subir), flechas, Inicio y Fin (mover; con Mayús extienden el rango) y escribir para saltar a un nombre.
+- **Menús:** con un menú abierto, ↑/↓ recorren los comandos habilitados, Enter ejecuta y Esc cierra.
+- **Mouse:** clic selecciona, doble clic abre, Ctrl+clic alterna, Mayús+clic selecciona un rango, clic del medio abre la carpeta en una pestaña nueva (o cierra la pestaña), botones laterales van atrás y adelante. Las casillas aparecen al pasar el mouse o con la fila seleccionada.
+- **Menú clásico:** «Mostrar más opciones» abre el menú del shell de Windows, con las entradas de terceros.

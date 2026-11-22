@@ -8,6 +8,7 @@ mod clipboard;
 mod iconset;
 mod icons;
 mod keys;
+mod scroll;
 mod settings;
 mod shell;
 mod style;
@@ -248,6 +249,7 @@ impl Explorer {
             command("Add tags", Message::Ask(Prompt::Tags), Some(icons::Icon::Tag), some),
             command("Clear tags", Message::Tag(false), Some(icons::Icon::Tag), some),
             command("Properties", Message::RunVerb("properties"), Some(icons::Icon::Info), one),
+            command("Show more options", Message::NativeMenu, Some(icons::Icon::DotsThree), true),
             command("Terminal here", Message::OpenTerminal, Some(icons::Icon::TerminalWindow), true),
             command("Terminal as administrator", Message::RunVerb("admin-terminal"), Some(icons::Icon::TerminalWindow), true),
             command("Git init", Message::Git("init"), Some(icons::Icon::GitBranch), !self.transferring),
@@ -525,6 +527,10 @@ enum Message {
     ThemeChanged(Result<usize, String>),
     Go,
     RowClick(PathBuf),
+    OpenInTab(PathBuf),
+    RowHover(Option<PathBuf>),
+    NativeMenu,
+    NativeMenuRun,
     OpenFolder(PathBuf),
     OpenFile(PathBuf),
     Parent,
@@ -564,6 +570,13 @@ struct Explorer {
     menu: Option<(f64, f64, MenuKind)>,
     bar_anchor: (f64, f64),
     last_click: Option<(PathBuf, std::time::Instant)>,
+    anchor: Option<PathBuf>,
+    cursor: Option<PathBuf>,
+    menu_focus: Option<usize>,
+    menu_closed_at: Option<std::time::Instant>,
+    hovered_row: Option<PathBuf>,
+    type_ahead: (String, std::time::Instant),
+    filter_ref: ElementRef<TextBox>,
     hovered_handle: Option<Column>,
     hovered_close: Option<usize>,
     hovered_subfolders: bool,
@@ -658,6 +671,13 @@ impl Component for Explorer {
             menu: None,
             bar_anchor: (0.0, 0.0),
             last_click: None,
+            anchor: None,
+            cursor: None,
+            menu_focus: None,
+            menu_closed_at: None,
+            hovered_row: None,
+            type_ahead: (String::new(), std::time::Instant::now()),
+            filter_ref: ElementRef::new(),
             hovered_handle: None,
             hovered_close: None,
             hovered_subfolders: false,
@@ -1195,6 +1215,7 @@ impl Component for Explorer {
                 }
             }
             Message::ContextItem(path, x, y) => {
+                self.menu_focus = None;
                 if !self.selected.contains(&path) {
                     self.selected = HashSet::from([path.clone()]);
                     self.refresh_status();
@@ -1203,6 +1224,7 @@ impl Component for Explorer {
             }
             Message::ContextBackground(x, y) => {
                 if self.menu.is_none() {
+                    self.menu_focus = None;
                     self.selected.clear();
                     self.refresh_status();
                     self.menu = Some((x, y, MenuKind::Background));
@@ -1211,12 +1233,13 @@ impl Component for Explorer {
             // A button swallows pointer presses, so the bar remembers where the pointer entered it to anchor the dropdown.
             Message::BarAnchor(x, y) => self.bar_anchor = (x, y),
             Message::OpenDropdown(kind) => {
+                self.menu_focus = None;
                 let (x, y) = self.bar_anchor;
                 self.menu = if self.menu.as_ref().is_some_and(|(_, _, open)| *open == kind) { None } else { Some((x, y + BAR_BUTTON_HEIGHT, kind)) };
             }
-            Message::CloseMenu => self.menu = None,
+            Message::CloseMenu => self.close_menu(),
             Message::MenuCommand(label) => {
-                self.menu = None;
+                self.close_menu();
                 self.update(Message::Command(label), context);
             }
             Message::SidebarStart(x) => self.sidebar_drag = Some((x, self.sidebar_width)),
@@ -1271,7 +1294,7 @@ impl Component for Explorer {
                 }
             }
             Message::CancelPrompt => {
-                self.menu = None;
+                self.close_menu();
                 self.prompt = None;
                 self.editing_address = false;
                 self.address = self.path.to_string_lossy().into_owned();
@@ -1409,6 +1432,10 @@ impl Component for Explorer {
             }
             Message::Go => self.navigate(PathBuf::from(&self.address), context),
             Message::RowClick(path) => {
+                // Enter on a keyboard-driven menu also clicks the row that still holds focus; that click must not change the selection.
+                if self.menu.is_some() || self.menu_closed_at.is_some_and(|at| at.elapsed() < MENU_CLICK_GUARD) {
+                    return;
+                }
                 let now = std::time::Instant::now();
                 let window = std::time::Duration::from_millis(u64::from(unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() }));
                 let double = self.last_click.take().is_some_and(|(last, at)| last == path && now.duration_since(at) < window);
@@ -1419,13 +1446,48 @@ impl Component for Explorer {
                 }
                 self.last_click = Some((path.clone(), now));
                 let ctrl = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState(windows::Win32::UI::Input::KeyboardAndMouse::VK_CONTROL.0 as i32) } < 0;
-                if !ctrl {
-                    self.selected.clear();
+                if keys::shift_down() {
+                    let visible = self.visible_entries();
+                    if let Some(target) = visible.iter().position(|entry| entry.path == path) {
+                        self.select_span(&visible, target, true);
+                    }
+                } else {
+                    if !ctrl {
+                        self.selected.clear();
+                    }
+                    if !self.selected.remove(&path) || !ctrl {
+                        self.selected.insert(path.clone());
+                    }
+                    self.anchor = Some(path.clone());
                 }
-                if !self.selected.remove(&path) || !ctrl {
-                    self.selected.insert(path);
-                }
+                self.cursor = Some(path);
                 self.refresh_status();
+            }
+            Message::OpenInTab(path) => {
+                if path.is_dir() {
+                    self.tabs.push(path);
+                    self.save_settings();
+                }
+            }
+            Message::RowHover(path) => self.hovered_row = path,
+            // The shell menu blocks until it closes, so our own menu is dismissed and repainted first.
+            Message::NativeMenu => {
+                self.close_menu();
+                let _task = context.spawn_background(|_| {
+                    std::thread::sleep(std::time::Duration::from_millis(80));
+                    Message::NativeMenuRun
+                });
+            }
+            Message::NativeMenuRun => {
+                let paths: Vec<PathBuf> = if self.selected.is_empty() { vec![self.path.clone()] } else { self.selected.iter().cloned().collect() };
+                match shell::native_menu(&paths) {
+                    Ok(true) => self.update(Message::Refresh, context),
+                    Ok(false) => {}
+                    Err(error) => {
+                        self.status = error;
+                        self.has_error = true;
+                    }
+                }
             }
             Message::OpenFolder(path) => self.navigate(path, context),
             Message::OpenFile(path) => {
@@ -1502,6 +1564,8 @@ impl Component for Explorer {
         let now = std::time::SystemTime::now();
         let visible = self.visible_entries();
         let revision = self.list_revision(&needle, visible.len());
+        keys::set_menu_open(self.menu.is_some());
+        let hovered = self.hovered_row.clone();
         let (selected, theme, sender, busy) = (
             self.selected.clone(),
             self.theme.clone(),
@@ -1529,6 +1593,7 @@ impl Component for Explorer {
                     Layout::Details | Layout::List => row(
                         entry,
                         selected.contains(&entry.path),
+                        hovered.as_ref() == Some(&entry.path),
                         theme.as_ref(),
                         &sender,
                         busy,
@@ -1538,15 +1603,20 @@ impl Component for Explorer {
                         compact,
                     ),
                     Layout::Tiles | Layout::Grid => {
-                        tile(entry, selected.contains(&entry.path), theme.as_ref(), &sender, busy, layout, hide_extensions)
+                        tile(entry, selected.contains(&entry.path), hovered.as_ref() == Some(&entry.path), theme.as_ref(), &sender, busy, layout, hide_extensions)
                     }
                 };
                 let build = |entry: &Entry| -> View {
                     let path = entry.path.clone();
+                    let entered = entry.path.clone();
                     Border::new()
+                        .on_pointer_entered(sender.callback(move |_: PointerEventInfo| Message::RowHover(Some(entered.clone()))))
+                        .on_pointer_exited(sender.callback(|_: PointerEventInfo| Message::RowHover(None)))
                         .on_pointer_pressed(sender.callback(move |info: PointerEventInfo| {
                             if info.is_right_button_pressed {
                                 Message::ContextItem(path.clone(), info.window_x, info.window_y)
+                            } else if info.is_middle_button_pressed {
+                                Message::OpenInTab(path.clone())
                             } else {
                                 Message::CloseMenu
                             }
@@ -1608,6 +1678,7 @@ impl Component for Explorer {
                             .tooltip(tr("Close tab"))
                     });
                     Border::new()
+                        .on_pointer_pressed(context.callback(move |info: PointerEventInfo| if info.is_middle_button_pressed { Message::CloseTabAt(index) } else { Message::CloseMenu }))
                         .max_width(TAB_MAX_WIDTH)
                         .corner_radius(CornerRadius::new(CONTENT_RADIUS, CONTENT_RADIUS, 0.0, 0.0))
                         .background_optional(if active { theme.map(Theme::surface) } else { None })
@@ -1805,6 +1876,7 @@ impl Component for Explorer {
                             .text(&self.filter)
                             .automation_name(tr("Filter by name"))
                             .placeholder_text(tr("Filter by name"))
+                            .element_ref(&self.filter_ref)
                             .on_text_changed(context.callback(Message::Filter)),
                         self.subfolders_toggle(context),
                     )),
@@ -1865,9 +1937,11 @@ impl Component for Explorer {
                     .height(ACCENT_BAR_HEIGHT)
                     .corner_radius(CornerRadius::uniform(ACCENT_BAR_WIDTH))
                     .background_optional(if current { self.theme.as_ref().map(Theme::accent) } else { None });
+                let target = path.clone();
                 KeyedView::new(
                     index,
                     Border::new()
+                        .on_pointer_pressed(context.callback(move |info: PointerEventInfo| if info.is_middle_button_pressed { Message::OpenInTab(target.clone()) } else { Message::CloseMenu }))
                         .corner_radius(CornerRadius::uniform(CARD_RADIUS))
                         .background_optional(if current { self.theme.as_ref().and_then(Theme::selection) } else { None })
                         .content(Grid::new().columns([GridLength::Pixel(ACCENT_BAR_WIDTH + ROW_GAP), GridLength::STAR]).children((bar, button))),
@@ -1919,13 +1993,98 @@ impl Component for Explorer {
 }
 
 impl Explorer {
+    fn close_menu(&mut self) {
+        if self.menu.take().is_some() {
+            self.menu_closed_at = Some(std::time::Instant::now());
+        }
+        self.menu_focus = None;
+    }
+
+    fn menu_items(&self, kind: MenuKind) -> Vec<(String, bool)> {
+        let commands = self.commands();
+        self.menu_entries(&commands, kind).into_iter().map(|command| (command.label.clone(), command.enabled)).collect()
+    }
+
+    fn move_menu_focus(&mut self, down: bool) {
+        let Some((_, _, kind)) = self.menu else { return };
+        let items = self.menu_items(kind);
+        let count = items.len();
+        let mut index = self.menu_focus;
+        for _ in 0..count {
+            let next = match (index, down) {
+                (None, true) => 0,
+                (None, false) => count - 1,
+                (Some(current), true) => (current + 1) % count,
+                (Some(current), false) => (current + count - 1) % count,
+            };
+            index = Some(next);
+            if items[next].1 {
+                self.menu_focus = index;
+                return;
+            }
+        }
+    }
+
+    // Selects the entry at `target`, or the span from the anchor to it when extending.
+    fn select_span(&mut self, visible: &[std::sync::Arc<Entry>], target: usize, extend: bool) {
+        let path = visible[target].path.clone();
+        if extend {
+            let from = self.anchor.clone().or_else(|| self.cursor.clone()).unwrap_or_else(|| path.clone());
+            let start = visible.iter().position(|entry| entry.path == from).unwrap_or(target);
+            self.anchor = Some(from);
+            self.selected = visible[start.min(target)..=start.max(target)].iter().map(|entry| entry.path.clone()).collect();
+        } else {
+            self.anchor = Some(path.clone());
+            self.selected = HashSet::from([path]);
+        }
+    }
+
+    fn focus_entry(&mut self, visible: &[std::sync::Arc<Entry>], target: usize, extend: bool, context: &ComponentContext<Self>) {
+        self.select_span(visible, target, extend);
+        self.cursor = Some(visible[target].path.clone());
+        self.refresh_status();
+        let name = visible[target].name.clone();
+        let fraction = target as f64 / visible.len().saturating_sub(1).max(1) as f64;
+        let _task = context.spawn_background(move |_| {
+            scroll::reveal(&name, fraction);
+            Message::Focus(true)
+        });
+    }
+
+    fn move_selection(&mut self, key: keys::Key, context: &ComponentContext<Self>) {
+        let visible = self.visible_entries();
+        if visible.is_empty() {
+            return;
+        }
+        let last = visible.len() - 1;
+        let per_row = self.layout.cell_width().map_or(1, |cell| ((self.list_width / cell) as usize).max(1));
+        let backwards = matches!(key, keys::Key::MoveUp | keys::Key::MoveLeft | keys::Key::Home);
+        let current = self.cursor.as_ref().and_then(|cursor| visible.iter().position(|entry| entry.path == *cursor)).or_else(|| {
+            let mut chosen = visible.iter().enumerate().filter(|(_, entry)| self.selected.contains(&entry.path)).map(|(index, _)| index);
+            if backwards { chosen.next() } else { chosen.last() }
+        });
+        let target = match (key, current) {
+            (keys::Key::Home, _) => 0,
+            (keys::Key::End, _) => last,
+            (keys::Key::MoveDown, Some(index)) => (index + per_row).min(last),
+            (keys::Key::MoveDown, None) => 0,
+            (keys::Key::MoveUp, Some(index)) => index.saturating_sub(per_row),
+            (keys::Key::MoveUp, None) => last,
+            (keys::Key::MoveRight, Some(index)) if per_row > 1 => (index + 1).min(last),
+            (keys::Key::MoveLeft, Some(index)) if per_row > 1 => index.saturating_sub(1),
+            (_, Some(index)) => index,
+            (_, None) => 0,
+        };
+        self.focus_entry(&visible, target, keys::shift_down(), context);
+    }
+
     fn menu_entries<'a>(&self, commands: &'a [Command], kind: MenuKind) -> Vec<&'a Command> {
         let find = |label: &str| {
             let label = tr_dynamic(label);
             commands.iter().find(|command| command.label == label)
         };
         match kind {
-            MenuKind::Item => ["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Compress to zip", "Extract here", "Copy path", "Share", "Add tags", "Terminal here", "Properties"].iter().filter_map(|label| find(label)).collect(),
+            MenuKind::Item => ["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Compress to zip", "Extract here", "Copy path", "Share", "Add tags", "Terminal here", "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
             MenuKind::Background => ["Paste here", "Paste as shortcut", "Create folder", "Create file", "Terminal here", "Open in editor", "Select none"].iter().filter_map(|label| find(label)).collect(),
             MenuKind::New => NEW_LABELS.iter().filter_map(|label| find(label)).collect(),
             MenuKind::Sort => self.sort_labels().iter().filter_map(|label| find(label)).collect(),
@@ -1950,7 +2109,10 @@ impl Explorer {
         let items = entries.into_iter().enumerate().map(|(index, command)| {
             KeyedView::new(
                 index,
-                Button::new()
+                Border::new()
+                    .corner_radius(CornerRadius::uniform(CARD_RADIUS))
+                    .background_optional(if self.menu_focus == Some(index) { self.theme.as_ref().and_then(Theme::selection) } else { None })
+                    .content(Button::new()
                     .automation_name(command.label.clone())
                     .style(ButtonStyle::Subtle)
                     .horizontal_alignment(HorizontalAlignment::Stretch)
@@ -1969,7 +2131,7 @@ impl Explorer {
                                 },
                                 text(&command.label, self.theme.as_ref().map(Theme::foreground)),
                             )),
-                    ),
+                    )),
             )
         });
         let backdrop = Border::new()
@@ -2013,25 +2175,43 @@ impl Explorer {
             keys::Key::Up => self.update(Message::Parent, context),
             keys::Key::ToggleHidden => self.update(Message::ToggleHidden, context),
             keys::Key::Refresh => self.update(Message::Refresh, context),
-            keys::Key::MoveUp | keys::Key::MoveDown | keys::Key::Open if self.menu.is_some() => {}
-            keys::Key::MoveUp | keys::Key::MoveDown => {
-                let visible = self.visible_entries();
-                let position = |down: bool| {
-                    let mut selected = visible.iter().enumerate().filter(|(_, e)| self.selected.contains(&e.path));
-                    if down { selected.last() } else { selected.next() }.map(|(index, _)| index)
-                };
-                let down = key == keys::Key::MoveDown;
-                let step = self.layout.cell_width().map_or(1, |cell| ((self.list_width / cell) as usize).max(1));
-                let target = match (position(down), down) {
-                    (Some(index), true) => (index + step).min(visible.len().saturating_sub(1)),
-                    (Some(index), false) => index.saturating_sub(step),
-                    (None, true) => 0,
-                    (None, false) => visible.len().saturating_sub(1),
-                };
-                if let Some(entry) = visible.get(target) {
-                    self.selected = HashSet::from([entry.path.clone()]);
-                    self.refresh_status();
+            keys::Key::MoveUp | keys::Key::MoveDown if self.menu.is_some() => self.move_menu_focus(key == keys::Key::MoveDown),
+            keys::Key::Open if self.menu.is_some() => {
+                if let (Some((_, _, kind)), Some(index)) = (self.menu, self.menu_focus)
+                    && let Some((label, true)) = self.menu_items(kind).into_iter().nth(index)
+                {
+                    self.update(Message::MenuCommand(label), context);
                 }
+            }
+            keys::Key::MoveLeft | keys::Key::MoveRight | keys::Key::Home | keys::Key::End | keys::Key::Char(_) if self.menu.is_some() => {}
+            keys::Key::MoveUp | keys::Key::MoveDown | keys::Key::MoveLeft | keys::Key::MoveRight | keys::Key::Home | keys::Key::End => self.move_selection(key, context),
+            keys::Key::Char(character) => {
+                let now = std::time::Instant::now();
+                if now.duration_since(self.type_ahead.1) > TYPE_AHEAD_WINDOW {
+                    self.type_ahead.0.clear();
+                }
+                self.type_ahead = (format!("{}{character}", self.type_ahead.0), now);
+                let visible = self.visible_entries();
+                if let Some(target) = visible.iter().position(|entry| entry.name.to_lowercase().starts_with(&self.type_ahead.0)) {
+                    self.focus_entry(&visible, target, false, context);
+                }
+            }
+            keys::Key::Back => self.update(Message::Back, context),
+            keys::Key::Forward => self.update(Message::Forward, context),
+            keys::Key::PrevTab => self.update(Message::SwitchTab((self.active_tab + self.tabs.len() - 1) % self.tabs.len()), context),
+            keys::Key::ReopenTab => self.update(Message::ReopenTab, context),
+            keys::Key::JumpTab(index) => {
+                if index < self.tabs.len() {
+                    self.update(Message::SwitchTab(index), context);
+                }
+            }
+            keys::Key::Rename => self.update(Message::Command(tr_dynamic("Rename selected")), context),
+            keys::Key::NewFolder => self.update(Message::Command(tr_dynamic("Create folder")), context),
+            keys::Key::CopyPath => self.update(Message::CopyPath(false), context),
+            keys::Key::Properties => self.update(Message::Command(tr_dynamic("Properties")), context),
+            keys::Key::DeletePermanently => self.update(Message::DeletePermanently, context),
+            keys::Key::FocusFilter => {
+                let _ = self.filter_ref.request_focus();
             }
             keys::Key::Confirm => self.update(Message::Confirm, context),
             keys::Key::Cancel => self.update(Message::CancelPrompt, context),
@@ -2090,6 +2270,7 @@ impl Explorer {
     fn list_revision(&self, needle: &str, visible: usize) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.hovered_row.hash(&mut hasher);
         (
             self.load_generation,
             self.sort,
@@ -2818,12 +2999,13 @@ fn display_name(entry: &Entry, hide_extensions: bool) -> String {
     }
 }
 
-fn select_box(entry: &Entry, is_selected: bool, sender: &LocalSender<Message>, busy: bool) -> CheckBox {
+fn select_box(entry: &Entry, is_selected: bool, shown: bool, sender: &LocalSender<Message>, busy: bool) -> CheckBox {
     let selected_path = entry.path.clone();
     CheckBox::new()
         .automation_name(format!("{} {}", tr("Select"), entry.name))
         .min_width(0.0)
         .width(CHECK_WIDTH)
+        .opacity(if shown || is_selected { 1.0 } else { 0.0 })
         .is_enabled(!busy)
         .is_checked(is_selected)
         .on_is_checked_changed(
@@ -2849,6 +3031,7 @@ fn selection_background(is_selected: bool, theme: Option<&Theme>) -> Option<Brus
 fn row(
     entry: &Entry,
     is_selected: bool,
+    hovered: bool,
     theme: Option<&Theme>,
     sender: &LocalSender<Message>,
     busy: bool,
@@ -2865,7 +3048,7 @@ fn row(
             icon(directory::icon(entry), ICON_SIZE, theme),
             text(&display_name(entry, hide_extensions), theme.map(Theme::foreground)),
         ));
-    let check = select_box(entry, is_selected, sender, busy).grid_column(0);
+    let check = select_box(entry, is_selected, hovered, sender, busy).grid_column(0);
     let button = open_button(entry, sender, 1, name);
     let grid = Grid::new()
         .width(width)
@@ -2900,6 +3083,7 @@ fn row(
 fn tile(
     entry: &Entry,
     is_selected: bool,
+    hovered: bool,
     theme: Option<&Theme>,
     sender: &LocalSender<Message>,
     busy: bool,
@@ -2933,7 +3117,7 @@ fn tile(
             Grid::new()
                 .columns([GridLength::Auto, GridLength::STAR])
                 .children((
-                    select_box(entry, is_selected, sender, busy).grid_column(0),
+                    select_box(entry, is_selected, hovered, sender, busy).grid_column(0),
                     open_button(entry, sender, 1, content),
                 )),
         )

@@ -505,3 +505,87 @@ pub fn apply_window_icon(colors: Option<[[u8; 3]; 3]>, wait_for_window: bool) {
 
 #[cfg(not(windows))]
 pub fn apply_window_icon(_colors: Option<[[u8; 3]; 3]>, _wait_for_window: bool) {}
+
+// The classic Explorer menu, including third-party entries; shown at the pointer and run when one is chosen.
+#[cfg(windows)]
+pub fn native_menu(paths: &[PathBuf]) -> Result<bool, String> {
+    use windows::{
+        Win32::{
+            Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
+            UI::{
+                Shell::{
+                    BHID_SFUIObject, CMF_NORMAL, CMINVOKECOMMANDINFO, DefSubclassProc, IContextMenu, IContextMenu2,
+                    SHCreateShellItemArrayFromIDLists, SHParseDisplayName, SetWindowSubclass, RemoveWindowSubclass,
+                },
+                WindowsAndMessaging::{
+                    CreatePopupMenu, DestroyMenu, GetCursorPos, GetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
+                    WM_DRAWITEM, WM_INITMENUPOPUP, WM_MEASUREITEM, WM_MENUCHAR,
+                },
+            },
+        },
+        core::{Interface, PCSTR, PCWSTR},
+    };
+
+    // Submenus such as "Open with" and "Send to" fill themselves in through these menu messages.
+    unsafe extern "system" fn forward(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, data: usize) -> LRESULT {
+        if matches!(message, WM_INITMENUPOPUP | WM_DRAWITEM | WM_MEASUREITEM | WM_MENUCHAR) {
+            let raw = data as *mut std::ffi::c_void;
+            if let Some(menu) = unsafe { IContextMenu2::from_raw_borrowed(&raw) }
+                && unsafe { menu.HandleMenuMsg(message, wparam, lparam) }.is_ok()
+            {
+                return LRESULT(0);
+            }
+        }
+        unsafe { DefSubclassProc(window, message, wparam, lparam) }
+    }
+
+    if paths.is_empty() {
+        return Ok(false);
+    }
+    unsafe {
+        let mut identifiers = Vec::new();
+        for path in paths {
+            let wide: Vec<u16> = path.as_os_str().to_string_lossy().encode_utf16().chain(Some(0)).collect();
+            let mut identifier = std::ptr::null_mut();
+            SHParseDisplayName(PCWSTR(wide.as_ptr()), None, &mut identifier, 0, None).map_err(|error| error.to_string())?;
+            identifiers.push(identifier as *const _);
+        }
+        let items = SHCreateShellItemArrayFromIDLists(&identifiers).map_err(|error| error.to_string())?;
+        let menu: IContextMenu = items.BindToHandler(None, &BHID_SFUIObject).map_err(|error| error.to_string())?;
+        let popup = CreatePopupMenu().map_err(|error| error.to_string())?;
+        let window = GetForegroundWindow();
+        let outcome = (|| -> Result<bool, String> {
+            menu.QueryContextMenu(popup, 0, 1, 0x7FFF, CMF_NORMAL).ok().map_err(|error| error.to_string())?;
+            let second = menu.cast::<IContextMenu2>().ok();
+            if let Some(second) = &second {
+                let _ = SetWindowSubclass(window, Some(forward), 1, second.as_raw() as usize);
+            }
+            let mut point = POINT::default();
+            let _ = GetCursorPos(&mut point);
+            let chosen = TrackPopupMenu(popup, TPM_RETURNCMD | TPM_RIGHTBUTTON, point.x, point.y, None, window, None);
+            if second.is_some() {
+                let _ = RemoveWindowSubclass(window, Some(forward), 1);
+            }
+            if chosen.0 == 0 {
+                return Ok(false);
+            }
+            let info = CMINVOKECOMMANDINFO {
+                cbSize: std::mem::size_of::<CMINVOKECOMMANDINFO>() as u32,
+                fMask: 0,
+                hwnd: window,
+                lpVerb: PCSTR((chosen.0 - 1) as usize as *const u8),
+                nShow: 1,
+                ..Default::default()
+            };
+            menu.InvokeCommand(&info).map_err(|error| error.to_string())?;
+            Ok(true)
+        })();
+        let _ = DestroyMenu(popup);
+        outcome
+    }
+}
+
+#[cfg(not(windows))]
+pub fn native_menu(_paths: &[PathBuf]) -> Result<bool, String> {
+    Err("not supported on this platform".to_owned())
+}

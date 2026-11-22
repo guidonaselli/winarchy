@@ -76,6 +76,7 @@ const ES: &[(&str, &str)] = &[
     ("Click to include subfolders in the list and the filter", "Clic para incluir subcarpetas en la lista y el filtro"),
     ("Searching…", "Buscando…"),
     ("limited to the first", "limitado a los primeros"),
+    ("Show more options", "Mostrar más opciones"),
     ("Subfolders", "Subcarpetas"),
     ("Settings file", "Archivo de configuración"),
     ("New", "Nuevo"),
