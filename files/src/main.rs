@@ -2042,6 +2042,10 @@ impl Component for Explorer {
                 .content(Grid::new().columns([GridLength::Pixel(ACCENT_BAR_WIDTH + ROW_GAP), GridLength::STAR]).children((bar, button)))
         };
         let mut sidebar_items: Vec<KeyedView> = Vec::new();
+        sidebar_items.push(KeyedView::new(
+            FAVORITES_KEY,
+            place(tr("Favorites"), icons::Icon::Star, self.in_favorites, tr("Favorites").to_owned(), Message::OpenFavorites, None),
+        ));
         for (index, (label, path)) in self.places.iter().enumerate() {
             let target = path.clone();
             sidebar_items.push(KeyedView::new(
@@ -2049,10 +2053,6 @@ impl Component for Explorer {
                 place(label, place_icon(path, false), !self.in_favorites && *path == self.path, path.to_string_lossy().into_owned(), Message::OpenFolder(path.clone()), Some(target)),
             ));
         }
-        sidebar_items.push(KeyedView::new(
-            FAVORITES_KEY,
-            place(tr("Favorites"), icons::Icon::Star, self.in_favorites, tr("Favorites").to_owned(), Message::OpenFavorites, None),
-        ));
         if !self.pinned.is_empty() {
             let pins = self.pinned.iter().map(|path| {
                 let label = path.file_name().map_or_else(|| path.to_string_lossy().into_owned(), |name| name.to_string_lossy().into_owned());
