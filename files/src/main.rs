@@ -621,6 +621,7 @@ impl Component for Explorer {
                 }
             }
             Message::TogglePin => {
+                self.pinned = settings::load().pinned;
                 let target = self.pin_target();
                 match self.pinned.iter().position(|pinned| *pinned == target) {
                     Some(index) => {
@@ -629,7 +630,7 @@ impl Component for Explorer {
                     None => self.pinned.push(target),
                 }
                 self.places = places_with(&self.pinned);
-                self.save_settings();
+                self.write_settings(self.pinned.clone());
             }
             Message::OpenEditor => {
                 use std::os::windows::process::CommandExt;
@@ -1631,7 +1632,12 @@ impl Explorer {
         });
     }
 
+    // Pins are shared by every window, so only a pin change writes them; any other save keeps what is on disk.
     fn save_settings(&self) {
+        self.write_settings(settings::load().pinned);
+    }
+
+    fn write_settings(&self, pinned: Vec<PathBuf>) {
         settings::save(&settings::Settings {
             show_hidden: self.show_hidden,
             hide_extensions: self.hide_extensions,
@@ -1639,7 +1645,7 @@ impl Explorer {
             descending: self.descending,
             language: self.language.to_owned(),
             layout: self.layout.name().to_owned(),
-            pinned: self.pinned.clone(),
+            pinned,
         });
     }
 
