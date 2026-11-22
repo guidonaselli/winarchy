@@ -490,6 +490,9 @@ enum Message {
     ResizeStart(Column, f64),
     ResizeDrag(f64, bool),
     ResizeEnd,
+    SidebarStart(f64),
+    SidebarDrag(f64, bool),
+    SidebarEnd,
     ResetColumns,
     Key(keys::Receiver, Option<keys::Key>),
     RetryFocus,
@@ -545,6 +548,8 @@ struct Explorer {
     hide_pane: bool,
     window_width: f64,
     drag: Option<(Column, f64, f64)>,
+    sidebar_width: f64,
+    sidebar_drag: Option<(f64, f64)>,
     recursive: bool,
     sort: SortKey,
     descending: bool,
@@ -619,8 +624,10 @@ impl Component for Explorer {
             columns: Columns::from_saved(saved.size_width, saved.modified_width),
             tags: saved.tags.clone(),
             drag: None,
+            sidebar_width: if saved.sidebar_width > 0.0 { saved.sidebar_width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH) } else { SIDEBAR_DEFAULT_WIDTH },
+            sidebar_drag: None,
             hide_pane: saved.hide_pane,
-            window_width: DEFAULT_LIST_WIDTH + SIDEBAR_AND_SCROLL,
+            window_width: DEFAULT_LIST_WIDTH + SIDEBAR_DEFAULT_WIDTH + SPLITTER_WIDTH + SCROLL_ALLOWANCE + 2.0 * WINDOW_MARGIN,
             recursive: false,
             sort: SortKey::from_name(&saved.sort),
             descending: saved.descending,
@@ -1126,6 +1133,18 @@ impl Component for Explorer {
             }
             Message::ResizeEnd => {
                 if self.drag.take().is_some() {
+                    self.save_settings();
+                }
+            }
+            Message::SidebarStart(x) => self.sidebar_drag = Some((x, self.sidebar_width)),
+            Message::SidebarDrag(x, pressed) => {
+                if let (Some((start_x, start_width)), true) = (self.sidebar_drag, pressed) {
+                    self.sidebar_width = (start_width + x - start_x).clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+                    self.fit_list_width();
+                }
+            }
+            Message::SidebarEnd => {
+                if self.sidebar_drag.take().is_some() {
                     self.save_settings();
                 }
             }
@@ -1645,11 +1664,15 @@ impl Component for Explorer {
             .rows([GridLength::Auto, GridLength::STAR, GridLength::Auto])
             .children((
                 Grid::new().grid_row(0).children((toolbar,)),
-                Grid::new()
+                Border::new()
                     .grid_row(1)
+                    .corner_radius(CornerRadius::uniform(CONTENT_RADIUS))
                     .background_optional(self.theme.as_ref().map(Theme::surface))
-                    .columns(if self.hide_pane { vec![GridLength::STAR] } else { vec![GridLength::STAR, GridLength::Pixel(PANE_WIDTH)] })
-                    .keyed_children(body_items),
+                    .content(
+                        Grid::new()
+                            .columns(if self.hide_pane { vec![GridLength::STAR] } else { vec![GridLength::STAR, GridLength::Pixel(PANE_WIDTH)] })
+                            .keyed_children(body_items),
+                    ),
                 Grid::new().grid_row(2).children((footer,)),
             ));
         let sidebar_items = self
@@ -1661,6 +1684,7 @@ impl Component for Explorer {
                     index,
                     Button::new()
                         .automation_name(label.clone())
+                        .horizontal_alignment(HorizontalAlignment::Stretch)
                         .horizontal_content_alignment(HorizontalAlignment::Left)
                         .style(if *path == self.path { ButtonStyle::Accent } else { ButtonStyle::Subtle })
                         .on_click(context.message(Message::OpenFolder(path.clone())))
@@ -1675,13 +1699,29 @@ impl Component for Explorer {
                         ),
                 )
             });
-        let body = Grid::new()
-            .columns([GridLength::Auto, GridLength::STAR])
-            .children((
-                Grid::new().grid_column(0).width(SIDEBAR_WIDTH).children((ScrollViewer::new()
-                    .content(StackPanel::new().spacing(TIGHT_GAP).keyed_children(sidebar_items)),)),
+        let splitter = Border::new()
+            .grid_column(1)
+            .width(SPLITTER_WIDTH)
+            .background_optional(self.theme.as_ref().map(Theme::background))
+            .capture_pointer_on_press(true)
+            .on_pointer_pressed(context.callback(|_: PointerEventInfo| Message::SidebarStart(shell::cursor_x())))
+            .on_pointer_moved(context.callback(|info: PointerEventInfo| Message::SidebarDrag(shell::cursor_x(), info.is_left_button_pressed)))
+            .on_pointer_released(context.callback(|_: PointerEventInfo| Message::SidebarEnd))
+            .content(
                 Border::new()
-                    .grid_column(1)
+                    .width(HANDLE_WIDTH)
+                    .horizontal_alignment(HorizontalAlignment::Center)
+                    .background_optional(self.theme.as_ref().map(Theme::muted)),
+            );
+        let body = Grid::new()
+            .margin(Thickness::new(WINDOW_MARGIN, WINDOW_MARGIN, WINDOW_MARGIN, WINDOW_MARGIN))
+            .columns([GridLength::Auto, GridLength::Auto, GridLength::STAR])
+            .children((
+                Grid::new().grid_column(0).width(self.sidebar_width).children((ScrollViewer::new()
+                    .content(StackPanel::new().spacing(TIGHT_GAP).keyed_children(sidebar_items)),)),
+                splitter,
+                Border::new()
+                    .grid_column(2)
                     .background_optional(self.theme.as_ref().map(Theme::background))
                     .drop_policy(
                         DragDropPolicy::new().storage_items(
@@ -1963,6 +2003,7 @@ impl Explorer {
             group: self.group.name().to_owned(),
             tags: self.tags.clone(),
             hide_pane: self.hide_pane,
+            sidebar_width: self.sidebar_width,
             size_width: self.columns.size,
             modified_width: self.columns.modified,
             pinned,
@@ -1984,7 +2025,8 @@ impl Explorer {
 
     fn fit_list_width(&mut self) {
         let pane = if self.hide_pane { 0.0 } else { PANE_WIDTH };
-        self.list_width = (self.window_width - SIDEBAR_AND_SCROLL - pane).max(MIN_LIST_WIDTH);
+        let chrome = self.sidebar_width + SPLITTER_WIDTH + SCROLL_ALLOWANCE + 2.0 * WINDOW_MARGIN;
+        self.list_width = (self.window_width - chrome - pane).max(MIN_LIST_WIDTH);
     }
 
     fn visible_entries(&self) -> Vec<Entry> {
