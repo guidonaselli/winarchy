@@ -356,3 +356,20 @@ fn run_tar(command: &mut std::process::Command) -> Result<(), String> {
         Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
     }
 }
+
+// Screen position in layout units: event coordinates move with the dragged handle, so they cannot drive a resize.
+#[cfg(windows)]
+pub fn cursor_x() -> f64 {
+    use windows::Win32::{Foundation::POINT, UI::{HiDpi::GetDpiForSystem, WindowsAndMessaging::GetCursorPos}};
+    let mut point = POINT::default();
+    // SAFETY: `point` is a valid out pointer for the duration of the call.
+    unsafe {
+        let _ = GetCursorPos(&mut point);
+        f64::from(point.x) * 96.0 / f64::from(GetDpiForSystem().max(96))
+    }
+}
+
+#[cfg(not(windows))]
+pub fn cursor_x() -> f64 {
+    0.0
+}

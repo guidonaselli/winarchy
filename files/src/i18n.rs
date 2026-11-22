@@ -65,6 +65,7 @@ const ES: &[(&str, &str)] = &[
     ("Shortcut", "Acceso directo"),
     ("Create shortcut", "Crear acceso directo"),
     ("Could not create shortcut", "No se pudo crear el acceso directo"),
+    ("Reset column widths", "Restablecer ancho de columnas"),
     ("Select none", "Quitar selección"),
     ("Invert selection", "Invertir selección"),
     ("Extensions: shown", "Extensiones: visibles"),

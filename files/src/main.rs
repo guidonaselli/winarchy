@@ -49,6 +49,42 @@ impl SortKey {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Column {
+    Size,
+    Modified,
+}
+
+#[derive(Clone, Copy)]
+struct Columns {
+    size: f64,
+    modified: f64,
+}
+
+impl Columns {
+    const DEFAULT: Columns = Columns { size: SIZE_WIDTH, modified: MODIFIED_WIDTH };
+
+    fn from_saved(size: f64, modified: f64) -> Self {
+        let pick = |saved: f64, default: f64| if saved > 0.0 { saved.clamp(MIN_COLUMN_WIDTH, MAX_COLUMN_WIDTH) } else { default };
+        Columns { size: pick(size, SIZE_WIDTH), modified: pick(modified, MODIFIED_WIDTH) }
+    }
+
+    fn get(self, column: Column) -> f64 {
+        match column {
+            Column::Size => self.size,
+            Column::Modified => self.modified,
+        }
+    }
+
+    fn set(&mut self, column: Column, width: f64) {
+        let width = width.clamp(MIN_COLUMN_WIDTH, MAX_COLUMN_WIDTH);
+        match column {
+            Column::Size => self.size = width,
+            Column::Modified => self.modified = width,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Layout {
     Details,
     List,
@@ -210,6 +246,7 @@ impl Explorer {
             command("Empty Recycle Bin", Message::EmptyRecycleBin, None, true, false),
             command(self.group.label(), Message::CycleGroup, None, true, false),
             command(self.layout.label(), Message::CycleLayout, None, true, false),
+            command("Reset column widths", Message::ResetColumns, None, self.layout == Layout::Details, false),
             command("Duplicate tab", Message::DuplicateTab, None, true, false),
             command("Reopen closed tab", Message::ReopenTab, None, !self.closed_tabs.is_empty(), false),
             command("Close other tabs", Message::CloseOtherTabs, None, self.tabs.len() > 1, false),
@@ -373,6 +410,10 @@ enum Message {
     Refresh,
     Focus(bool),
     Resize(WindowSize),
+    ResizeStart(Column, f64),
+    ResizeDrag(f64, bool),
+    ResizeEnd,
+    ResetColumns,
     Key(keys::Receiver, Option<keys::Key>),
     RetryFocus,
     Paste,
@@ -423,6 +464,8 @@ struct Explorer {
     language: &'static str,
     layout: Layout,
     group: Group,
+    columns: Columns,
+    drag: Option<(Column, f64, f64)>,
     recursive: bool,
     sort: SortKey,
     descending: bool,
@@ -489,6 +532,8 @@ impl Component for Explorer {
             language: i18n::choice(),
             layout: Layout::from_name(&saved.layout),
             group: Group::from_name(&saved.group),
+            columns: Columns::from_saved(saved.size_width, saved.modified_width),
+            drag: None,
             recursive: false,
             sort: SortKey::from_name(&saved.sort),
             descending: saved.descending,
@@ -949,6 +994,21 @@ impl Component for Explorer {
                     self.handle_key(key, context);
                 }
             }
+            Message::ResizeStart(column, x) => self.drag = Some((column, x, self.columns.get(column))),
+            Message::ResizeDrag(x, pressed) => {
+                if let (Some((column, start_x, start_width)), true) = (self.drag, pressed) {
+                    self.columns.set(column, start_width + start_x - x);
+                }
+            }
+            Message::ResizeEnd => {
+                if self.drag.take().is_some() {
+                    self.save_settings();
+                }
+            }
+            Message::ResetColumns => {
+                self.columns = Columns::DEFAULT;
+                self.save_settings();
+            }
             Message::Resize(size) => self.list_width = (size.width - SIDEBAR_AND_SCROLL).max(MIN_LIST_WIDTH),
             Message::Focus(true) => {}
             Message::Focus(false) => {
@@ -1138,6 +1198,7 @@ impl Component for Explorer {
         let layout = self.layout;
         let per_row = layout.cell_width().map_or(1, |cell| ((width / cell) as usize).max(1));
         let group = self.group;
+        let columns = self.columns;
         let lines = group::lines(&visible, group, per_row, now);
         let source = VirtualSource::new(
             revision,
@@ -1156,6 +1217,7 @@ impl Component for Explorer {
                         &sender,
                         busy,
                         width,
+                        columns,
                         hide_extensions,
                         layout == Layout::List,
                     ),
@@ -1243,14 +1305,16 @@ impl Component for Explorer {
                 .columns([
                     GridLength::Pixel(CHECK_WIDTH),
                     GridLength::STAR,
-                    GridLength::Pixel(SIZE_WIDTH),
-                    GridLength::Pixel(MODIFIED_WIDTH + ROW_TRAILING),
+                    GridLength::Pixel(self.columns.size),
+                    GridLength::Pixel(self.columns.modified + ROW_TRAILING),
                 ])
                 .column_spacing(COLUMN_GAP)
                 .children((
                     self.sort_button(context, SortKey::Name, tr("Name"), 1, HorizontalAlignment::Left),
                     self.sort_button(context, SortKey::Size, tr("Size"), 2, HorizontalAlignment::Right),
                     self.sort_button(context, SortKey::Modified, tr("Modified"), 3, HorizontalAlignment::Right),
+                    self.resize_handle(context, Column::Size, 2),
+                    self.resize_handle(context, Column::Modified, 3),
                 ))
                 .into()
         } else {
@@ -1541,6 +1605,7 @@ impl Explorer {
             self.hide_extensions,
             self.layout,
             self.group,
+            (self.columns.size.to_bits(), self.columns.modified.to_bits()),
             self.deleting || self.transferring,
             self.list_width.to_bits(),
         )
@@ -1556,6 +1621,26 @@ impl Explorer {
             })
             .fold(0u64, |acc, hash| acc ^ hash);
         (hasher.finish() ^ selection).wrapping_add(self.selected.len() as u64)
+    }
+
+    fn resize_handle(&self, context: &ViewContext<Self>, column: Column, grid_column: i32) -> View {
+        Border::new()
+            .grid_column(grid_column)
+            .width(HANDLE_HIT_WIDTH)
+            .horizontal_alignment(HorizontalAlignment::Left)
+            .margin(Thickness::new(-(COLUMN_GAP + HANDLE_HIT_WIDTH) / 2.0, HANDLE_INSET, 0.0, HANDLE_INSET))
+            .background_optional(self.theme.as_ref().map(Theme::background))
+            .capture_pointer_on_press(true)
+            .on_pointer_pressed(context.callback(move |_: PointerEventInfo| Message::ResizeStart(column, shell::cursor_x())))
+            .on_pointer_moved(context.callback(|info: PointerEventInfo| Message::ResizeDrag(shell::cursor_x(), info.is_left_button_pressed)))
+            .on_pointer_released(context.callback(|_: PointerEventInfo| Message::ResizeEnd))
+            .content(
+                Border::new()
+                    .width(HANDLE_WIDTH)
+                    .horizontal_alignment(HorizontalAlignment::Center)
+                    .background_optional(self.theme.as_ref().map(Theme::muted)),
+            )
+            .into()
     }
 
     fn sort_button(
@@ -1684,6 +1769,8 @@ impl Explorer {
             language: self.language.to_owned(),
             layout: self.layout.name().to_owned(),
             group: self.group.name().to_owned(),
+            size_width: self.columns.size,
+            modified_width: self.columns.modified,
             pinned,
         });
     }
@@ -2082,6 +2169,7 @@ fn row(
     sender: &LocalSender<Message>,
     busy: bool,
     width: f64,
+    columns: Columns,
     hide_extensions: bool,
     compact: bool,
 ) -> View {
@@ -2105,8 +2193,8 @@ fn row(
     grid.columns([
         GridLength::Pixel(CHECK_WIDTH),
         GridLength::STAR,
-        GridLength::Pixel(SIZE_WIDTH),
-        GridLength::Pixel(MODIFIED_WIDTH + ROW_TRAILING),
+        GridLength::Pixel(columns.size),
+        GridLength::Pixel(columns.modified + ROW_TRAILING),
     ])
         .children((
             check,
