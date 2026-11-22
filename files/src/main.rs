@@ -53,12 +53,13 @@ enum Undo {
     RemoveDir(PathBuf),
     MakeDir(PathBuf),
     Rename { from: PathBuf, to: PathBuf },
-    Recycle(Vec<PathBuf>),
+    // (copy, original) pairs, so removing a copy can be redone by copying the original again.
+    Recycle(Vec<(PathBuf, PathBuf)>),
+    Copy(Vec<(PathBuf, PathBuf)>),
     Move(Vec<(PathBuf, PathBuf)>),
 }
 
 impl Undo {
-    // Recycled copies cannot be brought back from the bin, so that step has no redo.
     fn inverse(&self) -> Option<Undo> {
         Some(match self {
             Undo::RemoveDir(path) => Undo::MakeDir(path.clone()),
@@ -67,7 +68,18 @@ impl Undo {
                 from: to.clone(),
                 to: from.clone(),
             },
-            Undo::Recycle(_) => return None,
+            Undo::Recycle(items) => Undo::Copy(
+                items
+                    .iter()
+                    .map(|(copy, original)| Some((original.clone(), copy.parent()?.to_path_buf())))
+                    .collect::<Option<_>>()?,
+            ),
+            Undo::Copy(items) => Undo::Recycle(
+                items
+                    .iter()
+                    .map(|(original, folder)| Some((folder.join(original.file_name()?), original.clone())))
+                    .collect::<Option<_>>()?,
+            ),
             Undo::Move(items) => Undo::Move(
                 items
                     .iter()
@@ -84,7 +96,12 @@ impl Undo {
             Undo::RemoveDir(path) => fs::remove_dir(path).map(|()| true).map_err(|e| e.to_string()),
             Undo::MakeDir(path) => fs::create_dir(path).map(|()| true).map_err(|e| e.to_string()),
             Undo::Rename { from, to } => shell::rename(&from, &to).map(|()| true).map_err(|e| e.to_string()),
-            Undo::Recycle(paths) => shell::recycle(&paths),
+            Undo::Recycle(items) => {
+                shell::recycle(&items.into_iter().map(|(copy, _)| copy).collect::<Vec<_>>())
+            }
+            Undo::Copy(items) => items.iter().try_fold(true, |done, (original, folder)| {
+                shell::transfer(std::slice::from_ref(original), folder, false).map(|ok| done && ok)
+            }),
             Undo::Move(items) => items.iter().try_fold(true, |done, (current, parent)| {
                 shell::transfer(std::slice::from_ref(current), parent, true).map(|ok| done && ok)
             }),
@@ -99,14 +116,18 @@ fn undo_for_transfer(paths: &[PathBuf], destination: &Path, cut: bool) -> Option
         if path.parent()? == destination || target.exists() {
             continue;
         }
-        created.push((target, path.parent()?.to_path_buf()));
+        created.push((target, path.clone()));
     }
     if created.is_empty() {
         None
     } else if cut {
-        Some(Undo::Move(created))
+        created
+            .iter()
+            .map(|(target, original)| Some((target.clone(), original.parent()?.to_path_buf())))
+            .collect::<Option<_>>()
+            .map(Undo::Move)
     } else {
-        Some(Undo::Recycle(created.into_iter().map(|(target, _)| target).collect()))
+        Some(Undo::Recycle(created))
     }
 }
 
@@ -1403,4 +1424,18 @@ fn main() {
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("C:\\"));
     App::run_component::<Explorer>(path).unwrap();
+}
+
+#[cfg(test)]
+mod undo_tests {
+    use super::*;
+
+    #[test]
+    fn undoing_a_copy_can_be_redone_by_copying_the_original_again() {
+        let pair = (PathBuf::from("C:/dest/a.txt"), PathBuf::from("C:/src/a.txt"));
+        let Some(Undo::Copy(copy)) = Undo::Recycle(vec![pair.clone()]).inverse() else { panic!("no redo") };
+        assert_eq!(copy, [(PathBuf::from("C:/src/a.txt"), PathBuf::from("C:/dest"))]);
+        let Some(Undo::Recycle(back)) = Undo::Copy(copy).inverse() else { panic!("no undo") };
+        assert_eq!(back, [pair]);
+    }
 }
