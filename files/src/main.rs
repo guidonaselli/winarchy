@@ -16,7 +16,7 @@ use std::{
     path::{Component as PathComponent, Path, PathBuf},
 };
 use theme::Theme;
-use i18n::tr;
+use i18n::{tr, tr_dynamic};
 use windows_reactor::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -46,6 +46,70 @@ impl SortKey {
 
 fn count_word(count: usize, one: &'static str, many: &'static str) -> &'static str {
     tr(if count == 1 { one } else { many })
+}
+
+struct Command {
+    label: String,
+    message: Option<Message>,
+    icon: Option<Symbol>,
+    enabled: bool,
+    primary: bool,
+}
+
+// Every action reachable from the command bar; primary ones show with an icon, the rest sit in the overflow menu.
+impl Explorer {
+    fn commands(&self) -> Vec<Command> {
+        let (some, one) = (!self.selected.is_empty(), self.selected.len() == 1);
+        let idle = !self.deleting && !self.transferring;
+        let command = |label: &str, message: Message, icon: Option<Symbol>, enabled: bool, primary: bool| Command {
+            label: tr_dynamic(label),
+            message: Some(message),
+            icon,
+            enabled,
+            primary,
+        };
+        let separator = || Command { label: String::new(), message: None, icon: None, enabled: true, primary: true };
+        vec![
+            command("Create folder", Message::CreateFolder, Some(Symbol::NewFolder), idle, true),
+            command("Create file", Message::CreateFile, Some(Symbol::Add), idle, true),
+            separator(),
+            command("Cut", Message::Clip(true), Some(Symbol::Cut), some, true),
+            command("Copy", Message::Clip(false), Some(Symbol::Copy), some, true),
+            command("Paste here", Message::Paste, Some(Symbol::Paste), clipboard::has_files() && idle, true),
+            separator(),
+            command("Rename selected", Message::RenameSelected, Some(Symbol::Rename), one && idle, true),
+            command("Delete to Recycle Bin", Message::DeleteSelected, Some(Symbol::Delete), some && idle, true),
+            command("Delete permanently", Message::DeletePermanently, None, some && idle, false),
+            command("Copy path", Message::CopyPath(false), None, true, false),
+            command("Copy path with quotes", Message::CopyPath(true), None, true, false),
+            command("Show in folder", Message::ShowInFolder, None, one, false),
+            command("Create shortcut", Message::CreateShortcut, None, one, false),
+            command("Compress to zip", Message::Compress, None, some && !self.transferring, false),
+            command("Extract here", Message::Extract, None, one && !self.transferring, false),
+            command("Edit in Notepad", Message::RunVerb("notepad"), None, one, false),
+            command("Properties", Message::RunVerb("properties"), None, one, false),
+            command("Terminal here", Message::OpenTerminal, None, true, false),
+            command("Terminal as administrator", Message::RunVerb("admin-terminal"), None, true, false),
+            command("Empty Recycle Bin", Message::EmptyRecycleBin, None, true, false),
+            command("Select none", Message::SelectNone, None, some, false),
+            command("Invert selection", Message::InvertSelection, None, true, false),
+            command(if self.hide_extensions { "Extensions: hidden" } else { "Extensions: shown" }, Message::ToggleExtensions, None, true, false),
+            command(if self.show_hidden { "Hidden: shown" } else { "Hidden: off" }, Message::ToggleHidden, None, true, false),
+            command(if self.recursive { "Subfolders: on" } else { "Subfolders: off" }, Message::ToggleRecursive, None, true, false),
+            command("New window", Message::NewWindow, None, true, false),
+            command(
+                match self.language {
+                    "es" => "Language: Spanish",
+                    "en" => "Language: English",
+                    _ => "Language: auto",
+                },
+                Message::CycleLanguage,
+                None,
+                true,
+                false,
+            ),
+        ]
+    }
 }
 
 // Only operations that can be reversed without guessing: names that did not exist before.
@@ -159,6 +223,7 @@ enum Message {
     ToggleRecursive,
     ToggleHidden,
     ToggleExtensions,
+    Command(String),
     Compress,
     Extract,
     ArchiveDone(Result<(), String>, Option<PathBuf>),
@@ -184,7 +249,6 @@ enum Message {
     CreateFolder,
     FolderCreated(PathBuf, String, Result<(), String>),
     Selection(PathBuf, bool),
-    RenameName(String),
     RenameSelected,
     RenameComplete(PathBuf, String, Result<(), String>),
     DeleteSelected,
@@ -226,7 +290,6 @@ struct Explorer {
     sort: SortKey,
     descending: bool,
     new_folder_name: String,
-    rename_name: String,
     transfer_destination: String,
     path: PathBuf,
     load_generation: u64,
@@ -288,7 +351,6 @@ impl Component for Explorer {
             sort: SortKey::from_name(&saved.sort),
             descending: saved.descending,
             new_folder_name: String::new(),
-            rename_name: String::new(),
             transfer_destination: String::new(),
             path: path.clone(),
             load_generation: 0,
@@ -585,6 +647,13 @@ impl Component for Explorer {
                     self.has_error = true;
                 }
             }
+            Message::Command(label) => {
+                if let Some(command) = self.commands().into_iter().find(|c| c.label == label && c.enabled)
+                    && let Some(message) = command.message
+                {
+                    self.update(message, context);
+                }
+            }
             Message::ToggleExtensions => {
                 self.hide_extensions = !self.hide_extensions;
                 self.save_settings();
@@ -671,7 +740,6 @@ impl Component for Explorer {
                 self.selected.remove(&path);
                 self.refresh_status();
             }
-            Message::RenameName(name) => self.rename_name = name,
             Message::RenameSelected => self.rename_selected(context),
             Message::DeleteSelected => self.delete_selected(false, context),
             Message::DeletePermanently => self.delete_selected(true, context),
@@ -789,7 +857,6 @@ impl Component for Explorer {
         context.on_window_size(context.callback(Message::Resize));
         let address_changed = context.callback(Message::Address);
         let folder_name_changed = context.callback(Message::NewFolderName);
-        let rename_name_changed = context.callback(Message::RenameName);
         let transfer_destination_changed = context.callback(Message::TransferDestination);
         let needle = self.filter.to_lowercase();
         let visible: Vec<Entry> = self
@@ -838,6 +905,34 @@ impl Component for Explorer {
                     .content(format!("{marker}{name}")),
             )
         });
+        let (primary, secondary) = {
+            let commands = self.commands();
+            let build = |primary: bool| {
+                commands
+                    .iter()
+                    .filter(|command| command.primary == primary)
+                    .enumerate()
+                    .map(|(index, command)| match (&command.message, command.icon) {
+                        (None, _) => CommandBarCommand::separator(index),
+                        (Some(_), Some(icon)) => {
+                            match CommandBarCommand::button_with_icon(index, command.label.clone(), icon) {
+                                CommandBarCommand::Button { key, label, icon, .. } => {
+                                    CommandBarCommand::Button { key, label, icon, enabled: command.enabled }
+                                }
+                                other => other,
+                            }
+                        }
+                        (Some(_), None) => CommandBarCommand::Button {
+                            key: index.into(),
+                            label: command.label.clone(),
+                            icon: None,
+                            enabled: command.enabled,
+                        },
+                    })
+                    .collect::<Vec<_>>()
+            };
+            (build(true), build(false))
+        };
         let toolbar = StackPanel::new().spacing(8.0).children((
             StackPanel::new()
                 .orientation(Orientation::Horizontal)
@@ -900,147 +995,12 @@ impl Component for Explorer {
                         .on_click(context.message(Message::Go))
                         .content(tr("Go")),
                 )),
-            Grid::new()
-                .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto])
-                .column_spacing(6.0)
-                .children((
-                    TextBox::new()
-                        .text(&self.new_folder_name)
-                        .placeholder_text(tr("New folder or file name"))
-                        .grid_column(0)
-                        .on_text_changed(folder_name_changed),
-                    Button::new()
-                        .grid_column(1)
-                        .is_enabled(!self.deleting && !self.transferring)
-                        .on_click(context.message(Message::CreateFolder))
-                        .content(tr("Create folder")),
-                    Button::new()
-                        .grid_column(2)
-                        .is_enabled(!self.deleting && !self.transferring)
-                        .on_click(context.message(Message::CreateFile))
-                        .content(tr("Create file")),
-                )),
-            Grid::new()
-                .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto, GridLength::Auto])
-                .column_spacing(6.0)
-                .children((
-                    TextBox::new()
-                        .text(&self.rename_name)
-                        .placeholder_text(tr("New name for one selected item"))
-                        .grid_column(0)
-                        .on_text_changed(rename_name_changed),
-                    Button::new()
-                        .grid_column(1)
-                        .is_enabled(
-                            self.selected.len() == 1 && !self.deleting && !self.transferring,
-                        )
-                        .on_click(context.message(Message::RenameSelected))
-                        .content(tr("Rename selected")),
-                    Button::new()
-                        .grid_column(2)
-                        .is_enabled(
-                            !self.selected.is_empty() && !self.deleting && !self.transferring,
-                        )
-                        .on_click(context.message(Message::DeleteSelected))
-                        .content(tr("Delete to Recycle Bin")),
-                    Button::new()
-                        .grid_column(3)
-                        .is_enabled(
-                            !self.selected.is_empty() && !self.deleting && !self.transferring,
-                        )
-                        .on_click(context.message(Message::DeletePermanently))
-                        .content(tr("Delete permanently")),
-                )),
-            Grid::new()
-                .columns([GridLength::Auto; 8])
-                .column_spacing(6.0)
-                .children((
-                    Button::new()
-                        .grid_column(0)
-                        .is_enabled(!self.selected.is_empty())
-                        .on_click(context.message(Message::Clip(false)))
-                        .content(tr("Copy")),
-                    Button::new()
-                        .grid_column(1)
-                        .is_enabled(!self.selected.is_empty())
-                        .on_click(context.message(Message::Clip(true)))
-                        .content(tr("Cut")),
-                    Button::new()
-                        .grid_column(2)
-                        .is_enabled(
-                            clipboard::has_files() && !self.deleting && !self.transferring,
-                        )
-                        .on_click(context.message(Message::Paste))
-                        .content(tr("Paste here")),
-                    Button::new()
-                        .grid_column(3)
-                        .on_click(context.message(Message::CopyPath(false)))
-                        .content(tr("Copy path")),
-                    Button::new()
-                        .grid_column(4)
-                        .on_click(context.message(Message::OpenTerminal))
-                        .content(tr("Terminal here")),
-                    Button::new()
-                        .grid_column(5)
-                        .on_click(context.message(Message::CopyPath(true)))
-                        .content(tr("Copy path with quotes")),
-                    Button::new()
-                        .grid_column(6)
-                        .is_enabled(self.selected.len() == 1)
-                        .on_click(context.message(Message::ShowInFolder))
-                        .content(tr("Show in folder")),
-                    Button::new()
-                        .grid_column(7)
-                        .is_enabled(self.selected.len() == 1)
-                        .on_click(context.message(Message::CreateShortcut))
-                        .content(tr("Create shortcut")),
-                )),
-            StackPanel::new()
-                .orientation(Orientation::Horizontal)
-                .spacing(6.0)
-                .children((
-                    Button::new()
-                        .automation_name(tr("Select none"))
-                        .is_enabled(!self.selected.is_empty())
-                        .on_click(context.message(Message::SelectNone))
-                        .content(tr("Select none")),
-                    Button::new()
-                        .automation_name(tr("Invert selection"))
-                        .on_click(context.message(Message::InvertSelection))
-                        .content(tr("Invert selection")),
-                    Button::new()
-                        .automation_name(tr("Show file extensions"))
-                        .on_click(context.message(Message::ToggleExtensions))
-                        .content(tr(if self.hide_extensions { "Extensions: hidden" } else { "Extensions: shown" })),
-                )),
-            StackPanel::new()
-                .orientation(Orientation::Horizontal)
-                .spacing(6.0)
-                .children((
-                    Button::new()
-                        .is_enabled(!self.selected.is_empty() && !self.transferring)
-                        .on_click(context.message(Message::Compress))
-                        .content(tr("Compress to zip")),
-                    Button::new()
-                        .is_enabled(self.selected.len() == 1 && !self.transferring)
-                        .on_click(context.message(Message::Extract))
-                        .content(tr("Extract here")),
-                    Button::new()
-                        .is_enabled(self.selected.len() == 1)
-                        .on_click(context.message(Message::RunVerb("notepad")))
-                        .content(tr("Edit in Notepad")),
-                    Button::new()
-                        .is_enabled(self.selected.len() == 1)
-                        .on_click(context.message(Message::RunVerb("properties")))
-                        .content(tr("Properties")),
-                    Button::new()
-                        .on_click(context.message(Message::RunVerb("admin-terminal")))
-                        .content(tr("Terminal as administrator")),
-                    Button::new()
-                        .on_click(context.message(Message::EmptyRecycleBin))
-                        .content(tr("Empty Recycle Bin")),
-                )),
-            text(tr("Destination folder"), self.theme.as_ref().map(Theme::muted)),
+            CommandBar::new().horizontal_alignment(HorizontalAlignment::Left).owned_commands(primary, secondary, context.callback(Message::Command)),
+            TextBox::new()
+                .text(&self.new_folder_name)
+                .automation_name(tr("Item name"))
+                .placeholder_text(tr("Name for a new folder or file, or the new name"))
+                .on_text_changed(folder_name_changed),
             Grid::new()
                 .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto])
                 .column_spacing(6.0)
@@ -1048,6 +1008,7 @@ impl Component for Explorer {
                     TextBox::new()
                         .text(&self.transfer_destination)
                         .automation_name(tr("Destination folder path"))
+                        .placeholder_text(tr("Copy or move the selection to this folder"))
                         .is_enabled(!self.transferring)
                         .grid_column(0)
                         .on_text_changed(transfer_destination_changed),
@@ -1071,44 +1032,12 @@ impl Component for Explorer {
                 .placeholder_text(tr("Filter by name"))
                 .on_text_changed(context.callback(Message::Filter)),
             Grid::new()
-                .columns([
-                    GridLength::STAR,
-                    GridLength::Auto,
-                    GridLength::Auto,
-                    GridLength::Auto,
-                    GridLength::Auto,
-                    GridLength::Auto,
-                    GridLength::Auto,
-                ])
+                .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto])
                 .column_spacing(6.0)
                 .children((
                     self.sort_button(context, SortKey::Name, tr("Name"), 0),
                     self.sort_button(context, SortKey::Size, tr("Size"), 1),
                     self.sort_button(context, SortKey::Modified, tr("Modified"), 2),
-                    Button::new()
-                        .grid_column(3)
-                        .automation_name(tr("Show hidden items"))
-                        .on_click(context.message(Message::ToggleHidden))
-                        .content(tr(if self.show_hidden { "Hidden: shown" } else { "Hidden: off" })),
-                    Button::new()
-                        .grid_column(4)
-                        .automation_name(tr("Search subfolders"))
-                        .on_click(context.message(Message::ToggleRecursive))
-                        .content(tr(if self.recursive { "Subfolders: on" } else { "Subfolders: off" })),
-                    Button::new()
-                        .grid_column(5)
-                        .automation_name(tr("New window"))
-                        .on_click(context.message(Message::NewWindow))
-                        .content(tr("New window")),
-                    Button::new()
-                        .grid_column(6)
-                        .automation_name(tr("Change language"))
-                        .on_click(context.message(Message::CycleLanguage))
-                        .content(tr(match self.language {
-                            "es" => "Language: Spanish",
-                            "en" => "Language: English",
-                            _ => "Language: auto",
-                        })),
                 )),
             text(
                 &self.path.to_string_lossy(),
@@ -1447,7 +1376,6 @@ impl Explorer {
         self.recursive = false;
         self.address = path.to_string_lossy().into_owned();
         self.new_folder_name.clear();
-        self.rename_name.clear();
         self.selected.clear();
         self.entries.clear();
         self.status = tr("Loading folder…").to_owned();
@@ -1603,7 +1531,7 @@ impl Explorer {
                     self.record(undo);
                 }
                 self.selected.clear();
-                self.rename_name.clear();
+                self.new_folder_name.clear();
                 self.entries.clear();
                 self.status = tr("Loading folder…").to_owned();
                 self.has_error = false;
@@ -1611,7 +1539,7 @@ impl Explorer {
             }
             Err(error) => {
                 self.pending_undo = None;
-                self.rename_name = name;
+                self.new_folder_name = name;
                 self.status = format!("{}: {error}", tr("Rename failed"));
                 self.has_error = true;
             }
@@ -1660,7 +1588,7 @@ impl Explorer {
             self.has_error = true;
             return;
         };
-        let name = self.rename_name.trim();
+        let name = self.new_folder_name.trim();
         if !is_single_name(name) {
             self.status = tr("Enter a single item name").to_owned();
             self.has_error = true;
@@ -1673,7 +1601,7 @@ impl Explorer {
         };
         let target = parent.join(name);
         if target == source {
-            self.rename_name.clear();
+            self.new_folder_name.clear();
             self.refresh_status();
             return;
         }

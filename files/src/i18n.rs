@@ -79,6 +79,9 @@ const ES: &[(&str, &str)] = &[
     ("Archive failed", "Falló el archivo comprimido"),
     ("Archive already exists", "El archivo comprimido ya existe"),
     ("Could not run", "No se pudo ejecutar"),
+    ("Item name", "Nombre del elemento"),
+    ("Name for a new folder or file, or the new name", "Nombre de la carpeta o archivo nuevo, o el nombre nuevo"),
+    ("Copy or move the selection to this folder", "Copiar o mover la selección a esta carpeta"),
     ("item", "elemento"),
     ("items", "elementos"),
     ("selected|one", "seleccionado"),
@@ -166,6 +169,14 @@ fn system_language_is_spanish() -> bool {
 
 // Unknown text falls back to the English original, so a missing entry is never blank.
 // A `|suffix` only tells apart keys that read the same in English ("selected|one").
+pub fn tr_dynamic(english: &str) -> String {
+    let plain = english.split('|').next().unwrap_or(english);
+    if !spanish() {
+        return plain.to_owned();
+    }
+    ES.iter().find(|(key, _)| *key == english).map_or(plain, |(_, text)| text).to_owned()
+}
+
 pub fn tr(english: &'static str) -> &'static str {
     let plain = english.split('|').next().unwrap_or(english);
     if !spanish() {
