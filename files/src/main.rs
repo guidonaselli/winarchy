@@ -1326,12 +1326,17 @@ impl Component for Explorer {
                 .placeholder_text(tr("Filter by name"))
                 .on_text_changed(context.callback(Message::Filter)),
             Grid::new()
-                .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto])
-                .column_spacing(ROW_GAP)
+                .columns([
+                    GridLength::Pixel(CHECK_WIDTH),
+                    GridLength::STAR,
+                    GridLength::Pixel(SIZE_WIDTH),
+                    GridLength::Pixel(MODIFIED_WIDTH + ROW_TRAILING),
+                ])
+                .column_spacing(COLUMN_GAP)
                 .children((
-                    self.sort_button(context, SortKey::Name, tr("Name"), 0),
-                    self.sort_button(context, SortKey::Size, tr("Size"), 1),
-                    self.sort_button(context, SortKey::Modified, tr("Modified"), 2),
+                    self.sort_button(context, SortKey::Name, tr("Name"), 1, HorizontalAlignment::Left),
+                    self.sort_button(context, SortKey::Size, tr("Size"), 2, HorizontalAlignment::Right),
+                    self.sort_button(context, SortKey::Modified, tr("Modified"), 3, HorizontalAlignment::Right),
                 )),
             StackPanel::new().spacing(STACK_GAP).keyed_children(info_items),
             text(
@@ -1515,6 +1520,7 @@ impl Explorer {
         key: SortKey,
         label: &str,
         column: i32,
+        align: HorizontalAlignment,
     ) -> View {
         let arrow = match (self.sort == key, self.descending) {
             (false, _) => "",
@@ -1523,6 +1529,8 @@ impl Explorer {
         };
         Button::new()
             .grid_column(column)
+            .horizontal_alignment(HorizontalAlignment::Stretch)
+            .horizontal_content_alignment(align)
             .style(ButtonStyle::Subtle)
             .on_click(context.message(Message::Sort(key)))
             .content(format!("{label}{arrow}"))
@@ -2027,15 +2035,22 @@ fn row(
     if compact {
         return grid.columns([GridLength::Auto, GridLength::STAR]).children((check, button)).into();
     }
-    grid.columns([GridLength::Auto, GridLength::STAR, GridLength::Auto, GridLength::Auto])
+    grid.columns([
+        GridLength::Pixel(CHECK_WIDTH),
+        GridLength::STAR,
+        GridLength::Pixel(SIZE_WIDTH),
+        GridLength::Pixel(MODIFIED_WIDTH + ROW_TRAILING),
+    ])
         .children((
             check,
             button,
             text(&directory::format_size(entry), theme.map(Theme::muted))
                 .grid_column(2)
+                .horizontal_alignment(HorizontalAlignment::Right)
                 .vertical_alignment(VerticalAlignment::Center),
             text(&directory::format_modified(entry), theme.map(Theme::muted))
                 .grid_column(3)
+                .horizontal_alignment(HorizontalAlignment::Right)
                 .vertical_alignment(VerticalAlignment::Center)
                 .margin(Thickness::new(0.0, 0.0, ROW_TRAILING, 0.0)),
         ))
