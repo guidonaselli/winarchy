@@ -147,6 +147,26 @@ fn places_with(pinned: &[PathBuf]) -> Vec<(String, PathBuf)> {
     places
 }
 
+fn place_icon(path: &Path, pinned: bool) -> Symbol {
+    if path.parent().is_none() {
+        return Symbol::SaveLocal;
+    }
+    let home = std::env::var_os("USERPROFILE").map(PathBuf::from);
+    if home.as_deref() == Some(path) {
+        return Symbol::Home;
+    }
+    match path.file_name().and_then(|name| name.to_str()) {
+        Some("Documents") if home.as_deref() == path.parent() => Symbol::Document,
+        Some("Downloads") if home.as_deref() == path.parent() => Symbol::Download,
+        Some("Pictures") if home.as_deref() == path.parent() => Symbol::Pictures,
+        Some("Music") if home.as_deref() == path.parent() => Symbol::Audio,
+        Some("Videos") if home.as_deref() == path.parent() => Symbol::Video,
+        Some("Desktop") if home.as_deref() == path.parent() => Symbol::Library,
+        _ if pinned => Symbol::Pin,
+        _ => Symbol::Folder,
+    }
+}
+
 fn count_word(count: usize, one: &'static str, many: &'static str) -> &'static str {
     tr(if count == 1 { one } else { many })
 }
@@ -1485,10 +1505,19 @@ impl Component for Explorer {
                 KeyedView::new(
                     index,
                     Button::new()
+                        .automation_name(label.clone())
                         .horizontal_content_alignment(HorizontalAlignment::Left)
-                        .style(ButtonStyle::Subtle)
+                        .style(if *path == self.path { ButtonStyle::Accent } else { ButtonStyle::Subtle })
                         .on_click(context.message(Message::OpenFolder(path.clone())))
-                        .content(text(label, self.theme.as_ref().map(Theme::foreground))),
+                        .content(
+                            StackPanel::new()
+                                .orientation(Orientation::Horizontal)
+                                .spacing(ROW_GAP)
+                                .children((
+                                    SymbolIcon::new().symbol(place_icon(path, self.pinned.contains(path))),
+                                    text(label, self.theme.as_ref().map(Theme::foreground)),
+                                )),
+                        ),
                 )
             });
         let body = Grid::new()
