@@ -134,6 +134,30 @@ pub fn format_attributes(attributes: u32) -> String {
     if names.is_empty() { "None".to_owned() } else { names.join(", ") }
 }
 
+const PREVIEW_BYTES: u64 = 2048;
+const PREVIEW_LINES: usize = 6;
+
+// None for folders, empty files and anything that is not valid UTF-8 text without NUL bytes.
+pub fn preview(entry: &Entry) -> Option<String> {
+    use std::io::Read;
+    if entry.is_directory || entry.size == 0 {
+        return None;
+    }
+    let mut buffer = Vec::new();
+    fs::File::open(&entry.path).ok()?.take(PREVIEW_BYTES).read_to_end(&mut buffer).ok()?;
+    if buffer.contains(&0) {
+        return None;
+    }
+    // a multibyte character may be cut at the 2 KB boundary
+    let text = match std::str::from_utf8(&buffer) {
+        Ok(text) => text,
+        Err(error) if error.error_len().is_none() => std::str::from_utf8(&buffer[..error.valid_up_to()]).ok()?,
+        Err(_) => return None,
+    };
+    Some(text.lines().take(PREVIEW_LINES).collect::<Vec<_>>().join("
+"))
+}
+
 pub fn properties(entry: &Entry) -> String {
     format!(
         "Path: {} · Created: {} · Attributes: {}",
@@ -229,5 +253,34 @@ mod tests {
         assert_eq!(format_attributes(0), "None");
         assert_eq!(format_attributes(0x1 | 0x2), "Read-only, Hidden");
         assert_eq!(format_attributes(0x10), "None");
+    }
+
+    #[test]
+    fn previews_text_only() {
+        let dir = std::env::temp_dir().join(format!("wf-preview-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let text = dir.join("t.txt");
+        let binary = dir.join("b.bin");
+        fs::write(&text, "one
+two
+three
+four
+five
+six
+seven").unwrap();
+        fs::write(&binary, [0u8, 1, 2]).unwrap();
+        let entry = |path: &PathBuf, size| Entry { name: String::new(), path: path.clone(), is_directory: false, hidden: false, attributes: 0, created: None, size, modified: None };
+        let shown = preview(&entry(&text, 30));
+        let refused = preview(&entry(&binary, 3));
+        fs::remove_file(&text).unwrap();
+        fs::remove_file(&binary).unwrap();
+        fs::remove_dir(&dir).unwrap();
+        assert_eq!(shown.as_deref(), Some("one
+two
+three
+four
+five
+six"));
+        assert_eq!(refused, None);
     }
 }
