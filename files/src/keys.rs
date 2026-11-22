@@ -12,7 +12,7 @@ use windows::Win32::{
             UIA_GroupControlTypeId, UIA_ListControlTypeId, UIA_ListItemControlTypeId, UIA_MenuControlTypeId,
             UIA_MenuItemControlTypeId, UIA_PaneControlTypeId, UIA_WindowControlTypeId, UIA_CONTROLTYPE_ID,
         },
-        Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL},
+        Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT},
         WindowsAndMessaging::{CallNextHookEx, HC_ACTION, SetWindowsHookExW, WH_KEYBOARD},
     },
 };
@@ -62,7 +62,8 @@ unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRE
     let key_down = lparam.0 & (1 << 31) == 0;
     if code == HC_ACTION as i32 && key_down {
         let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
-        let key = map_key(wparam.0 as u32, ctrl);
+        let shift = unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0;
+        let key = if wparam.0 == 0x79 && shift { Some(Key::ContextMenu) } else { map_key(wparam.0 as u32, ctrl) };
         if let (Some(key), Some(sender)) = (key, SENDER.get()) {
             let _ = sender.send(key);
         }
