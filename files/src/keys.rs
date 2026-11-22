@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, OnceLock, atomic::{AtomicBool, Ordering}, mpsc};
+use std::sync::{Arc, Mutex, OnceLock, atomic::{AtomicBool, AtomicI32, Ordering}, mpsc};
 use std::time::Duration;
 use windows::Win32::{
     Foundation::{LPARAM, LRESULT, WPARAM},
@@ -13,7 +13,7 @@ use windows::Win32::{
             UIA_MenuItemControlTypeId, UIA_PaneControlTypeId, UIA_WindowControlTypeId, UIA_CONTROLTYPE_ID,
         },
         Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT},
-        WindowsAndMessaging::{CallNextHookEx, HC_ACTION, MOUSEHOOKSTRUCTEX, SetWindowsHookExW, WH_KEYBOARD, WH_MOUSE},
+        WindowsAndMessaging::{CallNextHookEx, GetSystemMetrics, HC_ACTION, MOUSEHOOKSTRUCTEX, SM_CXDRAG, SM_CYDRAG, SetWindowsHookExW, WH_KEYBOARD, WH_MOUSE},
     },
 };
 use windows_reactor::CancellationToken;
@@ -42,6 +42,8 @@ pub enum Key {
     Cancel,
     FocusAddress,
     FocusFilter,
+    MouseDown,
+    DragStart,
     PinUp,
     PinDown,
     Back,
@@ -104,8 +106,41 @@ unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRE
 }
 
 const WM_XBUTTONUP: usize = 0x020C;
+const WM_MOUSEMOVE: usize = 0x0200;
+const WM_LBUTTONDOWN: usize = 0x0201;
+const WM_LBUTTONUP: usize = 0x0202;
+
+// Where the left button went down; a drag out of the window starts once the pointer leaves the system drag rectangle.
+static PRESSED: AtomicBool = AtomicBool::new(false);
+static PRESSED_X: AtomicI32 = AtomicI32::new(0);
+static PRESSED_Y: AtomicI32 = AtomicI32::new(0);
 
 unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code == HC_ACTION as i32 && matches!(wparam.0, WM_LBUTTONDOWN | WM_LBUTTONUP | WM_MOUSEMOVE) {
+        let point = unsafe { (*(lparam.0 as *const MOUSEHOOKSTRUCTEX)).Base.pt };
+        let send = |key| {
+            if let Some(sender) = SENDER.get() {
+                let _ = sender.send(key);
+            }
+        };
+        match wparam.0 {
+            WM_LBUTTONDOWN => {
+                PRESSED_X.store(point.x, Ordering::Relaxed);
+                PRESSED_Y.store(point.y, Ordering::Relaxed);
+                PRESSED.store(true, Ordering::Relaxed);
+                send(Key::MouseDown);
+            }
+            WM_LBUTTONUP => PRESSED.store(false, Ordering::Relaxed),
+            _ => {
+                let (dx, dy) = (point.x - PRESSED_X.load(Ordering::Relaxed), point.y - PRESSED_Y.load(Ordering::Relaxed));
+                let (limit_x, limit_y) = unsafe { (GetSystemMetrics(SM_CXDRAG), GetSystemMetrics(SM_CYDRAG)) };
+                if PRESSED.load(Ordering::Relaxed) && (dx.abs() >= limit_x || dy.abs() >= limit_y) {
+                    PRESSED.store(false, Ordering::Relaxed);
+                    send(Key::DragStart);
+                }
+            }
+        }
+    }
     if code == HC_ACTION as i32 && wparam.0 == WM_XBUTTONUP {
         let data = unsafe { &*(lparam.0 as *const MOUSEHOOKSTRUCTEX) };
         let key = match data.mouseData >> 16 {
@@ -212,6 +247,9 @@ fn resolve(key: Key) -> Option<Key> {
 }
 
 fn key_allowed(key: Key) -> bool {
+    if matches!(key, Key::MouseDown | Key::DragStart) {
+        return true;
+    }
     let Some(kind) = focused_kind() else { return false };
     let neutral = [UIA_WindowControlTypeId, UIA_PaneControlTypeId, UIA_CustomControlTypeId, UIA_GroupControlTypeId];
     let navigating = [

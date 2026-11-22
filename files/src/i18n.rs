@@ -78,6 +78,7 @@ const ES: &[(&str, &str)] = &[
     ("limited to the first", "limitado a los primeros"),
     ("Show more options", "Mostrar más opciones"),
     ("Favorites", "Favoritos"),
+    ("Drag failed", "No se pudo arrastrar"),
     ("Add to favorites", "Agregar a favoritos"),
     ("Remove from favorites", "Quitar de favoritos"),
     ("This folder is empty", "Esta carpeta está vacía"),

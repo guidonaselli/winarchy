@@ -271,6 +271,7 @@ dependencies = [
  "serde_json",
  "windows",
  "windows-collections 0.3.2",
+ "windows-core 0.62.2",
  "windows-reactor",
 ]
 

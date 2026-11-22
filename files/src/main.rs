@@ -584,6 +584,7 @@ struct Explorer {
     menu_focus: Option<usize>,
     menu_closed_at: Option<std::time::Instant>,
     hovered_row: Option<PathBuf>,
+    press_row: Option<PathBuf>,
     type_ahead: (String, std::time::Instant),
     filter_ref: ElementRef<TextBox>,
     hovered_handle: Option<Column>,
@@ -725,6 +726,7 @@ impl Component for Explorer {
             favorites: saved.favorites.clone(),
             in_favorites: false,
             pin_armed: None,
+            press_row: None,
             list_width: DEFAULT_LIST_WIDTH,
         };
         app.queue_load(path, context);
@@ -775,8 +777,11 @@ impl Component for Explorer {
             Message::Redo => self.step_history(true, context),
             Message::Dropped(DroppedData::StorageItems(items)) => {
                 if !(self.deleting || self.transferring) {
-                    let paths = items.into_iter().map(|item| PathBuf::from(item.path)).collect();
-                    self.begin_transfer(paths, false, tr("Copying dropped items…"), context);
+                    // dragging items out of this folder and releasing over the window must not duplicate them
+                    let paths: Vec<PathBuf> = items.into_iter().map(|item| PathBuf::from(item.path)).filter(|path| path.parent() != Some(self.path.as_path())).collect();
+                    if !paths.is_empty() {
+                        self.begin_transfer(paths, false, tr("Copying dropped items…"), context);
+                    }
                 }
             }
             Message::Dropped(_) => {}
@@ -2330,6 +2335,23 @@ impl Explorer {
                 if let Some(target) = visible.iter().position(|entry| entry.name.to_lowercase().starts_with(&self.type_ahead.0)) {
                     self.focus_entry(&visible, target, false, context);
                 }
+            }
+            keys::Key::MouseDown => self.press_row = self.hovered_row.clone(),
+            keys::Key::DragStart => {
+                let Some(pressed) = self.press_row.take() else { return };
+                if self.deleting || self.transferring {
+                    return;
+                }
+                if !self.selected.contains(&pressed) {
+                    self.selected = HashSet::from([pressed]);
+                    self.refresh_status();
+                }
+                let paths: Vec<PathBuf> = self.selected.iter().cloned().collect();
+                if let Err(error) = shell::drag_out(&paths) {
+                    self.status = format!("{}: {error}", tr("Drag failed"));
+                    self.has_error = true;
+                }
+                self.update(Message::Refresh, context);
             }
             keys::Key::PinUp => self.update(Message::MovePin(-1), context),
             keys::Key::PinDown => self.update(Message::MovePin(1), context),

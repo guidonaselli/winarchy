@@ -589,3 +589,73 @@ pub fn native_menu(paths: &[PathBuf]) -> Result<bool, String> {
 pub fn native_menu(_paths: &[PathBuf]) -> Result<bool, String> {
     Err("not supported on this platform".to_owned())
 }
+
+// Starts an OS drag of `paths` with the shell's own data object, so Explorer and other apps receive real files; blocks until the drop ends.
+#[cfg(windows)]
+pub fn drag_out(paths: &[PathBuf]) -> Result<(), String> {
+    use windows::{
+        Win32::{
+            Foundation::{DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, S_OK},
+            System::{
+                Com::CoTaskMemFree,
+                Ole::{DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_LINK, DROPEFFECT_MOVE, DoDragDrop, IDropSource, IDropSource_Impl, OleInitialize},
+                SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS},
+            },
+            UI::{
+                Input::KeyboardAndMouse::ReleaseCapture,
+                Shell::{SHCreateDataObject, SHParseDisplayName},
+            },
+        },
+        core::{BOOL, HRESULT, PCWSTR, implement},
+    };
+
+    #[implement(IDropSource)]
+    struct Source;
+
+    impl IDropSource_Impl for Source_Impl {
+        fn QueryContinueDrag(&self, escape: BOOL, state: MODIFIERKEYS_FLAGS) -> HRESULT {
+            if escape.as_bool() {
+                DRAGDROP_S_CANCEL
+            } else if state.0 & MK_LBUTTON.0 == 0 {
+                DRAGDROP_S_DROP
+            } else {
+                S_OK
+            }
+        }
+
+        fn GiveFeedback(&self, _effect: DROPEFFECT) -> HRESULT {
+            DRAGDROP_S_USEDEFAULTCURSORS
+        }
+    }
+
+    if paths.is_empty() {
+        return Ok(());
+    }
+    unsafe {
+        let _ = OleInitialize(None);
+        let mut identifiers: Vec<*const windows::Win32::UI::Shell::Common::ITEMIDLIST> = Vec::new();
+        for path in paths {
+            let wide: Vec<u16> = path.as_os_str().to_string_lossy().encode_utf16().chain(Some(0)).collect();
+            let mut identifier = std::ptr::null_mut();
+            SHParseDisplayName(PCWSTR(wide.as_ptr()), None, &mut identifier, 0, None).map_err(|error| error.to_string())?;
+            identifiers.push(identifier as *const _);
+        }
+        let data = SHCreateDataObject(None, Some(&identifiers), None);
+        let source: IDropSource = Source.into();
+        let _ = ReleaseCapture();
+        let mut effect = DROPEFFECT::default();
+        let outcome = data.and_then(|data: windows::Win32::System::Com::IDataObject| {
+            let result = DoDragDrop(&data, &source, DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK, &mut effect);
+            if result == DRAGDROP_S_DROP || result == DRAGDROP_S_CANCEL { Ok(()) } else { result.ok() }
+        });
+        for identifier in identifiers {
+            CoTaskMemFree(Some(identifier.cast()));
+        }
+        outcome.map_err(|error| error.to_string())
+    }
+}
+
+#[cfg(not(windows))]
+pub fn drag_out(_paths: &[PathBuf]) -> Result<(), String> {
+    Err("not supported on this platform".to_owned())
+}
