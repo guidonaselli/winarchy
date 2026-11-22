@@ -47,7 +47,7 @@ const ES: &[(&str, &str)] = &[
     ("Tab", "Pestaña"),
     ("item", "elemento"),
     ("items", "elementos"),
-    ("selected one", "seleccionado"),
+    ("selected|one", "seleccionado"),
     ("selected", "seleccionados"),
     ("of", "de"),
     ("cut", "cortados"),
@@ -131,13 +131,15 @@ fn system_language_is_spanish() -> bool {
 }
 
 // Unknown text falls back to the English original, so a missing entry is never blank.
+// A `|suffix` only tells apart keys that read the same in English ("selected|one").
 pub fn tr(english: &'static str) -> &'static str {
+    let plain = english.split('|').next().unwrap_or(english);
     if !spanish() {
-        return english;
+        return plain;
     }
     ES.iter()
         .find(|(key, _)| *key == english)
-        .map_or(english, |(_, text)| text)
+        .map_or(plain, |(_, text)| text)
 }
 
 #[cfg(test)]

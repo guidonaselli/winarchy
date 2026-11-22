@@ -170,6 +170,10 @@ pub fn is_image(entry: &Entry) -> bool {
         })
 }
 
+pub fn is_pdf(entry: &Entry) -> bool {
+    !entry.is_directory && entry.path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
+}
+
 pub fn properties(entry: &Entry) -> String {
     format!(
         "{}: {} · {}: {} · {}: {}",

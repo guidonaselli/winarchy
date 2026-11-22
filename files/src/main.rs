@@ -2,6 +2,7 @@
 
 mod directory;
 mod i18n;
+mod pdf;
 mod clipboard;
 mod keys;
 mod settings;
@@ -1009,7 +1010,7 @@ impl Explorer {
                 .filter(|entry| self.matches(entry, &needle))
                 .count();
             self.status = if shown == self.entries.len() {
-                format!("{shown} {} · {} {}", count_word(shown, "item", "items"), self.selected.len(), count_word(self.selected.len(), "selected one", "selected"))
+                format!("{shown} {} · {} {}", count_word(shown, "item", "items"), self.selected.len(), count_word(self.selected.len(), "selected|one", "selected"))
             } else {
                 format!(
                     "{shown} {} {} {} · {} {}",
@@ -1017,7 +1018,7 @@ impl Explorer {
                     self.entries.len(),
                     tr("items"),
                     self.selected.len(),
-                    count_word(self.selected.len(), "selected one", "selected")
+                    count_word(self.selected.len(), "selected|one", "selected")
                 )
             };
             if self.recursive && self.entries.len() >= directory::SEARCH_LIMIT {
@@ -1030,8 +1031,12 @@ impl Explorer {
                 && let Some(entry) = self.entries.iter().find(|entry| &entry.path == path)
             {
                 self.details = directory::properties(entry);
-                self.preview = directory::preview(entry).unwrap_or_default();
-                self.preview_image = directory::is_image(entry).then(|| entry.path.clone());
+                self.preview = if directory::is_pdf(entry) { String::new() } else { directory::preview(entry).unwrap_or_default() };
+                self.preview_image = if directory::is_image(entry) {
+                    Some(entry.path.clone())
+                } else {
+                    directory::is_pdf(entry).then(|| pdf::first_page(&entry.path)).flatten()
+                };
                 let kind = tr(if entry.is_directory { "Folder" } else { "File" });
                 self.status.push_str(&format!(
                     " · {kind} “{}” {} {}",
