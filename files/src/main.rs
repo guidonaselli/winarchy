@@ -115,6 +115,7 @@ enum Message {
     NewWindow,
     ToggleRecursive,
     ToggleHidden,
+    CycleLanguage,
     Undo,
     Redo,
     UndoComplete(Result<bool, String>),
@@ -163,6 +164,7 @@ struct Explorer {
     preview: String,
     preview_image: Option<PathBuf>,
     show_hidden: bool,
+    language: &'static str,
     recursive: bool,
     sort: SortKey,
     descending: bool,
@@ -193,6 +195,7 @@ impl Component for Explorer {
     fn create(input: &PathBuf, context: &ComponentContext<Self>) -> Self {
         let path = input.clone();
         let saved = settings::load();
+        i18n::set_choice(&saved.language);
         #[cfg(windows)]
         let theme_watcher = Theme::start_watching();
         let (theme, status, has_error) = match Theme::load() {
@@ -217,6 +220,7 @@ impl Component for Explorer {
             preview: String::new(),
             preview_image: None,
             show_hidden: saved.show_hidden,
+            language: i18n::choice(),
             recursive: false,
             sort: SortKey::from_name(&saved.sort),
             descending: saved.descending,
@@ -311,6 +315,14 @@ impl Component for Explorer {
                 self.entries.clear();
                 self.status = tr("Loading folder…").to_owned();
                 self.queue_load(self.path.clone(), context);
+            }
+            Message::CycleLanguage => {
+                let choices = i18n::choices();
+                let next = choices.iter().position(|c| *c == self.language).map_or(0, |i| (i + 1) % choices.len());
+                i18n::set_choice(choices[next]);
+                self.language = i18n::choice();
+                self.save_settings();
+                self.refresh_status();
             }
             Message::ToggleHidden => {
                 self.show_hidden = !self.show_hidden;
@@ -628,6 +640,7 @@ impl Component for Explorer {
                     GridLength::Auto,
                     GridLength::Auto,
                     GridLength::Auto,
+                    GridLength::Auto,
                 ])
                 .column_spacing(6.0)
                 .children((
@@ -649,6 +662,15 @@ impl Component for Explorer {
                         .automation_name(tr("New window"))
                         .on_click(context.message(Message::NewWindow))
                         .content(tr("New window")),
+                    Button::new()
+                        .grid_column(6)
+                        .automation_name(tr("Change language"))
+                        .on_click(context.message(Message::CycleLanguage))
+                        .content(tr(match self.language {
+                            "es" => "Language: Spanish",
+                            "en" => "Language: English",
+                            _ => "Language: auto",
+                        })),
                 )),
             text(
                 &self.path.to_string_lossy(),
@@ -913,6 +935,7 @@ impl Explorer {
             show_hidden: self.show_hidden,
             sort: self.sort.name().to_owned(),
             descending: self.descending,
+            language: self.language.to_owned(),
         });
     }
 

@@ -9,6 +9,8 @@ pub struct Settings {
     pub sort: String,
     #[serde(default)]
     pub descending: bool,
+    #[serde(default)]
+    pub language: String,
 }
 
 fn location() -> Option<PathBuf> {
@@ -45,7 +47,7 @@ mod tests {
     #[test]
     fn tolerates_partial_and_invalid_json() {
         let partial: Settings = serde_json::from_str(r#"{"show_hidden": true}"#).unwrap();
-        assert_eq!(partial, Settings { show_hidden: true, sort: String::new(), descending: false });
+        assert_eq!(partial, Settings { show_hidden: true, sort: String::new(), descending: false, language: String::new() });
         assert!(serde_json::from_str::<Settings>("not json").is_err());
     }
 }

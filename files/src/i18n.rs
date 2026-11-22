@@ -1,4 +1,4 @@
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 const ES: &[(&str, &str)] = &[
     ("Up", "Subir"),
@@ -38,6 +38,10 @@ const ES: &[(&str, &str)] = &[
     ("Videos", "Vídeos"),
     ("Folder", "Carpeta"),
     ("File", "Archivo"),
+    ("Language: auto", "Idioma: automático"),
+    ("Language: Spanish", "Idioma: español"),
+    ("Language: English", "Idioma: inglés"),
+    ("Change language", "Cambiar idioma"),
     ("item", "elemento"),
     ("items", "elementos"),
     ("selected one", "seleccionado"),
@@ -89,12 +93,31 @@ const ES: &[(&str, &str)] = &[
     ("Archive", "Archivar"),
 ];
 
+static CHOICE: AtomicU8 = AtomicU8::new(0);
+
+pub fn choices() -> [&'static str; 3] {
+    ["auto", "es", "en"]
+}
+
+pub fn set_choice(name: &str) {
+    let index = choices().iter().position(|choice| *choice == name).unwrap_or(0);
+    CHOICE.store(index as u8, Ordering::Relaxed);
+}
+
+pub fn choice() -> &'static str {
+    choices()[CHOICE.load(Ordering::Relaxed) as usize]
+}
+
+// The environment variable wins so scripts and tests stay deterministic.
 fn spanish() -> bool {
-    static SPANISH: OnceLock<bool> = OnceLock::new();
-    *SPANISH.get_or_init(|| match std::env::var("WINARCHY_FILES_LANG") {
+    match std::env::var("WINARCHY_FILES_LANG") {
         Ok(lang) => lang.to_lowercase().starts_with("es"),
-        Err(_) => system_language_is_spanish(),
-    })
+        Err(_) => match choice() {
+            "es" => true,
+            "en" => false,
+            _ => system_language_is_spanish(),
+        },
+    }
 }
 
 fn system_language_is_spanish() -> bool {
