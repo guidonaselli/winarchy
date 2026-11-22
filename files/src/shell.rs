@@ -7,39 +7,26 @@ pub fn open(path: &Path) -> Result<(), String> {
 // Verbs such as "open", "properties" or "runas" (elevated, with its own UAC prompt).
 #[cfg(windows)]
 pub fn execute(verb: &str, file: &str, parameters: Option<&str>) -> Result<(), String> {
-    use std::ffi::c_void;
-
-    #[link(name = "shell32")]
-    unsafe extern "system" {
-        fn ShellExecuteW(
-            window: *mut c_void,
-            operation: *const u16,
-            file: *const u16,
-            parameters: *const u16,
-            directory: *const u16,
-            show_command: i32,
-        ) -> isize;
-    }
+    use windows::{
+        Win32::UI::Shell::{SEE_MASK_INVOKEIDLIST, SHELLEXECUTEINFOW, ShellExecuteExW},
+        core::PCWSTR,
+    };
 
     let wide = |text: &str| text.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
     let operation = wide(verb);
     let file = wide(file);
     let parameters = parameters.map(wide);
-    let result = unsafe {
-        ShellExecuteW(
-            std::ptr::null_mut(),
-            operation.as_ptr(),
-            file.as_ptr(),
-            parameters.as_ref().map_or(std::ptr::null(), |p| p.as_ptr()),
-            std::ptr::null(),
-            1,
-        )
+    // INVOKEIDLIST is what makes the "properties" verb open the sheet; it is harmless for the other verbs.
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_INVOKEIDLIST,
+        lpVerb: PCWSTR(operation.as_ptr()),
+        lpFile: PCWSTR(file.as_ptr()),
+        lpParameters: parameters.as_ref().map_or(PCWSTR::null(), |p| PCWSTR(p.as_ptr())),
+        nShow: 1,
+        ..Default::default()
     };
-    if result > 32 {
-        Ok(())
-    } else {
-        Err(std::io::Error::from_raw_os_error(result as i32).to_string())
-    }
+    unsafe { ShellExecuteExW(&mut info) }.map_err(|error| error.to_string())
 }
 
 #[cfg(windows)]

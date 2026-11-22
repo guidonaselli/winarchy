@@ -112,6 +112,7 @@ impl Explorer {
             command("Properties", Message::RunVerb("properties"), None, one, false),
             command("Terminal here", Message::OpenTerminal, None, true, false),
             command("Terminal as administrator", Message::RunVerb("admin-terminal"), None, true, false),
+            command("Open Recycle Bin", Message::OpenRecycleBin, None, true, false),
             command("Empty Recycle Bin", Message::EmptyRecycleBin, None, true, false),
             command("Select none", Message::SelectNone, None, some, false),
             command("Invert selection", Message::InvertSelection, None, true, false),
@@ -252,6 +253,7 @@ enum Message {
     ArchiveDone(Result<(), String>, Option<PathBuf>),
     RunVerb(&'static str),
     EmptyRecycleBin,
+    OpenRecycleBin,
     SelectNone,
     InvertSelection,
     CycleLanguage,
@@ -662,6 +664,12 @@ impl Component for Explorer {
                 self.has_error = result.is_err();
                 if let Err(error) = result {
                     self.status = format!("{}: {error}", tr("Could not run"));
+                }
+            }
+            Message::OpenRecycleBin => {
+                if let Err(error) = shell::execute("open", "shell:RecycleBinFolder", None) {
+                    self.status = format!("{}: {error}", tr("Could not run"));
+                    self.has_error = true;
                 }
             }
             Message::EmptyRecycleBin => {

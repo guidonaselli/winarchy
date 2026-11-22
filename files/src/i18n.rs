@@ -75,6 +75,7 @@ const ES: &[(&str, &str)] = &[
     ("Edit in Notepad", "Editar en Bloc de notas"),
     ("Properties", "Propiedades"),
     ("Terminal as administrator", "Terminal como administrador"),
+    ("Open Recycle Bin", "Abrir la Papelera (restaurar elementos)"),
     ("Empty Recycle Bin", "Vaciar la Papelera"),
     ("Archive failed", "Falló el archivo comprimido"),
     ("Archive already exists", "El archivo comprimido ya existe"),
