@@ -3,6 +3,11 @@ use std::{
     fs, io,
     os::windows::fs::{FileTypeExt, MetadataExt},
     path::PathBuf,
+    sync::{
+        Arc, Condvar, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
+    time::{Duration, Instant},
 };
 
 const HIDDEN_OR_SYSTEM: u32 = 0x2 | 0x4;
@@ -19,60 +24,151 @@ pub struct Entry {
     pub modified: Option<std::time::SystemTime>,
 }
 
+fn entry_of(entry: &fs::DirEntry) -> io::Result<Entry> {
+    let file_type = entry.file_type()?;
+    let metadata = entry.metadata().ok();
+    Ok(Entry {
+        name: entry.file_name().to_string_lossy().into_owned(),
+        path: entry.path(),
+        is_directory: file_type.is_dir() || file_type.is_symlink_dir(),
+        hidden: metadata.as_ref().is_some_and(|m| m.file_attributes() & HIDDEN_OR_SYSTEM != 0),
+        attributes: metadata.as_ref().map_or(0, |m| m.file_attributes()),
+        created: metadata.as_ref().and_then(|m| m.created().ok()),
+        size: metadata.as_ref().map_or(0, |m| m.len()),
+        modified: metadata.and_then(|m| m.modified().ok()),
+    })
+}
+
 pub fn read(path: &PathBuf) -> io::Result<Vec<Entry>> {
-    let mut entries = fs::read_dir(path)?
-        .map(|entry| {
-            let entry = entry?;
-            let file_type = entry.file_type()?;
-            let metadata = entry.metadata().ok();
-            Ok(Entry {
-                name: entry.file_name().to_string_lossy().into_owned(),
-                path: entry.path(),
-                is_directory: file_type.is_dir() || file_type.is_symlink_dir(),
-                hidden: metadata
-                    .as_ref()
-                    .is_some_and(|m| m.file_attributes() & HIDDEN_OR_SYSTEM != 0),
-                attributes: metadata.as_ref().map_or(0, |m| m.file_attributes()),
-                created: metadata.as_ref().and_then(|m| m.created().ok()),
-                size: metadata.as_ref().map_or(0, |m| m.len()),
-                modified: metadata.and_then(|m| m.modified().ok()),
-            })
-        })
-        .collect::<io::Result<Vec<_>>>()?;
+    let mut entries = fs::read_dir(path)?.map(|entry| entry_of(&entry?)).collect::<io::Result<Vec<_>>>()?;
     entries.sort_by_key(|entry| (!entry.is_directory, entry.name.to_lowercase()));
     Ok(entries)
 }
 
-pub const SEARCH_LIMIT: usize = 20_000;
+// Ceiling for one recursive listing, so a whole-drive walk cannot exhaust memory.
+pub const SEARCH_LIMIT: usize = 500_000;
+const WALK_WORKERS: usize = 8;
+const FIRST_BATCH: Duration = Duration::from_millis(150);
+// Each UI refresh clones the visible list, so batches get sparser as the result grows.
+const BATCH_GROWTH_PER_ENTRY: Duration = Duration::from_micros(2000);
 
-// Names are paths relative to `root`; symlinked folders are listed but not entered, so cycles cannot loop.
-pub fn read_recursive(root: &PathBuf) -> io::Result<Vec<Entry>> {
-    let mut found = Vec::new();
-    let mut pending = vec![root.clone()];
-    while let Some(folder) = pending.pop() {
-        let Ok(children) = read(&folder) else {
-            if &folder == root {
-                return Err(io::Error::last_os_error());
+#[derive(Clone)]
+pub struct Batch {
+    pub entries: Vec<Entry>,
+    pub finished: bool,
+    pub error: Option<String>,
+}
+
+// A parallel directory walk: workers share one folder queue and the UI drains the found entries in batches.
+// Names are paths relative to the root; symlinked folders are listed but not entered, so cycles cannot loop.
+pub struct Walk {
+    root: PathBuf,
+    queue: Mutex<Vec<PathBuf>>,
+    wake: Condvar,
+    busy: AtomicUsize,
+    live: AtomicUsize,
+    found: AtomicUsize,
+    cancelled: AtomicBool,
+    buffer: Mutex<(Vec<Entry>, bool, Option<String>)>,
+    progress: Condvar,
+}
+
+impl Walk {
+    pub fn start(root: PathBuf) -> Arc<Self> {
+        let workers = std::thread::available_parallelism().map_or(4, usize::from).min(WALK_WORKERS);
+        let walk = Arc::new(Self {
+            queue: Mutex::new(vec![root.clone()]),
+            root,
+            wake: Condvar::new(),
+            busy: AtomicUsize::new(0),
+            live: AtomicUsize::new(workers),
+            found: AtomicUsize::new(0),
+            cancelled: AtomicBool::new(false),
+            buffer: Mutex::new((Vec::new(), false, None)),
+            progress: Condvar::new(),
+        });
+        for _ in 0..workers {
+            let walk = Arc::clone(&walk);
+            std::thread::spawn(move || walk.work());
+        }
+        walk
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+        self.wake.notify_all();
+        self.progress.notify_all();
+    }
+
+    pub fn found(&self) -> usize {
+        self.found.load(Ordering::Relaxed)
+    }
+
+    fn work(&self) {
+        while let Some(folder) = self.take_folder() {
+            match fs::read_dir(&folder) {
+                Ok(children) => {
+                    let mut subfolders = Vec::new();
+                    let mut entries = Vec::new();
+                    for child in children.flatten() {
+                        let Ok(mut entry) = entry_of(&child) else { continue };
+                        if child.file_type().is_ok_and(|kind| kind.is_dir()) {
+                            subfolders.push(entry.path.clone());
+                        }
+                        entry.name = entry.path.strip_prefix(&self.root).map_or(entry.name, |relative| relative.to_string_lossy().into_owned());
+                        entries.push(entry);
+                    }
+                    let total = self.found.fetch_add(entries.len(), Ordering::Relaxed) + entries.len();
+                    self.buffer.lock().unwrap().0.append(&mut entries);
+                    if total >= SEARCH_LIMIT {
+                        self.cancelled.store(true, Ordering::Relaxed);
+                    }
+                    self.queue.lock().unwrap().extend(subfolders);
+                }
+                Err(error) if folder == self.root => self.buffer.lock().unwrap().2 = Some(format!("{}: {error}", folder.display())),
+                Err(_) => {}
             }
-            continue;
-        };
-        for mut entry in children {
-            if found.len() >= SEARCH_LIMIT {
-                return Ok(found);
-            }
-            if entry.is_directory
-                && fs::symlink_metadata(&entry.path).is_ok_and(|m| !m.file_type().is_symlink())
-            {
-                pending.push(entry.path.clone());
-            }
-            entry.name = entry
-                .path
-                .strip_prefix(root)
-                .map_or(entry.name, |relative| relative.to_string_lossy().into_owned());
-            found.push(entry);
+            let _queue = self.queue.lock().unwrap();
+            self.busy.fetch_sub(1, Ordering::SeqCst);
+            self.wake.notify_all();
+        }
+        if self.live.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.buffer.lock().unwrap().1 = true;
+            self.progress.notify_all();
         }
     }
-    Ok(found)
+
+    // None once the queue is empty and no worker can add more folders to it.
+    fn take_folder(&self) -> Option<PathBuf> {
+        let mut queue = self.queue.lock().unwrap();
+        loop {
+            if self.cancelled.load(Ordering::Relaxed) {
+                return None;
+            }
+            if let Some(folder) = queue.pop() {
+                self.busy.fetch_add(1, Ordering::SeqCst);
+                return Some(folder);
+            }
+            if self.busy.load(Ordering::SeqCst) == 0 {
+                self.wake.notify_all();
+                return None;
+            }
+            queue = self.wake.wait(queue).unwrap();
+        }
+    }
+
+    // Blocks until the next batch is due or the walk ends.
+    pub fn next_batch(&self) -> Batch {
+        let due = Instant::now() + FIRST_BATCH + BATCH_GROWTH_PER_ENTRY * (self.found() / 1000) as u32;
+        let mut buffer = self.buffer.lock().unwrap();
+        while !buffer.1 && !self.cancelled.load(Ordering::Relaxed) {
+            let Some(left) = due.checked_duration_since(Instant::now()) else { break };
+            buffer = self.progress.wait_timeout(buffer, left).unwrap().0;
+        }
+        let entries = std::mem::take(&mut buffer.0);
+        let finished = buffer.1 || self.cancelled.load(Ordering::Relaxed);
+        Batch { entries, finished, error: buffer.2.take() }
+    }
 }
 
 pub fn places() -> Vec<(String, PathBuf)> {
@@ -290,11 +386,15 @@ mod tests {
         fs::create_dir_all(root.join("a").join("b")).unwrap();
         fs::write(root.join("top.txt"), "").unwrap();
         fs::write(root.join("a").join("b").join("deep.txt"), "").unwrap();
-        let mut names: Vec<_> = read_recursive(&root)
-            .unwrap()
-            .into_iter()
-            .map(|entry| entry.name)
-            .collect();
+        let walk = Walk::start(root.clone());
+        let mut names = Vec::new();
+        loop {
+            let batch = walk.next_batch();
+            names.extend(batch.entries.into_iter().map(|entry| entry.name));
+            if batch.finished {
+                break;
+            }
+        }
         names.sort();
         fs::remove_file(root.join("top.txt")).unwrap();
         fs::remove_file(root.join("a").join("b").join("deep.txt")).unwrap();

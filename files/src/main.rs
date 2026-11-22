@@ -528,6 +528,7 @@ enum Message {
     OpenFile(PathBuf),
     Parent,
     Loaded(u64, PathBuf, Result<Vec<Entry>, String>),
+    Searched(u64, PathBuf, directory::Batch),
 }
 
 struct Explorer {
@@ -564,6 +565,8 @@ struct Explorer {
     last_click: Option<(PathBuf, std::time::Instant)>,
     hovered_handle: Option<Column>,
     hovered_close: Option<usize>,
+    walk: Option<std::sync::Arc<directory::Walk>>,
+    searching: bool,
     drag: Option<(Column, f64, f64)>,
     terminal: String,
     sidebar_width: f64,
@@ -655,6 +658,8 @@ impl Component for Explorer {
             last_click: None,
             hovered_handle: None,
             hovered_close: None,
+            walk: None,
+            searching: false,
             window_width: DEFAULT_LIST_WIDTH + SIDEBAR_DEFAULT_WIDTH + SPLITTER_WIDTH + SCROLL_ALLOWANCE + 2.0 * WINDOW_MARGIN,
             recursive: false,
             sort: SortKey::from_name(&saved.sort),
@@ -1456,6 +1461,23 @@ impl Component for Explorer {
                 }
             }
             Message::Loaded(_, _, _) => {}
+            Message::Searched(generation, path, batch) if generation == self.load_generation && path == self.path => {
+                if let Some(error) = batch.error {
+                    self.status = error;
+                    self.has_error = true;
+                    self.searching = false;
+                    return;
+                }
+                self.entries.extend(batch.entries);
+                if batch.finished {
+                    self.searching = false;
+                    self.apply_sort();
+                } else if let Some(walk) = self.walk.clone() {
+                    self.wait_for_batch(generation, path, walk, context);
+                }
+                self.refresh_status();
+            }
+            Message::Searched(..) => {}
         }
     }
 
@@ -2419,7 +2441,9 @@ impl Explorer {
                     count_word(self.selected.len(), "selected|one", "selected")
                 )
             };
-            if self.recursive && self.entries.len() >= directory::SEARCH_LIMIT {
+            if self.searching {
+                self.status.push_str(&format!(" · {}", tr("Searching…")));
+            } else if self.recursive && self.entries.len() >= directory::SEARCH_LIMIT {
                 self.status.push_str(&format!(" · {} {}", tr("limited to the first"), directory::SEARCH_LIMIT));
             }
             self.details.clear();
@@ -2477,21 +2501,29 @@ impl Explorer {
         self.queue_load(path, context);
     }
 
+    fn wait_for_batch(&self, generation: u64, path: PathBuf, walk: std::sync::Arc<directory::Walk>, context: &ComponentContext<Self>) {
+        let _task = context.spawn_background(move |_| Message::Searched(generation, path, walk.next_batch()));
+    }
+
     fn queue_load(&mut self, path: PathBuf, context: &ComponentContext<Self>) {
         self.load_generation += 1;
         let generation = self.load_generation;
         let requested_path = path.clone();
         let path_for_git = path.clone();
-        let recursive = self.recursive;
-        let _task = context.spawn_background(move |_| {
-            let result = if recursive {
-                directory::read_recursive(&path)
-            } else {
-                directory::read(&path)
-            }
-            .map_err(|error| format!("{}: {error}", path.display()));
-            Message::Loaded(generation, requested_path, result)
-        });
+        if let Some(previous) = self.walk.take() {
+            previous.cancel();
+        }
+        self.searching = self.recursive;
+        if self.recursive {
+            let walk = directory::Walk::start(path);
+            self.walk = Some(walk.clone());
+            self.wait_for_batch(generation, requested_path, walk, context);
+        } else {
+            let _task = context.spawn_background(move |_| {
+                let result = directory::read(&path).map_err(|error| format!("{}: {error}", path.display()));
+                Message::Loaded(generation, requested_path, result)
+            });
+        }
         let branch_path = path_for_git;
         let _branch = context.spawn_background(move |_| {
             let branch = shell::git(&["branch", "--show-current"], &branch_path).ok();
