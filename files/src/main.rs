@@ -2348,12 +2348,16 @@ fn tile(
     let content: View = if layout == Layout::Grid {
         StackPanel::new().spacing(TIGHT_GAP).horizontal_alignment(HorizontalAlignment::Center).children((icon, name)).into()
     } else {
+        let mut lines = vec![KeyedView::new(0usize, name)];
+        if !entry.is_directory {
+            lines.push(KeyedView::new(1usize, text(&directory::format_size(entry), theme.map(Theme::muted))));
+        }
         StackPanel::new()
             .orientation(Orientation::Horizontal)
             .spacing(ROW_GAP)
             .children((
                 icon,
-                StackPanel::new().children((name, text(&directory::format_size(entry), theme.map(Theme::muted)))),
+                StackPanel::new().vertical_alignment(VerticalAlignment::Center).keyed_children(lines),
             ))
             .into()
     };
