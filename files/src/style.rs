@@ -36,3 +36,4 @@ pub const CARD_RADIUS: f64 = 6.0;
 pub const PANE_WIDTH: f64 = 300.0;
 pub const FILTER_WIDTH: f64 = 220.0;
 pub const BAR_GAP: f64 = 2.0;
+pub const NAV_GLYPH_SIZE: f64 = 18.0;

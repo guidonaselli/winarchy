@@ -1441,7 +1441,8 @@ impl Component for Explorer {
                     .automation_name(format!("{} {}", tr("Tab"), index + 1))
                     .style(if index == self.active_tab { ButtonStyle::Accent } else { ButtonStyle::Subtle })
                     .on_click(context.message(Message::SwitchTab(index)))
-                    .content(name),
+                    .content(name)
+                    .tooltip(path.to_string_lossy().into_owned()),
             )
         });
         let (primary, secondary) = {
@@ -1572,13 +1573,15 @@ impl Component for Explorer {
                 Button::new().grid_column(3).on_click(context.message(Message::CancelPrompt)).content(tr("Cancel")),
             ));
         }
-        let icon_button = |symbol: Symbol, name: &str, enabled: bool, column: i32, message: Message| {
+        let icon_button = |glyph: &str, name: &str, enabled: bool, column: i32, message: Message| {
             Button::new()
                 .grid_column(column)
                 .automation_name(name)
+                .style(ButtonStyle::Subtle)
                 .is_enabled(enabled)
                 .on_click(context.message(message))
-                .content(SymbolIcon::new().symbol(symbol))
+                .content(TextBlock::new().text(glyph).font_size(NAV_GLYPH_SIZE))
+                .tooltip(name)
         };
         let address_view: View = if self.editing_address {
             TextBox::new()
@@ -1615,12 +1618,14 @@ impl Component for Explorer {
                     Button::new()
                         .automation_name(tr("New tab"))
                         .on_click(context.message(Message::NewTab))
-                        .content("+"),
+                        .content("+")
+                        .tooltip(tr("New tab")),
                     Button::new()
                         .automation_name(tr("Close tab"))
                         .is_enabled(self.tabs.len() > 1)
                         .on_click(context.message(Message::CloseTab))
-                        .content("×"),
+                        .content("×")
+                        .tooltip(tr("Close tab")),
                 )),
             Grid::new()
                 .columns([
@@ -1633,11 +1638,11 @@ impl Component for Explorer {
                 ])
                 .column_spacing(ROW_GAP)
                 .children((
-                    icon_button(Symbol::Back, tr("Back"), !self.back.is_empty(), 0, Message::Back),
-                    icon_button(Symbol::Forward, tr("Forward"), !self.forward.is_empty(), 1, Message::Forward),
-                    icon_button(Symbol::Up, tr("Up"), true, 2, Message::Parent),
+                    icon_button("←", tr("Back"), !self.back.is_empty(), 0, Message::Back),
+                    icon_button("→", tr("Forward"), !self.forward.is_empty(), 1, Message::Forward),
+                    icon_button("↑", tr("Up"), true, 2, Message::Parent),
                     address_view,
-                    icon_button(Symbol::Edit, tr("Edit address"), true, 4, Message::EditAddress),
+                    icon_button("✎", tr("Edit address"), true, 4, Message::EditAddress),
                     TextBox::new()
                         .grid_column(5)
                         .vertical_alignment(VerticalAlignment::Center)
@@ -1696,7 +1701,8 @@ impl Component for Explorer {
                                     SymbolIcon::new().symbol(place_icon(path, self.pinned.contains(path))),
                                     text(label, self.theme.as_ref().map(Theme::foreground)),
                                 )),
-                        ),
+                        )
+                        .tooltip(path.to_string_lossy().into_owned()),
                 )
             });
         let splitter = Border::new()
@@ -1905,6 +1911,7 @@ impl Explorer {
             .style(ButtonStyle::Subtle)
             .on_click(context.message(Message::Sort(key)))
             .content(format!("{label}{arrow}"))
+            .tooltip(format!("{} {}", tr("Sort by"), label))
     }
 
     fn paste(&mut self, context: &ComponentContext<Self>) {
