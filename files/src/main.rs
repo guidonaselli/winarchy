@@ -1,6 +1,8 @@
 #![windows_subsystem = "windows"]
 
 mod directory;
+mod clipboard;
+mod keys;
 mod shell;
 mod theme;
 
@@ -27,6 +29,7 @@ enum Message {
     Refresh,
     Focus(bool),
     Resize(WindowSize),
+    Key(keys::Receiver, Option<keys::Key>),
     RetryFocus,
     Paste,
     Filter(String),
@@ -122,6 +125,13 @@ impl Component for Explorer {
             list_width: 800.0,
         };
         app.queue_load(path, context);
+        match keys::install() {
+            Ok(receiver) => app.watch_keys(receiver, context),
+            Err(error) => {
+                app.status = format!("Keyboard shortcuts unavailable: {error}");
+                app.has_error = true;
+            }
+        }
         #[cfg(windows)]
         match theme_watcher {
             Ok(handle) => app.watch_theme_handle(handle, context),
@@ -144,15 +154,25 @@ impl Component for Explorer {
                 if !self.selected.is_empty() {
                     self.clipboard = self.selected.iter().cloned().collect();
                     self.clipboard_cut = cut;
-                    self.has_error = false;
-                    self.status = format!(
-                        "{} items {}",
-                        self.clipboard.len(),
-                        if cut { "cut" } else { "copied" }
-                    );
+                    let shared = clipboard::set_files(&self.clipboard, cut);
+                    self.has_error = shared.is_err();
+                    self.status = match shared {
+                        Ok(()) => format!(
+                            "{} items {}",
+                            self.clipboard.len(),
+                            if cut { "cut" } else { "copied" }
+                        ),
+                        Err(error) => format!("Clipboard failed: {error}"),
+                    };
                 }
             }
             Message::Paste => self.paste(context),
+            Message::Key(receiver, key) => {
+                if let Some(key) = key {
+                    self.watch_keys(receiver, context);
+                    self.handle_key(key, context);
+                }
+            }
             Message::Resize(size) => self.list_width = (size.width - SIDEBAR_AND_SCROLL).max(320.0),
             Message::Focus(true) => {}
             Message::Focus(false) => {
@@ -385,7 +405,7 @@ impl Component for Explorer {
                     Button::new()
                         .grid_column(2)
                         .is_enabled(
-                            !self.clipboard.is_empty() && !self.deleting && !self.transferring,
+                            clipboard::has_files() && !self.deleting && !self.transferring,
                         )
                         .on_click(context.message(Message::Paste))
                         .content("Paste here"),
@@ -496,6 +516,34 @@ impl Component for Explorer {
 }
 
 impl Explorer {
+    fn watch_keys(&self, receiver: keys::Receiver, context: &ComponentContext<Self>) {
+        let _task = context.spawn_background(move |cancel| {
+            let key = keys::next(&receiver, &cancel);
+            Message::Key(receiver, key)
+        });
+    }
+
+    fn handle_key(&mut self, key: keys::Key, context: &ComponentContext<Self>) {
+        match key {
+            keys::Key::Copy => self.update(Message::Clip(false), context),
+            keys::Key::Cut => self.update(Message::Clip(true), context),
+            keys::Key::Paste => self.update(Message::Paste, context),
+            keys::Key::Delete => self.update(Message::DeleteSelected, context),
+            keys::Key::Up => self.update(Message::Parent, context),
+            keys::Key::Refresh => self.update(Message::Refresh, context),
+            keys::Key::SelectAll => {
+                let needle = self.filter.to_lowercase();
+                self.selected = self
+                    .entries
+                    .iter()
+                    .filter(|entry| entry.name.to_lowercase().contains(&needle))
+                    .map(|entry| entry.path.clone())
+                    .collect();
+                self.refresh_status();
+            }
+        }
+    }
+
     fn request_address_focus(&mut self, context: &ComponentContext<Self>) {
         self.focus_attempts += 1;
         let sender = context.sender();
@@ -554,14 +602,19 @@ impl Explorer {
     }
 
     fn paste(&mut self, context: &ComponentContext<Self>) {
-        if self.deleting || self.transferring || self.clipboard.is_empty() {
+        if self.deleting || self.transferring {
             return;
         }
-        let (paths, destination, cut) = (
-            self.clipboard.clone(),
-            self.path.clone(),
-            self.clipboard_cut,
-        );
+        let (paths, cut) = match clipboard::get_files() {
+            Ok(Some(files)) => files,
+            Ok(None) => return,
+            Err(error) => {
+                self.has_error = true;
+                self.status = format!("Clipboard failed: {error}");
+                return;
+            }
+        };
+        let destination = self.path.clone();
         self.transferring = true;
         self.has_error = false;
         self.status = "Pasting…".to_owned();
@@ -735,6 +788,7 @@ impl Explorer {
         if move_items {
             self.selected.clear();
             self.clipboard.clear();
+            clipboard::clear();
         }
         self.entries.clear();
         match result {
