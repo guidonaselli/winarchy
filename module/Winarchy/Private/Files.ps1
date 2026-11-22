@@ -19,6 +19,7 @@ function Start-WinarchyFiles {
     $start = [Diagnostics.ProcessStartInfo]::new($exe)
     $start.UseShellExecute = $false
     $start.Environment['WINARCHY_FILES_THEME'] = Join-Path $root 'config\files\theme.json'
+    $start.Environment['WINARCHY_FILES_SETTINGS'] = Join-Path (Get-WinarchyStateDir) 'files-settings.json'
     if ($Path) { $start.ArgumentList.Add((Resolve-Path -LiteralPath $Path).Path) }
     $null = [Diagnostics.Process]::Start($start)
 }

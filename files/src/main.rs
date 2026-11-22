@@ -3,6 +3,7 @@
 mod directory;
 mod clipboard;
 mod keys;
+mod settings;
 mod shell;
 mod theme;
 
@@ -20,6 +21,24 @@ enum SortKey {
     Name,
     Size,
     Modified,
+}
+
+impl SortKey {
+    fn name(self) -> &'static str {
+        match self {
+            SortKey::Name => "name",
+            SortKey::Size => "size",
+            SortKey::Modified => "modified",
+        }
+    }
+
+    fn from_name(name: &str) -> Self {
+        match name {
+            "size" => SortKey::Size,
+            "modified" => SortKey::Modified,
+            _ => SortKey::Name,
+        }
+    }
 }
 
 // Only operations that can be reversed without guessing: names that did not exist before.
@@ -163,6 +182,7 @@ impl Component for Explorer {
 
     fn create(input: &PathBuf, context: &ComponentContext<Self>) -> Self {
         let path = input.clone();
+        let saved = settings::load();
         #[cfg(windows)]
         let theme_watcher = Theme::start_watching();
         let (theme, status, has_error) = match Theme::load() {
@@ -184,10 +204,10 @@ impl Component for Explorer {
             pending_inverse: None,
             redoing: false,
             details: String::new(),
-            show_hidden: false,
+            show_hidden: saved.show_hidden,
             recursive: false,
-            sort: SortKey::Name,
-            descending: false,
+            sort: SortKey::from_name(&saved.sort),
+            descending: saved.descending,
             new_folder_name: String::new(),
             rename_name: String::new(),
             transfer_destination: String::new(),
@@ -261,6 +281,7 @@ impl Component for Explorer {
             }
             Message::ToggleHidden => {
                 self.show_hidden = !self.show_hidden;
+                self.save_settings();
                 self.selected.clear();
                 self.refresh_status();
             }
@@ -314,6 +335,7 @@ impl Component for Explorer {
                 self.descending = self.sort == key && !self.descending;
                 self.sort = key;
                 self.apply_sort();
+                self.save_settings();
             }
             Message::NewFolderName(name) => self.new_folder_name = name,
             Message::CreateFolder => self.create_folder(context),
@@ -812,6 +834,14 @@ impl Explorer {
     fn watch_theme_handle(&self, handle: usize, context: &ComponentContext<Self>) {
         let _task = context.spawn_background(move |cancel| {
             Message::ThemeChanged(Theme::wait_for_change(handle, cancel))
+        });
+    }
+
+    fn save_settings(&self) {
+        settings::save(&settings::Settings {
+            show_hidden: self.show_hidden,
+            sort: self.sort.name().to_owned(),
+            descending: self.descending,
         });
     }
 
