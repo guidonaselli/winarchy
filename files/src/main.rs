@@ -145,7 +145,10 @@ enum Message {
     Back,
     Forward,
     CreateFile,
-    CopyPath,
+    CopyPath(bool),
+    DeletePermanently,
+    ShowInFolder,
+    CreateShortcut,
     OpenTerminal,
     CloseTab,
     DuplicateTab,
@@ -377,11 +380,15 @@ impl Component for Explorer {
                     }
                 }
             }
-            Message::CopyPath => {
+            Message::CopyPath(quoted) => {
                 let text = if self.selected.is_empty() {
-                    self.path.to_string_lossy().into_owned()
+                    if quoted { format!("\"{}\"", self.path.display()) } else { self.path.to_string_lossy().into_owned() }
                 } else {
-                    let mut paths: Vec<_> = self.selected.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+                    let mut paths: Vec<_> = self
+                        .selected
+                        .iter()
+                        .map(|p| if quoted { format!("\"{}\"", p.display()) } else { p.to_string_lossy().into_owned() })
+                        .collect();
                     paths.sort();
                     paths.join("\r\n")
                 };
@@ -554,7 +561,30 @@ impl Component for Explorer {
             }
             Message::RenameName(name) => self.rename_name = name,
             Message::RenameSelected => self.rename_selected(context),
-            Message::DeleteSelected => self.delete_selected(context),
+            Message::DeleteSelected => self.delete_selected(false, context),
+            Message::DeletePermanently => self.delete_selected(true, context),
+            Message::ShowInFolder => {
+                if let [path] = self.selected.iter().collect::<Vec<_>>()[..]
+                    && let Some(parent) = path.parent().map(PathBuf::from)
+                {
+                    self.navigate(parent, context);
+                }
+            }
+            Message::CreateShortcut => {
+                let Some(target) = self.selected.iter().next().filter(|_| self.selected.len() == 1).cloned() else { return };
+                let Some(name) = target.file_name().map(|n| n.to_string_lossy().into_owned()) else { return };
+                let link = self.path.join(format!("{name} - {}.lnk", tr("Shortcut")));
+                match shell::create_shortcut(&target, &link) {
+                    Ok(()) => {
+                        self.record(Undo::RemoveFile(link));
+                        self.load_path(self.path.clone(), context);
+                    }
+                    Err(error) => {
+                        self.status = format!("{}: {error}", tr("Could not create shortcut"));
+                        self.has_error = true;
+                    }
+                }
+            }
             Message::DeleteComplete(parent, result) => {
                 self.delete_complete(parent, result, context)
             }
@@ -777,7 +807,7 @@ impl Component for Explorer {
                         .content(tr("Create file")),
                 )),
             Grid::new()
-                .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto])
+                .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto, GridLength::Auto])
                 .column_spacing(6.0)
                 .children((
                     TextBox::new()
@@ -799,9 +829,16 @@ impl Component for Explorer {
                         )
                         .on_click(context.message(Message::DeleteSelected))
                         .content(tr("Delete to Recycle Bin")),
+                    Button::new()
+                        .grid_column(3)
+                        .is_enabled(
+                            !self.selected.is_empty() && !self.deleting && !self.transferring,
+                        )
+                        .on_click(context.message(Message::DeletePermanently))
+                        .content(tr("Delete permanently")),
                 )),
             Grid::new()
-                .columns([GridLength::Auto; 5])
+                .columns([GridLength::Auto; 8])
                 .column_spacing(6.0)
                 .children((
                     Button::new()
@@ -823,12 +860,26 @@ impl Component for Explorer {
                         .content(tr("Paste here")),
                     Button::new()
                         .grid_column(3)
-                        .on_click(context.message(Message::CopyPath))
+                        .on_click(context.message(Message::CopyPath(false)))
                         .content(tr("Copy path")),
                     Button::new()
                         .grid_column(4)
                         .on_click(context.message(Message::OpenTerminal))
                         .content(tr("Terminal here")),
+                    Button::new()
+                        .grid_column(5)
+                        .on_click(context.message(Message::CopyPath(true)))
+                        .content(tr("Copy path with quotes")),
+                    Button::new()
+                        .grid_column(6)
+                        .is_enabled(self.selected.len() == 1)
+                        .on_click(context.message(Message::ShowInFolder))
+                        .content(tr("Show in folder")),
+                    Button::new()
+                        .grid_column(7)
+                        .is_enabled(self.selected.len() == 1)
+                        .on_click(context.message(Message::CreateShortcut))
+                        .content(tr("Create shortcut")),
                 )),
             text(tr("Destination folder"), self.theme.as_ref().map(Theme::muted)),
             Grid::new()
@@ -1259,17 +1310,17 @@ impl Explorer {
         });
     }
 
-    fn delete_selected(&mut self, context: &ComponentContext<Self>) {
+    fn delete_selected(&mut self, permanent: bool, context: &ComponentContext<Self>) {
         if self.deleting || self.transferring || self.selected.is_empty() {
             return;
         }
         let paths: Vec<_> = self.selected.iter().cloned().collect();
         let parent = self.path.clone();
         self.deleting = true;
-        self.status = tr("Deleting to Recycle Bin…").to_owned();
+        self.status = tr(if permanent { "Deleting permanently…" } else { "Deleting to Recycle Bin…" }).to_owned();
         self.has_error = false;
         let _task = context.spawn_background(move |_| {
-            let result = shell::recycle(&paths);
+            let result = shell::delete(&paths, permanent);
             Message::DeleteComplete(parent, result)
         });
     }

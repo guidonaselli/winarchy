@@ -55,6 +55,12 @@ pub fn rename(source: &Path, target: &Path) -> Result<(), String> {
 
 #[cfg(windows)]
 pub fn recycle(paths: &[std::path::PathBuf]) -> Result<bool, String> {
+    delete(paths, false)
+}
+
+#[cfg(windows)]
+// A permanent delete leaves out FOF_ALLOWUNDO, so Windows asks for its own confirmation.
+pub fn delete(paths: &[std::path::PathBuf], permanent: bool) -> Result<bool, String> {
     use std::{
         ffi::c_void,
         os::windows::ffi::OsStrExt,
@@ -114,7 +120,7 @@ pub fn recycle(paths: &[std::path::PathBuf]) -> Result<bool, String> {
             operation: 3,
             from: from.as_ptr(),
             to: std::ptr::null(),
-            flags: 0x0040,
+            flags: if permanent { 0 } else { 0x0040 },
             aborted: 0,
             mappings: std::ptr::null_mut(),
             progress_title: std::ptr::null(),
@@ -149,8 +155,8 @@ pub fn recycle(paths: &[std::path::PathBuf]) -> Result<bool, String> {
 }
 
 #[cfg(not(windows))]
-pub fn recycle(_paths: &[std::path::PathBuf]) -> Result<bool, String> {
-    Err("Recycle Bin is supported only on Windows".to_owned())
+pub fn delete(_paths: &[std::path::PathBuf], _permanent: bool) -> Result<bool, String> {
+    Err("Deleting is supported only on Windows".to_owned())
 }
 
 #[cfg(not(windows))]
@@ -263,4 +269,29 @@ pub fn transfer(
 #[cfg(not(windows))]
 pub fn open(_path: &Path) -> Result<(), String> {
     Err("Opening files is supported only on Windows".to_owned())
+}
+
+#[cfg(windows)]
+pub fn create_shortcut(target: &Path, link: &Path) -> Result<(), String> {
+    use windows::{
+        Win32::{
+            System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, IPersistFile},
+            UI::Shell::{IShellLinkW, ShellLink},
+        },
+        core::{Interface, HSTRING},
+    };
+    unsafe {
+        let shell_link: IShellLinkW =
+            CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(|e| e.to_string())?;
+        shell_link.SetPath(&HSTRING::from(target.as_os_str())).map_err(|e| e.to_string())?;
+        shell_link
+            .cast::<IPersistFile>()
+            .and_then(|file| file.Save(&HSTRING::from(link.as_os_str()), true))
+            .map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(not(windows))]
+pub fn create_shortcut(_target: &Path, _link: &Path) -> Result<(), String> {
+    Err("Shortcuts are supported only on Windows".to_owned())
 }
