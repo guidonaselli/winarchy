@@ -490,6 +490,8 @@ enum Message {
     ResizeStart(Column, f64),
     ResizeDrag(f64, bool),
     ResizeEnd,
+    BarAnchor(f64, f64),
+    OpenDropdown(MenuKind),
     ContextItem(PathBuf, f64, f64),
     ContextBackground(f64, f64),
     CloseMenu,
@@ -552,7 +554,8 @@ struct Explorer {
     hide_pane: bool,
     window_width: f64,
     window_height: f64,
-    menu: Option<(f64, f64, Option<PathBuf>)>,
+    menu: Option<(f64, f64, MenuKind)>,
+    bar_anchor: (f64, f64),
     drag: Option<(Column, f64, f64)>,
     terminal: String,
     sidebar_width: f64,
@@ -637,6 +640,7 @@ impl Component for Explorer {
             hide_pane: saved.hide_pane,
             window_height: 600.0,
             menu: None,
+            bar_anchor: (0.0, 0.0),
             window_width: DEFAULT_LIST_WIDTH + SIDEBAR_DEFAULT_WIDTH + SPLITTER_WIDTH + SCROLL_ALLOWANCE + 2.0 * WINDOW_MARGIN,
             recursive: false,
             sort: SortKey::from_name(&saved.sort),
@@ -1161,14 +1165,20 @@ impl Component for Explorer {
                     self.selected = HashSet::from([path.clone()]);
                     self.refresh_status();
                 }
-                self.menu = Some((x, y, Some(path)));
+                self.menu = Some((x, y, MenuKind::Item));
             }
             Message::ContextBackground(x, y) => {
                 if self.menu.is_none() {
                     self.selected.clear();
                     self.refresh_status();
-                    self.menu = Some((x, y, None));
+                    self.menu = Some((x, y, MenuKind::Background));
                 }
+            }
+            // A button swallows pointer presses, so the bar remembers where the pointer entered it to anchor the dropdown.
+            Message::BarAnchor(x, y) => self.bar_anchor = (x, y),
+            Message::OpenDropdown(kind) => {
+                let (x, y) = self.bar_anchor;
+                self.menu = if self.menu.as_ref().is_some_and(|(_, _, open)| *open == kind) { None } else { Some((x, y + BAR_BUTTON_HEIGHT, kind)) };
             }
             Message::CloseMenu => self.menu = None,
             Message::MenuCommand(label) => {
@@ -1795,29 +1805,40 @@ impl Component for Explorer {
             .children((Grid::new().grid_row(0).margin(Thickness::new(0.0, 0.0, 0.0, BAR_GAP)).children((top,)), body));
         let mut items = vec![KeyedView::new(0usize, page)];
         if let Some((x, y, target)) = &self.menu {
-            items.push(KeyedView::new(1usize, self.context_menu(context, *x, *y, target.is_some())));
+            items.push(KeyedView::new(1usize, self.context_menu(context, *x, *y, *target)));
         }
         Grid::new().background_optional(background).keyed_children(items).into()
     }
 }
 
 impl Explorer {
-    fn context_menu(&self, context: &ViewContext<Self>, x: f64, y: f64, on_item: bool) -> View {
-        let wanted: &[&str] = if on_item {
-            &["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Compress to zip", "Extract here", "Copy path", "Share", "Add tags", "Terminal here", "Properties"]
-        } else {
-            &["Paste here", "Paste as shortcut", "Create folder", "Create file", "Terminal here", "Open in editor", "Select none"]
+    fn menu_entries<'a>(&self, commands: &'a [Command], kind: MenuKind) -> Vec<&'a Command> {
+        let find = |label: &str| {
+            let label = tr_dynamic(label);
+            commands.iter().find(|command| command.label == label)
         };
+        match kind {
+            MenuKind::Item => ["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Compress to zip", "Extract here", "Copy path", "Share", "Add tags", "Terminal here", "Properties"].iter().filter_map(|label| find(label)).collect(),
+            MenuKind::Background => ["Paste here", "Paste as shortcut", "Create folder", "Create file", "Terminal here", "Open in editor", "Select none"].iter().filter_map(|label| find(label)).collect(),
+            MenuKind::New => NEW_LABELS.iter().filter_map(|label| find(label)).collect(),
+            MenuKind::Sort => self.sort_labels().iter().filter_map(|label| find(label)).collect(),
+            MenuKind::More => {
+                let shown: Vec<String> = NEW_LABELS.iter().chain(&TOOL_LABELS).copied().chain(self.sort_labels()).map(tr_dynamic).collect();
+                commands.iter().filter(|command| command.message.is_some() && !shown.contains(&command.label)).collect()
+            }
+        }
+    }
+
+    fn sort_labels(&self) -> [&'static str; 5] {
+        [self.sort_label(SortKey::Name, "Sort by name"), self.sort_label(SortKey::Size, "Sort by size"), self.sort_label(SortKey::Modified, "Sort by date"), self.group.label(), self.layout.label()]
+    }
+
+    fn context_menu(&self, context: &ViewContext<Self>, x: f64, y: f64, kind: MenuKind) -> View {
         let commands = self.commands();
-        let entries: Vec<&Command> = wanted
-            .iter()
-            .filter_map(|label| {
-                let label = tr_dynamic(label);
-                commands.iter().find(|command| command.label == label)
-            })
-            .collect();
+        let entries = self.menu_entries(&commands, kind);
         let height = entries.len() as f64 * MENU_ITEM_HEIGHT + 2.0 * MENU_PADDING;
         let left = x.min(self.window_width - MENU_WIDTH - WINDOW_MARGIN).max(0.0);
+        let height = height.min(self.window_height - 2.0 * WINDOW_MARGIN);
         let top = y.min(self.window_height - height - WINDOW_MARGIN).max(0.0);
         let items = entries.into_iter().enumerate().map(|(index, command)| {
             KeyedView::new(
@@ -1858,7 +1879,8 @@ impl Explorer {
             .border_thickness(Thickness::new(DIVIDER, DIVIDER, DIVIDER, DIVIDER))
             .border_brush_optional(self.theme.as_ref().map(Theme::muted))
             .background_optional(self.theme.as_ref().map(Theme::surface))
-            .content(StackPanel::new().keyed_children(items));
+            .height(height)
+            .content(ScrollViewer::new().content(StackPanel::new().keyed_children(items)));
         Grid::new().children((backdrop, card)).into()
     }
 
@@ -2101,30 +2123,28 @@ impl Explorer {
             let label = tr_dynamic(label);
             commands.iter().find(|command| command.label == label)
         };
-        let menu_of = |labels: &[&str]| {
-            let items = labels.iter().enumerate().filter_map(|(index, label)| {
-                find(label).map(|command| {
-                    if command.enabled { MenuItem::item(index, command.label.clone()) } else { MenuItem::disabled(index, command.label.clone()) }
+        let anchored = |kind: MenuKind, label: &str, content: View, tooltip: Option<String>| -> View {
+            let button = Button::new().style(ButtonStyle::Subtle).automation_name(label).on_click(context.message(Message::OpenDropdown(kind))).content(content);
+            Border::new()
+                .on_pointer_entered(context.callback(|info: PointerEventInfo| Message::BarAnchor(info.window_x - info.x, info.window_y - info.y)))
+                .content(match tooltip {
+                    Some(hint) => button.tooltip(hint),
+                    None => button.into(),
                 })
-            });
-            Menu::new(items, context.callback(Message::Command))
+                .into()
         };
-        let dropdown = |glyph: icons::Icon, label: &str, menu: Menu| -> View {
-            Button::new()
-                .style(ButtonStyle::Subtle)
-                .automation_name(label)
-                .content(
-                    StackPanel::new()
-                        .orientation(Orientation::Horizontal)
-                        .spacing(ROW_GAP)
-                        .vertical_alignment(VerticalAlignment::Center)
-                        .children((
-                            icon(glyph, ICON_SIZE, theme),
-                            text(label, theme.map(Theme::foreground)),
-                            icon(icons::Icon::CaretDown, ICON_SIZE_SMALL, theme),
-                        )),
-                )
-                .menu(menu)
+        let dropdown = |glyph: icons::Icon, label: &str, kind: MenuKind| -> View {
+            anchored(
+                kind,
+                label,
+                StackPanel::new()
+                    .orientation(Orientation::Horizontal)
+                    .spacing(ROW_GAP)
+                    .vertical_alignment(VerticalAlignment::Center)
+                    .children((icon(glyph, ICON_SIZE, theme), text(label, theme.map(Theme::foreground)), icon(icons::Icon::CaretDown, ICON_SIZE_SMALL, theme)))
+                    .into(),
+                None,
+            )
         };
         let tool = |label: &str| -> Option<View> {
             let command = find(label)?;
@@ -2143,25 +2163,11 @@ impl Explorer {
             )
         };
         let separator = || Border::new().width(DIVIDER).height(BAR_DIVIDER_HEIGHT).margin(Thickness::new(ROW_GAP, 0.0, ROW_GAP, 0.0)).background_optional(theme.map(Theme::muted)).into();
-        const NEW: [&str; 4] = ["Create folder", "Create file", "Create shortcut", "Git clone"];
-        let sort_labels = [self.sort_label(SortKey::Name, "Sort by name"), self.sort_label(SortKey::Size, "Sort by size"), self.sort_label(SortKey::Modified, "Sort by date"), self.group.label(), self.layout.label()];
-        const TOOLS: [&str; 6] = ["Cut", "Copy", "Paste here", "Rename selected", "Share", "Delete to Recycle Bin"];
-        let shown: Vec<String> = NEW.iter().chain(&TOOLS).copied().chain(sort_labels).map(tr_dynamic).collect();
-        let more_items = commands
-            .iter()
-            .filter(|command| command.message.is_some() && !shown.contains(&command.label))
-            .enumerate()
-            .map(|(index, command)| if command.enabled { MenuItem::item(index, command.label.clone()) } else { MenuItem::disabled(index, command.label.clone()) });
-        let more = Button::new()
-            .style(ButtonStyle::Subtle)
-            .automation_name(tr("More"))
-            .content(icon(icons::Icon::DotsThree, ICON_SIZE, theme))
-            .tooltip(tr("More"))
-            .menu(Menu::new(more_items, context.callback(Message::Command)));
-        let mut left: Vec<View> = vec![dropdown(icons::Icon::Plus, tr("New"), menu_of(&NEW)), separator()];
-        left.extend(TOOLS.iter().filter_map(|label| tool(label)));
+        let more = anchored(MenuKind::More, &tr("More"), icon(icons::Icon::DotsThree, ICON_SIZE, theme).into(), Some(tr("More").to_owned()));
+        let mut left: Vec<View> = vec![dropdown(icons::Icon::Plus, tr("New"), MenuKind::New), separator()];
+        left.extend(TOOL_LABELS.iter().filter_map(|label| tool(label)));
         left.push(separator());
-        left.push(dropdown(icons::Icon::SortAscending, tr("Sort"), menu_of(&sort_labels)));
+        left.push(dropdown(icons::Icon::SortAscending, tr("Sort"), MenuKind::Sort));
         left.push(more);
         let details = Border::new()
             .grid_column(1)
@@ -2819,6 +2825,18 @@ fn shortcut_of(label: &str) -> Option<&'static str> {
 // A disabled control dims its icon too, since images ignore the button's disabled state.
 fn icon_state(glyph: icons::Icon, size: f64, theme: Option<&Theme>, enabled: bool) -> View {
     Border::new().opacity(if enabled { 1.0 } else { ICON_DISABLED_OPACITY }).content(icon(glyph, size, theme)).into()
+}
+
+const NEW_LABELS: [&str; 4] = ["Create folder", "Create file", "Create shortcut", "Git clone"];
+const TOOL_LABELS: [&str; 6] = ["Cut", "Copy", "Paste here", "Rename selected", "Share", "Delete to Recycle Bin"];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MenuKind {
+    Item,
+    Background,
+    New,
+    Sort,
+    More,
 }
 
 // Duotone icon: an accent-tinted layer under a foreground outline, drawn from a themed SVG.
