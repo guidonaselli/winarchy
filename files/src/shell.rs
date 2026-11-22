@@ -16,10 +16,10 @@ pub fn execute(verb: &str, file: &str, parameters: Option<&str>) -> Result<(), S
     let operation = wide(verb);
     let file = wide(file);
     let parameters = parameters.map(wide);
-    // INVOKEIDLIST is what makes the "properties" verb open the sheet; it is harmless for the other verbs.
+    // Only the "properties" verb needs INVOKEIDLIST; it makes the shell parse the file as an item id list.
     let mut info = SHELLEXECUTEINFOW {
         cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
-        fMask: SEE_MASK_INVOKEIDLIST,
+        fMask: if verb == "properties" { SEE_MASK_INVOKEIDLIST } else { 0 },
         lpVerb: PCWSTR(operation.as_ptr()),
         lpFile: PCWSTR(file.as_ptr()),
         lpParameters: parameters.as_ref().map_or(PCWSTR::null(), |p| PCWSTR(p.as_ptr())),
@@ -266,6 +266,18 @@ pub fn open(_path: &Path) -> Result<(), String> {
 }
 
 #[cfg(windows)]
+// A name that does not exist yet, so a shortcut never overwrites (and its undo never deletes) a user's file.
+pub fn free_name(dir: &Path, stem: &str, extension: &str) -> PathBuf {
+    let mut candidate = dir.join(format!("{stem}.{extension}"));
+    let mut counter = 2;
+    while candidate.exists() {
+        candidate = dir.join(format!("{stem} ({counter}).{extension}"));
+        counter += 1;
+    }
+    candidate
+}
+
+#[cfg(windows)]
 pub fn create_shortcut(target: &Path, link: &Path) -> Result<(), String> {
     use windows::{
         Win32::{
@@ -321,6 +333,8 @@ pub fn git(args: &[&str], dir: &Path) -> Result<String, String> {
     use std::os::windows::process::CommandExt;
     let output = std::process::Command::new("git")
         .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never")
         .current_dir(dir)
         .creation_flags(0x0800_0000)
         .output()

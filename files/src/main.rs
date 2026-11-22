@@ -113,6 +113,9 @@ fn places_with(pinned: &[PathBuf]) -> Vec<(String, PathBuf)> {
 }
 
 fn extension_of(entry: &Entry) -> String {
+    if entry.is_directory {
+        return String::new();
+    }
     entry.path.extension().map(|ext| ext.to_string_lossy().to_lowercase()).unwrap_or_default()
 }
 
@@ -213,7 +216,7 @@ impl Explorer {
             command("Storage settings", Message::OpenStorageSense, None, true, false),
             command("Open Recycle Bin", Message::OpenRecycleBin, None, true, false),
             command("Empty Recycle Bin", Message::EmptyRecycleBin, None, true, false),
-            command(if self.sort == SortKey::Type { "Group by type: on" } else { "Group by type: off" }, Message::Sort(SortKey::Type), None, true, false),
+            command(if self.sort == SortKey::Type { "Group by type: on" } else { "Group by type: off" }, Message::Sort(if self.sort == SortKey::Type { SortKey::Name } else { SortKey::Type }), None, true, false),
             command(self.layout.label(), Message::CycleLayout, None, true, false),
             command("Select none", Message::SelectNone, None, some, false),
             command("Invert selection", Message::InvertSelection, None, true, false),
@@ -634,8 +637,8 @@ impl Component for Explorer {
                     Some(path) if self.selected.len() == 1 => path.clone(),
                     _ => self.path.clone(),
                 };
-                let opened = std::process::Command::new("cmd.exe")
-                    .args(["/c", "code"])
+                // code.cmd is spawned directly so Rust escapes the argument; going through cmd /c would run `&` in a file name.
+                let opened = std::process::Command::new("code.cmd")
                     .arg(&target)
                     .creation_flags(0x0800_0000)
                     .spawn();
@@ -830,7 +833,7 @@ impl Component for Explorer {
                     return;
                 }
                 let url = self.new_folder_name.trim().to_owned();
-                if action == "clone" && url.is_empty() {
+                if action == "clone" && (url.is_empty() || url.starts_with('-')) {
                     self.status = tr("Type the repository URL in the name field").to_owned();
                     self.has_error = true;
                     return;
@@ -841,7 +844,7 @@ impl Component for Explorer {
                 self.status = format!("git {action}…");
                 let _task = context.spawn_background(move |_| {
                     let result = match action {
-                        "clone" => shell::git(&["clone", &url], &dir),
+                        "clone" => shell::git(&["clone", "--", &url], &dir),
                         other => shell::git(&[other], &dir),
                     };
                     Message::GitDone(action, result)
@@ -982,6 +985,9 @@ impl Component for Explorer {
                 }
             }
             Message::PasteShortcut => {
+                if self.deleting || self.transferring {
+                    return;
+                }
                 let files = match clipboard::get_files() {
                     Ok(Some((files, _))) => files,
                     Ok(None) => return,
@@ -994,7 +1000,7 @@ impl Component for Explorer {
                 let mut failure = None;
                 for target in files {
                     let Some(name) = target.file_name().map(|n| n.to_string_lossy().into_owned()) else { continue };
-                    let link = self.path.join(format!("{name} - {}.lnk", tr("Shortcut")));
+                    let link = shell::free_name(&self.path, &format!("{name} - {}", tr("Shortcut")), "lnk");
                     match shell::create_shortcut(&target, &link) {
                         Ok(()) => self.record(Undo::RemoveFile(link)),
                         Err(error) => failure = Some(format!("{}: {error}", tr("Could not create shortcut"))),
@@ -1006,7 +1012,7 @@ impl Component for Explorer {
             Message::CreateShortcut => {
                 let Some(target) = self.selected.iter().next().filter(|_| self.selected.len() == 1).cloned() else { return };
                 let Some(name) = target.file_name().map(|n| n.to_string_lossy().into_owned()) else { return };
-                let link = self.path.join(format!("{name} - {}.lnk", tr("Shortcut")));
+                let link = shell::free_name(&self.path, &format!("{name} - {}", tr("Shortcut")), "lnk");
                 match shell::create_shortcut(&target, &link) {
                     Ok(()) => {
                         self.record(Undo::RemoveFile(link));
@@ -1699,6 +1705,7 @@ impl Explorer {
     fn load_path(&mut self, path: PathBuf, context: &ComponentContext<Self>) {
         self.path = path.clone();
         self.tabs[self.active_tab] = path.clone();
+        self.notice = None;
         self.recursive = false;
         self.address = path.to_string_lossy().into_owned();
         self.new_folder_name.clear();
