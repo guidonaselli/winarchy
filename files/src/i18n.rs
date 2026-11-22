@@ -72,6 +72,7 @@ const ES: &[(&str, &str)] = &[
     ("Sort by date ▲", "Ordenar por fecha ▲"),
     ("Sort by date ▼", "Ordenar por fecha ▼"),
     ("Share", "Compartir"),
+    ("Refresh", "Actualizar"),
     ("Sort by", "Ordenar por"),
     ("New file name", "Nombre del archivo nuevo"),
     ("New name", "Nombre nuevo"),

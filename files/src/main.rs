@@ -241,7 +241,7 @@ impl Explorer {
             command("Paste as shortcut", Message::PasteShortcut, None, clipboard::has_files() && idle, false),
             command("Create shortcut", Message::CreateShortcut, None, one, false),
             command("Compress to zip", Message::Compress, None, some && !self.transferring, false),
-            command("Extract here", Message::Extract, None, one && !self.transferring, false),
+            command("Extract here", Message::Extract, None, one && !self.transferring && self.selected.iter().next().is_some_and(|path| path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip"))), false),
             command("Edit in Notepad", Message::RunVerb("notepad"), None, one, false),
             command("Share", Message::Share, Some(Symbol::Share), some, false),
             command("Add tags", Message::Ask(Prompt::Tags), Some(Symbol::Tag), some, false),
@@ -444,6 +444,7 @@ enum Message {
     CreateShortcut,
     OpenTerminal,
     CloseTab,
+    CloseTabAt(usize),
     DuplicateTab,
     ReopenTab,
     CloseOtherTabs,
@@ -554,6 +555,7 @@ struct Explorer {
     window_height: f64,
     menu: Option<(f64, f64, Option<PathBuf>)>,
     drag: Option<(Column, f64, f64)>,
+    terminal: String,
     sidebar_width: f64,
     sidebar_drag: Option<(f64, f64)>,
     recursive: bool,
@@ -632,6 +634,7 @@ impl Component for Explorer {
             drag: None,
             sidebar_width: if saved.sidebar_width > 0.0 { saved.sidebar_width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH) } else { SIDEBAR_DEFAULT_WIDTH },
             sidebar_drag: None,
+            terminal: saved.terminal.clone(),
             hide_pane: saved.hide_pane,
             window_height: 600.0,
             menu: None,
@@ -804,10 +807,14 @@ impl Component for Explorer {
                 }
             }
             Message::OpenTerminal => {
-                let opened = std::process::Command::new("wt.exe")
-                    .arg("-d")
-                    .arg(&self.path)
-                    .spawn()
+                let mut custom = self.terminal.split_whitespace();
+                let opened = match custom.next() {
+                    Some(program) => std::process::Command::new(program)
+                        .args(custom.map(|arg| arg.replace("{path}", &self.path.to_string_lossy())))
+                        .current_dir(&self.path)
+                        .spawn(),
+                    None => std::process::Command::new("wt.exe").arg("-d").arg(&self.path).spawn(),
+                }
                     .or_else(|_| {
                         std::process::Command::new("cmd.exe")
                             .args(["/c", "start", "cmd.exe"])
@@ -830,6 +837,12 @@ impl Component for Explorer {
                     self.back.clear();
                     self.forward.clear();
                     self.load_path(self.tabs[self.active_tab].clone(), context);
+                }
+            }
+            Message::CloseTabAt(index) => {
+                if self.tabs.len() > 1 && index < self.tabs.len() {
+                    self.update(Message::SwitchTab(index), context);
+                    self.update(Message::CloseTab, context);
                 }
             }
             Message::DuplicateTab => {
@@ -1395,9 +1408,13 @@ impl Component for Explorer {
 
     fn view(&self, _input: &PathBuf, context: &mut ViewContext<Self>) -> View {
         context.window_title("Files — Winarchy");
-        if let Some(theme) = &self.theme {
-            context.window_visuals(WindowVisuals::new().theme(theme.window_theme()));
-        }
+        let pane = if self.pane_hidden() { 0.0 } else { PANE_WIDTH };
+        let limits = WindowConstraints { min_width: Some(self.chrome_width() + pane + MIN_LIST_WIDTH), ..Default::default() };
+        let visuals = WindowVisuals::new().constraints(limits);
+        context.window_visuals(match &self.theme {
+            Some(theme) => visuals.theme(theme.window_theme()),
+            None => visuals,
+        });
         context.on_window_size(context.callback(Message::Resize));
         let address_changed = context.callback(Message::Address);
         let folder_name_changed = context.callback(Message::NewFolderName);
@@ -1418,6 +1435,7 @@ impl Component for Explorer {
         let per_row = layout.cell_width().map_or(1, |cell| ((width / cell) as usize).max(1));
         let group = self.group;
         let columns = self.columns;
+        let compact = self.layout == Layout::List || (self.layout == Layout::Details && self.list_width < COMPACT_BELOW);
         let lines = group::lines(&visible, group, per_row, now);
         let source = VirtualSource::new(
             revision,
@@ -1438,7 +1456,7 @@ impl Component for Explorer {
                         width,
                         columns,
                         hide_extensions,
-                        layout == Layout::List,
+                        compact,
                     ),
                     Layout::Tiles | Layout::Grid => {
                         tile(entry, selected.contains(&entry.path), theme.as_ref(), &sender, busy, layout, hide_extensions)
@@ -1473,17 +1491,16 @@ impl Component for Explorer {
             },
         );
 
-        let tab_buttons = self.tabs.iter().enumerate().map(|(index, path)| {
+        let tab_items = self.tabs.iter().enumerate().map(|(index, path)| {
             let name = path
                 .file_name()
                 .map_or_else(|| path.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
             KeyedView::new(
                 index,
-                Button::new()
-                    .automation_name(format!("{} {}", tr("Tab"), index + 1))
-                    .style(if index == self.active_tab { ButtonStyle::Accent } else { ButtonStyle::Subtle })
-                    .on_click(context.message(Message::SwitchTab(index)))
-                    .content(name)
+                TabViewItem::new()
+                    .header(name)
+                    .tag(index.to_string())
+                    .is_closable(self.tabs.len() > 1)
                     .tooltip(path.to_string_lossy().into_owned()),
             )
         });
@@ -1534,7 +1551,7 @@ impl Component for Explorer {
                 image.stretch(Stretch::Uniform).horizontal_alignment(HorizontalAlignment::Left).height(PREVIEW_HEIGHT),
             ));
         }
-        let header: View = if self.layout == Layout::Details {
+        let header: View = if self.layout == Layout::Details && !compact {
             Grid::new()
                 .width(self.list_width)
                 .horizontal_alignment(HorizontalAlignment::Left)
@@ -1574,7 +1591,7 @@ impl Component for Explorer {
                         .content(ItemsRepeater::new().horizontal_alignment(HorizontalAlignment::Stretch).virtual_source(source)),
                 ),
         )];
-        if !self.hide_pane {
+        if !self.pane_hidden() {
             body_items.push(KeyedView::new(
                 1usize,
                 ScrollViewer::new()
@@ -1641,52 +1658,50 @@ impl Component for Explorer {
                 .element_ref(&self.address_ref)
                 .automation_name(tr("Address"))
                 .text(&self.address)
-                .grid_column(3)
+                .grid_column(4)
                 .vertical_alignment(VerticalAlignment::Center)
                 .on_text_changed(address_changed)
                 .into()
         } else {
-            BreadcrumbBar::new()
-                .grid_column(3)
-                .vertical_alignment(VerticalAlignment::Center)
-                .items_source(
-                    self.crumbs()
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, (label, _))| format!("{label}{}", ZERO_WIDTH.to_string().repeat(index)))
-                        .collect::<Vec<_>>(),
-                )
-                .on_item_clicked(context.callback(Message::Crumb))
+            Grid::new()
+                .grid_column(4)
+                .columns([GridLength::Auto, GridLength::STAR])
+                .children((
+                    BreadcrumbBar::new()
+                        .grid_column(0)
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .items_source(
+                            self.crumbs()
+                                .into_iter()
+                                .enumerate()
+                                .map(|(index, (label, _))| format!("{label}{}", ZERO_WIDTH.to_string().repeat(index)))
+                                .collect::<Vec<_>>(),
+                        )
+                        .on_item_clicked(context.callback(Message::Crumb)),
+                    Border::new()
+                        .grid_column(1)
+                        .opacity(MENU_DIM)
+                        .background_optional(self.theme.as_ref().map(Theme::background))
+                        .on_pointer_pressed(context.callback(|_: PointerEventInfo| Message::EditAddress)),
+                ))
                 .into()
         };
-        let toolbar = StackPanel::new().spacing(BAR_GAP).margin(Thickness::new(0.0, 0.0, CONTENT_MARGIN, 0.0)).children((
-            StackPanel::new()
-                .orientation(Orientation::Horizontal)
-                .spacing(ROW_GAP)
-                .children((
-                    StackPanel::new()
-                        .orientation(Orientation::Horizontal)
-                        .spacing(ROW_GAP)
-                        .keyed_children(tab_buttons),
-                    Button::new()
-                        .automation_name(tr("New tab"))
-                        .on_click(context.message(Message::NewTab))
-                        .content("+")
-                        .tooltip(tr("New tab")),
-                    Button::new()
-                        .automation_name(tr("Close tab"))
-                        .is_enabled(self.tabs.len() > 1)
-                        .on_click(context.message(Message::CloseTab))
-                        .content("×")
-                        .tooltip(tr("Close tab")),
-                )),
+        let top = StackPanel::new().spacing(BAR_GAP).children((
+            TabView::new()
+                .selected_index(self.active_tab)
+                .is_add_tab_button_visible(true)
+                .can_reorder_tabs(false)
+                .on_selection_changed(context.callback(|index: Option<usize>| Message::SwitchTab(index.unwrap_or(0))))
+                .on_close_requested(context.callback(|tag: String| Message::CloseTabAt(tag.parse().unwrap_or(0))))
+                .on_add_tab_button_click(context.message(Message::NewTab))
+                .collection_slot(TabViewSlot::TabItems, tab_items),
             Grid::new()
                 .columns([
                     GridLength::Auto,
                     GridLength::Auto,
                     GridLength::Auto,
-                    GridLength::STAR,
                     GridLength::Auto,
+                    GridLength::STAR,
                     GridLength::Pixel(FILTER_WIDTH),
                 ])
                 .column_spacing(ROW_GAP)
@@ -1694,8 +1709,8 @@ impl Component for Explorer {
                     icon_button("←", tr("Back"), !self.back.is_empty(), 0, Message::Back),
                     icon_button("→", tr("Forward"), !self.forward.is_empty(), 1, Message::Forward),
                     icon_button("↑", tr("Up"), true, 2, Message::Parent),
+                    icon_button("⟳", tr("Refresh"), true, 3, Message::Refresh),
                     address_view,
-                    icon_button("✎", tr("Edit address"), true, 4, Message::EditAddress),
                     TextBox::new()
                         .grid_column(5)
                         .vertical_alignment(VerticalAlignment::Center)
@@ -1711,7 +1726,6 @@ impl Component for Explorer {
                 .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto, GridLength::Auto])
                 .column_spacing(ROW_GAP)
                 .keyed_children(prompt_items),
-            header,
         ));
         let content = Grid::new()
             .key_accelerators(KeyAccelerators::new([KeyAccelerator::new(
@@ -1721,14 +1735,15 @@ impl Component for Explorer {
             )]))
             .rows([GridLength::Auto, GridLength::STAR, GridLength::Auto])
             .children((
-                Grid::new().grid_row(0).children((toolbar,)),
+                Grid::new().grid_row(0).margin(Thickness::new(CARD_PADDING, 0.0, 0.0, 0.0)).children((header,)),
                 Border::new()
                     .grid_row(1)
                     .corner_radius(CornerRadius::uniform(CONTENT_RADIUS))
                     .background_optional(self.theme.as_ref().map(Theme::surface))
+                    .padding(Thickness::new(CARD_PADDING, CARD_PADDING, CARD_PADDING, CARD_PADDING))
                     .content(
                         Grid::new()
-                            .columns(if self.hide_pane { vec![GridLength::STAR] } else { vec![GridLength::STAR, GridLength::Pixel(PANE_WIDTH)] })
+                            .columns(if self.pane_hidden() { vec![GridLength::STAR] } else { vec![GridLength::STAR, GridLength::Pixel(PANE_WIDTH)] })
                             .keyed_children(body_items),
                     ),
                 Grid::new().grid_row(2).children((footer,)),
@@ -1785,7 +1800,7 @@ impl Component for Explorer {
                     .background_optional(self.theme.as_ref().map(Theme::muted)),
             );
         let body = Grid::new()
-            .margin(Thickness::new(WINDOW_MARGIN, WINDOW_MARGIN, WINDOW_MARGIN, WINDOW_MARGIN))
+            .grid_row(1)
             .columns([GridLength::Auto, GridLength::Auto, GridLength::STAR])
             .children((
                 Grid::new().grid_column(0).width(self.sidebar_width).children((ScrollViewer::new()
@@ -1803,7 +1818,11 @@ impl Component for Explorer {
                     .content(content),
             ));
         let background = self.theme.as_ref().map(Theme::background);
-        let mut items = vec![KeyedView::new(0usize, body)];
+        let page = Grid::new()
+            .margin(Thickness::new(WINDOW_MARGIN, WINDOW_MARGIN, WINDOW_MARGIN, WINDOW_MARGIN))
+            .rows([GridLength::Auto, GridLength::STAR])
+            .children((Grid::new().grid_row(0).margin(Thickness::new(0.0, 0.0, 0.0, BAR_GAP)).children((top,)), body));
+        let mut items = vec![KeyedView::new(0usize, page)];
         if let Some((x, y, target)) = &self.menu {
             items.push(KeyedView::new(1usize, self.context_menu(context, *x, *y, target.is_some())));
         }
@@ -1814,9 +1833,9 @@ impl Component for Explorer {
 impl Explorer {
     fn context_menu(&self, context: &ViewContext<Self>, x: f64, y: f64, on_item: bool) -> View {
         let wanted: &[&str] = if on_item {
-            &["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Copy path", "Share", "Add tags", "Properties"]
+            &["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Compress to zip", "Extract here", "Copy path", "Share", "Add tags", "Terminal here", "Properties"]
         } else {
-            &["Paste here", "Paste as shortcut", "Create folder", "Create file", "Terminal here", "Select none"]
+            &["Paste here", "Paste as shortcut", "Create folder", "Create file", "Terminal here", "Open in editor", "Select none"]
         };
         let commands = self.commands();
         let entries: Vec<&Command> = wanted
@@ -2093,6 +2112,14 @@ impl Explorer {
         let _task = context.spawn_background(move |_| Message::UndoComplete(action.run()));
     }
 
+    fn pane_hidden(&self) -> bool {
+        self.hide_pane || self.window_width < AUTO_HIDE_PANE_BELOW
+    }
+
+    fn chrome_width(&self) -> f64 {
+        self.sidebar_width + SPLITTER_WIDTH + SCROLL_ALLOWANCE + 2.0 * WINDOW_MARGIN + 2.0 * CARD_PADDING
+    }
+
     fn apply_sort(&mut self) {
         let (key, descending) = (self.sort, self.descending);
         self.entries.sort_by(|a, b| {
@@ -2133,6 +2160,7 @@ impl Explorer {
             tags: self.tags.clone(),
             hide_pane: self.hide_pane,
             sidebar_width: self.sidebar_width,
+            terminal: self.terminal.clone(),
             size_width: self.columns.size,
             modified_width: self.columns.modified,
             pinned,
@@ -2153,9 +2181,8 @@ impl Explorer {
     }
 
     fn fit_list_width(&mut self) {
-        let pane = if self.hide_pane { 0.0 } else { PANE_WIDTH };
-        let chrome = self.sidebar_width + SPLITTER_WIDTH + SCROLL_ALLOWANCE + 2.0 * WINDOW_MARGIN;
-        self.list_width = (self.window_width - chrome - pane).max(MIN_LIST_WIDTH);
+        let pane = if self.pane_hidden() { 0.0 } else { PANE_WIDTH };
+        self.list_width = (self.window_width - self.chrome_width() - pane).max(MIN_LIST_WIDTH);
     }
 
     fn visible_entries(&self) -> Vec<Entry> {
@@ -2216,7 +2243,7 @@ impl Explorer {
                     directory::is_pdf(entry).then(|| pdf::first_page(&entry.path)).flatten()
                 };
                 // the pane already shows the item's details; the status only repeats them when the pane is hidden
-                if self.hide_pane {
+                if self.pane_hidden() {
                     let kind = tr(if entry.is_directory { "Folder" } else { "File" });
                     self.status.push_str(&format!(
                         " · {kind} “{}” {} {}",
