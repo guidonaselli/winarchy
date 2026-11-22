@@ -68,10 +68,10 @@ impl Theme {
                 .into_iter()
                 .flatten()
                 .all(|value| color(value).is_some());
-        valid
-            .then_some(theme)
-            .ok_or_else(|| "theme contains an invalid color".to_owned())
-            .map(Some)
+        if !valid {
+            return Err("theme contains an invalid color".to_owned());
+        }
+        Ok(Some(theme.with_readable_text()))
     }
 
     #[cfg(windows)]
@@ -149,6 +149,21 @@ impl Theme {
         };
     }
 
+    // Text colors come from a palette made for the bar, not for body text: nudge each toward the
+    // foreground until it reaches 4.5:1 against every surface it is drawn on.
+    fn with_readable_text(mut self) -> Self {
+        let grounds: Vec<&str> = [Some(self.background.as_str()), self.surface.as_deref(), self.selection.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect();
+        let foreground = self.foreground.clone();
+        let adjust = |text: &str| readable(text, &foreground, &grounds);
+        self.muted = adjust(&self.muted);
+        self.accent = adjust(&self.accent);
+        self.urgent = adjust(&self.urgent);
+        self
+    }
+
     pub fn background(&self) -> Brush {
         brush(&self.background, ThemeBrush::SolidBackground)
     }
@@ -188,4 +203,57 @@ fn color(value: &str) -> Option<Color> {
     }
     let channel = |start| u8::from_str_radix(&value[start..start + 2], 16).ok();
     Some(Color::rgb(channel(0)?, channel(2)?, channel(4)?))
+}
+
+fn rgb(value: &str) -> Option<[f64; 3]> {
+    let value = value.strip_prefix('#').unwrap_or(value);
+    let channel = |start: usize| u8::from_str_radix(value.get(start..start + 2)?, 16).ok().map(f64::from);
+    Some([channel(0)?, channel(2)?, channel(4)?])
+}
+
+fn luminance([r, g, b]: [f64; 3]) -> f64 {
+    let linear = |c: f64| {
+        let c = c / 255.0;
+        if c <= 0.03928 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+}
+
+fn contrast(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+const MIN_TEXT_CONTRAST: f64 = 4.5;
+
+fn readable(text: &str, foreground: &str, grounds: &[&str]) -> String {
+    let (Some(text_rgb), Some(target)) = (rgb(text), rgb(foreground)) else { return text.to_owned() };
+    let grounds: Vec<[f64; 3]> = grounds.iter().filter_map(|g| rgb(g)).collect();
+    for step in 0..=20 {
+        let mix = f64::from(step) / 20.0;
+        let candidate = [0, 1, 2].map(|i| text_rgb[i] + (target[i] - text_rgb[i]) * mix);
+        if grounds.iter().all(|ground| contrast(candidate, *ground) >= MIN_TEXT_CONTRAST) {
+            return format!("#{:02x}{:02x}{:02x}", candidate[0].round() as u8, candidate[1].round() as u8, candidate[2].round() as u8);
+        }
+    }
+    foreground.to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn muted_text_reaches_readable_contrast_on_every_surface() {
+        let grounds = ["#e6e9ef", "#ccd0da", "#eff1f5"];
+        let fixed = readable("#6c6f85", "#4c4f69", &grounds);
+        for ground in grounds {
+            assert!(contrast(rgb(&fixed).unwrap(), rgb(ground).unwrap()) >= MIN_TEXT_CONTRAST, "{fixed} on {ground}");
+        }
+    }
+
+    #[test]
+    fn already_readable_text_is_left_alone() {
+        assert_eq!(readable("#4c4f69", "#4c4f69", &["#ffffff"]), "#4c4f69");
+    }
 }
