@@ -266,6 +266,7 @@ impl Explorer {
                 true,
             ),
             command("Open in editor", Message::OpenEditor, Some(icons::Icon::PencilSimple), true),
+            command("Settings file", Message::OpenSettings, None, true),
             command("Storage settings", Message::OpenStorageSense, None, true),
             command("Open Recycle Bin", Message::OpenRecycleBin, Some(icons::Icon::Trash), true),
             command("Empty Recycle Bin", Message::EmptyRecycleBin, Some(icons::Icon::Trash), true),
@@ -462,6 +463,7 @@ enum Message {
     OpenRecycleBin,
     TogglePin,
     OpenEditor,
+    OpenSettings,
     OpenStorageSense,
     PasteShortcut,
     Git(&'static str),
@@ -599,8 +601,11 @@ impl Component for Explorer {
     type Message = Message;
 
     fn create(input: &PathBuf, context: &ComponentContext<Self>) -> Self {
-        let path = input.clone();
         let saved = settings::load();
+        let explicit = std::env::args_os().nth(1).is_some_and(|arg| PathBuf::from(arg).is_dir());
+        let restored: Vec<PathBuf> = if explicit { Vec::new() } else { saved.tabs.iter().filter(|tab| tab.is_dir()).cloned().collect() };
+        let (tabs, active_tab) = if restored.is_empty() { (vec![input.clone()], 0) } else { (restored.clone(), saved.active_tab.min(restored.len() - 1)) };
+        let path = tabs[active_tab].clone();
         i18n::set_choice(&saved.language);
         #[cfg(windows)]
         let theme_watcher = Theme::start_watching();
@@ -614,11 +619,11 @@ impl Component for Explorer {
         };
         let mut app = Self {
             address: path.to_string_lossy().into_owned(),
-            tabs: vec![path.clone()],
+            tabs,
             closed_tabs: Vec::new(),
             back: Vec::new(),
             forward: Vec::new(),
-            active_tab: 0,
+            active_tab,
             filter: String::new(),
             clipboard: Vec::new(),
             clipboard_cut: false,
@@ -796,6 +801,12 @@ impl Component for Explorer {
                 self.places = places_with(&self.pinned);
                 self.write_settings(self.pinned.clone());
             }
+            Message::OpenSettings => {
+                self.save_settings();
+                if let Some(path) = settings::location() {
+                    self.update(Message::OpenFile(path), context);
+                }
+            }
             Message::OpenEditor => {
                 use std::os::windows::process::CommandExt;
                 let target = match self.selected.iter().next() {
@@ -841,6 +852,7 @@ impl Component for Explorer {
             Message::NewTab => {
                 self.tabs.push(self.path.clone());
                 self.active_tab = self.tabs.len() - 1;
+                self.save_settings();
             }
             Message::CloseTab => {
                 if self.tabs.len() > 1 {
@@ -860,6 +872,7 @@ impl Component for Explorer {
             Message::DuplicateTab => {
                 self.tabs.insert(self.active_tab + 1, self.path.clone());
                 self.active_tab += 1;
+                self.save_settings();
             }
             Message::ReopenTab => {
                 if let Some(path) = self.closed_tabs.pop() {
@@ -875,6 +888,7 @@ impl Component for Explorer {
                 self.closed_tabs.append(&mut self.tabs);
                 self.tabs.push(keep);
                 self.active_tab = 0;
+                self.save_settings();
             }
             Message::NextTab => {
                 let next = (self.active_tab + 1) % self.tabs.len();
@@ -1970,6 +1984,7 @@ impl Explorer {
             keys::Key::Redo => self.update(Message::Redo, context),
             keys::Key::Delete => self.update(Message::DeleteSelected, context),
             keys::Key::Up => self.update(Message::Parent, context),
+            keys::Key::ToggleHidden => self.update(Message::ToggleHidden, context),
             keys::Key::Refresh => self.update(Message::Refresh, context),
             keys::Key::MoveUp | keys::Key::MoveDown | keys::Key::Open if self.menu.is_some() => {}
             keys::Key::MoveUp | keys::Key::MoveDown => {
@@ -2247,7 +2262,6 @@ impl Explorer {
         left.push(dropdown(icons::Icon::SortAscending, tr("Sort"), MenuKind::Sort));
         left.push(more);
         let details = Border::new()
-            .grid_column(1)
             .corner_radius(CornerRadius::uniform(CARD_RADIUS))
             .background_optional(if self.hide_pane { None } else { theme.and_then(Theme::selection) })
             .content(
@@ -2263,6 +2277,23 @@ impl Explorer {
                     )
                     .tooltip(tr("Preview pane")),
             );
+        let subfolders = Border::new()
+            .corner_radius(CornerRadius::uniform(CARD_RADIUS))
+            .background_optional(if self.recursive { theme.and_then(Theme::selection) } else { None })
+            .content(
+                Button::new()
+                    .style(ButtonStyle::Subtle)
+                    .automation_name(tr("Subfolders"))
+                    .on_click(context.message(Message::ToggleRecursive))
+                    .content(
+                        StackPanel::new()
+                            .orientation(Orientation::Horizontal)
+                            .spacing(ROW_GAP)
+                            .children((icon(icons::Icon::FolderOpen, ICON_SIZE, theme), text(tr("Subfolders"), theme.map(Theme::foreground)))),
+                    )
+                    .tooltip(tr("Include subfolders in the list and the filter")),
+            );
+        let right = StackPanel::new().grid_column(1).orientation(Orientation::Horizontal).children((subfolders, details));
         Grid::new()
             .columns([GridLength::STAR, GridLength::Auto])
             .children((
@@ -2271,7 +2302,7 @@ impl Explorer {
                     .orientation(Orientation::Horizontal)
                     .vertical_alignment(VerticalAlignment::Center)
                     .keyed_children(left.into_iter().enumerate().map(|(index, view)| KeyedView::new(index, view)).collect::<Vec<_>>()),
-                details,
+                right,
             ))
             .into()
     }
@@ -2325,6 +2356,8 @@ impl Explorer {
             hide_pane: self.hide_pane,
             sidebar_width: self.sidebar_width,
             terminal: self.terminal.clone(),
+            tabs: self.tabs.clone(),
+            active_tab: self.active_tab,
             size_width: self.columns.size,
             modified_width: self.columns.modified,
             pinned,
@@ -2431,6 +2464,7 @@ impl Explorer {
     fn load_path(&mut self, path: PathBuf, context: &ComponentContext<Self>) {
         self.path = path.clone();
         self.tabs[self.active_tab] = path.clone();
+        self.save_settings();
         self.notice = None;
         self.recursive = false;
         self.address = path.to_string_lossy().into_owned();
