@@ -7,7 +7,11 @@ use windows::Win32::{
         Threading::GetCurrentThreadId,
     },
     UI::{
-        Accessibility::{CUIAutomation, IUIAutomation, UIA_EditControlTypeId},
+        Accessibility::{
+            CUIAutomation, IUIAutomation, UIA_ComboBoxControlTypeId, UIA_CustomControlTypeId, UIA_EditControlTypeId,
+            UIA_GroupControlTypeId, UIA_ListControlTypeId, UIA_ListItemControlTypeId, UIA_MenuControlTypeId,
+            UIA_MenuItemControlTypeId, UIA_PaneControlTypeId, UIA_WindowControlTypeId, UIA_CONTROLTYPE_ID,
+        },
         Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL},
         WindowsAndMessaging::{CallNextHookEx, HC_ACTION, SetWindowsHookExW, WH_KEYBOARD},
     },
@@ -29,6 +33,9 @@ pub enum Key {
     NewTab,
     CloseTab,
     NextTab,
+    MoveUp,
+    MoveDown,
+    Open,
 }
 
 pub type Receiver = Arc<Mutex<mpsc::Receiver<Key>>>;
@@ -71,6 +78,9 @@ fn map_key(virtual_key: u32, ctrl: bool) -> Option<Key> {
         (0x54, true) => Some(Key::NewTab),
         (0x57, true) => Some(Key::CloseTab),
         (0x09, true) => Some(Key::NextTab),
+        (0x26, false) => Some(Key::MoveUp),
+        (0x28, false) => Some(Key::MoveDown),
+        (0x0D, false) => Some(Key::Open),
         (0x2E, false) => Some(Key::Delete),
         (0x08, false) => Some(Key::Up),
         (0x74, false) => Some(Key::Refresh),
@@ -89,26 +99,35 @@ pub fn next(receiver: &Receiver, cancel: &CancellationToken) -> Option<Key> {
             .ok()?
             .recv_timeout(Duration::from_millis(250));
         match key {
-            Ok(key) if !focus_in_text_field() => return Some(key),
+            Ok(key) if key_allowed(key) => return Some(key),
             Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return None,
         }
     }
 }
 
+// Arrows must not steal from menus or lists, and Enter must not double-fire on a focused button, so those
+// keys only pass when focus sits on a neutral container.
+fn key_allowed(key: Key) -> bool {
+    let Some(kind) = focused_kind() else { return false };
+    let neutral = [UIA_WindowControlTypeId, UIA_PaneControlTypeId, UIA_CustomControlTypeId, UIA_GroupControlTypeId];
+    let navigating = [
+        UIA_ComboBoxControlTypeId, UIA_ListControlTypeId, UIA_ListItemControlTypeId, UIA_MenuControlTypeId,
+        UIA_MenuItemControlTypeId,
+    ];
+    match key {
+        Key::Open => neutral.contains(&kind),
+        Key::MoveUp | Key::MoveDown => kind != UIA_EditControlTypeId && !navigating.contains(&kind),
+        _ => kind != UIA_EditControlTypeId,
+    }
+}
+
 // Any failure counts as "typing", so a shortcut never fires on a state that could not be read.
-fn focus_in_text_field() -> bool {
+fn focused_kind() -> Option<UIA_CONTROLTYPE_ID> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        let Ok(automation) =
-            CoCreateInstance::<_, IUIAutomation>(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
-        else {
-            return true;
-        };
-        automation
-            .GetFocusedElement()
-            .and_then(|element| element.CurrentControlType())
-            .map_or(true, |kind| kind == UIA_EditControlTypeId)
+        let automation = CoCreateInstance::<_, IUIAutomation>(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
+        automation.GetFocusedElement().and_then(|element| element.CurrentControlType()).ok()
     }
 }
 
@@ -130,5 +149,8 @@ mod tests {
         assert_eq!(map_key(0x54, true), Some(Key::NewTab));
         assert_eq!(map_key(0x57, true), Some(Key::CloseTab));
         assert_eq!(map_key(0x09, true), Some(Key::NextTab));
+        assert_eq!(map_key(0x28, false), Some(Key::MoveDown));
+        assert_eq!(map_key(0x26, false), Some(Key::MoveUp));
+        assert_eq!(map_key(0x0D, false), Some(Key::Open));
     }
 }

@@ -1186,6 +1186,34 @@ impl Explorer {
             keys::Key::Delete => self.update(Message::DeleteSelected, context),
             keys::Key::Up => self.update(Message::Parent, context),
             keys::Key::Refresh => self.update(Message::Refresh, context),
+            keys::Key::MoveUp | keys::Key::MoveDown => {
+                let needle = self.filter.to_lowercase();
+                let visible: Vec<&Entry> = self.entries.iter().filter(|entry| self.matches(entry, &needle)).collect();
+                let position = |down: bool| {
+                    let mut selected = visible.iter().enumerate().filter(|(_, e)| self.selected.contains(&e.path));
+                    if down { selected.last() } else { selected.next() }.map(|(index, _)| index)
+                };
+                let down = key == keys::Key::MoveDown;
+                let target = match (position(down), down) {
+                    (Some(index), true) => (index + 1).min(visible.len().saturating_sub(1)),
+                    (Some(index), false) => index.saturating_sub(1),
+                    (None, true) => 0,
+                    (None, false) => visible.len().saturating_sub(1),
+                };
+                if let Some(entry) = visible.get(target) {
+                    self.selected = HashSet::from([entry.path.clone()]);
+                    self.refresh_status();
+                }
+            }
+            keys::Key::Open => {
+                let mut chosen = self.selected.iter();
+                if let (Some(path), None) = (chosen.next().cloned(), chosen.next())
+                    && let Some(entry) = self.entries.iter().find(|entry| entry.path == path)
+                {
+                    let message = if entry.is_directory { Message::OpenFolder(path) } else { Message::OpenFile(path) };
+                    self.update(message, context);
+                }
+            }
             keys::Key::SelectAll => {
                 let needle = self.filter.to_lowercase();
                 self.selected = self
