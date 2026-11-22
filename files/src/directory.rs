@@ -185,6 +185,52 @@ impl Walk {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DriveKind {
+    Fixed,
+    Removable,
+    Optical,
+    Network,
+}
+
+#[derive(Clone)]
+pub struct Drive {
+    pub label: String,
+    pub path: PathBuf,
+    pub kind: DriveKind,
+}
+
+pub fn drives() -> Vec<Drive> {
+    use windows::{
+        Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW},
+        core::PCWSTR,
+    };
+    let mask = unsafe { GetLogicalDrives() };
+    let mut drives = Vec::new();
+    for index in 0..26u8 {
+        if mask & (1 << index) == 0 {
+            continue;
+        }
+        let letter = (b'A' + index) as char;
+        let root: Vec<u16> = format!("{letter}:\\").encode_utf16().chain(Some(0)).collect();
+        // DRIVE_REMOVABLE = 2, DRIVE_REMOTE = 4, DRIVE_CDROM = 5
+        let kind = match unsafe { GetDriveTypeW(PCWSTR(root.as_ptr())) } {
+            2 => DriveKind::Removable,
+            4 => DriveKind::Network,
+            5 => DriveKind::Optical,
+            _ => DriveKind::Fixed,
+        };
+        // a network share or an empty reader can block here, so only local volumes are asked for their name
+        let mut name = [0u16; 64];
+        let named = kind != DriveKind::Network
+            && unsafe { GetVolumeInformationW(PCWSTR(root.as_ptr()), Some(&mut name), None, None, None, None) }.is_ok();
+        let volume = if named { String::from_utf16_lossy(&name[..name.iter().position(|&c| c == 0).unwrap_or(0)]) } else { String::new() };
+        let label = if volume.is_empty() { format!("{letter}:") } else { format!("{volume} ({letter}:)") };
+        drives.push(Drive { label, path: PathBuf::from(format!("{letter}:{}", std::path::MAIN_SEPARATOR)), kind });
+    }
+    drives
+}
+
 pub fn places() -> Vec<(String, PathBuf)> {
     let mut places = Vec::new();
     if let Some(home) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
@@ -202,16 +248,6 @@ pub fn places() -> Vec<(String, PathBuf)> {
             }
         }
         places.insert(0, (tr("Home").to_owned(), home));
-    }
-    let mask = unsafe { windows::Win32::Storage::FileSystem::GetLogicalDrives() };
-    for index in 0..26u8 {
-        if mask & (1 << index) != 0 {
-            let letter = (b'A' + index) as char;
-            places.push((
-                format!("{letter}:"),
-                PathBuf::from(format!("{letter}:{}", std::path::MAIN_SEPARATOR)),
-            ));
-        }
     }
     places
 }

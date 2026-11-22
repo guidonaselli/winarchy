@@ -659,3 +659,42 @@ pub fn drag_out(paths: &[PathBuf]) -> Result<(), String> {
 pub fn drag_out(_paths: &[PathBuf]) -> Result<(), String> {
     Err("not supported on this platform".to_owned())
 }
+
+// Ejects a removable drive the way Explorer does: through the drive's own shell "eject" verb.
+#[cfg(windows)]
+pub fn eject(path: &Path) -> Result<(), String> {
+    use windows::{
+        Win32::UI::{
+            Shell::{BHID_SFUIObject, CMF_NORMAL, CMINVOKECOMMANDINFO, IContextMenu, SHCreateShellItemArrayFromIDLists, SHParseDisplayName},
+            WindowsAndMessaging::{CreatePopupMenu, DestroyMenu, GetForegroundWindow},
+        },
+        core::{PCSTR, PCWSTR},
+    };
+
+    unsafe {
+        let wide: Vec<u16> = path.as_os_str().to_string_lossy().encode_utf16().chain(Some(0)).collect();
+        let mut identifier = std::ptr::null_mut();
+        SHParseDisplayName(PCWSTR(wide.as_ptr()), None, &mut identifier, 0, None).map_err(|error| error.to_string())?;
+        let items = SHCreateShellItemArrayFromIDLists(&[identifier as *const _]).map_err(|error| error.to_string())?;
+        let menu: IContextMenu = items.BindToHandler(None, &BHID_SFUIObject).map_err(|error| error.to_string())?;
+        let popup = CreatePopupMenu().map_err(|error| error.to_string())?;
+        let outcome = (|| -> Result<(), String> {
+            menu.QueryContextMenu(popup, 0, 1, 0x7FFF, CMF_NORMAL).ok().map_err(|error| error.to_string())?;
+            let info = CMINVOKECOMMANDINFO {
+                cbSize: std::mem::size_of::<CMINVOKECOMMANDINFO>() as u32,
+                hwnd: GetForegroundWindow(),
+                lpVerb: PCSTR(b"eject\0".as_ptr()),
+                nShow: 1,
+                ..Default::default()
+            };
+            menu.InvokeCommand(&info).map_err(|error| error.to_string())
+        })();
+        let _ = DestroyMenu(popup);
+        outcome
+    }
+}
+
+#[cfg(not(windows))]
+pub fn eject(_path: &Path) -> Result<(), String> {
+    Err("not supported on this platform".to_owned())
+}

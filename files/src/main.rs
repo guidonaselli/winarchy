@@ -466,6 +466,8 @@ enum Message {
     EmptyRecycleBin,
     OpenRecycleBin,
     TogglePin,
+    Eject(PathBuf),
+    RefreshDrives,
     ToggleFavorite,
     OpenFavorites,
     PinDown(PathBuf),
@@ -620,6 +622,7 @@ struct Explorer {
     loaded: bool,
     focus_attempts: u8,
     places: Vec<(String, PathBuf)>,
+    drives: Vec<directory::Drive>,
     pinned: Vec<PathBuf>,
     favorites: Vec<PathBuf>,
     in_favorites: bool,
@@ -722,6 +725,7 @@ impl Component for Explorer {
             loaded: false,
             focus_attempts: 0,
             places: directory::places(),
+            drives: directory::drives(),
             pinned: saved.pinned.clone(),
             favorites: saved.favorites.clone(),
             in_favorites: false,
@@ -839,6 +843,16 @@ impl Component for Explorer {
                     }
                 }
             }
+            Message::Eject(path) => {
+                if let Err(error) = shell::eject(&path) {
+                    self.status = format!("{}: {error}", tr("Could not eject"));
+                    self.has_error = true;
+                }
+                let _task = context.spawn_background(|_| {
+                    std::thread::sleep(std::time::Duration::from_millis(DRIVE_RESCAN_DELAY_MS));
+                    Message::RefreshDrives
+                });
+            }
             Message::ToggleFavorite => {
                 self.favorites = settings::load().favorites;
                 let chosen: Vec<PathBuf> = self.selected.iter().cloned().collect();
@@ -906,7 +920,6 @@ impl Component for Explorer {
                     }
                     None => self.pinned.push(target),
                 }
-                self.places = directory::places();
                 self.write_settings(self.pinned.clone(), self.favorites.clone());
             }
             Message::OpenSettings => {
@@ -1389,7 +1402,7 @@ impl Component for Explorer {
                 self.focus_attempts = 0;
                 self.retry_focus_soon(context);
             }
-            Message::Focus(true) => {}
+            Message::Focus(true) | Message::RefreshDrives => self.drives = directory::drives(),
             Message::Focus(false) => {
                 if self.focus_attempts < 10 {
                     let _task = context.spawn_background(|_| {
@@ -2013,7 +2026,7 @@ impl Component for Explorer {
                 Grid::new().grid_row(2).children((footer,)),
             ));
         let theme = self.theme.as_ref();
-        let place = |label: &str, glyph: icons::Icon, current: bool, tooltip: String, message: Message, middle: Option<PathBuf>| {
+        let place = |label: &str, glyph: icons::Icon, current: bool, tooltip: String, message: Message, middle: Option<PathBuf>, eject: Option<PathBuf>| {
             let button = Button::new()
                 .grid_column(1)
                 .automation_name(label.to_owned())
@@ -2032,6 +2045,20 @@ impl Component for Explorer {
                 .height(ACCENT_BAR_HEIGHT)
                 .corner_radius(CornerRadius::uniform(ACCENT_BAR_WIDTH))
                 .background_optional(if current { theme.map(Theme::accent) } else { None });
+            let eject_cell: View = match eject {
+                Some(path) => Border::new()
+                    .grid_column(2)
+                    .content(
+                        Button::new()
+                            .automation_name(format!("{} {label}", tr("Eject")))
+                            .style(ButtonStyle::Subtle)
+                            .on_click(context.message(Message::Eject(path)))
+                            .content(icon(icons::Icon::Eject, ICON_SIZE, theme))
+                            .tooltip(tr("Eject").to_owned()),
+                    )
+                    .into(),
+                None => Border::new().grid_column(2).into(),
+            };
             Border::new()
                 .on_pointer_pressed(context.callback(move |info: PointerEventInfo| match (&middle, info.is_middle_button_pressed) {
                     (Some(path), true) => Message::OpenInTab(path.clone()),
@@ -2039,18 +2066,18 @@ impl Component for Explorer {
                 }))
                 .corner_radius(CornerRadius::uniform(CARD_RADIUS))
                 .background_optional(if current { theme.and_then(Theme::selection) } else { None })
-                .content(Grid::new().columns([GridLength::Pixel(ACCENT_BAR_WIDTH + ROW_GAP), GridLength::STAR]).children((bar, button)))
+                .content(Grid::new().columns([GridLength::Pixel(ACCENT_BAR_WIDTH + ROW_GAP), GridLength::STAR, GridLength::Auto]).children((bar, button, eject_cell)))
         };
         let mut sidebar_items: Vec<KeyedView> = Vec::new();
         sidebar_items.push(KeyedView::new(
             FAVORITES_KEY,
-            place(tr("Favorites"), icons::Icon::Star, self.in_favorites, tr("Favorites").to_owned(), Message::OpenFavorites, None),
+            place(tr("Favorites"), icons::Icon::Star, self.in_favorites, tr("Favorites").to_owned(), Message::OpenFavorites, None, None),
         ));
         for (index, (label, path)) in self.places.iter().enumerate() {
             let target = path.clone();
             sidebar_items.push(KeyedView::new(
                 index,
-                place(label, place_icon(path, false), !self.in_favorites && *path == self.path, path.to_string_lossy().into_owned(), Message::OpenFolder(path.clone()), Some(target)),
+                place(label, place_icon(path, false), !self.in_favorites && *path == self.path, path.to_string_lossy().into_owned(), Message::OpenFolder(path.clone()), Some(target), None),
             ));
         }
         if !self.pinned.is_empty() {
@@ -2087,6 +2114,37 @@ impl Component for Explorer {
                     .collection_slot(ListViewSlot::Items, pins),
             ));
         }
+        let mut device_items: Vec<KeyedView> = Vec::new();
+        if !self.drives.is_empty() {
+            device_items.push(KeyedView::new(
+                DEVICES_HEADER_KEY,
+                StackPanel::new().margin(Thickness::new(0.0, DEVICES_HEADER_GAP, 0.0, 0.0)).children((
+                    Border::new().height(1.0).opacity(DEVICES_RULE_OPACITY).background_optional(theme.map(Theme::muted)),
+                    caption(tr("Devices"), theme.map(Theme::muted)).margin(Thickness::new(ROW_GAP, DEVICES_HEADER_GAP, 0.0, 0.0)),
+                )),
+            ));
+            for (index, drive) in self.drives.iter().enumerate() {
+                let glyph = match drive.kind {
+                    directory::DriveKind::Removable => icons::Icon::Usb,
+                    directory::DriveKind::Optical => icons::Icon::Disc,
+                    directory::DriveKind::Network => icons::Icon::HardDrives,
+                    directory::DriveKind::Fixed => icons::Icon::HardDrive,
+                };
+                let ejectable = matches!(drive.kind, directory::DriveKind::Removable | directory::DriveKind::Optical);
+                device_items.push(KeyedView::new(
+                    DEVICES_KEY + index,
+                    place(
+                        &drive.label,
+                        glyph,
+                        !self.in_favorites && drive.path == self.path,
+                        drive.path.to_string_lossy().into_owned(),
+                        Message::OpenFolder(drive.path.clone()),
+                        Some(drive.path.clone()),
+                        ejectable.then(|| drive.path.clone()),
+                    ),
+                ));
+            }
+        }
         let splitter = Border::new()
             .grid_column(1)
             .width(SPLITTER_WIDTH)
@@ -2105,8 +2163,10 @@ impl Component for Explorer {
             .grid_row(1)
             .columns([GridLength::Auto, GridLength::Auto, GridLength::STAR])
             .children((
-                Grid::new().grid_column(0).width(self.sidebar_width).children((ScrollViewer::new()
-                    .content(StackPanel::new().spacing(TIGHT_GAP).keyed_children(sidebar_items)),)),
+                Grid::new().grid_column(0).width(self.sidebar_width).rows([GridLength::STAR, GridLength::Auto]).children((
+                    ScrollViewer::new().grid_row(0).content(StackPanel::new().spacing(TIGHT_GAP).keyed_children(sidebar_items)),
+                    StackPanel::new().grid_row(1).spacing(TIGHT_GAP).keyed_children(device_items),
+                )),
                 splitter,
                 Border::new()
                     .grid_column(2)
