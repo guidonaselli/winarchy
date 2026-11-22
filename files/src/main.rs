@@ -530,6 +530,7 @@ enum Message {
     OpenInTab(PathBuf),
     RowHover(Option<PathBuf>),
     NativeMenu,
+    ContextKey(Option<PathBuf>, Option<(f64, f64)>),
     NativeMenuRun,
     OpenFolder(PathBuf),
     OpenFile(PathBuf),
@@ -1471,6 +1472,15 @@ impl Component for Explorer {
             }
             Message::RowHover(path) => self.hovered_row = path,
             // The shell menu blocks until it closes, so our own menu is dismissed and repainted first.
+            // shortcut: without a selected row the menu opens at a fixed spot below the toolbar.
+            Message::ContextKey(target, at) => {
+                let (x, y) = at.unwrap_or((self.sidebar_width + SPLITTER_WIDTH + WINDOW_MARGIN + CHECK_WIDTH, MENU_ANCHOR_Y));
+                let message = match target {
+                    Some(path) => Message::ContextItem(path, x, y),
+                    None => Message::ContextBackground(x, y),
+                };
+                self.update(message, context);
+            }
             Message::NativeMenu => {
                 self.close_menu();
                 let _task = context.spawn_background(|_| {
@@ -2217,13 +2227,11 @@ impl Explorer {
             keys::Key::Cancel => self.update(Message::CancelPrompt, context),
             keys::Key::FocusAddress => self.update(Message::EditAddress, context),
             keys::Key::ContextMenu => {
-                // shortcut: opens at a fixed spot below the toolbar, not beside the selected row; track row positions to anchor it.
-                let x = self.sidebar_width + SPLITTER_WIDTH + WINDOW_MARGIN + CHECK_WIDTH;
-                let message = match self.selected.iter().next() {
-                    Some(path) => Message::ContextItem(path.clone(), x, MENU_ANCHOR_Y),
-                    None => Message::ContextBackground(x, MENU_ANCHOR_Y),
-                };
-                self.update(message, context);
+                let target = self.selected.iter().next().cloned();
+                let name = target.as_ref().and_then(|path| path.file_name()).map(|name| name.to_string_lossy().into_owned());
+                let _task = context.spawn_background(move |_| {
+                    Message::ContextKey(target, name.and_then(|name| scroll::anchor(&name)))
+                });
             }
             keys::Key::Open => {
                 let mut chosen = self.selected.iter();

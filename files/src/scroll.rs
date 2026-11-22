@@ -1,7 +1,8 @@
 use std::time::Duration;
 use windows::{
     Win32::{
-        Foundation::RECT,
+        Foundation::{POINT, RECT},
+        Graphics::Gdi::ClientToScreen,
         System::{
             Com::{CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx},
             Variant::VARIANT,
@@ -11,7 +12,8 @@ use windows::{
                 CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationScrollPattern, TreeScope_Descendants,
                 UIA_IsScrollPatternAvailablePropertyId, UIA_NamePropertyId, UIA_ScrollPatternId,
             },
-            WindowsAndMessaging::GetForegroundWindow,
+            WindowsAndMessaging::{GetForegroundWindow},
+            HiDpi::GetDpiForWindow,
         },
     },
     core::{BSTR, Result},
@@ -30,11 +32,8 @@ fn area(rect: &RECT) -> i64 {
     i64::from(rect.right - rect.left) * i64::from(rect.bottom - rect.top)
 }
 
-fn try_reveal(name: &str, fraction: f64) -> Result<()> {
+fn list_scroller(automation: &IUIAutomation, root: &IUIAutomationElement) -> Result<Option<(IUIAutomationElement, RECT)>> {
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)?;
-        let root = automation.ElementFromHandle(GetForegroundWindow())?;
         let scrollables = root.FindAll(TreeScope_Descendants, &automation.CreatePropertyCondition(UIA_IsScrollPatternAvailablePropertyId, &VARIANT::from(true))?)?;
         let mut scroller: Option<(IUIAutomationElement, RECT)> = None;
         for index in 0..scrollables.Length()? {
@@ -44,6 +43,16 @@ fn try_reveal(name: &str, fraction: f64) -> Result<()> {
                 scroller = Some((element, rect));
             }
         }
+        Ok(scroller)
+    }
+}
+
+fn try_reveal(name: &str, fraction: f64) -> Result<()> {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)?;
+        let root = automation.ElementFromHandle(GetForegroundWindow())?;
+        let scroller = list_scroller(&automation, &root)?;
         let Some((scroller, view)) = scroller else { return Ok(()) };
         let pattern: IUIAutomationScrollPattern = scroller.GetCurrentPatternAs(UIA_ScrollPatternId)?;
         let by_name = automation.CreatePropertyCondition(UIA_NamePropertyId, &VARIANT::from(BSTR::from(name)))?;
@@ -88,4 +97,31 @@ fn try_reveal(name: &str, fraction: f64) -> Result<()> {
         }
     }
     Ok(())
+}
+
+// Top-left of the named list row in window DIPs, so a keyboard-opened menu can sit beside it.
+pub fn anchor(name: &str) -> Option<(f64, f64)> {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let window = GetForegroundWindow();
+        let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
+        let root = automation.ElementFromHandle(window).ok()?;
+        let found = root.FindAll(TreeScope_Descendants, &automation.CreatePropertyCondition(UIA_NamePropertyId, &VARIANT::from(BSTR::from(name))).ok()?).ok()?;
+        let (_, view) = list_scroller(&automation, &root).ok()??;
+        let mut best: Option<RECT> = None;
+        // the sidebar and the preview can show the same name; only the list's column counts
+        for index in 0..found.Length().ok()? {
+            let rect = found.GetElement(index).ok()?.CurrentBoundingRectangle().ok()?;
+            let middle = (rect.left + rect.right) / 2;
+            if middle >= view.left && middle <= view.right {
+                best = Some(rect);
+                break;
+            }
+        }
+        let rect = best?;
+        let mut origin = POINT::default();
+        let _ = ClientToScreen(window, &mut origin);
+        let scale = f64::from(GetDpiForWindow(window)) / 96.0;
+        Some((f64::from(rect.left + 40 - origin.x) / scale, f64::from(rect.bottom - origin.y) / scale))
+    }
 }
