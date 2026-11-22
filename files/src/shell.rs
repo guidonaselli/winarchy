@@ -1,8 +1,13 @@
 use std::path::{Path, PathBuf};
 
-#[cfg(windows)]
 pub fn open(path: &Path) -> Result<(), String> {
-    use std::{ffi::c_void, os::windows::ffi::OsStrExt};
+    execute("open", &path.to_string_lossy(), None)
+}
+
+// Verbs such as "open", "properties" or "runas" (elevated, with its own UAC prompt).
+#[cfg(windows)]
+pub fn execute(verb: &str, file: &str, parameters: Option<&str>) -> Result<(), String> {
+    use std::ffi::c_void;
 
     #[link(name = "shell32")]
     unsafe extern "system" {
@@ -16,14 +21,16 @@ pub fn open(path: &Path) -> Result<(), String> {
         ) -> isize;
     }
 
-    let operation: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
-    let file: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let wide = |text: &str| text.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+    let operation = wide(verb);
+    let file = wide(file);
+    let parameters = parameters.map(wide);
     let result = unsafe {
         ShellExecuteW(
             std::ptr::null_mut(),
             operation.as_ptr(),
             file.as_ptr(),
-            std::ptr::null(),
+            parameters.as_ref().map_or(std::ptr::null(), |p| p.as_ptr()),
             std::ptr::null(),
             1,
         )
@@ -294,4 +301,41 @@ pub fn create_shortcut(target: &Path, link: &Path) -> Result<(), String> {
 #[cfg(not(windows))]
 pub fn create_shortcut(_target: &Path, _link: &Path) -> Result<(), String> {
     Err("Shortcuts are supported only on Windows".to_owned())
+}
+
+#[cfg(windows)]
+pub fn empty_recycle_bin() -> Result<(), String> {
+    #[link(name = "shell32")]
+    unsafe extern "system" {
+        fn SHEmptyRecycleBinW(window: *mut std::ffi::c_void, root: *const u16, flags: u32) -> i32;
+    }
+    // Windows shows its own confirmation unless flags ask otherwise.
+    let result = unsafe { SHEmptyRecycleBinW(std::ptr::null_mut(), std::ptr::null(), 0) };
+    // S_OK, or the "already empty" result Windows returns for an empty bin.
+    if result == 0 || result == 0x8000_0001u32 as i32 { Ok(()) } else { Err(format!("0x{:08X}", result as u32)) }
+}
+
+// Uses the tar.exe that ships with Windows 10 and later, so no archive library is needed.
+pub fn compress(items: &[PathBuf], parent: &Path, archive: &Path) -> Result<(), String> {
+    let mut command = std::process::Command::new("tar.exe");
+    command.args(["-a", "-c", "-f"]).arg(archive).arg("-C").arg(parent);
+    for item in items {
+        command.arg(item.file_name().ok_or("item has no name")?);
+    }
+    run_tar(&mut command)
+}
+
+pub fn extract(archive: &Path, destination: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+    run_tar(std::process::Command::new("tar.exe").arg("-x").arg("-f").arg(archive).arg("-C").arg(destination))
+}
+
+fn run_tar(command: &mut std::process::Command) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    let output = command.creation_flags(0x0800_0000).output().map_err(|error| error.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+    }
 }

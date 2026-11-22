@@ -159,6 +159,11 @@ enum Message {
     ToggleRecursive,
     ToggleHidden,
     ToggleExtensions,
+    Compress,
+    Extract,
+    ArchiveDone(Result<(), String>, Option<PathBuf>),
+    RunVerb(&'static str),
+    EmptyRecycleBin,
     SelectNone,
     InvertSelection,
     CycleLanguage,
@@ -495,6 +500,90 @@ impl Component for Explorer {
                 self.language = i18n::choice();
                 self.save_settings();
                 self.refresh_status();
+            }
+            Message::Compress => {
+                if self.selected.is_empty() || self.transferring {
+                    return;
+                }
+                let mut items: Vec<_> = self.selected.iter().cloned().collect();
+                items.sort();
+                let stem = match &items[..] {
+                    [one] => one.file_name().map(|n| n.to_string_lossy().into_owned()),
+                    _ => self.path.file_name().map(|n| n.to_string_lossy().into_owned()),
+                }
+                .unwrap_or_else(|| "archive".to_owned());
+                let archive = self.path.join(format!("{stem}.zip"));
+                if archive.exists() {
+                    self.status = tr("Archive already exists").to_owned();
+                    self.has_error = true;
+                    return;
+                }
+                let parent = self.path.clone();
+                self.transferring = true;
+                self.has_error = false;
+                self.status = tr("Compress to zip").to_owned() + "…";
+                let _task = context.spawn_background(move |_| {
+                    let result = shell::compress(&items, &parent, &archive);
+                    Message::ArchiveDone(result, Some(archive))
+                });
+            }
+            Message::Extract => {
+                let Some(archive) = self
+                    .selected
+                    .iter()
+                    .next()
+                    .filter(|path| self.selected.len() == 1 && path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")))
+                    .cloned()
+                else {
+                    return;
+                };
+                if self.transferring {
+                    return;
+                }
+                let destination = archive.with_extension("");
+                self.transferring = true;
+                self.has_error = false;
+                self.status = tr("Extract here").to_owned() + "…";
+                let _task = context.spawn_background(move |_| {
+                    Message::ArchiveDone(shell::extract(&archive, &destination), None)
+                });
+            }
+            Message::ArchiveDone(result, created) => {
+                self.transferring = false;
+                match result {
+                    Ok(()) => {
+                        if let Some(archive) = created {
+                            self.record(Undo::RemoveFile(archive));
+                        }
+                        self.load_path(self.path.clone(), context);
+                    }
+                    Err(error) => {
+                        self.status = format!("{}: {error}", tr("Archive failed"));
+                        self.has_error = true;
+                    }
+                }
+            }
+            Message::RunVerb(verb) => {
+                let target = match &self.selected.iter().collect::<Vec<_>>()[..] {
+                    [one] => (*one).clone(),
+                    _ => self.path.clone(),
+                };
+                let result = match verb {
+                    "notepad" => shell::execute("open", "notepad.exe", Some(&format!("\"{}\"", target.display()))),
+                    "admin-terminal" => shell::execute("runas", "wt.exe", Some(&format!("-d \"{}\"", self.path.display())))
+                        .or_else(|_| shell::execute("runas", "cmd.exe", Some(&format!("/k cd /d \"{}\"", self.path.display())))),
+                    other => shell::execute(other, &target.to_string_lossy(), None),
+                };
+                self.has_error = result.is_err();
+                if let Err(error) = result {
+                    self.status = format!("{}: {error}", tr("Could not run"));
+                }
+            }
+            Message::EmptyRecycleBin => {
+                if let Err(error) = shell::empty_recycle_bin() {
+                    self.status = format!("{}: {error}", tr("Could not run"));
+                    self.has_error = true;
+                }
             }
             Message::ToggleExtensions => {
                 self.hide_extensions = !self.hide_extensions;
@@ -923,6 +1012,33 @@ impl Component for Explorer {
                         .automation_name(tr("Show file extensions"))
                         .on_click(context.message(Message::ToggleExtensions))
                         .content(tr(if self.hide_extensions { "Extensions: hidden" } else { "Extensions: shown" })),
+                )),
+            StackPanel::new()
+                .orientation(Orientation::Horizontal)
+                .spacing(6.0)
+                .children((
+                    Button::new()
+                        .is_enabled(!self.selected.is_empty() && !self.transferring)
+                        .on_click(context.message(Message::Compress))
+                        .content(tr("Compress to zip")),
+                    Button::new()
+                        .is_enabled(self.selected.len() == 1 && !self.transferring)
+                        .on_click(context.message(Message::Extract))
+                        .content(tr("Extract here")),
+                    Button::new()
+                        .is_enabled(self.selected.len() == 1)
+                        .on_click(context.message(Message::RunVerb("notepad")))
+                        .content(tr("Edit in Notepad")),
+                    Button::new()
+                        .is_enabled(self.selected.len() == 1)
+                        .on_click(context.message(Message::RunVerb("properties")))
+                        .content(tr("Properties")),
+                    Button::new()
+                        .on_click(context.message(Message::RunVerb("admin-terminal")))
+                        .content(tr("Terminal as administrator")),
+                    Button::new()
+                        .on_click(context.message(Message::EmptyRecycleBin))
+                        .content(tr("Empty Recycle Bin")),
                 )),
             text(tr("Destination folder"), self.theme.as_ref().map(Theme::muted)),
             Grid::new()
