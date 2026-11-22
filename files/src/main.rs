@@ -112,6 +112,11 @@ impl Explorer {
             command("Properties", Message::RunVerb("properties"), None, one, false),
             command("Terminal here", Message::OpenTerminal, None, true, false),
             command("Terminal as administrator", Message::RunVerb("admin-terminal"), None, true, false),
+            command("Git init", Message::Git("init"), None, !self.transferring, false),
+            command("Git clone (URL in name field)", Message::Git("clone"), None, !self.transferring, false),
+            command("Git fetch", Message::Git("fetch"), None, self.git_branch.is_some() && !self.transferring, false),
+            command("Git pull", Message::Git("pull"), None, self.git_branch.is_some() && !self.transferring, false),
+            command("Git push", Message::Git("push"), None, self.git_branch.is_some() && !self.transferring, false),
             command("Open Recycle Bin", Message::OpenRecycleBin, None, true, false),
             command("Empty Recycle Bin", Message::EmptyRecycleBin, None, true, false),
             command("Select none", Message::SelectNone, None, some, false),
@@ -254,6 +259,9 @@ enum Message {
     RunVerb(&'static str),
     EmptyRecycleBin,
     OpenRecycleBin,
+    Git(&'static str),
+    GitBranch(PathBuf, Option<String>),
+    GitDone(&'static str, Result<String, String>),
     SelectNone,
     InvertSelection,
     CycleLanguage,
@@ -306,6 +314,7 @@ struct Explorer {
     pending_inverse: Option<Undo>,
     redoing: bool,
     details: String,
+    git_branch: Option<String>,
     preview: String,
     preview_image: Option<PathBuf>,
     show_hidden: bool,
@@ -367,6 +376,7 @@ impl Component for Explorer {
             pending_inverse: None,
             redoing: false,
             details: String::new(),
+            git_branch: None,
             preview: String::new(),
             preview_image: None,
             show_hidden: saved.show_hidden,
@@ -664,6 +674,47 @@ impl Component for Explorer {
                 self.has_error = result.is_err();
                 if let Err(error) = result {
                     self.status = format!("{}: {error}", tr("Could not run"));
+                }
+            }
+            Message::GitBranch(path, branch) => {
+                if path == self.path {
+                    self.git_branch = branch;
+                }
+            }
+            Message::Git(action) => {
+                if self.transferring {
+                    return;
+                }
+                let url = self.new_folder_name.trim().to_owned();
+                if action == "clone" && url.is_empty() {
+                    self.status = tr("Type the repository URL in the name field").to_owned();
+                    self.has_error = true;
+                    return;
+                }
+                let dir = self.path.clone();
+                self.transferring = true;
+                self.has_error = false;
+                self.status = format!("git {action}…");
+                let _task = context.spawn_background(move |_| {
+                    let result = match action {
+                        "clone" => shell::git(&["clone", &url], &dir),
+                        other => shell::git(&[other], &dir),
+                    };
+                    Message::GitDone(action, result)
+                });
+            }
+            Message::GitDone(action, result) => {
+                self.transferring = false;
+                match result {
+                    Ok(output) => {
+                        self.status = format!("git {action}: {}", output.lines().last().unwrap_or("OK"));
+                        self.load_path(self.path.clone(), context);
+                        self.status = format!("git {action}: {}", output.lines().last().unwrap_or("OK"));
+                    }
+                    Err(error) => {
+                        self.status = format!("git {action}: {}", error.lines().last().unwrap_or_default());
+                        self.has_error = true;
+                    }
                 }
             }
             Message::OpenRecycleBin => {
@@ -977,6 +1028,9 @@ impl Component for Explorer {
         }
         if !self.preview.is_empty() {
             info_items.push(KeyedView::new(1usize, text(&self.preview, muted)));
+        }
+        if let Some(branch) = &self.git_branch {
+            info_items.push(KeyedView::new(3usize, text(&format!("Git: {branch}"), self.theme.as_ref().map(Theme::accent))));
         }
         if let Some(image) = self.preview_image.as_ref().and_then(|path| Image::new().source_file(path).ok()) {
             info_items.push(KeyedView::new(
@@ -1450,6 +1504,7 @@ impl Explorer {
         self.new_folder_name.clear();
         self.selected.clear();
         self.entries.clear();
+        self.git_branch = None;
         self.status = tr("Loading folder…").to_owned();
         self.has_error = false;
         self.queue_load(path, context);
@@ -1459,6 +1514,7 @@ impl Explorer {
         self.load_generation += 1;
         let generation = self.load_generation;
         let requested_path = path.clone();
+        let path_for_git = path.clone();
         let recursive = self.recursive;
         let _task = context.spawn_background(move |_| {
             let result = if recursive {
@@ -1468,6 +1524,11 @@ impl Explorer {
             }
             .map_err(|error| format!("{}: {error}", path.display()));
             Message::Loaded(generation, requested_path, result)
+        });
+        let branch_path = path_for_git;
+        let _branch = context.spawn_background(move |_| {
+            let branch = shell::git(&["branch", "--show-current"], &branch_path).ok();
+            Message::GitBranch(branch_path, branch)
         });
     }
 

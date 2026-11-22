@@ -317,6 +317,22 @@ pub fn extract(archive: &Path, destination: &Path) -> Result<(), String> {
     run_tar(std::process::Command::new("tar.exe").arg("-x").arg("-f").arg(archive).arg("-C").arg(destination))
 }
 
+pub fn git(args: &[&str], dir: &Path) -> Result<String, String> {
+    use std::os::windows::process::CommandExt;
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .creation_flags(0x0800_0000)
+        .output()
+        .map_err(|error| error.to_string())?;
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).trim().to_owned();
+    if output.status.success() {
+        Ok(text(&output.stdout))
+    } else {
+        Err(text(&output.stderr))
+    }
+}
+
 fn run_tar(command: &mut std::process::Command) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     let output = command.creation_flags(0x0800_0000).output().map_err(|error| error.to_string())?;
