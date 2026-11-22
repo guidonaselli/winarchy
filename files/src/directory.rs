@@ -174,6 +174,22 @@ pub fn is_pdf(entry: &Entry) -> bool {
     !entry.is_directory && entry.path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
 }
 
+pub fn icon(entry: &Entry) -> windows_reactor::Symbol {
+    use windows_reactor::Symbol;
+    if entry.is_directory {
+        return Symbol::Folder;
+    }
+    let ext = entry.path.extension().and_then(|ext| ext.to_str()).unwrap_or_default().to_lowercase();
+    match ext.as_str() {
+        _ if is_image(entry) => Symbol::Pictures,
+        "mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac" => Symbol::Audio,
+        "mp4" | "mkv" | "avi" | "mov" | "wmv" | "webm" => Symbol::Video,
+        "pdf" | "doc" | "docx" | "txt" | "md" | "rtf" | "odt" | "xls" | "xlsx" | "ppt" | "pptx" => Symbol::Document,
+        "zip" | "7z" | "rar" | "tar" | "gz" => Symbol::MoveToFolder,
+        _ => Symbol::Page,
+    }
+}
+
 pub fn properties(entry: &Entry) -> String {
     format!(
         "{}: {} · {}: {} · {}: {}",

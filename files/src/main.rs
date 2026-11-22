@@ -962,6 +962,20 @@ impl Component for Explorer {
             };
             (build(true), build(false))
         };
+        let muted = self.theme.as_ref().map(Theme::muted);
+        let mut info_items = Vec::new();
+        if !self.details.is_empty() {
+            info_items.push(KeyedView::new(0usize, text(&self.details, muted.clone())));
+        }
+        if !self.preview.is_empty() {
+            info_items.push(KeyedView::new(1usize, text(&self.preview, muted)));
+        }
+        if let Some(image) = self.preview_image.as_ref().and_then(|path| Image::new().source_file(path).ok()) {
+            info_items.push(KeyedView::new(
+                2usize,
+                image.stretch(Stretch::Uniform).horizontal_alignment(HorizontalAlignment::Left).height(PREVIEW_HEIGHT),
+            ));
+        }
         let toolbar = StackPanel::new().spacing(STACK_GAP).children((
             StackPanel::new()
                 .orientation(Orientation::Horizontal)
@@ -1077,19 +1091,7 @@ impl Component for Explorer {
                     self.sort_button(context, SortKey::Size, tr("Size"), 1),
                     self.sort_button(context, SortKey::Modified, tr("Modified"), 2),
                 )),
-            text(&self.details, self.theme.as_ref().map(Theme::muted)),
-            text(&self.preview, self.theme.as_ref().map(Theme::muted)),
-            match self
-                .preview_image
-                .as_ref()
-                .and_then(|path| Image::new().source_file(path).ok())
-            {
-                Some(image) => image
-                    .stretch(Stretch::Uniform)
-                    .horizontal_alignment(HorizontalAlignment::Left)
-                    .height(PREVIEW_HEIGHT),
-                None => Image::new().height(0.0),
-            },
+            StackPanel::new().spacing(STACK_GAP).keyed_children(info_items),
             text(
                 &self.status,
                 self.theme.as_ref().map(|theme| {
@@ -1712,6 +1714,8 @@ fn row(
             CheckBox::new()
                 .automation_name(format!("{} {}", tr("Select"), entry.name))
                 .grid_column(0)
+                .min_width(0.0)
+                .width(CHECK_WIDTH)
                 .is_enabled(!busy)
                 .is_checked(is_selected)
                 .on_is_checked_changed(
@@ -1723,18 +1727,31 @@ fn row(
                 .grid_column(1)
                 .horizontal_content_alignment(HorizontalAlignment::Left)
                 .style(ButtonStyle::Subtle)
+                .automation_name(entry.name.clone())
                 .on_click(sender.message(action))
-                .content(text(
-                    &if hide_extensions && !entry.is_directory {
-                        Path::new(&entry.name).with_extension("").to_string_lossy().into_owned()
-                    } else {
-                        entry.name.clone()
-                    },
-                    theme.map(Theme::foreground),
-                )),
-            text(&directory::format_size(entry), theme.map(Theme::muted)).grid_column(2),
+                .content(
+                    StackPanel::new()
+                        .horizontal_alignment(HorizontalAlignment::Left)
+                        .orientation(Orientation::Horizontal)
+                        .spacing(ROW_GAP)
+                        .children((
+                            SymbolIcon::new().symbol(directory::icon(entry)),
+                            text(
+                                &if hide_extensions && !entry.is_directory {
+                                    Path::new(&entry.name).with_extension("").to_string_lossy().into_owned()
+                                } else {
+                                    entry.name.clone()
+                                },
+                                theme.map(Theme::foreground),
+                            ),
+                        )),
+                ),
+            text(&directory::format_size(entry), theme.map(Theme::muted))
+                .grid_column(2)
+                .vertical_alignment(VerticalAlignment::Center),
             text(&directory::format_modified(entry), theme.map(Theme::muted))
                 .grid_column(3)
+                .vertical_alignment(VerticalAlignment::Center)
                 .margin(Thickness::new(0.0, 0.0, ROW_TRAILING, 0.0)),
         ))
 }

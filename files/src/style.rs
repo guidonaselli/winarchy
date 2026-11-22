@@ -4,6 +4,7 @@ pub const ROW_GAP: f64 = 6.0;
 pub const TIGHT_GAP: f64 = 2.0;
 pub const COLUMN_GAP: f64 = 12.0;
 pub const ROW_TRAILING: f64 = 16.0;
+pub const CHECK_WIDTH: f64 = 32.0;
 pub const PREVIEW_HEIGHT: f64 = 160.0;
 pub const MIN_LIST_WIDTH: f64 = 320.0;
 pub const DEFAULT_LIST_WIDTH: f64 = 800.0;
