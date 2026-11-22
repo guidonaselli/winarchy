@@ -77,6 +77,7 @@ const ES: &[(&str, &str)] = &[
     ("Terminal as administrator", "Terminal como administrador"),
     ("Open Recycle Bin", "Abrir la Papelera (restaurar elementos)"),
     ("Empty Recycle Bin", "Vaciar la Papelera"),
+    ("Paste as shortcut", "Pegar como acceso directo"),
     ("Git init", "Git: inicializar repositorio"),
     ("Git clone (URL in name field)", "Git: clonar (URL en el campo de nombre)"),
     ("Git fetch", "Git: fetch"),

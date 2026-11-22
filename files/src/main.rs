@@ -105,6 +105,7 @@ impl Explorer {
             command("Copy path", Message::CopyPath(false), None, true, false),
             command("Copy path with quotes", Message::CopyPath(true), None, true, false),
             command("Show in folder", Message::ShowInFolder, None, one, false),
+            command("Paste as shortcut", Message::PasteShortcut, None, clipboard::has_files() && idle, false),
             command("Create shortcut", Message::CreateShortcut, None, one, false),
             command("Compress to zip", Message::Compress, None, some && !self.transferring, false),
             command("Extract here", Message::Extract, None, one && !self.transferring, false),
@@ -259,6 +260,7 @@ enum Message {
     RunVerb(&'static str),
     EmptyRecycleBin,
     OpenRecycleBin,
+    PasteShortcut,
     Git(&'static str),
     GitBranch(PathBuf, Option<String>),
     GitDone(&'static str, Result<String, String>),
@@ -838,6 +840,28 @@ impl Component for Explorer {
                 {
                     self.navigate(parent, context);
                 }
+            }
+            Message::PasteShortcut => {
+                let files = match clipboard::get_files() {
+                    Ok(Some((files, _))) => files,
+                    Ok(None) => return,
+                    Err(error) => {
+                        self.status = format!("{}: {error}", tr("Clipboard failed"));
+                        self.has_error = true;
+                        return;
+                    }
+                };
+                let mut failure = None;
+                for target in files {
+                    let Some(name) = target.file_name().map(|n| n.to_string_lossy().into_owned()) else { continue };
+                    let link = self.path.join(format!("{name} - {}.lnk", tr("Shortcut")));
+                    match shell::create_shortcut(&target, &link) {
+                        Ok(()) => self.record(Undo::RemoveFile(link)),
+                        Err(error) => failure = Some(format!("{}: {error}", tr("Could not create shortcut"))),
+                    }
+                }
+                self.load_path(self.path.clone(), context);
+                self.notice = failure;
             }
             Message::CreateShortcut => {
                 let Some(target) = self.selected.iter().next().filter(|_| self.selected.len() == 1).cloned() else { return };
