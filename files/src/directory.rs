@@ -225,7 +225,18 @@ pub fn drives() -> Vec<Drive> {
         let named = kind != DriveKind::Network
             && unsafe { GetVolumeInformationW(PCWSTR(root.as_ptr()), Some(&mut name), None, None, None, None) }.is_ok();
         let volume = if named { String::from_utf16_lossy(&name[..name.iter().position(|&c| c == 0).unwrap_or(0)]) } else { String::new() };
-        let label = if volume.is_empty() { format!("{letter}:") } else { format!("{volume} ({letter}:)") };
+        let volume = if volume.is_empty() {
+            tr(match kind {
+                DriveKind::Fixed => "Local Disk",
+                DriveKind::Removable => "Removable Disk",
+                DriveKind::Optical => "CD/DVD Drive",
+                DriveKind::Network => "Network Drive",
+            })
+            .to_owned()
+        } else {
+            volume
+        };
+        let label = format!("{volume} ({letter}:)");
         drives.push(Drive { label, path: PathBuf::from(format!("{letter}:{}", std::path::MAIN_SEPARATOR)), kind });
     }
     drives
