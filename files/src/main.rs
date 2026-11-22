@@ -86,6 +86,7 @@ fn undo_for_transfer(paths: &[PathBuf], destination: &Path, cut: bool) -> Option
 
 #[derive(Clone)]
 enum Message {
+    ToggleRecursive,
     ToggleHidden,
     Undo,
     Redo,
@@ -132,6 +133,7 @@ struct Explorer {
     pending_inverse: Option<Undo>,
     redoing: bool,
     show_hidden: bool,
+    recursive: bool,
     sort: SortKey,
     descending: bool,
     new_folder_name: String,
@@ -181,6 +183,7 @@ impl Component for Explorer {
             pending_inverse: None,
             redoing: false,
             show_hidden: false,
+            recursive: false,
             sort: SortKey::Name,
             descending: false,
             new_folder_name: String::new(),
@@ -247,6 +250,13 @@ impl Component for Explorer {
             Message::Paste => self.paste(context),
             Message::Undo => self.step_history(false, context),
             Message::Redo => self.step_history(true, context),
+            Message::ToggleRecursive => {
+                self.recursive = !self.recursive;
+                self.selected.clear();
+                self.entries.clear();
+                self.status = "Loading folder…".to_owned();
+                self.queue_load(self.path.clone(), context);
+            }
             Message::ToggleHidden => {
                 self.show_hidden = !self.show_hidden;
                 self.selected.clear();
@@ -554,7 +564,13 @@ impl Component for Explorer {
                 .placeholder_text("Filter by name")
                 .on_text_changed(context.callback(Message::Filter)),
             Grid::new()
-                .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto, GridLength::Auto])
+                .columns([
+                    GridLength::STAR,
+                    GridLength::Auto,
+                    GridLength::Auto,
+                    GridLength::Auto,
+                    GridLength::Auto,
+                ])
                 .column_spacing(6.0)
                 .children((
                     self.sort_button(context, SortKey::Name, "Name", 0),
@@ -565,6 +581,11 @@ impl Component for Explorer {
                         .automation_name("Show hidden items")
                         .on_click(context.message(Message::ToggleHidden))
                         .content(if self.show_hidden { "Hidden: shown" } else { "Hidden: off" }),
+                    Button::new()
+                        .grid_column(4)
+                        .automation_name("Search subfolders")
+                        .on_click(context.message(Message::ToggleRecursive))
+                        .content(if self.recursive { "Subfolders: on" } else { "Subfolders: off" }),
                 )),
             text(
                 &self.path.to_string_lossy(),
@@ -812,6 +833,9 @@ impl Explorer {
                     self.selected.len()
                 )
             };
+            if self.recursive && self.entries.len() >= directory::SEARCH_LIMIT {
+                self.status.push_str(" · limited to the first 20000");
+            }
             if let [path] = self.selected.iter().collect::<Vec<_>>()[..]
                 && let Some(entry) = self.entries.iter().find(|entry| &entry.path == path)
             {
@@ -828,6 +852,7 @@ impl Explorer {
 
     fn navigate(&mut self, path: PathBuf, context: &ComponentContext<Self>) {
         self.path = path.clone();
+        self.recursive = false;
         self.address = path.to_string_lossy().into_owned();
         self.new_folder_name.clear();
         self.rename_name.clear();
@@ -842,9 +867,14 @@ impl Explorer {
         self.load_generation += 1;
         let generation = self.load_generation;
         let requested_path = path.clone();
+        let recursive = self.recursive;
         let _task = context.spawn_background(move |_| {
-            let result =
-                directory::read(&path).map_err(|error| format!("{}: {error}", path.display()));
+            let result = if recursive {
+                directory::read_recursive(&path)
+            } else {
+                directory::read(&path)
+            }
+            .map_err(|error| format!("{}: {error}", path.display()));
             Message::Loaded(generation, requested_path, result)
         });
     }

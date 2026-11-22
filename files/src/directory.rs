@@ -38,6 +38,38 @@ pub fn read(path: &PathBuf) -> io::Result<Vec<Entry>> {
     Ok(entries)
 }
 
+pub const SEARCH_LIMIT: usize = 20_000;
+
+// Names are paths relative to `root`; symlinked folders are listed but not entered, so cycles cannot loop.
+pub fn read_recursive(root: &PathBuf) -> io::Result<Vec<Entry>> {
+    let mut found = Vec::new();
+    let mut pending = vec![root.clone()];
+    while let Some(folder) = pending.pop() {
+        let Ok(children) = read(&folder) else {
+            if &folder == root {
+                return Err(io::Error::last_os_error());
+            }
+            continue;
+        };
+        for mut entry in children {
+            if found.len() >= SEARCH_LIMIT {
+                return Ok(found);
+            }
+            if entry.is_directory
+                && fs::symlink_metadata(&entry.path).is_ok_and(|m| !m.file_type().is_symlink())
+            {
+                pending.push(entry.path.clone());
+            }
+            entry.name = entry
+                .path
+                .strip_prefix(root)
+                .map_or(entry.name, |relative| relative.to_string_lossy().into_owned());
+            found.push(entry);
+        }
+    }
+    Ok(found)
+}
+
 pub fn places() -> Vec<(String, PathBuf)> {
     let mut places = Vec::new();
     if let Some(home) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
@@ -136,5 +168,31 @@ mod tests {
             format_modified(&entry(0, 951_782_400, false)),
             "2000-02-29 00:00 UTC"
         );
+    }
+
+    #[test]
+    fn recursive_read_lists_nested_entries_with_relative_names() {
+        let root = std::env::temp_dir().join(format!("wf-recursive-{}", std::process::id()));
+        fs::create_dir_all(root.join("a").join("b")).unwrap();
+        fs::write(root.join("top.txt"), "").unwrap();
+        fs::write(root.join("a").join("b").join("deep.txt"), "").unwrap();
+        let mut names: Vec<_> = read_recursive(&root)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+        names.sort();
+        fs::remove_file(root.join("top.txt")).unwrap();
+        fs::remove_file(root.join("a").join("b").join("deep.txt")).unwrap();
+        fs::remove_dir(root.join("a").join("b")).unwrap();
+        fs::remove_dir(root.join("a")).unwrap();
+        fs::remove_dir(&root).unwrap();
+        let expected = [
+            "a".to_owned(),
+            ["a", "b"].join(std::path::MAIN_SEPARATOR_STR),
+            ["a", "b", "deep.txt"].join(std::path::MAIN_SEPARATOR_STR),
+            "top.txt".to_owned(),
+        ];
+        assert_eq!(names, expected);
     }
 }
