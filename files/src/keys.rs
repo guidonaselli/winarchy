@@ -25,6 +25,7 @@ pub enum Key {
     Refresh,
     Undo,
     Redo,
+    NewWindow,
 }
 
 pub type Receiver = Arc<Mutex<mpsc::Receiver<Key>>>;
@@ -63,6 +64,7 @@ fn map_key(virtual_key: u32, ctrl: bool) -> Option<Key> {
         (0x41, true) => Some(Key::SelectAll),
         (0x5A, true) => Some(Key::Undo),
         (0x59, true) => Some(Key::Redo),
+        (0x4E, true) => Some(Key::NewWindow),
         (0x2E, false) => Some(Key::Delete),
         (0x08, false) => Some(Key::Up),
         (0x74, false) => Some(Key::Refresh),
@@ -118,5 +120,6 @@ mod tests {
         assert_eq!(map_key(0x41, true), Some(Key::SelectAll));
         assert_eq!(map_key(0x5A, true), Some(Key::Undo));
         assert_eq!(map_key(0x59, true), Some(Key::Redo));
+        assert_eq!(map_key(0x4E, true), Some(Key::NewWindow));
     }
 }

@@ -105,6 +105,7 @@ fn undo_for_transfer(paths: &[PathBuf], destination: &Path, cut: bool) -> Option
 
 #[derive(Clone)]
 enum Message {
+    NewWindow,
     ToggleRecursive,
     ToggleHidden,
     Undo,
@@ -272,6 +273,19 @@ impl Component for Explorer {
             Message::Paste => self.paste(context),
             Message::Undo => self.step_history(false, context),
             Message::Redo => self.step_history(true, context),
+            Message::NewWindow => {
+                let folder = match self.selected.iter().collect::<Vec<_>>()[..] {
+                    [path] if path.is_dir() => path.clone(),
+                    _ => self.path.clone(),
+                };
+                let opened = std::env::current_exe()
+                    .and_then(|exe| std::process::Command::new(exe).arg(&folder).spawn());
+                self.has_error = opened.is_err();
+                self.status = match opened {
+                    Ok(_) => format!("Opened {} in a new window", folder.display()),
+                    Err(error) => format!("New window failed: {error}"),
+                };
+            }
             Message::ToggleRecursive => {
                 self.recursive = !self.recursive;
                 self.selected.clear();
@@ -594,6 +608,7 @@ impl Component for Explorer {
                     GridLength::Auto,
                     GridLength::Auto,
                     GridLength::Auto,
+                    GridLength::Auto,
                 ])
                 .column_spacing(6.0)
                 .children((
@@ -610,6 +625,11 @@ impl Component for Explorer {
                         .automation_name("Search subfolders")
                         .on_click(context.message(Message::ToggleRecursive))
                         .content(if self.recursive { "Subfolders: on" } else { "Subfolders: off" }),
+                    Button::new()
+                        .grid_column(5)
+                        .automation_name("New window")
+                        .on_click(context.message(Message::NewWindow))
+                        .content("New window"),
                 )),
             text(
                 &self.path.to_string_lossy(),
@@ -693,6 +713,7 @@ impl Explorer {
             keys::Key::Cut => self.update(Message::Clip(true), context),
             keys::Key::Paste => self.update(Message::Paste, context),
             keys::Key::Undo => self.update(Message::Undo, context),
+            keys::Key::NewWindow => self.update(Message::NewWindow, context),
             keys::Key::Redo => self.update(Message::Redo, context),
             keys::Key::Delete => self.update(Message::DeleteSelected, context),
             keys::Key::Up => self.update(Message::Parent, context),
