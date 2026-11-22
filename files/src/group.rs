@@ -1,5 +1,5 @@
 use crate::{directory::Entry, i18n::tr_dynamic};
-use std::time::SystemTime;
+use std::{sync::Arc, time::SystemTime};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Group {
@@ -49,7 +49,7 @@ impl Group {
 
 pub enum Line {
     Header(String),
-    Row(Vec<Entry>),
+    Row(Vec<Arc<Entry>>),
 }
 
 const DAY: u64 = 86_400;
@@ -93,7 +93,7 @@ fn bucket(group: Group, entry: &Entry, now: SystemTime) -> (u8, String) {
 }
 
 // Stable: within a bucket the incoming (sorted) order is kept.
-pub fn arrange(mut entries: Vec<Entry>, group: Group, now: SystemTime) -> Vec<Entry> {
+pub fn arrange(mut entries: Vec<Arc<Entry>>, group: Group, now: SystemTime) -> Vec<Arc<Entry>> {
     if group != Group::None {
         entries.sort_by_cached_key(|entry| bucket(group, entry, now));
     }
@@ -101,7 +101,7 @@ pub fn arrange(mut entries: Vec<Entry>, group: Group, now: SystemTime) -> Vec<En
 }
 
 // `entries` must already be arranged; each group is chunked into rows of `per_row`.
-pub fn lines(entries: &[Entry], group: Group, per_row: usize, now: SystemTime) -> Vec<Line> {
+pub fn lines(entries: &[Arc<Entry>], group: Group, per_row: usize, now: SystemTime) -> Vec<Line> {
     let per_row = per_row.max(1);
     let mut lines = Vec::new();
     let mut start = 0;
@@ -125,8 +125,8 @@ mod tests {
     use super::*;
     use std::{path::PathBuf, time::Duration};
 
-    fn entry(name: &str, directory: bool, size: u64, age_days: u64, now: SystemTime) -> Entry {
-        Entry {
+    fn entry(name: &str, directory: bool, size: u64, age_days: u64, now: SystemTime) -> Arc<Entry> {
+        Arc::new(Entry {
             name: name.to_owned(),
             path: PathBuf::from(name),
             is_directory: directory,
@@ -135,10 +135,10 @@ mod tests {
             created: None,
             size,
             modified: Some(now - Duration::from_secs(age_days * DAY)),
-        }
+        })
     }
 
-    fn names(entries: &[Entry]) -> Vec<&str> {
+    fn names(entries: &[Arc<Entry>]) -> Vec<&str> {
         entries.iter().map(|e| e.name.as_str()).collect()
     }
 
@@ -176,7 +176,7 @@ mod tests {
     #[test]
     fn chunks_rows_inside_each_group_and_adds_no_headers_when_ungrouped() {
         let now = SystemTime::now();
-        let entries: Vec<Entry> = (0..5).map(|i| entry(&format!("f{i}.txt"), false, 1, 0, now)).collect();
+        let entries: Vec<Arc<Entry>> = (0..5).map(|i| entry(&format!("f{i}.txt"), false, 1, 0, now)).collect();
         let ungrouped = lines(&entries, Group::None, 2, now);
         assert_eq!(ungrouped.len(), 3);
         assert!(ungrouped.iter().all(|l| matches!(l, Line::Row(_))));
