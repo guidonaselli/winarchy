@@ -158,6 +158,13 @@ pub fn preview(entry: &Entry) -> Option<String> {
 "))
 }
 
+pub fn is_image(entry: &Entry) -> bool {
+    !entry.is_directory
+        && entry.path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| {
+            ["png", "jpg", "jpeg", "gif", "bmp", "webp", "ico"].contains(&ext.to_lowercase().as_str())
+        })
+}
+
 pub fn properties(entry: &Entry) -> String {
     format!(
         "Path: {} · Created: {} · Attributes: {}",

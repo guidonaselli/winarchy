@@ -155,6 +155,7 @@ struct Explorer {
     redoing: bool,
     details: String,
     preview: String,
+    preview_image: Option<PathBuf>,
     show_hidden: bool,
     recursive: bool,
     sort: SortKey,
@@ -208,6 +209,7 @@ impl Component for Explorer {
             redoing: false,
             details: String::new(),
             preview: String::new(),
+            preview_image: None,
             show_hidden: saved.show_hidden,
             recursive: false,
             sort: SortKey::from_name(&saved.sort),
@@ -647,6 +649,17 @@ impl Component for Explorer {
             ),
             text(&self.details, self.theme.as_ref().map(Theme::muted)),
             text(&self.preview, self.theme.as_ref().map(Theme::muted)),
+            match self
+                .preview_image
+                .as_ref()
+                .and_then(|path| Image::new().source_file(path).ok())
+            {
+                Some(image) => image
+                    .stretch(Stretch::Uniform)
+                    .horizontal_alignment(HorizontalAlignment::Left)
+                    .height(160.0),
+                None => Image::new().height(0.0),
+            },
             text(
                 &self.status,
                 self.theme.as_ref().map(|theme| {
@@ -922,11 +935,13 @@ impl Explorer {
             }
             self.details.clear();
             self.preview.clear();
+            self.preview_image = None;
             if let [path] = self.selected.iter().collect::<Vec<_>>()[..]
                 && let Some(entry) = self.entries.iter().find(|entry| &entry.path == path)
             {
                 self.details = directory::properties(entry);
                 self.preview = directory::preview(entry).unwrap_or_default();
+                self.preview_image = directory::is_image(entry).then(|| entry.path.clone());
                 let kind = if entry.is_directory { "Folder" } else { "File" };
                 self.status.push_str(&format!(
                     " · {kind} “{}” {} {}",
