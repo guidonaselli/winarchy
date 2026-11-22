@@ -15,6 +15,8 @@ pub struct Settings {
     pub hide_extensions: bool,
     #[serde(default)]
     pub layout: String,
+    #[serde(default)]
+    pub pinned: Vec<PathBuf>,
 }
 
 fn location() -> Option<PathBuf> {
@@ -51,7 +53,7 @@ mod tests {
     #[test]
     fn tolerates_partial_and_invalid_json() {
         let partial: Settings = serde_json::from_str(r#"{"show_hidden": true}"#).unwrap();
-        assert_eq!(partial, Settings { show_hidden: true, sort: String::new(), descending: false, language: String::new(), hide_extensions: false, layout: String::new() });
+        assert_eq!(partial, Settings { show_hidden: true, sort: String::new(), descending: false, language: String::new(), hide_extensions: false, layout: String::new(), pinned: Vec::new() });
         assert!(serde_json::from_str::<Settings>("not json").is_err());
     }
 }

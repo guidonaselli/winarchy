@@ -100,6 +100,15 @@ impl Layout {
     }
 }
 
+fn places_with(pinned: &[PathBuf]) -> Vec<(String, PathBuf)> {
+    let mut places = directory::places();
+    places.extend(pinned.iter().map(|path| {
+        let label = path.file_name().map_or_else(|| path.to_string_lossy().into_owned(), |name| name.to_string_lossy().into_owned());
+        (label, path.clone())
+    }));
+    places
+}
+
 fn count_word(count: usize, one: &'static str, many: &'static str) -> &'static str {
     tr(if count == 1 { one } else { many })
 }
@@ -129,6 +138,16 @@ impl Explorer {
             .collect();
         crumbs.reverse();
         crumbs
+    }
+}
+
+impl Explorer {
+    // The selected folder when exactly one is selected, otherwise the folder being shown.
+    fn pin_target(&self) -> PathBuf {
+        match self.selected.iter().next() {
+            Some(path) if self.selected.len() == 1 && path.is_dir() => path.clone(),
+            _ => self.path.clone(),
+        }
     }
 }
 
@@ -172,6 +191,19 @@ impl Explorer {
             command("Git fetch", Message::Git("fetch"), None, self.git_branch.is_some() && !self.transferring, false),
             command("Git pull", Message::Git("pull"), None, self.git_branch.is_some() && !self.transferring, false),
             command("Git push", Message::Git("push"), None, self.git_branch.is_some() && !self.transferring, false),
+            command(
+                if self.pinned.contains(&self.pin_target()) {
+                    "Unpin from sidebar"
+                } else {
+                    "Pin to sidebar"
+                },
+                Message::TogglePin,
+                None,
+                true,
+                false,
+            ),
+            command("Open in editor", Message::OpenEditor, None, true, false),
+            command("Storage settings", Message::OpenStorageSense, None, true, false),
             command("Open Recycle Bin", Message::OpenRecycleBin, None, true, false),
             command("Empty Recycle Bin", Message::EmptyRecycleBin, None, true, false),
             command(self.layout.label(), Message::CycleLayout, None, true, false),
@@ -315,6 +347,9 @@ enum Message {
     RunVerb(&'static str),
     EmptyRecycleBin,
     OpenRecycleBin,
+    TogglePin,
+    OpenEditor,
+    OpenStorageSense,
     PasteShortcut,
     Git(&'static str),
     GitBranch(PathBuf, Option<String>),
@@ -399,6 +434,7 @@ struct Explorer {
     focus_requested: bool,
     focus_attempts: u8,
     places: Vec<(String, PathBuf)>,
+    pinned: Vec<PathBuf>,
     list_width: f64,
 }
 
@@ -462,7 +498,8 @@ impl Component for Explorer {
             address_ref: ElementRef::new(),
             focus_requested: false,
             focus_attempts: 0,
-            places: directory::places(),
+            places: places_with(&saved.pinned),
+            pinned: saved.pinned.clone(),
             list_width: DEFAULT_LIST_WIDTH,
         };
         app.queue_load(path, context);
@@ -570,6 +607,39 @@ impl Component for Explorer {
                         self.has_error = true;
                         self.status = format!("{}: {error}", tr("Clipboard failed"));
                     }
+                }
+            }
+            Message::TogglePin => {
+                let target = self.pin_target();
+                match self.pinned.iter().position(|pinned| *pinned == target) {
+                    Some(index) => {
+                        self.pinned.remove(index);
+                    }
+                    None => self.pinned.push(target),
+                }
+                self.places = places_with(&self.pinned);
+                self.save_settings();
+            }
+            Message::OpenEditor => {
+                use std::os::windows::process::CommandExt;
+                let target = match self.selected.iter().next() {
+                    Some(path) if self.selected.len() == 1 => path.clone(),
+                    _ => self.path.clone(),
+                };
+                let opened = std::process::Command::new("cmd.exe")
+                    .args(["/c", "code"])
+                    .arg(&target)
+                    .creation_flags(0x0800_0000)
+                    .spawn();
+                if let Err(error) = opened {
+                    self.status = format!("{}: {error}", tr("Could not run"));
+                    self.has_error = true;
+                }
+            }
+            Message::OpenStorageSense => {
+                if let Err(error) = shell::execute("open", "ms-settings:storagesense", None) {
+                    self.status = format!("{}: {error}", tr("Could not run"));
+                    self.has_error = true;
                 }
             }
             Message::OpenTerminal => {
@@ -1546,6 +1616,7 @@ impl Explorer {
             descending: self.descending,
             language: self.language.to_owned(),
             layout: self.layout.name().to_owned(),
+            pinned: self.pinned.clone(),
         });
     }
 
