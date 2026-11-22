@@ -105,6 +105,7 @@ fn undo_for_transfer(paths: &[PathBuf], destination: &Path, cut: bool) -> Option
 
 #[derive(Clone)]
 enum Message {
+    Dropped(DroppedData),
     NewWindow,
     ToggleRecursive,
     ToggleHidden,
@@ -275,6 +276,13 @@ impl Component for Explorer {
             Message::Paste => self.paste(context),
             Message::Undo => self.step_history(false, context),
             Message::Redo => self.step_history(true, context),
+            Message::Dropped(DroppedData::StorageItems(items)) => {
+                if !(self.deleting || self.transferring) {
+                    let paths = items.into_iter().map(|item| PathBuf::from(item.path)).collect();
+                    self.begin_transfer(paths, false, "Copying dropped items…", context);
+                }
+            }
+            Message::Dropped(_) => {}
             Message::NewWindow => {
                 let folder = match self.selected.iter().collect::<Vec<_>>()[..] {
                     [path] if path.is_dir() => path.clone(),
@@ -689,7 +697,16 @@ impl Component for Explorer {
             .children((
                 Grid::new().grid_column(0).children((ScrollViewer::new()
                     .content(StackPanel::new().spacing(2.0).keyed_children(sidebar_items)),)),
-                Grid::new().grid_column(1).children((content,)),
+                Border::new()
+                    .grid_column(1)
+                    .background_optional(self.theme.as_ref().map(Theme::background))
+                    .drop_policy(
+                        DragDropPolicy::new().storage_items(
+                            DragDropAction::new(DragDropOperation::Copy).caption("Copy here"),
+                        ),
+                    )
+                    .on_drop(context.callback(Message::Dropped))
+                    .content(content),
             ));
         if let Some(theme) = &self.theme {
             Grid::new()
@@ -804,11 +821,21 @@ impl Explorer {
                 return;
             }
         };
+        self.begin_transfer(paths, cut, "Pasting…", context);
+    }
+
+    fn begin_transfer(
+        &mut self,
+        paths: Vec<PathBuf>,
+        cut: bool,
+        label: &str,
+        context: &ComponentContext<Self>,
+    ) {
         let destination = self.path.clone();
         self.pending_undo = undo_for_transfer(&paths, &destination, cut);
         self.transferring = true;
         self.has_error = false;
-        self.status = "Pasting…".to_owned();
+        self.status = label.to_owned();
         let _task = context.spawn_background(move |_| {
             let result = shell::transfer(&paths, &destination, cut);
             Message::TransferComplete(cut, result)
