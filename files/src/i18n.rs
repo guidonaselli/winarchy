@@ -77,6 +77,8 @@ const ES: &[(&str, &str)] = &[
     ("Searching…", "Buscando…"),
     ("limited to the first", "limitado a los primeros"),
     ("Show more options", "Mostrar más opciones"),
+    ("This folder is empty", "Esta carpeta está vacía"),
+    ("No items match the filter", "Ningún elemento coincide con el filtro"),
     ("Subfolders", "Subcarpetas"),
     ("Settings file", "Archivo de configuración"),
     ("New", "Nuevo"),

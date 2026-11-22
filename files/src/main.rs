@@ -608,6 +608,7 @@ struct Explorer {
     editing_address: bool,
     focus_prompt: bool,
     focus_requested: bool,
+    loaded: bool,
     focus_attempts: u8,
     places: Vec<(String, PathBuf)>,
     pinned: Vec<PathBuf>,
@@ -706,6 +707,7 @@ impl Component for Explorer {
             editing_address: false,
             focus_prompt: false,
             focus_requested: false,
+            loaded: false,
             focus_attempts: 0,
             places: places_with(&saved.pinned),
             pinned: saved.pinned.clone(),
@@ -949,6 +951,7 @@ impl Component for Explorer {
                 self.selected.clear();
                 self.entries.clear();
                 self.status = tr("Loading folder…").to_owned();
+        self.loaded = false;
                 self.queue_load(self.path.clone(), context);
             }
             Message::CycleLayout => {
@@ -1517,6 +1520,7 @@ impl Component for Explorer {
             Message::Loaded(generation, path, result)
                 if generation == self.load_generation && path == self.path =>
             {
+                self.loaded = true;
                 match result {
                     Ok(entries) => {
                         if !self.focus_requested {
@@ -1538,6 +1542,7 @@ impl Component for Explorer {
             }
             Message::Loaded(_, _, _) => {}
             Message::Searched(generation, path, batch) if generation == self.load_generation && path == self.path => {
+                self.loaded = true;
                 if let Some(error) = batch.error {
                     self.status = error;
                     self.has_error = true;
@@ -1767,6 +1772,16 @@ impl Component for Explorer {
                         .content(ItemsRepeater::new().horizontal_alignment(HorizontalAlignment::Stretch).virtual_source(source)),
                 ),
         )];
+        if self.loaded && !self.has_error && visible.is_empty() {
+            let message = if self.filter.is_empty() { "This folder is empty" } else { "No items match the filter" };
+            body_items.push(KeyedView::new(
+                2usize,
+                text(tr(message), self.theme.as_ref().map(Theme::muted))
+                    .grid_column(0)
+                    .horizontal_alignment(HorizontalAlignment::Center)
+                    .vertical_alignment(VerticalAlignment::Center),
+            ));
+        }
         if !self.pane_hidden() {
             body_items.push(KeyedView::new(
                 1usize,
