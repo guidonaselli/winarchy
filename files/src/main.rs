@@ -43,6 +43,10 @@ impl SortKey {
     }
 }
 
+fn count_word(count: usize, one: &'static str, many: &'static str) -> &'static str {
+    tr(if count == 1 { one } else { many })
+}
+
 // Only operations that can be reversed without guessing: names that did not exist before.
 enum Undo {
     RemoveDir(PathBuf),
@@ -925,7 +929,7 @@ impl Explorer {
                 .filter(|entry| self.matches(entry, &needle))
                 .count();
             self.status = if shown == self.entries.len() {
-                format!("{shown} {} · {} {}", tr("items"), self.selected.len(), tr("selected"))
+                format!("{shown} {} · {} {}", count_word(shown, "item", "items"), self.selected.len(), count_word(self.selected.len(), "selected one", "selected"))
             } else {
                 format!(
                     "{shown} {} {} {} · {} {}",
@@ -933,7 +937,7 @@ impl Explorer {
                     self.entries.len(),
                     tr("items"),
                     self.selected.len(),
-                    tr("selected")
+                    count_word(self.selected.len(), "selected one", "selected")
                 )
             };
             if self.recursive && self.entries.len() >= directory::SEARCH_LIMIT {
