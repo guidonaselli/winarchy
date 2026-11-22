@@ -2420,7 +2420,7 @@ impl Explorer {
                 )
             };
             if self.recursive && self.entries.len() >= directory::SEARCH_LIMIT {
-                self.status.push_str(" · limited to the first 20000");
+                self.status.push_str(&format!(" · {} {}", tr("limited to the first"), directory::SEARCH_LIMIT));
             }
             self.details.clear();
             self.preview.clear();

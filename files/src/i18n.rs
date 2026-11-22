@@ -72,6 +72,7 @@ const ES: &[(&str, &str)] = &[
     ("Sort by date ▲", "Ordenar por fecha ▲"),
     ("Sort by date ▼", "Ordenar por fecha ▼"),
     ("Share", "Compartir"),
+    ("limited to the first", "limitado a los primeros"),
     ("Subfolders", "Subcarpetas"),
     ("Include subfolders in the list and the filter", "Incluir subcarpetas en la lista y el filtro"),
     ("Settings file", "Archivo de configuración"),
