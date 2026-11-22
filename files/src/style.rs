@@ -67,3 +67,7 @@ pub const TOGGLE_SIZE: f64 = 24.0;
 pub const TOGGLE_INSET: f64 = 6.0;
 pub const MENU_CLICK_GUARD: std::time::Duration = std::time::Duration::from_millis(250);
 pub const TYPE_AHEAD_WINDOW: std::time::Duration = std::time::Duration::from_millis(900);
+pub const FAVORITES_KEY: usize = 10_000;
+pub const PINS_KEY: usize = 10_001;
+pub const PIN_PADDING: f64 = 6.0;
+pub const PIN_INDENT_TRIM: f64 = 5.0;

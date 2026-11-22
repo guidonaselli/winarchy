@@ -39,6 +39,20 @@ fn entry_of(entry: &fs::DirEntry) -> io::Result<Entry> {
     })
 }
 
+pub fn entry_at(path: &std::path::Path) -> Option<Entry> {
+    let metadata = fs::metadata(path).ok()?;
+    Some(Entry {
+        name: path.file_name().map_or_else(|| path.to_string_lossy().into_owned(), |name| name.to_string_lossy().into_owned()),
+        path: path.to_path_buf(),
+        is_directory: metadata.is_dir(),
+        hidden: false,
+        attributes: metadata.file_attributes(),
+        created: metadata.created().ok(),
+        size: metadata.len(),
+        modified: metadata.modified().ok(),
+    })
+}
+
 pub fn read(path: &PathBuf) -> io::Result<Vec<Entry>> {
     let mut entries = fs::read_dir(path)?.map(|entry| entry_of(&entry?)).collect::<io::Result<Vec<_>>>()?;
     entries.sort_by_key(|entry| (!entry.is_directory, entry.name.to_lowercase()));

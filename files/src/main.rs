@@ -141,15 +141,6 @@ impl Layout {
     }
 }
 
-fn places_with(pinned: &[PathBuf]) -> Vec<(String, PathBuf)> {
-    let mut places = directory::places();
-    places.extend(pinned.iter().map(|path| {
-        let label = path.file_name().map_or_else(|| path.to_string_lossy().into_owned(), |name| name.to_string_lossy().into_owned());
-        (label, path.clone())
-    }));
-    places
-}
-
 fn place_icon(path: &Path, pinned: bool) -> icons::Icon {
     use icons::Icon;
     if path.parent().is_none() {
@@ -206,7 +197,7 @@ impl Explorer {
     // The selected folder when exactly one is selected, otherwise the folder being shown.
     fn pin_target(&self) -> PathBuf {
         match self.selected.iter().next() {
-            Some(path) if self.selected.len() == 1 && path.is_dir() => path.clone(),
+            Some(path) if self.selected.len() == 1 => path.clone(),
             _ => self.path.clone(),
         }
     }
@@ -217,6 +208,7 @@ impl Explorer {
     fn commands(&self) -> Vec<Command> {
         let (some, one) = (!self.selected.is_empty(), self.selected.len() == 1);
         let idle = !self.deleting && !self.transferring;
+        let in_folder = idle && !self.in_favorites;
         let command = |label: &str, message: Message, icon: Option<icons::Icon>, enabled: bool| Command {
             label: tr_dynamic(label),
             message: Some(message),
@@ -225,12 +217,12 @@ impl Explorer {
         };
         let separator = || Command { label: String::new(), message: None, icon: None, enabled: true };
         vec![
-            command("Create folder", Message::Ask(Prompt::NewFolder), Some(icons::Icon::FolderPlus), idle),
-            command("Create file", Message::Ask(Prompt::NewFile), Some(icons::Icon::FilePlus), idle),
+            command("Create folder", Message::Ask(Prompt::NewFolder), Some(icons::Icon::FolderPlus), in_folder),
+            command("Create file", Message::Ask(Prompt::NewFile), Some(icons::Icon::FilePlus), in_folder),
             separator(),
             command("Cut", Message::Clip(true), Some(icons::Icon::Scissors), some),
             command("Copy", Message::Clip(false), Some(icons::Icon::Copy), some),
-            command("Paste here", Message::Paste, Some(icons::Icon::ClipboardText), clipboard::has_files() && idle),
+            command("Paste here", Message::Paste, Some(icons::Icon::ClipboardText), clipboard::has_files() && in_folder),
             separator(),
             command("Rename selected", Message::Ask(Prompt::Rename), Some(icons::Icon::PencilSimple), one && idle),
             command("Copy to…", Message::Ask(Prompt::CopyTo), Some(icons::Icon::Copy), some && idle),
@@ -240,7 +232,7 @@ impl Explorer {
             command("Copy path", Message::CopyPath(false), Some(icons::Icon::LinkSimple), true),
             command("Copy path with quotes", Message::CopyPath(true), Some(icons::Icon::LinkSimple), true),
             command("Show in folder", Message::ShowInFolder, Some(icons::Icon::FolderOpen), one),
-            command("Paste as shortcut", Message::PasteShortcut, Some(icons::Icon::LinkSimple), clipboard::has_files() && idle),
+            command("Paste as shortcut", Message::PasteShortcut, Some(icons::Icon::LinkSimple), clipboard::has_files() && in_folder),
             command("Create shortcut", Message::CreateShortcut, Some(icons::Icon::LinkSimple), one),
             command("Compress to zip", Message::Compress, Some(icons::Icon::FileZip), some && !self.transferring),
             command("Extract here", Message::Extract, Some(icons::Icon::FileZip), one && !self.transferring && self.selected.iter().next().is_some_and(|path| path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")))),
@@ -266,6 +258,16 @@ impl Explorer {
                 Message::TogglePin,
                 None,
                 true,
+            ),
+            command(
+                if !self.selected.is_empty() && self.selected.iter().all(|path| self.favorites.contains(path)) {
+                    "Remove from favorites"
+                } else {
+                    "Add to favorites"
+                },
+                Message::ToggleFavorite,
+                Some(icons::Icon::Star),
+                some,
             ),
             command("Open in editor", Message::OpenEditor, Some(icons::Icon::PencilSimple), true),
             command("Settings file", Message::OpenSettings, None, true),
@@ -464,6 +466,12 @@ enum Message {
     EmptyRecycleBin,
     OpenRecycleBin,
     TogglePin,
+    ToggleFavorite,
+    OpenFavorites,
+    PinDown(PathBuf),
+    OpenPin(PathBuf),
+    PinsReordered(Vec<String>),
+    MovePin(i32),
     OpenEditor,
     OpenSettings,
     OpenStorageSense,
@@ -612,6 +620,9 @@ struct Explorer {
     focus_attempts: u8,
     places: Vec<(String, PathBuf)>,
     pinned: Vec<PathBuf>,
+    favorites: Vec<PathBuf>,
+    in_favorites: bool,
+    pin_armed: Option<PathBuf>,
     tags: std::collections::BTreeMap<PathBuf, Vec<String>>,
     list_width: f64,
 }
@@ -709,8 +720,11 @@ impl Component for Explorer {
             focus_requested: false,
             loaded: false,
             focus_attempts: 0,
-            places: places_with(&saved.pinned),
+            places: directory::places(),
             pinned: saved.pinned.clone(),
+            favorites: saved.favorites.clone(),
+            in_favorites: false,
+            pin_armed: None,
             list_width: DEFAULT_LIST_WIDTH,
         };
         app.queue_load(path, context);
@@ -820,6 +834,64 @@ impl Component for Explorer {
                     }
                 }
             }
+            Message::ToggleFavorite => {
+                self.favorites = settings::load().favorites;
+                let chosen: Vec<PathBuf> = self.selected.iter().cloned().collect();
+                let all = !chosen.is_empty() && chosen.iter().all(|path| self.favorites.contains(path));
+                if all {
+                    self.favorites.retain(|path| !chosen.contains(path));
+                } else {
+                    for path in chosen {
+                        if !self.favorites.contains(&path) {
+                            self.favorites.push(path);
+                        }
+                    }
+                }
+                self.write_settings(self.pinned.clone(), self.favorites.clone());
+                if self.in_favorites {
+                    self.update(Message::OpenFavorites, context);
+                }
+            }
+            Message::OpenFavorites => {
+                self.favorites = settings::load().favorites;
+                self.load_generation += 1;
+                self.in_favorites = true;
+                self.recursive = false;
+                self.selected.clear();
+                self.address = tr("Favorites").to_owned();
+                self.entries = self.favorites.iter().filter_map(|path| directory::entry_at(path)).map(std::sync::Arc::new).collect();
+                self.apply_sort();
+                self.loaded = true;
+                self.has_error = false;
+                self.refresh_status();
+            }
+            Message::PinDown(path) => self.pin_armed = Some(path),
+            Message::OpenPin(path) => {
+                if self.pin_armed.take().as_ref() != Some(&path) {
+                    return;
+                }
+                if path.is_dir() {
+                    self.navigate(path, context);
+                } else {
+                    self.update(Message::OpenFile(path), context);
+                }
+            }
+            Message::PinsReordered(order) => {
+                let reordered: Vec<PathBuf> = order.iter().map(PathBuf::from).filter(|path| self.pinned.contains(path)).collect();
+                if reordered.len() == self.pinned.len() {
+                    self.pinned = reordered;
+                    self.write_settings(self.pinned.clone(), self.favorites.clone());
+                }
+            }
+            Message::MovePin(delta) => {
+                self.pinned = settings::load().pinned;
+                if let Some(index) = self.pinned.iter().position(|path| *path == self.path) {
+                    let target = (index as i32 + delta).clamp(0, self.pinned.len() as i32 - 1) as usize;
+                    let moved = self.pinned.remove(index);
+                    self.pinned.insert(target, moved);
+                    self.write_settings(self.pinned.clone(), self.favorites.clone());
+                }
+            }
             Message::TogglePin => {
                 self.pinned = settings::load().pinned;
                 let target = self.pin_target();
@@ -829,8 +901,8 @@ impl Component for Explorer {
                     }
                     None => self.pinned.push(target),
                 }
-                self.places = places_with(&self.pinned);
-                self.write_settings(self.pinned.clone());
+                self.places = directory::places();
+                self.write_settings(self.pinned.clone(), self.favorites.clone());
             }
             Message::OpenSettings => {
                 self.save_settings();
@@ -952,6 +1024,7 @@ impl Component for Explorer {
                 self.entries.clear();
                 self.status = tr("Loading folder…").to_owned();
         self.loaded = false;
+        self.in_favorites = false;
                 self.queue_load(self.path.clone(), context);
             }
             Message::CycleLayout => {
@@ -1321,6 +1394,7 @@ impl Component for Explorer {
                 }
             }
             Message::RetryFocus => self.request_address_focus(context),
+            Message::Refresh if self.in_favorites => self.update(Message::OpenFavorites, context),
             Message::Refresh => self.navigate(self.path.clone(), context),
             Message::Sort(key) => {
                 self.descending = self.sort == key && !self.descending;
@@ -1933,45 +2007,81 @@ impl Component for Explorer {
                     ),
                 Grid::new().grid_row(2).children((footer,)),
             ));
-        let sidebar_items = self
-            .places
-            .iter()
-            .enumerate()
-            .map(|(index, (label, path))| {
-                let current = *path == self.path;
-                let button = Button::new()
-                        .grid_column(1)
-                        .automation_name(label.clone())
-                        .horizontal_alignment(HorizontalAlignment::Stretch)
-                        .horizontal_content_alignment(HorizontalAlignment::Left)
-                        .style(ButtonStyle::Subtle)
-                        .on_click(context.message(Message::OpenFolder(path.clone())))
-                        .content(
-                            StackPanel::new()
-                                .orientation(Orientation::Horizontal)
-                                .spacing(ROW_GAP)
-                                .children((
-                                    icon(place_icon(path, self.pinned.contains(path)), ICON_SIZE, self.theme.as_ref()),
-                                    text(label, self.theme.as_ref().map(Theme::foreground)),
-                                )),
-                        )
-                        .tooltip(path.to_string_lossy().into_owned());
-                let bar = Border::new()
-                    .grid_column(0)
-                    .width(ACCENT_BAR_WIDTH)
-                    .height(ACCENT_BAR_HEIGHT)
-                    .corner_radius(CornerRadius::uniform(ACCENT_BAR_WIDTH))
-                    .background_optional(if current { self.theme.as_ref().map(Theme::accent) } else { None });
-                let target = path.clone();
+        let theme = self.theme.as_ref();
+        let place = |label: &str, glyph: icons::Icon, current: bool, tooltip: String, message: Message, middle: Option<PathBuf>| {
+            let button = Button::new()
+                .grid_column(1)
+                .automation_name(label.to_owned())
+                .horizontal_alignment(HorizontalAlignment::Stretch)
+                .horizontal_content_alignment(HorizontalAlignment::Left)
+                .style(ButtonStyle::Subtle)
+                .on_click(context.message(message))
+                .content(StackPanel::new().orientation(Orientation::Horizontal).spacing(ROW_GAP).children((
+                    icon(glyph, ICON_SIZE, theme),
+                    text(label, theme.map(Theme::foreground)),
+                )))
+                .tooltip(tooltip);
+            let bar = Border::new()
+                .grid_column(0)
+                .width(ACCENT_BAR_WIDTH)
+                .height(ACCENT_BAR_HEIGHT)
+                .corner_radius(CornerRadius::uniform(ACCENT_BAR_WIDTH))
+                .background_optional(if current { theme.map(Theme::accent) } else { None });
+            Border::new()
+                .on_pointer_pressed(context.callback(move |info: PointerEventInfo| match (&middle, info.is_middle_button_pressed) {
+                    (Some(path), true) => Message::OpenInTab(path.clone()),
+                    _ => Message::CloseMenu,
+                }))
+                .corner_radius(CornerRadius::uniform(CARD_RADIUS))
+                .background_optional(if current { theme.and_then(Theme::selection) } else { None })
+                .content(Grid::new().columns([GridLength::Pixel(ACCENT_BAR_WIDTH + ROW_GAP), GridLength::STAR]).children((bar, button)))
+        };
+        let mut sidebar_items: Vec<KeyedView> = Vec::new();
+        for (index, (label, path)) in self.places.iter().enumerate() {
+            let target = path.clone();
+            sidebar_items.push(KeyedView::new(
+                index,
+                place(label, place_icon(path, false), !self.in_favorites && *path == self.path, path.to_string_lossy().into_owned(), Message::OpenFolder(path.clone()), Some(target)),
+            ));
+        }
+        sidebar_items.push(KeyedView::new(
+            FAVORITES_KEY,
+            place(tr("Favorites"), icons::Icon::Star, self.in_favorites, tr("Favorites").to_owned(), Message::OpenFavorites, None),
+        ));
+        if !self.pinned.is_empty() {
+            let pins = self.pinned.iter().map(|path| {
+                let label = path.file_name().map_or_else(|| path.to_string_lossy().into_owned(), |name| name.to_string_lossy().into_owned());
+                let current = !self.in_favorites && *path == self.path;
+                let (opened, new_tab, armed) = (path.clone(), path.clone(), path.clone());
+                let glyph = if path.is_dir() { place_icon(path, true) } else { icons::Icon::File };
                 KeyedView::new(
-                    index,
-                    Border::new()
-                        .on_pointer_pressed(context.callback(move |info: PointerEventInfo| if info.is_middle_button_pressed { Message::OpenInTab(target.clone()) } else { Message::CloseMenu }))
-                        .corner_radius(CornerRadius::uniform(CARD_RADIUS))
-                        .background_optional(if current { self.theme.as_ref().and_then(Theme::selection) } else { None })
-                        .content(Grid::new().columns([GridLength::Pixel(ACCENT_BAR_WIDTH + ROW_GAP), GridLength::STAR]).children((bar, button))),
+                    path.to_string_lossy().into_owned(),
+                    ListViewItem::new().tag(path.to_string_lossy().into_owned()).content(
+                        Border::new()
+                            .automation_name(label.clone())
+                            .corner_radius(CornerRadius::uniform(CARD_RADIUS))
+                            .background_optional(if current { theme.and_then(Theme::selection) } else { None })
+                            .padding(Thickness::new(ACCENT_BAR_WIDTH + ROW_GAP - PIN_INDENT_TRIM, PIN_PADDING, 0.0, PIN_PADDING))
+                            .on_pointer_pressed(context.callback(move |info: PointerEventInfo| if info.is_middle_button_pressed { Message::OpenInTab(new_tab.clone()) } else { Message::PinDown(armed.clone()) }))
+                            .on_pointer_released(context.callback(move |_: PointerEventInfo| Message::OpenPin(opened.clone())))
+                            .content(StackPanel::new().orientation(Orientation::Horizontal).spacing(ROW_GAP).children((
+                                icon(glyph, ICON_SIZE, theme),
+                                text(&label, theme.map(Theme::foreground)),
+                            ))
+                            .tooltip(path.to_string_lossy().into_owned())),
+                    ),
                 )
             });
+            sidebar_items.push(KeyedView::new(
+                PINS_KEY,
+                ListView::new()
+                    .selection_mode(ListViewSelectionMode::None)
+                    .can_reorder_items(true)
+                    .allow_drop(true)
+                    .on_reordered(context.callback(Message::PinsReordered))
+                    .collection_slot(ListViewSlot::Items, pins),
+            ));
+        }
         let splitter = Border::new()
             .grid_column(1)
             .width(SPLITTER_WIDTH)
@@ -2109,7 +2219,7 @@ impl Explorer {
             commands.iter().find(|command| command.label == label)
         };
         match kind {
-            MenuKind::Item => ["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Compress to zip", "Extract here", "Copy path", "Share", "Add tags", "Terminal here", "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
+            MenuKind::Item => ["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Compress to zip", "Extract here", "Copy path", "Share", "Add tags", "Add to favorites", "Remove from favorites", "Pin to sidebar", "Unpin from sidebar", "Terminal here", "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
             MenuKind::Background => ["Paste here", "Paste as shortcut", "Create folder", "Create file", "Terminal here", "Open in editor", "Select none"].iter().filter_map(|label| find(label)).collect(),
             MenuKind::New => NEW_LABELS.iter().filter_map(|label| find(label)).collect(),
             MenuKind::Sort => self.sort_labels().iter().filter_map(|label| find(label)).collect(),
@@ -2221,6 +2331,8 @@ impl Explorer {
                     self.focus_entry(&visible, target, false, context);
                 }
             }
+            keys::Key::PinUp => self.update(Message::MovePin(-1), context),
+            keys::Key::PinDown => self.update(Message::MovePin(1), context),
             keys::Key::Back => self.update(Message::Back, context),
             keys::Key::Forward => self.update(Message::Forward, context),
             keys::Key::PrevTab => self.update(Message::SwitchTab((self.active_tab + self.tabs.len() - 1) % self.tabs.len()), context),
@@ -2576,10 +2688,11 @@ impl Explorer {
 
     // Pins are shared by every window, so only a pin change writes them; any other save keeps what is on disk.
     fn save_settings(&self) {
-        self.write_settings(settings::load().pinned);
+        let saved = settings::load();
+        self.write_settings(saved.pinned, saved.favorites);
     }
 
-    fn write_settings(&self, pinned: Vec<PathBuf>) {
+    fn write_settings(&self, pinned: Vec<PathBuf>, favorites: Vec<PathBuf>) {
         settings::save(&settings::Settings {
             show_hidden: self.show_hidden,
             hide_extensions: self.hide_extensions,
@@ -2597,6 +2710,7 @@ impl Explorer {
             size_width: self.columns.size,
             modified_width: self.columns.modified,
             pinned,
+            favorites,
         });
     }
 

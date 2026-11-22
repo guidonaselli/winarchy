@@ -42,6 +42,8 @@ pub enum Key {
     Cancel,
     FocusAddress,
     FocusFilter,
+    PinUp,
+    PinDown,
     Back,
     Forward,
     PrevTab,
@@ -121,6 +123,8 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
 fn map_key(virtual_key: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Key> {
     if alt {
         return match (virtual_key, ctrl) {
+            (0x26, false) if shift => Some(Key::PinUp),
+            (0x28, false) if shift => Some(Key::PinDown),
             (0x25, false) => Some(Key::Back),
             (0x27, false) => Some(Key::Forward),
             (0x26, false) => Some(Key::Up),
@@ -218,7 +222,7 @@ fn key_allowed(key: Key) -> bool {
         Key::MoveUp | Key::MoveDown | Key::Open | Key::Cancel if MENU_OPEN.load(Ordering::Relaxed) => true,
         Key::Open => neutral.contains(&kind),
         Key::Cancel => kind != UIA_EditControlTypeId,
-        Key::FocusAddress | Key::FocusFilter | Key::Back | Key::Forward => true,
+        Key::FocusAddress | Key::FocusFilter | Key::Back | Key::Forward | Key::PinUp | Key::PinDown => true,
         Key::MoveUp | Key::MoveDown | Key::MoveLeft | Key::MoveRight | Key::Home | Key::End | Key::Char(_) => {
             kind != UIA_EditControlTypeId && !navigating.contains(&kind)
         }

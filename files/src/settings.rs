@@ -34,6 +34,8 @@ pub struct Settings {
     #[serde(default)]
     pub pinned: Vec<PathBuf>,
     #[serde(default)]
+    pub favorites: Vec<PathBuf>,
+    #[serde(default)]
     pub tags: std::collections::BTreeMap<PathBuf, Vec<String>>,
 }
 
@@ -71,7 +73,7 @@ mod tests {
     #[test]
     fn tolerates_partial_and_invalid_json() {
         let partial: Settings = serde_json::from_str(r#"{"show_hidden": true}"#).unwrap();
-        assert_eq!(partial, Settings { show_hidden: true, sort: String::new(), descending: false, language: String::new(), hide_extensions: false, layout: String::new(), group: String::new(), hide_pane: false, terminal: String::new(), tabs: Vec::new(), active_tab: 0, sidebar_width: 0.0, size_width: 0.0, modified_width: 0.0, pinned: Vec::new(), tags: Default::default() });
+        assert_eq!(partial, Settings { show_hidden: true, sort: String::new(), descending: false, language: String::new(), hide_extensions: false, layout: String::new(), group: String::new(), hide_pane: false, terminal: String::new(), tabs: Vec::new(), active_tab: 0, sidebar_width: 0.0, size_width: 0.0, modified_width: 0.0, pinned: Vec::new(), favorites: Vec::new(), tags: Default::default() });
         assert!(serde_json::from_str::<Settings>("not json").is_err());
     }
 }
