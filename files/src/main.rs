@@ -7,6 +7,7 @@ mod clipboard;
 mod keys;
 mod settings;
 mod shell;
+mod style;
 mod theme;
 
 use directory::Entry;
@@ -15,6 +16,7 @@ use std::{
     fs,
     path::{Component as PathComponent, Path, PathBuf},
 };
+use style::*;
 use theme::Theme;
 use i18n::{tr, tr_dynamic};
 use windows_reactor::*;
@@ -54,6 +56,26 @@ struct Command {
     icon: Option<Symbol>,
     enabled: bool,
     primary: bool,
+}
+
+// Breadcrumb clicks return only the item text, so each one carries its position as trailing zero-width spaces.
+const ZERO_WIDTH: char = '\u{200B}';
+
+impl Explorer {
+    fn crumbs(&self) -> Vec<(String, PathBuf)> {
+        let mut crumbs: Vec<_> = self
+            .path
+            .ancestors()
+            .map(|path| {
+                let label = path
+                    .file_name()
+                    .map_or_else(|| path.to_string_lossy().into_owned(), |name| name.to_string_lossy().into_owned());
+                (label, path.to_path_buf())
+            })
+            .collect();
+        crumbs.reverse();
+        crumbs
+    }
 }
 
 // Every action reachable from the command bar; primary ones show with an icon, the rest sit in the overflow menu.
@@ -224,6 +246,7 @@ enum Message {
     ToggleHidden,
     ToggleExtensions,
     Command(String),
+    Crumb(String),
     Compress,
     Extract,
     ArchiveDone(Result<(), String>, Option<PathBuf>),
@@ -366,7 +389,7 @@ impl Component for Explorer {
             focus_requested: false,
             focus_attempts: 0,
             places: directory::places(),
-            list_width: 800.0,
+            list_width: DEFAULT_LIST_WIDTH,
         };
         app.queue_load(path, context);
         match keys::install() {
@@ -647,6 +670,12 @@ impl Component for Explorer {
                     self.has_error = true;
                 }
             }
+            Message::Crumb(label) => {
+                let index = label.chars().rev().take_while(|c| *c == ZERO_WIDTH).count();
+                if let Some((_, path)) = self.crumbs().into_iter().nth(index) {
+                    self.navigate(path, context);
+                }
+            }
             Message::Command(label) => {
                 if let Some(command) = self.commands().into_iter().find(|c| c.label == label && c.enabled)
                     && let Some(message) = command.message
@@ -712,7 +741,7 @@ impl Component for Explorer {
                     self.handle_key(key, context);
                 }
             }
-            Message::Resize(size) => self.list_width = (size.width - SIDEBAR_AND_SCROLL).max(320.0),
+            Message::Resize(size) => self.list_width = (size.width - SIDEBAR_AND_SCROLL).max(MIN_LIST_WIDTH),
             Message::Focus(true) => {}
             Message::Focus(false) => {
                 if self.focus_attempts < 10 {
@@ -933,14 +962,14 @@ impl Component for Explorer {
             };
             (build(true), build(false))
         };
-        let toolbar = StackPanel::new().spacing(8.0).children((
+        let toolbar = StackPanel::new().spacing(STACK_GAP).children((
             StackPanel::new()
                 .orientation(Orientation::Horizontal)
-                .spacing(6.0)
+                .spacing(ROW_GAP)
                 .children((
                     StackPanel::new()
                         .orientation(Orientation::Horizontal)
-                        .spacing(6.0)
+                        .spacing(ROW_GAP)
                         .keyed_children(tab_buttons),
                     Button::new()
                         .automation_name(tr("New tab"))
@@ -968,7 +997,7 @@ impl Component for Explorer {
                 )),
             Grid::new()
                 .columns([GridLength::Auto, GridLength::Auto, GridLength::Auto, GridLength::STAR, GridLength::Auto])
-                .column_spacing(6.0)
+                .column_spacing(ROW_GAP)
                 .children((
                     Button::new()
                         .grid_column(0)
@@ -995,6 +1024,15 @@ impl Component for Explorer {
                         .on_click(context.message(Message::Go))
                         .content(tr("Go")),
                 )),
+            BreadcrumbBar::new()
+                .items_source(
+                    self.crumbs()
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, (label, _))| format!("{label}{}", ZERO_WIDTH.to_string().repeat(index)))
+                        .collect::<Vec<_>>(),
+                )
+                .on_item_clicked(context.callback(Message::Crumb)),
             CommandBar::new().horizontal_alignment(HorizontalAlignment::Left).owned_commands(primary, secondary, context.callback(Message::Command)),
             TextBox::new()
                 .text(&self.new_folder_name)
@@ -1003,7 +1041,7 @@ impl Component for Explorer {
                 .on_text_changed(folder_name_changed),
             Grid::new()
                 .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto])
-                .column_spacing(6.0)
+                .column_spacing(ROW_GAP)
                 .children((
                     TextBox::new()
                         .text(&self.transfer_destination)
@@ -1033,16 +1071,12 @@ impl Component for Explorer {
                 .on_text_changed(context.callback(Message::Filter)),
             Grid::new()
                 .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto])
-                .column_spacing(6.0)
+                .column_spacing(ROW_GAP)
                 .children((
                     self.sort_button(context, SortKey::Name, tr("Name"), 0),
                     self.sort_button(context, SortKey::Size, tr("Size"), 1),
                     self.sort_button(context, SortKey::Modified, tr("Modified"), 2),
                 )),
-            text(
-                &self.path.to_string_lossy(),
-                self.theme.as_ref().map(Theme::muted),
-            ),
             text(&self.details, self.theme.as_ref().map(Theme::muted)),
             text(&self.preview, self.theme.as_ref().map(Theme::muted)),
             match self
@@ -1053,7 +1087,7 @@ impl Component for Explorer {
                 Some(image) => image
                     .stretch(Stretch::Uniform)
                     .horizontal_alignment(HorizontalAlignment::Left)
-                    .height(160.0),
+                    .height(PREVIEW_HEIGHT),
                 None => Image::new().height(0.0),
             },
             text(
@@ -1105,7 +1139,7 @@ impl Component for Explorer {
             .columns([GridLength::Auto, GridLength::STAR])
             .children((
                 Grid::new().grid_column(0).children((ScrollViewer::new()
-                    .content(StackPanel::new().spacing(2.0).keyed_children(sidebar_items)),)),
+                    .content(StackPanel::new().spacing(TIGHT_GAP).keyed_children(sidebar_items)),)),
                 Border::new()
                     .grid_column(1)
                     .background_optional(self.theme.as_ref().map(Theme::background))
@@ -1643,7 +1677,6 @@ impl Explorer {
     }
 }
 
-const SIDEBAR_AND_SCROLL: f64 = 100.0;
 
 fn row(
     entry: &Entry,
@@ -1674,7 +1707,7 @@ fn row(
             GridLength::Auto,
             GridLength::Auto,
         ])
-        .column_spacing(12.0)
+        .column_spacing(COLUMN_GAP)
         .children((
             CheckBox::new()
                 .automation_name(format!("{} {}", tr("Select"), entry.name))
@@ -1702,7 +1735,7 @@ fn row(
             text(&directory::format_size(entry), theme.map(Theme::muted)).grid_column(2),
             text(&directory::format_modified(entry), theme.map(Theme::muted))
                 .grid_column(3)
-                .margin(Thickness::new(0.0, 0.0, 16.0, 0.0)),
+                .margin(Thickness::new(0.0, 0.0, ROW_TRAILING, 0.0)),
         ))
 }
 
