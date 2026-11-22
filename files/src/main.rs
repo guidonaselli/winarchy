@@ -2041,13 +2041,16 @@ impl Explorer {
                 } else {
                     directory::is_pdf(entry).then(|| pdf::first_page(&entry.path)).flatten()
                 };
-                let kind = tr(if entry.is_directory { "Folder" } else { "File" });
-                self.status.push_str(&format!(
-                    " · {kind} “{}” {} {}",
-                    entry.name,
-                    directory::format_size(entry),
-                    directory::format_modified(entry)
-                ));
+                // the pane already shows the item's details; the status only repeats them when the pane is hidden
+                if self.hide_pane {
+                    let kind = tr(if entry.is_directory { "Folder" } else { "File" });
+                    self.status.push_str(&format!(
+                        " · {kind} “{}” {} {}",
+                        entry.name,
+                        directory::format_size(entry),
+                        directory::format_modified(entry)
+                    ));
+                }
             }
         }
     }
