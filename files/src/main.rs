@@ -242,6 +242,8 @@ impl Explorer {
             command("Extract here", Message::Extract, None, one && !self.transferring, false),
             command("Edit in Notepad", Message::RunVerb("notepad"), None, one, false),
             command("Share", Message::Share, Some(Symbol::Share), some, false),
+            command("Add tags (name field)", Message::Tag(true), Some(Symbol::Tag), some, false),
+            command("Clear tags", Message::Tag(false), None, some, false),
             command("Properties", Message::RunVerb("properties"), None, one, false),
             command("Terminal here", Message::OpenTerminal, None, true, false),
             command("Terminal as administrator", Message::RunVerb("admin-terminal"), None, true, false),
@@ -424,6 +426,7 @@ enum Message {
     CycleLayout,
     CycleGroup,
     Share,
+    Tag(bool),
     Undo,
     Redo,
     UndoComplete(Result<bool, String>),
@@ -508,6 +511,7 @@ struct Explorer {
     focus_attempts: u8,
     places: Vec<(String, PathBuf)>,
     pinned: Vec<PathBuf>,
+    tags: std::collections::BTreeMap<PathBuf, Vec<String>>,
     list_width: f64,
 }
 
@@ -555,6 +559,7 @@ impl Component for Explorer {
             layout: Layout::from_name(&saved.layout),
             group: Group::from_name(&saved.group),
             columns: Columns::from_saved(saved.size_width, saved.modified_width),
+            tags: saved.tags.clone(),
             drag: None,
             recursive: false,
             sort: SortKey::from_name(&saved.sort),
@@ -802,6 +807,30 @@ impl Component for Explorer {
             Message::CycleLayout => {
                 self.layout = self.layout.next();
                 self.save_settings();
+            }
+            Message::Tag(add) => {
+                let names: Vec<String> = self.new_folder_name.split(',').map(|tag| tag.trim().to_owned()).filter(|tag| !tag.is_empty()).collect();
+                if add && names.is_empty() {
+                    self.status = tr("Type tags in the name field, separated by commas").to_owned();
+                    return;
+                }
+                for path in &self.selected {
+                    if add {
+                        let current = self.tags.entry(path.clone()).or_default();
+                        for name in &names {
+                            if !current.iter().any(|tag| tag.eq_ignore_ascii_case(name)) {
+                                current.push(name.clone());
+                            }
+                        }
+                    } else {
+                        self.tags.remove(path);
+                    }
+                }
+                if add {
+                    self.new_folder_name.clear();
+                }
+                self.save_settings();
+                self.refresh_status();
             }
             Message::Share => {
                 let files: Vec<PathBuf> = self.selected.iter().filter(|path| path.is_file()).cloned().collect();
@@ -1809,6 +1838,7 @@ impl Explorer {
             language: self.language.to_owned(),
             layout: self.layout.name().to_owned(),
             group: self.group.name().to_owned(),
+            tags: self.tags.clone(),
             size_width: self.columns.size,
             modified_width: self.columns.modified,
             pinned,
@@ -1822,7 +1852,14 @@ impl Explorer {
     }
 
     fn matches(&self, entry: &Entry, needle: &str) -> bool {
-        (self.show_hidden || !entry.hidden) && entry.name.to_lowercase().contains(needle)
+        let found = match needle.strip_prefix("tag:") {
+            Some(tag) => self
+                .tags
+                .get(&entry.path)
+                .is_some_and(|tags| tags.iter().any(|candidate| candidate.to_lowercase().contains(tag.trim()))),
+            None => entry.name.to_lowercase().contains(needle),
+        };
+        (self.show_hidden || !entry.hidden) && found
     }
 
     fn refresh_status(&mut self) {
@@ -1855,6 +1892,9 @@ impl Explorer {
                 && let Some(entry) = self.entries.iter().find(|entry| &entry.path == path)
             {
                 self.details = directory::properties(entry);
+                if let Some(tags) = self.tags.get(&entry.path) {
+                    self.details.push_str(&format!(" · {}: {}", tr("Tags"), tags.join(", ")));
+                }
                 self.preview = if directory::is_pdf(entry) { String::new() } else { directory::preview(entry).unwrap_or_default() };
                 self.preview_image = if directory::is_image(entry) {
                     Some(entry.path.clone())
