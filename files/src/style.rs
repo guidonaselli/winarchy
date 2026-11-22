@@ -43,3 +43,6 @@ pub const MENU_RADIUS: f64 = 8.0;
 pub const MENU_ITEM_HEIGHT: f64 = 36.0;
 pub const MENU_DIM: f64 = 0.01;
 pub const DIVIDER: f64 = 1.0;
+pub const ACCENT_BAR_WIDTH: f64 = 3.0;
+pub const ACCENT_BAR_HEIGHT: f64 = 16.0;
+pub const MENU_ANCHOR_Y: f64 = 200.0;

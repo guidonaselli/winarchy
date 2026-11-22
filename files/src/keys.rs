@@ -36,6 +36,7 @@ pub enum Key {
     MoveUp,
     MoveDown,
     Open,
+    ContextMenu,
     Confirm,
     Cancel,
     FocusAddress,
@@ -84,6 +85,7 @@ fn map_key(virtual_key: u32, ctrl: bool) -> Option<Key> {
         (0x26, false) => Some(Key::MoveUp),
         (0x28, false) => Some(Key::MoveDown),
         (0x0D, false) => Some(Key::Open),
+        (0x5D, false) => Some(Key::ContextMenu),
         (0x1B, false) => Some(Key::Cancel),
         (0x4C, true) => Some(Key::FocusAddress),
         (0x2E, false) => Some(Key::Delete),
@@ -171,5 +173,6 @@ mod tests {
         assert_eq!(map_key(0x28, false), Some(Key::MoveDown));
         assert_eq!(map_key(0x26, false), Some(Key::MoveUp));
         assert_eq!(map_key(0x0D, false), Some(Key::Open));
+        assert_eq!(map_key(0x5D, false), Some(Key::ContextMenu));
     }
 }

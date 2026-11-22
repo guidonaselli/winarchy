@@ -1738,13 +1738,13 @@ impl Component for Explorer {
             .iter()
             .enumerate()
             .map(|(index, (label, path))| {
-                KeyedView::new(
-                    index,
-                    Button::new()
+                let current = *path == self.path;
+                let button = Button::new()
+                        .grid_column(1)
                         .automation_name(label.clone())
                         .horizontal_alignment(HorizontalAlignment::Stretch)
                         .horizontal_content_alignment(HorizontalAlignment::Left)
-                        .style(if *path == self.path { ButtonStyle::Accent } else { ButtonStyle::Subtle })
+                        .style(ButtonStyle::Subtle)
                         .on_click(context.message(Message::OpenFolder(path.clone())))
                         .content(
                             StackPanel::new()
@@ -1755,7 +1755,19 @@ impl Component for Explorer {
                                     text(label, self.theme.as_ref().map(Theme::foreground)),
                                 )),
                         )
-                        .tooltip(path.to_string_lossy().into_owned()),
+                        .tooltip(path.to_string_lossy().into_owned());
+                let bar = Border::new()
+                    .grid_column(0)
+                    .width(ACCENT_BAR_WIDTH)
+                    .height(ACCENT_BAR_HEIGHT)
+                    .corner_radius(CornerRadius::uniform(ACCENT_BAR_WIDTH))
+                    .background_optional(if current { self.theme.as_ref().map(Theme::accent) } else { None });
+                KeyedView::new(
+                    index,
+                    Border::new()
+                        .corner_radius(CornerRadius::uniform(CARD_RADIUS))
+                        .background_optional(if current { self.theme.as_ref().and_then(Theme::selection) } else { None })
+                        .content(Grid::new().columns([GridLength::Pixel(ACCENT_BAR_WIDTH + ROW_GAP), GridLength::STAR]).children((bar, button))),
                 )
             });
         let splitter = Border::new()
@@ -1870,6 +1882,7 @@ impl Explorer {
             keys::Key::Delete => self.update(Message::DeleteSelected, context),
             keys::Key::Up => self.update(Message::Parent, context),
             keys::Key::Refresh => self.update(Message::Refresh, context),
+            keys::Key::MoveUp | keys::Key::MoveDown | keys::Key::Open if self.menu.is_some() => {}
             keys::Key::MoveUp | keys::Key::MoveDown => {
                 let visible = self.visible_entries();
                 let position = |down: bool| {
@@ -1892,6 +1905,15 @@ impl Explorer {
             keys::Key::Confirm => self.update(Message::Confirm, context),
             keys::Key::Cancel => self.update(Message::CancelPrompt, context),
             keys::Key::FocusAddress => self.update(Message::EditAddress, context),
+            keys::Key::ContextMenu => {
+                // shortcut: opens at a fixed spot below the toolbar, not beside the selected row; track row positions to anchor it.
+                let x = self.sidebar_width + SPLITTER_WIDTH + WINDOW_MARGIN + CHECK_WIDTH;
+                let message = match self.selected.iter().next() {
+                    Some(path) => Message::ContextItem(path.clone(), x, MENU_ANCHOR_Y),
+                    None => Message::ContextBackground(x, MENU_ANCHOR_Y),
+                };
+                self.update(message, context);
+            }
             keys::Key::Open => {
                 let mut chosen = self.selected.iter();
                 if let (Some(path), None) = (chosen.next().cloned(), chosen.next())
