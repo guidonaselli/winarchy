@@ -130,7 +130,10 @@ function Invoke-Winarchy {
                 -Self:($rest -contains '--self' -or $rest -contains '-self')
         }
         'menu' { Show-WinarchyMenu }
-        'files' { Start-WinarchyFiles -Path ($rest -join ' ') }
+        'files' {
+            if ($rest -contains '--rollback') { Restore-WinarchyFilesPrevious }
+            else { Start-WinarchyFiles -Path ($rest -join ' ') }
+        }
         'webapp' {
             $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'list' }
             switch ($sub) {

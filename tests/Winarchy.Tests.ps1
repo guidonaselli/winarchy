@@ -3445,6 +3445,25 @@ Describe 'Start-WinarchyFiles' {
     }
 }
 
+Describe 'Restore-WinarchyFilesPrevious' {
+    It 'swaps the current binary with the previous one and refuses without a previous one' {
+        $repo = Join-Path $TestDrive 'repo-rollback'
+        $bin = Join-Path (Join-Path $repo 'state') 'bin'
+        New-Item -ItemType Directory -Path $bin -Force | Out-Null
+        InModuleScope Winarchy -Parameters @{ Bin = $bin } {
+            param($Bin)
+            Mock Get-WinarchyStateDir { Split-Path (Split-Path $Bin -Parent) -Parent | Join-Path -ChildPath 'state' }
+            Mock Get-Process { $null }
+            { Restore-WinarchyFilesPrevious } | Should -Throw '*No previous*'
+            Set-Content (Join-Path $Bin 'winarchy-files.exe') 'new' -NoNewline
+            Set-Content (Join-Path $Bin 'winarchy-files.exe.prev') 'old' -NoNewline
+            Restore-WinarchyFilesPrevious
+            Get-Content (Join-Path $Bin 'winarchy-files.exe') -Raw | Should -Be 'old'
+            Get-Content (Join-Path $Bin 'winarchy-files.exe.prev') -Raw | Should -Be 'new'
+        }
+    }
+}
+
 Describe 'Invoke-WinarchyAssistant' {
     It 'rejects unknown subcommands and reports status without a binary' {
         InModuleScope Winarchy {

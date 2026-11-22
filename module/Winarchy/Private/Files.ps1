@@ -46,6 +46,22 @@ function Install-WinarchyFilesBinary {
     }
 }
 
+function Restore-WinarchyFilesPrevious {
+    <# Vuelve al winarchy-files.exe anterior (.prev) e intercambia ambos para poder rehacer el cambio. #>
+    $dest = Join-Path (Join-Path (Get-WinarchyStateDir) 'bin') 'winarchy-files.exe'
+    $prev = "$dest.prev"
+    if (-not (Test-Path -LiteralPath $prev)) { throw 'No previous winarchy-files.exe to roll back to.' }
+    if (Get-Process -Name 'winarchy-files' -ErrorAction SilentlyContinue) { throw 'Close every Files window before rolling back.' }
+    $swap = "$dest.swap"
+    if (Test-Path -LiteralPath $dest) { Move-Item -LiteralPath $dest -Destination $swap -Force }
+    try { Move-Item -LiteralPath $prev -Destination $dest -Force }
+    catch {
+        if (Test-Path -LiteralPath $swap) { Move-Item -LiteralPath $swap -Destination $dest -Force }
+        throw
+    }
+    if (Test-Path -LiteralPath $swap) { Move-Item -LiteralPath $swap -Destination $prev -Force }
+}
+
 function Install-WinarchyFilesRelease {
     $url = "https://github.com/$script:WinarchyRepo/releases/download/v$((Get-WinarchyVersion).Version)/winarchy-files.exe"
     $tmp = Join-Path ([IO.Path]::GetTempPath()) "winarchy-files-$([guid]::NewGuid().ToString('N')).exe"
