@@ -15,6 +15,7 @@ use windows::{
 };
 
 const CF_HDROP: u32 = 15;
+const CF_UNICODETEXT: u32 = 13;
 const DROPEFFECT_COPY: u32 = 1;
 const DROPEFFECT_MOVE: u32 = 2;
 const DROPFILES_HEADER: usize = 20;
@@ -74,6 +75,13 @@ pub fn set_files(paths: &[PathBuf], cut: bool) -> Result<(), String> {
     let effect = if cut { DROPEFFECT_MOVE } else { DROPEFFECT_COPY };
     let format = unsafe { RegisterClipboardFormatW(w!("Preferred DropEffect")) };
     put(format, &effect.to_le_bytes())
+}
+
+pub fn set_text(text: &str) -> Result<(), String> {
+    let _clipboard = Open::new()?;
+    unsafe { EmptyClipboard() }.map_err(|error| error.to_string())?;
+    let bytes: Vec<u8> = text.encode_utf16().chain(std::iter::once(0)).flat_map(u16::to_le_bytes).collect();
+    put(CF_UNICODETEXT, &bytes)
 }
 
 pub fn has_files() -> bool {

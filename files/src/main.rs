@@ -52,6 +52,8 @@ fn count_word(count: usize, one: &'static str, many: &'static str) -> &'static s
 enum Undo {
     RemoveDir(PathBuf),
     MakeDir(PathBuf),
+    RemoveFile(PathBuf),
+    MakeFile(PathBuf),
     Rename { from: PathBuf, to: PathBuf },
     // (copy, original) pairs, so removing a copy can be redone by copying the original again.
     Recycle(Vec<(PathBuf, PathBuf)>),
@@ -64,6 +66,8 @@ impl Undo {
         Some(match self {
             Undo::RemoveDir(path) => Undo::MakeDir(path.clone()),
             Undo::MakeDir(path) => Undo::RemoveDir(path.clone()),
+            Undo::RemoveFile(path) => Undo::MakeFile(path.clone()),
+            Undo::MakeFile(path) => Undo::RemoveFile(path.clone()),
             Undo::Rename { from, to } => Undo::Rename {
                 from: to.clone(),
                 to: from.clone(),
@@ -95,6 +99,8 @@ impl Undo {
         match self {
             Undo::RemoveDir(path) => fs::remove_dir(path).map(|()| true).map_err(|e| e.to_string()),
             Undo::MakeDir(path) => fs::create_dir(path).map(|()| true).map_err(|e| e.to_string()),
+            Undo::RemoveFile(path) => fs::remove_file(path).map(|()| true).map_err(|e| e.to_string()),
+            Undo::MakeFile(path) => fs::File::create_new(path).map(|_| true).map_err(|e| e.to_string()),
             Undo::Rename { from, to } => shell::rename(&from, &to).map(|()| true).map_err(|e| e.to_string()),
             Undo::Recycle(items) => {
                 shell::recycle(&items.into_iter().map(|(copy, _)| copy).collect::<Vec<_>>())
@@ -136,6 +142,11 @@ enum Message {
     Dropped(DroppedData),
     NewWindow,
     NewTab,
+    Back,
+    Forward,
+    CreateFile,
+    CopyPath,
+    OpenTerminal,
     CloseTab,
     SwitchTab(usize),
     ToggleRecursive,
@@ -178,6 +189,8 @@ enum Message {
 struct Explorer {
     address: String,
     tabs: Vec<PathBuf>,
+    back: Vec<PathBuf>,
+    forward: Vec<PathBuf>,
     active_tab: usize,
     filter: String,
     clipboard: Vec<PathBuf>,
@@ -236,6 +249,8 @@ impl Component for Explorer {
         let mut app = Self {
             address: path.to_string_lossy().into_owned(),
             tabs: vec![path.clone()],
+            back: Vec::new(),
+            forward: Vec::new(),
             active_tab: 0,
             filter: String::new(),
             clipboard: Vec::new(),
@@ -325,6 +340,72 @@ impl Component for Explorer {
                 }
             }
             Message::Dropped(_) => {}
+            Message::Back | Message::Forward => {
+                let backwards = matches!(message, Message::Back);
+                let (from, to) = if backwards { (&mut self.back, &mut self.forward) } else { (&mut self.forward, &mut self.back) };
+                if let Some(path) = from.pop() {
+                    to.push(self.path.clone());
+                    self.load_path(path, context);
+                }
+            }
+            Message::CreateFile => {
+                let name = self.new_folder_name.trim().to_owned();
+                if self.deleting || self.transferring {
+                    return;
+                }
+                if !is_single_name(&name) {
+                    self.status = tr("Enter a single file name").to_owned();
+                    self.has_error = true;
+                    return;
+                }
+                let file = self.path.join(&name);
+                match fs::File::create_new(&file) {
+                    Ok(_) => {
+                        self.record(Undo::RemoveFile(file));
+                        self.new_folder_name.clear();
+                        self.load_path(self.path.clone(), context);
+                    }
+                    Err(error) => {
+                        self.status = format!("{}: {error}", tr("Could not create file"));
+                        self.has_error = true;
+                    }
+                }
+            }
+            Message::CopyPath => {
+                let text = if self.selected.is_empty() {
+                    self.path.to_string_lossy().into_owned()
+                } else {
+                    let mut paths: Vec<_> = self.selected.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+                    paths.sort();
+                    paths.join("\r\n")
+                };
+                match clipboard::set_text(&text) {
+                    Ok(()) => {
+                        self.has_error = false;
+                        self.status = tr("Path copied").to_owned();
+                    }
+                    Err(error) => {
+                        self.has_error = true;
+                        self.status = format!("{}: {error}", tr("Clipboard failed"));
+                    }
+                }
+            }
+            Message::OpenTerminal => {
+                let opened = std::process::Command::new("wt.exe")
+                    .arg("-d")
+                    .arg(&self.path)
+                    .spawn()
+                    .or_else(|_| {
+                        std::process::Command::new("cmd.exe")
+                            .args(["/c", "start", "cmd.exe"])
+                            .current_dir(&self.path)
+                            .spawn()
+                    });
+                self.has_error = opened.is_err();
+                if let Err(error) = opened {
+                    self.status = format!("{}: {error}", tr("Could not open terminal"));
+                }
+            }
             Message::NewTab => {
                 self.tabs.push(self.path.clone());
                 self.active_tab = self.tabs.len() - 1;
@@ -333,13 +414,17 @@ impl Component for Explorer {
                 if self.tabs.len() > 1 {
                     self.tabs.remove(self.active_tab);
                     self.active_tab = self.active_tab.min(self.tabs.len() - 1);
-                    self.navigate(self.tabs[self.active_tab].clone(), context);
+                    self.back.clear();
+                    self.forward.clear();
+                    self.load_path(self.tabs[self.active_tab].clone(), context);
                 }
             }
             Message::SwitchTab(index) => {
                 if index < self.tabs.len() && index != self.active_tab {
                     self.active_tab = index;
-                    self.navigate(self.tabs[index].clone(), context);
+                    self.back.clear();
+                    self.forward.clear();
+                    self.load_path(self.tabs[index].clone(), context);
                 }
             }
             Message::NewWindow => {
@@ -600,31 +685,41 @@ impl Component for Explorer {
                         .content("×"),
                 )),
             Grid::new()
-                .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
+                .columns([GridLength::Auto, GridLength::Auto, GridLength::Auto, GridLength::STAR, GridLength::Auto])
                 .column_spacing(6.0)
                 .children((
                     Button::new()
                         .grid_column(0)
+                        .is_enabled(!self.back.is_empty())
+                        .on_click(context.message(Message::Back))
+                        .content(tr("Back")),
+                    Button::new()
+                        .grid_column(1)
+                        .is_enabled(!self.forward.is_empty())
+                        .on_click(context.message(Message::Forward))
+                        .content(tr("Forward")),
+                    Button::new()
+                        .grid_column(2)
                         .on_click(context.message(Message::Parent))
                         .content(tr("Up")),
                     TextBox::new()
                         .element_ref(&self.address_ref)
                         .automation_name(tr("Address"))
                         .text(&self.address)
-                        .grid_column(1)
+                        .grid_column(3)
                         .on_text_changed(address_changed),
                     Button::new()
-                        .grid_column(2)
+                        .grid_column(4)
                         .on_click(context.message(Message::Go))
                         .content(tr("Go")),
                 )),
             Grid::new()
-                .columns([GridLength::STAR, GridLength::Auto])
+                .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto])
                 .column_spacing(6.0)
                 .children((
                     TextBox::new()
                         .text(&self.new_folder_name)
-                        .placeholder_text(tr("New folder name"))
+                        .placeholder_text(tr("New folder or file name"))
                         .grid_column(0)
                         .on_text_changed(folder_name_changed),
                     Button::new()
@@ -632,6 +727,11 @@ impl Component for Explorer {
                         .is_enabled(!self.deleting && !self.transferring)
                         .on_click(context.message(Message::CreateFolder))
                         .content(tr("Create folder")),
+                    Button::new()
+                        .grid_column(2)
+                        .is_enabled(!self.deleting && !self.transferring)
+                        .on_click(context.message(Message::CreateFile))
+                        .content(tr("Create file")),
                 )),
             Grid::new()
                 .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto])
@@ -658,7 +758,7 @@ impl Component for Explorer {
                         .content(tr("Delete to Recycle Bin")),
                 )),
             Grid::new()
-                .columns([GridLength::Auto, GridLength::Auto, GridLength::Auto])
+                .columns([GridLength::Auto; 5])
                 .column_spacing(6.0)
                 .children((
                     Button::new()
@@ -678,6 +778,14 @@ impl Component for Explorer {
                         )
                         .on_click(context.message(Message::Paste))
                         .content(tr("Paste here")),
+                    Button::new()
+                        .grid_column(3)
+                        .on_click(context.message(Message::CopyPath))
+                        .content(tr("Copy path")),
+                    Button::new()
+                        .grid_column(4)
+                        .on_click(context.message(Message::OpenTerminal))
+                        .content(tr("Terminal here")),
                 )),
             text(tr("Destination folder"), self.theme.as_ref().map(Theme::muted)),
             Grid::new()
@@ -1070,6 +1178,14 @@ impl Explorer {
     }
 
     fn navigate(&mut self, path: PathBuf, context: &ComponentContext<Self>) {
+        if path != self.path {
+            self.back.push(self.path.clone());
+            self.forward.clear();
+        }
+        self.load_path(path, context);
+    }
+
+    fn load_path(&mut self, path: PathBuf, context: &ComponentContext<Self>) {
         self.path = path.clone();
         self.tabs[self.active_tab] = path.clone();
         self.recursive = false;
