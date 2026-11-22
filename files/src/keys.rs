@@ -36,6 +36,9 @@ pub enum Key {
     MoveUp,
     MoveDown,
     Open,
+    Confirm,
+    Cancel,
+    FocusAddress,
 }
 
 pub type Receiver = Arc<Mutex<mpsc::Receiver<Key>>>;
@@ -81,6 +84,8 @@ fn map_key(virtual_key: u32, ctrl: bool) -> Option<Key> {
         (0x26, false) => Some(Key::MoveUp),
         (0x28, false) => Some(Key::MoveDown),
         (0x0D, false) => Some(Key::Open),
+        (0x1B, false) => Some(Key::Cancel),
+        (0x4C, true) => Some(Key::FocusAddress),
         (0x2E, false) => Some(Key::Delete),
         (0x08, false) => Some(Key::Up),
         (0x74, false) => Some(Key::Refresh),
@@ -99,8 +104,12 @@ pub fn next(receiver: &Receiver, cancel: &CancellationToken) -> Option<Key> {
             .ok()?
             .recv_timeout(Duration::from_millis(250));
         match key {
-            Ok(key) if key_allowed(key) => return Some(key),
-            Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Ok(key) => {
+                if let Some(key) = resolve(key) {
+                    return Some(key);
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return None,
         }
     }
@@ -108,6 +117,14 @@ pub fn next(receiver: &Receiver, cancel: &CancellationToken) -> Option<Key> {
 
 // Arrows must not steal from menus or lists, and Enter must not double-fire on a focused button, so those
 // keys only pass when focus sits on a neutral container.
+fn resolve(key: Key) -> Option<Key> {
+    // Enter and Escape drive the prompt and address fields, so they matter exactly when a text field has focus.
+    if matches!(key, Key::Open | Key::Cancel) && focused_kind() == Some(UIA_EditControlTypeId) {
+        return Some(if key == Key::Open { Key::Confirm } else { Key::Cancel });
+    }
+    key_allowed(key).then_some(key)
+}
+
 fn key_allowed(key: Key) -> bool {
     let Some(kind) = focused_kind() else { return false };
     let neutral = [UIA_WindowControlTypeId, UIA_PaneControlTypeId, UIA_CustomControlTypeId, UIA_GroupControlTypeId];
@@ -117,6 +134,8 @@ fn key_allowed(key: Key) -> bool {
     ];
     match key {
         Key::Open => neutral.contains(&kind),
+        Key::Cancel => kind != UIA_EditControlTypeId,
+        Key::FocusAddress => true,
         Key::MoveUp | Key::MoveDown => kind != UIA_EditControlTypeId && !navigating.contains(&kind),
         _ => kind != UIA_EditControlTypeId,
     }

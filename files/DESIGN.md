@@ -7,13 +7,12 @@
 
 ## Jerarquía de la pantalla (arriba → abajo)
 1. Pestañas.
-2. Navegación: Atrás, Adelante, Subir, dirección, Ir.
-3. Migas de pan (cada miga navega a su carpeta).
-4. Barra de comandos: acciones primarias con ícono (crear, cortar/copiar/pegar, renombrar, eliminar); el resto en el menú «…».
-5. Nombre del elemento, destino de copiar/mover, filtro.
-6. Encabezado de orden (Nombre, Tamaño, Modificado).
-7. Detalle, vista previa y estado solo si tienen contenido (no ocupan espacio vacío).
-8. Lista: casilla, ícono por tipo, nombre, tamaño, fecha.
+2. Navegación en una fila: Atrás, Adelante, Subir (íconos), migas de pan que se editan como dirección (lápiz o Ctrl+L; Enter va, Esc cancela) y filtro.
+3. Barra de comandos: acciones primarias con ícono (crear, cortar/copiar/pegar, renombrar, eliminar); el resto en el menú «…».
+4. Franja de texto solo mientras una acción la pide (crear, renombrar, etiquetas, clonar, copiar a…, mover a…): etiqueta, campo con foco, Aceptar/Cancelar; Enter acepta y Esc cancela.
+5. Encabezado de orden (Nombre, Tamaño, Modificado).
+6. Detalle, vista previa y estado solo si tienen contenido (no ocupan espacio vacío).
+7. Lista: casilla, ícono por tipo, nombre, tamaño, fecha.
 
 ## Estados
 - **Seleccionado:** fondo `selection` en la fila y casilla marcada.

@@ -29,3 +29,4 @@ pub const HANDLE_HIT_WIDTH: f64 = 10.0;
 pub const CARD_MARGIN: f64 = 4.0;
 pub const CARD_RADIUS: f64 = 6.0;
 pub const PANE_WIDTH: f64 = 300.0;
+pub const FILTER_WIDTH: f64 = 220.0;

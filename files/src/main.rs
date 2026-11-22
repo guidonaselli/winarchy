@@ -223,14 +223,16 @@ impl Explorer {
         };
         let separator = || Command { label: String::new(), message: None, icon: None, enabled: true, primary: true };
         vec![
-            command("Create folder", Message::CreateFolder, Some(Symbol::NewFolder), idle, true),
-            command("Create file", Message::CreateFile, Some(Symbol::Add), idle, true),
+            command("Create folder", Message::Ask(Prompt::NewFolder), Some(Symbol::NewFolder), idle, true),
+            command("Create file", Message::Ask(Prompt::NewFile), Some(Symbol::Add), idle, true),
             separator(),
             command("Cut", Message::Clip(true), Some(Symbol::Cut), some, true),
             command("Copy", Message::Clip(false), Some(Symbol::Copy), some, true),
             command("Paste here", Message::Paste, Some(Symbol::Paste), clipboard::has_files() && idle, true),
             separator(),
-            command("Rename selected", Message::RenameSelected, Some(Symbol::Rename), one && idle, true),
+            command("Rename selected", Message::Ask(Prompt::Rename), Some(Symbol::Rename), one && idle, true),
+            command("Copy to…", Message::Ask(Prompt::CopyTo), None, some && idle, false),
+            command("Move to…", Message::Ask(Prompt::MoveTo), None, some && idle, false),
             command("Delete to Recycle Bin", Message::DeleteSelected, Some(Symbol::Delete), some && idle, true),
             command("Delete permanently", Message::DeletePermanently, None, some && idle, false),
             command("Copy path", Message::CopyPath(false), None, true, false),
@@ -242,13 +244,13 @@ impl Explorer {
             command("Extract here", Message::Extract, None, one && !self.transferring, false),
             command("Edit in Notepad", Message::RunVerb("notepad"), None, one, false),
             command("Share", Message::Share, Some(Symbol::Share), some, false),
-            command("Add tags (name field)", Message::Tag(true), Some(Symbol::Tag), some, false),
+            command("Add tags", Message::Ask(Prompt::Tags), Some(Symbol::Tag), some, false),
             command("Clear tags", Message::Tag(false), None, some, false),
             command("Properties", Message::RunVerb("properties"), None, one, false),
             command("Terminal here", Message::OpenTerminal, None, true, false),
             command("Terminal as administrator", Message::RunVerb("admin-terminal"), None, true, false),
             command("Git init", Message::Git("init"), None, !self.transferring, false),
-            command("Git clone (URL in name field)", Message::Git("clone"), None, !self.transferring, false),
+            command("Git clone", Message::Ask(Prompt::GitClone), None, !self.transferring, false),
             command("Git fetch", Message::Git("fetch"), None, self.git_branch.is_some() && !self.transferring, false),
             command("Git pull", Message::Git("pull"), None, self.git_branch.is_some() && !self.transferring, false),
             command("Git push", Message::Git("push"), None, self.git_branch.is_some() && !self.transferring, false),
@@ -365,6 +367,47 @@ impl Undo {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Prompt {
+    NewFolder,
+    NewFile,
+    Rename,
+    Tags,
+    GitClone,
+    CopyTo,
+    MoveTo,
+}
+
+impl Prompt {
+    fn label(self) -> &'static str {
+        match self {
+            Prompt::NewFolder => "New folder name",
+            Prompt::NewFile => "New file name",
+            Prompt::Rename => "New name",
+            Prompt::Tags => "Tags, separated by commas",
+            Prompt::GitClone => "Repository URL",
+            Prompt::CopyTo => "Copy to this folder",
+            Prompt::MoveTo => "Move to this folder",
+        }
+    }
+
+    fn uses_destination(self) -> bool {
+        matches!(self, Prompt::CopyTo | Prompt::MoveTo)
+    }
+
+    fn message(self) -> Message {
+        match self {
+            Prompt::NewFolder => Message::CreateFolder,
+            Prompt::NewFile => Message::CreateFile,
+            Prompt::Rename => Message::RenameSelected,
+            Prompt::Tags => Message::Tag(true),
+            Prompt::GitClone => Message::Git("clone"),
+            Prompt::CopyTo => Message::TransferSelected(false),
+            Prompt::MoveTo => Message::TransferSelected(true),
+        }
+    }
+}
+
 fn undo_for_transfer(paths: &[PathBuf], destination: &Path, cut: bool) -> Option<Undo> {
     let mut created = Vec::new();
     for path in paths {
@@ -430,6 +473,10 @@ enum Message {
     CycleLayout,
     CycleGroup,
     TogglePane,
+    Ask(Prompt),
+    Confirm,
+    CancelPrompt,
+    EditAddress,
     Share,
     Tag(bool),
     Undo,
@@ -514,6 +561,10 @@ struct Explorer {
     theme: Option<Theme>,
     theme_version: u64,
     address_ref: ElementRef<TextBox>,
+    prompt_ref: ElementRef<TextBox>,
+    prompt: Option<Prompt>,
+    editing_address: bool,
+    focus_prompt: bool,
     focus_requested: bool,
     focus_attempts: u8,
     places: Vec<(String, PathBuf)>,
@@ -586,6 +637,10 @@ impl Component for Explorer {
             theme,
             theme_version: 0,
             address_ref: ElementRef::new(),
+            prompt_ref: ElementRef::new(),
+            prompt: None,
+            editing_address: false,
+            focus_prompt: false,
             focus_requested: false,
             focus_attempts: 0,
             places: places_with(&saved.pinned),
@@ -820,7 +875,7 @@ impl Component for Explorer {
             Message::Tag(add) => {
                 let names: Vec<String> = self.new_folder_name.split(',').map(|tag| tag.trim().to_owned()).filter(|tag| !tag.is_empty()).collect();
                 if add && names.is_empty() {
-                    self.status = tr("Type tags in the name field, separated by commas").to_owned();
+                    self.status = tr("Type at least one tag").to_owned();
                     return;
                 }
                 for path in &self.selected {
@@ -951,7 +1006,7 @@ impl Component for Explorer {
                 }
                 let url = self.new_folder_name.trim().to_owned();
                 if action == "clone" && (url.is_empty() || url.starts_with('-')) {
-                    self.status = tr("Type the repository URL in the name field").to_owned();
+                    self.status = tr("Type the repository URL").to_owned();
                     self.has_error = true;
                     return;
                 }
@@ -1086,6 +1141,44 @@ impl Component for Explorer {
                 self.hide_pane = !self.hide_pane;
                 self.fit_list_width();
                 self.save_settings();
+            }
+            Message::Ask(prompt) => {
+                if !prompt.uses_destination() {
+                    self.new_folder_name = if prompt == Prompt::Rename {
+                        self.selected.iter().next().and_then(|path| path.file_name()).map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+                }
+                self.prompt = Some(prompt);
+                self.focus_prompt = true;
+                self.focus_attempts = 0;
+                self.retry_focus_soon(context);
+            }
+            Message::Confirm => {
+                if self.editing_address {
+                    self.editing_address = false;
+                    self.update(Message::Go, context);
+                } else if let Some(prompt) = self.prompt {
+                    self.has_error = false;
+                    self.update(prompt.message(), context);
+                    if !self.has_error {
+                        self.prompt = None;
+                    }
+                }
+            }
+            Message::CancelPrompt => {
+                self.prompt = None;
+                self.editing_address = false;
+                self.address = self.path.to_string_lossy().into_owned();
+                self.new_folder_name.clear();
+            }
+            Message::EditAddress => {
+                self.editing_address = true;
+                self.prompt = None;
+                self.focus_prompt = false;
+                self.focus_attempts = 0;
+                self.retry_focus_soon(context);
             }
             Message::Focus(true) => {}
             Message::Focus(false) => {
@@ -1428,46 +1521,66 @@ impl Component for Explorer {
                     self.theme.as_ref().map(|theme| if self.has_error { theme.urgent() } else { theme.muted() }),
                 ),
             ));
-        let has_selection = !self.selected.is_empty();
-        let mut transfer_row = vec![KeyedView::new(
-            0usize,
-            TextBox::new()
-                .grid_column(0)
-                .grid_column_span(if has_selection { 1 } else { 4 })
-                .text(&self.new_folder_name)
-                .automation_name(tr("Item name"))
-                .placeholder_text(tr("Name for a new folder or file, or the new name"))
-                .on_text_changed(folder_name_changed),
-        )];
-        if has_selection {
-            let busy = self.deleting || self.transferring;
-            transfer_row.push(KeyedView::new(
+        let mut prompt_items = Vec::new();
+        if let Some(prompt) = self.prompt {
+            let (field, changed) = if prompt.uses_destination() {
+                (&self.transfer_destination, transfer_destination_changed)
+            } else {
+                (&self.new_folder_name, folder_name_changed)
+            };
+            prompt_items.push(KeyedView::new(
+                0usize,
+                text(tr(prompt.label()), self.theme.as_ref().map(Theme::muted)).grid_column(0).vertical_alignment(VerticalAlignment::Center),
+            ));
+            prompt_items.push(KeyedView::new(
                 1usize,
                 TextBox::new()
-                    .text(&self.transfer_destination)
-                    .automation_name(tr("Destination folder path"))
-                    .placeholder_text(tr("Copy or move the selection to this folder"))
-                    .is_enabled(!self.transferring)
+                    .element_ref(&self.prompt_ref)
                     .grid_column(1)
-                    .on_text_changed(transfer_destination_changed),
+                    .text(field)
+                    .automation_name(tr(prompt.label()))
+                    .on_text_changed(changed),
             ));
-            transfer_row.push(KeyedView::new(
+            prompt_items.push(KeyedView::new(
                 2usize,
-                Button::new()
-                    .grid_column(2)
-                    .is_enabled(!busy)
-                    .on_click(context.message(Message::TransferSelected(false)))
-                    .content(tr("Copy selected")),
+                Button::new().grid_column(2).style(ButtonStyle::Accent).on_click(context.message(Message::Confirm)).content(tr("OK")),
             ));
-            transfer_row.push(KeyedView::new(
+            prompt_items.push(KeyedView::new(
                 3usize,
-                Button::new()
-                    .grid_column(3)
-                    .is_enabled(!busy)
-                    .on_click(context.message(Message::TransferSelected(true)))
-                    .content(tr("Move selected")),
+                Button::new().grid_column(3).on_click(context.message(Message::CancelPrompt)).content(tr("Cancel")),
             ));
         }
+        let icon_button = |symbol: Symbol, name: &str, enabled: bool, column: i32, message: Message| {
+            Button::new()
+                .grid_column(column)
+                .automation_name(name)
+                .is_enabled(enabled)
+                .on_click(context.message(message))
+                .content(SymbolIcon::new().symbol(symbol))
+        };
+        let address_view: View = if self.editing_address {
+            TextBox::new()
+                .element_ref(&self.address_ref)
+                .automation_name(tr("Address"))
+                .text(&self.address)
+                .grid_column(3)
+                .vertical_alignment(VerticalAlignment::Center)
+                .on_text_changed(address_changed)
+                .into()
+        } else {
+            BreadcrumbBar::new()
+                .grid_column(3)
+                .vertical_alignment(VerticalAlignment::Center)
+                .items_source(
+                    self.crumbs()
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, (label, _))| format!("{label}{}", ZERO_WIDTH.to_string().repeat(index)))
+                        .collect::<Vec<_>>(),
+                )
+                .on_item_clicked(context.callback(Message::Crumb))
+                .into()
+        };
         let toolbar = StackPanel::new().spacing(STACK_GAP).margin(Thickness::new(0.0, 0.0, CONTENT_MARGIN, 0.0)).children((
             StackPanel::new()
                 .orientation(Orientation::Horizontal)
@@ -1488,62 +1601,36 @@ impl Component for Explorer {
                         .content("×"),
                 )),
             Grid::new()
-                .columns([GridLength::Auto, GridLength::Auto, GridLength::Auto, GridLength::STAR, GridLength::Auto])
+                .columns([
+                    GridLength::Auto,
+                    GridLength::Auto,
+                    GridLength::Auto,
+                    GridLength::STAR,
+                    GridLength::Auto,
+                    GridLength::Pixel(FILTER_WIDTH),
+                ])
                 .column_spacing(ROW_GAP)
                 .children((
-                    Button::new()
-                        .grid_column(0)
-                        .is_enabled(!self.back.is_empty())
-                        .on_click(context.message(Message::Back))
-                        .content(tr("Back")),
-                    Button::new()
-                        .grid_column(1)
-                        .is_enabled(!self.forward.is_empty())
-                        .on_click(context.message(Message::Forward))
-                        .content(tr("Forward")),
-                    Button::new()
-                        .grid_column(2)
-                        .on_click(context.message(Message::Parent))
-                        .content(tr("Up")),
+                    icon_button(Symbol::Back, tr("Back"), !self.back.is_empty(), 0, Message::Back),
+                    icon_button(Symbol::Forward, tr("Forward"), !self.forward.is_empty(), 1, Message::Forward),
+                    icon_button(Symbol::Up, tr("Up"), true, 2, Message::Parent),
+                    address_view,
+                    icon_button(Symbol::Edit, tr("Edit address"), true, 4, Message::EditAddress),
                     TextBox::new()
-                        .element_ref(&self.address_ref)
-                        .automation_name(tr("Address"))
-                        .text(&self.address)
-                        .grid_column(3)
-                        .on_text_changed(address_changed),
-                    Button::new()
-                        .grid_column(4)
-                        .on_click(context.message(Message::Go))
-                        .content(tr("Go")),
-                )),
-            BreadcrumbBar::new()
-                .items_source(
-                    self.crumbs()
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, (label, _))| format!("{label}{}", ZERO_WIDTH.to_string().repeat(index)))
-                        .collect::<Vec<_>>(),
-                )
-                .on_item_clicked(context.callback(Message::Crumb)),
-            Grid::new()
-                .columns([GridLength::Auto, GridLength::STAR])
-                .column_spacing(COLUMN_GAP)
-                .children((
-                    CommandBar::new()
-                        .grid_column(0)
-                        .horizontal_alignment(HorizontalAlignment::Left)
-                        .owned_commands(primary, secondary, context.callback(Message::Command)),
-                    TextBox::new()
-                        .grid_column(1)
+                        .grid_column(5)
                         .vertical_alignment(VerticalAlignment::Center)
                         .text(&self.filter)
+                        .automation_name(tr("Filter by name"))
                         .placeholder_text(tr("Filter by name"))
                         .on_text_changed(context.callback(Message::Filter)),
                 )),
+            CommandBar::new()
+                .horizontal_alignment(HorizontalAlignment::Left)
+                .owned_commands(primary, secondary, context.callback(Message::Command)),
             Grid::new()
-                .columns([GridLength::STAR, GridLength::STAR, GridLength::Auto, GridLength::Auto])
+                .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto, GridLength::Auto])
                 .column_spacing(ROW_GAP)
-                .keyed_children(transfer_row),
+                .keyed_children(prompt_items),
             header,
         ));
         let content = Grid::new()
@@ -1653,6 +1740,9 @@ impl Explorer {
                     self.refresh_status();
                 }
             }
+            keys::Key::Confirm => self.update(Message::Confirm, context),
+            keys::Key::Cancel => self.update(Message::CancelPrompt, context),
+            keys::Key::FocusAddress => self.update(Message::EditAddress, context),
             keys::Key::Open => {
                 let mut chosen = self.selected.iter();
                 if let (Some(path), None) = (chosen.next().cloned(), chosen.next())
@@ -1675,12 +1765,21 @@ impl Explorer {
         }
     }
 
+    // The field is not in the tree until the next render, so the first attempt waits for it.
+    fn retry_focus_soon(&self, context: &ComponentContext<Self>) {
+        let _task = context.spawn_background(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            Message::RetryFocus
+        });
+    }
+
     fn request_address_focus(&mut self, context: &ComponentContext<Self>) {
         self.focus_attempts += 1;
         let sender = context.sender();
-        let accepted = self.address_ref.request_focus_result(move |result| {
+        let report = move |result: Result<bool, _>| {
             let _ = sender.send(Message::Focus(matches!(result, Ok(true))));
-        });
+        };
+        let accepted = if self.focus_prompt { self.prompt_ref.request_focus_result(report) } else { self.address_ref.request_focus_result(report) };
         if !accepted {
             self.focus_attempts = u8::MAX;
         }
