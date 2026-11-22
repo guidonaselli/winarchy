@@ -22,8 +22,36 @@ enum SortKey {
     Modified,
 }
 
+// Only operations that can be reversed without guessing: names that did not exist before.
+enum Undo {
+    Created(PathBuf),
+    Renamed { from: PathBuf, to: PathBuf },
+    Copied(Vec<PathBuf>),
+    Moved(Vec<(PathBuf, PathBuf)>),
+}
+
+fn undo_for_transfer(paths: &[PathBuf], destination: &Path, cut: bool) -> Option<Undo> {
+    let mut created = Vec::new();
+    for path in paths {
+        let target = destination.join(path.file_name()?);
+        if path.parent()? == destination || target.exists() {
+            continue;
+        }
+        created.push((target, path.parent()?.to_path_buf()));
+    }
+    if created.is_empty() {
+        None
+    } else if cut {
+        Some(Undo::Moved(created))
+    } else {
+        Some(Undo::Copied(created.into_iter().map(|(target, _)| target).collect()))
+    }
+}
+
 #[derive(Clone)]
 enum Message {
+    Undo,
+    UndoComplete(Result<bool, String>),
     Sort(SortKey),
     Clip(bool),
     Refresh,
@@ -60,6 +88,8 @@ struct Explorer {
     filter: String,
     clipboard: Vec<PathBuf>,
     clipboard_cut: bool,
+    pending_undo: Option<Undo>,
+    undo: Vec<Undo>,
     sort: SortKey,
     descending: bool,
     new_folder_name: String,
@@ -103,6 +133,8 @@ impl Component for Explorer {
             filter: String::new(),
             clipboard: Vec::new(),
             clipboard_cut: false,
+            pending_undo: None,
+            undo: Vec::new(),
             sort: SortKey::Name,
             descending: false,
             new_folder_name: String::new(),
@@ -167,6 +199,26 @@ impl Component for Explorer {
                 }
             }
             Message::Paste => self.paste(context),
+            Message::Undo => self.undo(context),
+            Message::UndoComplete(result) => {
+                self.transferring = false;
+                self.entries.clear();
+                match result {
+                    Ok(true) => {
+                        self.status = "Undone".to_owned();
+                        self.has_error = false;
+                    }
+                    Ok(false) => {
+                        self.status = "Undo canceled".to_owned();
+                        self.has_error = true;
+                    }
+                    Err(error) => {
+                        self.status = format!("Undo failed: {error}");
+                        self.has_error = true;
+                    }
+                }
+                self.queue_load(self.path.clone(), context);
+            }
             Message::Key(receiver, key) => {
                 if let Some(key) = key {
                     self.watch_keys(receiver, context);
@@ -528,6 +580,7 @@ impl Explorer {
             keys::Key::Copy => self.update(Message::Clip(false), context),
             keys::Key::Cut => self.update(Message::Clip(true), context),
             keys::Key::Paste => self.update(Message::Paste, context),
+            keys::Key::Undo => self.update(Message::Undo, context),
             keys::Key::Delete => self.update(Message::DeleteSelected, context),
             keys::Key::Up => self.update(Message::Parent, context),
             keys::Key::Refresh => self.update(Message::Refresh, context),
@@ -615,12 +668,43 @@ impl Explorer {
             }
         };
         let destination = self.path.clone();
+        self.pending_undo = undo_for_transfer(&paths, &destination, cut);
         self.transferring = true;
         self.has_error = false;
         self.status = "Pasting…".to_owned();
         let _task = context.spawn_background(move |_| {
             let result = shell::transfer(&paths, &destination, cut);
             Message::TransferComplete(cut, result)
+        });
+    }
+
+    fn undo(&mut self, context: &ComponentContext<Self>) {
+        if self.deleting || self.transferring {
+            return;
+        }
+        let Some(action) = self.undo.pop() else {
+            self.status = "Nothing to undo".to_owned();
+            self.has_error = false;
+            return;
+        };
+        self.transferring = true;
+        self.has_error = false;
+        self.status = "Undoing…".to_owned();
+        let _task = context.spawn_background(move |_| {
+            let result = match action {
+                Undo::Created(folder) => fs::remove_dir(folder)
+                    .map(|()| true)
+                    .map_err(|error| error.to_string()),
+                Undo::Renamed { from, to } => shell::rename(&to, &from)
+                    .map(|()| true)
+                    .map_err(|error| error.to_string()),
+                Undo::Copied(paths) => shell::recycle(&paths),
+                Undo::Moved(items) => items.iter().try_fold(true, |done, (current, parent)| {
+                    shell::transfer(std::slice::from_ref(current), parent, true)
+                        .map(|ok| done && ok)
+                }),
+            };
+            Message::UndoComplete(result)
         });
     }
 
@@ -765,6 +849,7 @@ impl Explorer {
 
         let paths: Vec<_> = self.selected.iter().cloned().collect();
         let destination = PathBuf::from(destination);
+        self.pending_undo = undo_for_transfer(&paths, &destination, move_items);
         self.transferring = true;
         self.status = if move_items {
             "Moving selected items…".to_owned()
@@ -791,6 +876,10 @@ impl Explorer {
             clipboard::clear();
         }
         self.entries.clear();
+        let undo = self.pending_undo.take();
+        if let (Ok(true), Some(undo)) = (&result, undo) {
+            self.undo.push(undo);
+        }
         match result {
             Ok(true) => {
                 self.status = if move_items {
@@ -824,6 +913,7 @@ impl Explorer {
         }
         match result {
             Ok(()) => {
+                self.undo.extend(self.pending_undo.take());
                 self.selected.clear();
                 self.rename_name.clear();
                 self.entries.clear();
@@ -832,6 +922,7 @@ impl Explorer {
                 self.queue_load(parent, context);
             }
             Err(error) => {
+                self.pending_undo = None;
                 self.rename_name = name;
                 self.status = format!("Rename failed: {error}");
                 self.has_error = true;
@@ -851,6 +942,7 @@ impl Explorer {
         }
         match result {
             Ok(()) => {
+                self.undo.push(Undo::Created(parent.join(&name)));
                 self.entries.clear();
                 self.selected.clear();
                 self.status = "Loading folder…".to_owned();
@@ -899,6 +991,10 @@ impl Explorer {
         }
 
         let name = name.to_owned();
+        self.pending_undo = Some(Undo::Renamed {
+            from: source.clone(),
+            to: target.clone(),
+        });
         self.status = "Renaming…".to_owned();
         self.has_error = false;
         let _task = context.spawn_background(move |_| {
