@@ -519,6 +519,7 @@ enum Message {
     #[cfg(windows)]
     ThemeChanged(Result<usize, String>),
     Go,
+    RowClick(PathBuf),
     OpenFolder(PathBuf),
     OpenFile(PathBuf),
     Parent,
@@ -556,6 +557,7 @@ struct Explorer {
     window_height: f64,
     menu: Option<(f64, f64, MenuKind)>,
     bar_anchor: (f64, f64),
+    last_click: Option<(PathBuf, std::time::Instant)>,
     drag: Option<(Column, f64, f64)>,
     terminal: String,
     sidebar_width: f64,
@@ -641,6 +643,7 @@ impl Component for Explorer {
             window_height: 600.0,
             menu: None,
             bar_anchor: (0.0, 0.0),
+            last_click: None,
             window_width: DEFAULT_LIST_WIDTH + SIDEBAR_DEFAULT_WIDTH + SPLITTER_WIDTH + SCROLL_ALLOWANCE + 2.0 * WINDOW_MARGIN,
             recursive: false,
             sort: SortKey::from_name(&saved.sort),
@@ -1374,6 +1377,25 @@ impl Component for Explorer {
                 self.folder_created(parent, name, result, context)
             }
             Message::Go => self.navigate(PathBuf::from(&self.address), context),
+            Message::RowClick(path) => {
+                let now = std::time::Instant::now();
+                let window = std::time::Duration::from_millis(u64::from(unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() }));
+                let double = self.last_click.take().is_some_and(|(last, at)| last == path && now.duration_since(at) < window);
+                if double {
+                    let open = if path.is_dir() { Message::OpenFolder(path) } else { Message::OpenFile(path) };
+                    self.update(open, context);
+                    return;
+                }
+                self.last_click = Some((path.clone(), now));
+                let ctrl = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState(windows::Win32::UI::Input::KeyboardAndMouse::VK_CONTROL.0 as i32) } < 0;
+                if !ctrl {
+                    self.selected.clear();
+                }
+                if !self.selected.remove(&path) || !ctrl {
+                    self.selected.insert(path);
+                }
+                self.refresh_status();
+            }
             Message::OpenFolder(path) => self.navigate(path, context),
             Message::OpenFile(path) => {
                 if let Err(error) = shell::open(&path) {
@@ -1500,19 +1522,52 @@ impl Component for Explorer {
             },
         );
 
-        let tab_items = self.tabs.iter().enumerate().map(|(index, path)| {
-            let name = path
-                .file_name()
-                .map_or_else(|| path.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
-            KeyedView::new(
-                index,
-                TabViewItem::new()
-                    .header(name)
-                    .tag(index.to_string())
-                    .is_closable(self.tabs.len() > 1)
-                    .tooltip(path.to_string_lossy().into_owned()),
-            )
-        });
+        let theme = self.theme.as_ref();
+        let tab_strip = {
+            let closable = self.tabs.len() > 1;
+            let mut tabs: Vec<View> = self
+                .tabs
+                .iter()
+                .enumerate()
+                .map(|(index, path)| {
+                    let name = path.file_name().map_or_else(|| path.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
+                    let active = index == self.active_tab;
+                    let title = Button::new()
+                        .grid_column(0)
+                        .style(ButtonStyle::Subtle)
+                        .horizontal_content_alignment(HorizontalAlignment::Left)
+                        .automation_name(name.clone())
+                        .on_click(context.message(Message::SwitchTab(index)))
+                        .content(text(&name, theme.map(Theme::foreground)))
+                        .tooltip(path.to_string_lossy().into_owned());
+                    let close = closable.then(|| {
+                        Button::new()
+                            .grid_column(1)
+                            .style(ButtonStyle::Subtle)
+                            .automation_name(tr("Close tab"))
+                            .on_click(context.message(Message::CloseTabAt(index)))
+                            .content(icon(icons::Icon::X, ICON_SIZE_SMALL, theme))
+                            .tooltip(tr("Close tab"))
+                    }).unwrap_or_else(|| StackPanel::new().grid_column(1).into());
+                    Border::new()
+                        .max_width(TAB_MAX_WIDTH)
+                        .corner_radius(CornerRadius::new(CONTENT_RADIUS, CONTENT_RADIUS, 0.0, 0.0))
+                        .background_optional(if active { theme.map(Theme::surface) } else { None })
+                        .content(Grid::new().columns([GridLength::STAR, GridLength::Auto]).children((title, close)))
+                        .into()
+                })
+                .collect();
+            tabs.push(
+                Button::new()
+                    .style(ButtonStyle::Subtle)
+                    .automation_name(tr("New tab"))
+                    .on_click(context.message(Message::NewTab))
+                    .content(icon(icons::Icon::Plus, ICON_SIZE_SMALL, theme))
+                    .tooltip(tr("New tab"))
+                    .into(),
+            );
+            StackPanel::new().orientation(Orientation::Horizontal).keyed_children(tabs.into_iter().enumerate().map(|(index, view)| KeyedView::new(index, view)).collect::<Vec<_>>())
+        };
         let command_bar = self.command_bar(context);
         let muted = self.theme.as_ref().map(Theme::muted);
         let mut info_items = Vec::new();
@@ -1670,14 +1725,7 @@ impl Component for Explorer {
                 .into()
         };
         let top = StackPanel::new().spacing(BAR_GAP).children((
-            TabView::new()
-                .selected_index(self.active_tab)
-                .is_add_tab_button_visible(true)
-                .can_reorder_tabs(false)
-                .on_selection_changed(context.callback(|index: Option<usize>| Message::SwitchTab(index.unwrap_or(0))))
-                .on_close_requested(context.callback(|tag: String| Message::CloseTabAt(tag.parse().unwrap_or(0))))
-                .on_add_tab_button_click(context.message(Message::NewTab))
-                .collection_slot(TabViewSlot::TabItems, tab_items),
+            tab_strip,
             Grid::new()
                 .columns([
                     GridLength::Auto,
@@ -2679,11 +2727,7 @@ fn select_box(entry: &Entry, is_selected: bool, sender: &LocalSender<Message>, b
 }
 
 fn open_button(entry: &Entry, sender: &LocalSender<Message>, column: i32, content: impl Into<View>) -> View {
-    let action = if entry.is_directory {
-        Message::OpenFolder(entry.path.clone())
-    } else {
-        Message::OpenFile(entry.path.clone())
-    };
+    let action = Message::RowClick(entry.path.clone());
     Button::new()
         .grid_column(column)
         .horizontal_content_alignment(HorizontalAlignment::Left)
@@ -2828,7 +2872,7 @@ fn icon_state(glyph: icons::Icon, size: f64, theme: Option<&Theme>, enabled: boo
 }
 
 const NEW_LABELS: [&str; 4] = ["Create folder", "Create file", "Create shortcut", "Git clone"];
-const TOOL_LABELS: [&str; 6] = ["Cut", "Copy", "Paste here", "Rename selected", "Share", "Delete to Recycle Bin"];
+const TOOL_LABELS: [&str; 7] = ["Cut", "Copy", "Copy path", "Paste here", "Rename selected", "Share", "Delete to Recycle Bin"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MenuKind {

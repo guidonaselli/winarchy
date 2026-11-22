@@ -55,3 +55,4 @@ pub const ICON_SIZE_SMALL: f64 = 12.0;
 pub const ICON_DISABLED_OPACITY: f64 = 0.35;
 pub const BAR_DIVIDER_HEIGHT: f64 = 20.0;
 pub const BAR_BUTTON_HEIGHT: f64 = 36.0;
+pub const TAB_MAX_WIDTH: f64 = 220.0;
