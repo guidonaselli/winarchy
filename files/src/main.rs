@@ -2367,6 +2367,13 @@ impl Explorer {
         self.entries.clear();
         let undo = self.pending_undo.take();
         if let (Ok(true), Some(undo)) = (&result, undo) {
+            if let Undo::Move(items) = &undo {
+                let pairs: Vec<_> = items
+                    .iter()
+                    .filter_map(|(current, parent)| Some((current.clone(), parent.join(current.file_name()?))))
+                    .collect();
+                self.move_tags(&pairs);
+            }
             self.record(undo);
         }
         match result {
@@ -2390,6 +2397,20 @@ impl Explorer {
         self.queue_load(self.path.clone(), context);
     }
 
+    // Pairs are (new path, original path); tags follow the item to its new path.
+    fn move_tags(&mut self, pairs: &[(PathBuf, PathBuf)]) {
+        let mut moved = false;
+        for (new, original) in pairs {
+            if let Some(tags) = self.tags.remove(original) {
+                self.tags.insert(new.clone(), tags);
+                moved = true;
+            }
+        }
+        if moved {
+            self.save_settings();
+        }
+    }
+
     fn rename_complete(
         &mut self,
         parent: PathBuf,
@@ -2403,6 +2424,9 @@ impl Explorer {
         match result {
             Ok(()) => {
                 if let Some(undo) = self.pending_undo.take() {
+                    if let Undo::Rename { from, to } = &undo {
+                        self.move_tags(&[(from.clone(), to.clone())]);
+                    }
                     self.record(undo);
                 }
                 self.selected.clear();
