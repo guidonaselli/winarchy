@@ -267,7 +267,11 @@ impl Explorer {
             command("Storage settings", Message::OpenStorageSense, None, true, false),
             command("Open Recycle Bin", Message::OpenRecycleBin, None, true, false),
             command("Empty Recycle Bin", Message::EmptyRecycleBin, None, true, false),
+            command(self.sort_label(SortKey::Name, "Sort by name"), Message::Sort(SortKey::Name), None, true, false),
+            command(self.sort_label(SortKey::Size, "Sort by size"), Message::Sort(SortKey::Size), None, true, false),
+            command(self.sort_label(SortKey::Modified, "Sort by date"), Message::Sort(SortKey::Modified), None, true, false),
             command(self.group.label(), Message::CycleGroup, None, true, false),
+            command(if self.hide_pane { "Preview pane: off" } else { "Preview pane: on" }, Message::TogglePane, None, true, false),
             command(self.layout.label(), Message::CycleLayout, None, true, false),
             command("Reset column widths", Message::ResetColumns, None, self.layout == Layout::Details, false),
             command("Duplicate tab", Message::DuplicateTab, None, true, false),
@@ -425,6 +429,7 @@ enum Message {
     CycleLanguage,
     CycleLayout,
     CycleGroup,
+    TogglePane,
     Share,
     Tag(bool),
     Undo,
@@ -490,6 +495,8 @@ struct Explorer {
     layout: Layout,
     group: Group,
     columns: Columns,
+    hide_pane: bool,
+    window_width: f64,
     drag: Option<(Column, f64, f64)>,
     recursive: bool,
     sort: SortKey,
@@ -561,6 +568,8 @@ impl Component for Explorer {
             columns: Columns::from_saved(saved.size_width, saved.modified_width),
             tags: saved.tags.clone(),
             drag: None,
+            hide_pane: saved.hide_pane,
+            window_width: DEFAULT_LIST_WIDTH + SIDEBAR_AND_SCROLL,
             recursive: false,
             sort: SortKey::from_name(&saved.sort),
             descending: saved.descending,
@@ -1069,7 +1078,15 @@ impl Component for Explorer {
                 self.columns = Columns::DEFAULT;
                 self.save_settings();
             }
-            Message::Resize(size) => self.list_width = (size.width - SIDEBAR_AND_SCROLL).max(MIN_LIST_WIDTH),
+            Message::Resize(size) => {
+                self.window_width = size.width;
+                self.fit_list_width();
+            }
+            Message::TogglePane => {
+                self.hide_pane = !self.hide_pane;
+                self.fit_list_width();
+                self.save_settings();
+            }
             Message::Focus(true) => {}
             Message::Focus(false) => {
                 if self.focus_attempts < 10 {
@@ -1362,6 +1379,7 @@ impl Component for Explorer {
         let header: View = if self.layout == Layout::Details {
             Grid::new()
                 .width(self.list_width)
+                .horizontal_alignment(HorizontalAlignment::Left)
                 .columns([
                     GridLength::Pixel(CHECK_WIDTH),
                     GridLength::STAR,
@@ -1378,21 +1396,33 @@ impl Component for Explorer {
                 ))
                 .into()
         } else {
-            StackPanel::new()
-                .orientation(Orientation::Horizontal)
-                .spacing(ROW_GAP)
-                .children((
-                    self.sort_button(context, SortKey::Name, tr("Name"), 0, HorizontalAlignment::Left),
-                    self.sort_button(context, SortKey::Size, tr("Size"), 1, HorizontalAlignment::Left),
-                    self.sort_button(context, SortKey::Modified, tr("Modified"), 2, HorizontalAlignment::Left),
-                ))
-                .into()
+            StackPanel::new().into()
         };
+        let mut body_items = vec![KeyedView::new(
+            0usize,
+            ScrollViewer::new()
+                .grid_column(0)
+                .horizontal_scroll_bar_visibility(ScrollBarVisibility::Disabled)
+                .content(ItemsRepeater::new().horizontal_alignment(HorizontalAlignment::Stretch).virtual_source(source)),
+        )];
+        if !self.hide_pane {
+            body_items.push(KeyedView::new(
+                1usize,
+                ScrollViewer::new()
+                    .grid_column(1)
+                    .horizontal_scroll_bar_visibility(ScrollBarVisibility::Disabled)
+                    .content(
+                        StackPanel::new()
+                            .spacing(STACK_GAP)
+                            .margin(Thickness::new(CONTENT_MARGIN, 0.0, CONTENT_MARGIN, 0.0))
+                            .keyed_children(info_items),
+                    ),
+            ));
+        }
         let footer = StackPanel::new()
             .spacing(STACK_GAP)
             .margin(Thickness::new(0.0, STACK_GAP, CONTENT_MARGIN, 0.0))
             .children((
-                StackPanel::new().spacing(STACK_GAP).keyed_children(info_items),
                 text(
                     &self.status,
                     self.theme.as_ref().map(|theme| if self.has_error { theme.urgent() } else { theme.muted() }),
@@ -1528,13 +1558,8 @@ impl Component for Explorer {
                 Grid::new()
                     .grid_row(1)
                     .background_optional(self.theme.as_ref().map(Theme::surface))
-                    .children((ScrollViewer::new()
-                        .horizontal_scroll_bar_visibility(ScrollBarVisibility::Disabled)
-                        .content(
-                            ItemsRepeater::new()
-                                .horizontal_alignment(HorizontalAlignment::Stretch)
-                                .virtual_source(source),
-                        ),)),
+                    .columns(if self.hide_pane { vec![GridLength::STAR] } else { vec![GridLength::STAR, GridLength::Pixel(PANE_WIDTH)] })
+                    .keyed_children(body_items),
                 Grid::new().grid_row(2).children((footer,)),
             ));
         let sidebar_items = self
@@ -1563,7 +1588,7 @@ impl Component for Explorer {
         let body = Grid::new()
             .columns([GridLength::Auto, GridLength::STAR])
             .children((
-                Grid::new().grid_column(0).children((ScrollViewer::new()
+                Grid::new().grid_column(0).width(SIDEBAR_WIDTH).children((ScrollViewer::new()
                     .content(StackPanel::new().spacing(TIGHT_GAP).keyed_children(sidebar_items)),)),
                 Border::new()
                     .grid_column(1)
@@ -1728,14 +1753,10 @@ impl Explorer {
         Button::new()
             .grid_column(column)
             .min_width(0.0)
-            .margin(if self.layout == Layout::Details {
-                match key {
-                    SortKey::Name => Thickness::new(ICON_WIDTH, 0.0, 0.0, 0.0),
-                    SortKey::Size => Thickness::new(0.0, 0.0, -BUTTON_INSET, 0.0),
-                    SortKey::Modified => Thickness::new(0.0, 0.0, ROW_TRAILING - BUTTON_INSET, 0.0),
-                }
-            } else {
-                Thickness::new(0.0, 0.0, 0.0, 0.0)
+            .margin(match key {
+                SortKey::Name => Thickness::new(ICON_WIDTH, 0.0, 0.0, 0.0),
+                SortKey::Size => Thickness::new(0.0, 0.0, -BUTTON_INSET, 0.0),
+                SortKey::Modified => Thickness::new(0.0, 0.0, ROW_TRAILING - BUTTON_INSET, 0.0),
             })
             .horizontal_alignment(HorizontalAlignment::Stretch)
             .horizontal_content_alignment(align)
@@ -1839,10 +1860,29 @@ impl Explorer {
             layout: self.layout.name().to_owned(),
             group: self.group.name().to_owned(),
             tags: self.tags.clone(),
+            hide_pane: self.hide_pane,
             size_width: self.columns.size,
             modified_width: self.columns.modified,
             pinned,
         });
+    }
+
+    // The active key shows its direction; the label stays a static key so it can be translated.
+    fn sort_label(&self, key: SortKey, label: &'static str) -> &'static str {
+        match (self.sort == key, self.descending, label) {
+            (true, false, "Sort by name") => "Sort by name ▲",
+            (true, true, "Sort by name") => "Sort by name ▼",
+            (true, false, "Sort by size") => "Sort by size ▲",
+            (true, true, "Sort by size") => "Sort by size ▼",
+            (true, false, "Sort by date") => "Sort by date ▲",
+            (true, true, "Sort by date") => "Sort by date ▼",
+            _ => label,
+        }
+    }
+
+    fn fit_list_width(&mut self) {
+        let pane = if self.hide_pane { 0.0 } else { PANE_WIDTH };
+        self.list_width = (self.window_width - SIDEBAR_AND_SCROLL - pane).max(MIN_LIST_WIDTH);
     }
 
     fn visible_entries(&self) -> Vec<Entry> {
@@ -2317,14 +2357,20 @@ fn tile(
             .into()
     };
     let width = if layout == Layout::Grid { GRID_CELL_WIDTH } else { TILE_CELL_WIDTH };
-    Grid::new()
-        .width(width)
-        .background_optional(selection_background(is_selected, theme))
-        .columns([GridLength::Auto, GridLength::STAR])
-        .children((
-            select_box(entry, is_selected, sender, busy).grid_column(0),
-            open_button(entry, sender, 1, content),
-        ))
+    let card = if is_selected { theme.and_then(Theme::selection) } else { theme.map(Theme::background) };
+    Border::new()
+        .width(width - 2.0 * CARD_MARGIN)
+        .margin(Thickness::new(CARD_MARGIN, CARD_MARGIN, CARD_MARGIN, CARD_MARGIN))
+        .corner_radius(CornerRadius::uniform(CARD_RADIUS))
+        .background_optional(card)
+        .content(
+            Grid::new()
+                .columns([GridLength::Auto, GridLength::STAR])
+                .children((
+                    select_box(entry, is_selected, sender, busy).grid_column(0),
+                    open_button(entry, sender, 1, content),
+                )),
+        )
         .into()
 }
 

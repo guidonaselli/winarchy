@@ -18,6 +18,8 @@ pub struct Settings {
     #[serde(default)]
     pub group: String,
     #[serde(default)]
+    pub hide_pane: bool,
+    #[serde(default)]
     pub size_width: f64,
     #[serde(default)]
     pub modified_width: f64,
@@ -61,7 +63,7 @@ mod tests {
     #[test]
     fn tolerates_partial_and_invalid_json() {
         let partial: Settings = serde_json::from_str(r#"{"show_hidden": true}"#).unwrap();
-        assert_eq!(partial, Settings { show_hidden: true, sort: String::new(), descending: false, language: String::new(), hide_extensions: false, layout: String::new(), group: String::new(), size_width: 0.0, modified_width: 0.0, pinned: Vec::new(), tags: Default::default() });
+        assert_eq!(partial, Settings { show_hidden: true, sort: String::new(), descending: false, language: String::new(), hide_extensions: false, layout: String::new(), group: String::new(), hide_pane: false, size_width: 0.0, modified_width: 0.0, pinned: Vec::new(), tags: Default::default() });
         assert!(serde_json::from_str::<Settings>("not json").is_err());
     }
 }
