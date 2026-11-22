@@ -1275,6 +1275,7 @@ impl Component for Explorer {
                     self.watch_theme_handle(handle, context);
                     match Theme::load() {
                         Ok(Some(theme)) => {
+                            shell::apply_window_icon(theme.icon_colors(), false);
                             self.theme = Some(theme);
                             self.theme_version += 1;
                             self.has_error = false;
@@ -2516,7 +2517,7 @@ fn main() {
         .filter(|path| path.is_dir())
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("C:\\"));
-    shell::apply_window_icon();
+    shell::apply_window_icon(Theme::load().ok().flatten().and_then(|theme| theme.icon_colors()), true);
     App::run_component::<Explorer>(path).unwrap();
 }
 

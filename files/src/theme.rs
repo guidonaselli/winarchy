@@ -164,6 +164,12 @@ impl Theme {
         self
     }
 
+    // Foreground, accent and background as RGB, for the window icon.
+    pub fn icon_colors(&self) -> Option<[[u8; 3]; 3]> {
+        let channels = |value: &str| rgb(value).map(|[r, g, b]| [r as u8, g as u8, b as u8]);
+        Some([channels(&self.foreground)?, channels(&self.accent)?, channels(&self.background)?])
+    }
+
     pub fn background(&self) -> Brush {
         brush(&self.background, ThemeBrush::SolidBackground)
     }

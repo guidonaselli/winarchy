@@ -414,48 +414,94 @@ pub fn share(_paths: &[PathBuf]) -> Result<(), String> {
     Err("sharing needs Windows".to_owned())
 }
 
-// The framework creates the window without an icon; give it the executable's embedded one once it exists.
+const ICON_LAYERS: &[u8] = include_bytes!("../assets/icon-layers.bin");
+const ICON_SIZES: [usize; 4] = [16, 24, 32, 48];
+const ICON_OPACITY: [f32; 3] = [0.55, 0.45, 1.0];
+const DEFAULT_ICON_COLORS: [[u8; 3]; 3] = [[0xe6, 0xd9, 0xdb], [0xf3, 0x8d, 0x70], [0x2c, 0x25, 0x25]];
+
+// BGRA pixels of the icon: back folder, accent panel and front outline tinted and stacked.
+fn icon_pixels(size: usize, tints: [[u8; 3]; 3]) -> Vec<u8> {
+    let area = size * size;
+    let start: usize = ICON_SIZES.iter().take_while(|&&candidate| candidate != size).map(|candidate| 3 * candidate * candidate).sum();
+    let mut pixels = vec![0u8; area * 4];
+    for pixel in 0..area {
+        let (mut color, mut alpha) = ([0f32; 3], 0f32);
+        for (layer, tint) in tints.iter().enumerate() {
+            let coverage = f32::from(ICON_LAYERS[start + layer * area + pixel]) / 255.0 * ICON_OPACITY[layer];
+            let out = coverage + alpha * (1.0 - coverage);
+            if out > 0.0 {
+                for channel in 0..3 {
+                    color[channel] = (f32::from(tint[channel]) * coverage + color[channel] * alpha * (1.0 - coverage)) / out;
+                }
+            }
+            alpha = out;
+        }
+        pixels[pixel * 4..pixel * 4 + 4].copy_from_slice(&[color[2] as u8, color[1] as u8, color[0] as u8, (alpha * 255.0) as u8]);
+    }
+    pixels
+}
+
+// The title bar is tinted with the accent, so its icon is drawn in the background colour; the taskbar
+// keeps the foreground outline with the accent panel.
+// shortcut: the title bar assumes an accent-tinted frame, revisit if Winarchy stops tinting it.
 #[cfg(windows)]
-pub fn apply_window_icon() {
+pub fn apply_window_icon(colors: Option<[[u8; 3]; 3]>, wait_for_window: bool) {
     use windows::Win32::{
         Foundation::{HWND, LPARAM, WPARAM},
-        System::{LibraryLoader::GetModuleHandleW, Threading::GetCurrentProcessId},
+        System::Threading::GetCurrentProcessId,
         UI::WindowsAndMessaging::{
-            EnumWindows, GetSystemMetrics, GetWindowThreadProcessId, ICON_BIG, ICON_SMALL, IMAGE_ICON, IsWindowVisible,
-            LR_DEFAULTCOLOR, LoadImageW, SM_CXICON, SM_CXSMICON, SendMessageW, WM_SETICON,
+            CreateIcon, DestroyIcon, EnumWindows, GetSystemMetrics, GetWindowThreadProcessId, ICON_BIG, ICON_SMALL, IsWindowVisible,
+            SM_CXICON, SM_CXSMICON, SendMessageW, WM_SETICON,
         },
     };
-    use windows::core::{BOOL, PCWSTR};
+    use windows::core::BOOL;
 
-    unsafe extern "system" fn set(window: HWND, _: LPARAM) -> BOOL {
+    let [foreground, accent, background] = colors.unwrap_or(DEFAULT_ICON_COLORS);
+    let variants = [(ICON_BIG, SM_CXICON, [foreground, accent, foreground]), (ICON_SMALL, SM_CXSMICON, [background, background, background])];
+
+    unsafe extern "system" fn set(window: HWND, data: LPARAM) -> BOOL {
         let mut process = 0;
-        // SAFETY: plain Win32 queries on a window handle supplied by EnumWindows
+        // SAFETY: plain Win32 queries on a window handle supplied by EnumWindows; `data` points at `variants` below
         unsafe {
             GetWindowThreadProcessId(window, Some(&mut process));
             if process != GetCurrentProcessId() || !IsWindowVisible(window).as_bool() {
                 return true.into();
             }
-            let Ok(module) = GetModuleHandleW(None) else { return true.into() };
-            for (kind, metric) in [(ICON_BIG, SM_CXICON), (ICON_SMALL, SM_CXSMICON)] {
-                let size = GetSystemMetrics(metric);
-                if let Ok(icon) = LoadImageW(Some(module.into()), PCWSTR(1 as _), IMAGE_ICON, size, size, LR_DEFAULTCOLOR) {
-                    SendMessageW(window, WM_SETICON, Some(WPARAM(kind as usize)), Some(LPARAM(icon.0 as isize)));
+            let variants = &*(data.0 as *const [(u32, windows::Win32::UI::WindowsAndMessaging::SYSTEM_METRICS_INDEX, [[u8; 3]; 3]); 2]);
+            for (kind, metric, tints) in variants {
+                let wanted = GetSystemMetrics(*metric) as usize;
+                let size = ICON_SIZES.into_iter().find(|&candidate| candidate >= wanted).unwrap_or(48);
+                let pixels = icon_pixels(size, *tints);
+                let mask = vec![0u8; (size + 15) / 16 * 2 * size];
+                if let Ok(icon) = CreateIcon(None, size as i32, size as i32, 1, 32, mask.as_ptr(), pixels.as_ptr()) {
+                    let previous = SendMessageW(window, WM_SETICON, Some(WPARAM(*kind as usize)), Some(LPARAM(icon.0 as isize)));
+                    if previous.0 != 0 {
+                        let _ = DestroyIcon(windows::Win32::UI::WindowsAndMessaging::HICON(previous.0 as *mut _));
+                    }
                 }
             }
         }
         false.into()
     }
 
-    std::thread::spawn(|| {
-        for _ in 0..50 {
-            // SAFETY: `set` matches the WNDENUMPROC contract
-            if unsafe { EnumWindows(Some(set), LPARAM(0)) }.is_err() {
-                return;
+    let run = move || {
+        let data = LPARAM(&variants as *const _ as isize);
+        // SAFETY: `set` matches WNDENUMPROC and `variants` outlives the call
+        unsafe { EnumWindows(Some(set), data) }.is_ok()
+    };
+    if wait_for_window {
+        std::thread::spawn(move || {
+            for _ in 0..50 {
+                if !run() {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-    });
+        });
+    } else {
+        run();
+    }
 }
 
 #[cfg(not(windows))]
-pub fn apply_window_icon() {}
+pub fn apply_window_icon(_colors: Option<[[u8; 3]; 3]>, _wait_for_window: bool) {}
