@@ -63,3 +63,5 @@ pub const FOOTER_GAP: f64 = 6.0;
 pub const TAB_CLOSE_SIZE: f64 = 24.0;
 pub const TAB_CLOSE_INSET: f64 = 4.0;
 pub const TAB_CLOSE_SPACE: f64 = TAB_CLOSE_SIZE + TAB_CLOSE_INSET;
+pub const TOGGLE_SIZE: f64 = 24.0;
+pub const TOGGLE_INSET: f64 = 6.0;

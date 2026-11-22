@@ -494,6 +494,7 @@ enum Message {
     ResizeEnd,
     HandleHover(Option<Column>),
     CloseHover(Option<usize>),
+    SubfoldersHover(bool),
     BarAnchor(f64, f64),
     OpenDropdown(MenuKind),
     ContextItem(PathBuf, f64, f64),
@@ -565,6 +566,7 @@ struct Explorer {
     last_click: Option<(PathBuf, std::time::Instant)>,
     hovered_handle: Option<Column>,
     hovered_close: Option<usize>,
+    hovered_subfolders: bool,
     walk: Option<std::sync::Arc<directory::Walk>>,
     searching: bool,
     drag: Option<(Column, f64, f64)>,
@@ -578,7 +580,7 @@ struct Explorer {
     transfer_destination: String,
     path: PathBuf,
     load_generation: u64,
-    entries: Vec<Entry>,
+    entries: Vec<std::sync::Arc<Entry>>,
     selected: HashSet<PathBuf>,
     deleting: bool,
     transferring: bool,
@@ -658,6 +660,7 @@ impl Component for Explorer {
             last_click: None,
             hovered_handle: None,
             hovered_close: None,
+            hovered_subfolders: false,
             walk: None,
             searching: false,
             window_width: DEFAULT_LIST_WIDTH + SIDEBAR_DEFAULT_WIDTH + SPLITTER_WIDTH + SCROLL_ALLOWANCE + 2.0 * WINDOW_MARGIN,
@@ -1185,6 +1188,7 @@ impl Component for Explorer {
             }
             Message::HandleHover(column) => self.hovered_handle = column,
             Message::CloseHover(index) => self.hovered_close = index,
+            Message::SubfoldersHover(hovered) => self.hovered_subfolders = hovered,
             Message::ResizeEnd => {
                 if self.drag.take().is_some() {
                     self.save_settings();
@@ -1447,7 +1451,7 @@ impl Component for Explorer {
                             self.focus_requested = true;
                             self.request_address_focus(context);
                         }
-                        self.entries = entries;
+                        self.entries = entries.into_iter().map(std::sync::Arc::new).collect();
                         self.apply_sort();
                         self.refresh_status();
                         if let Some(notice) = self.notice.take() {
@@ -1468,7 +1472,7 @@ impl Component for Explorer {
                     self.searching = false;
                     return;
                 }
-                self.entries.extend(batch.entries);
+                self.entries.extend(batch.entries.into_iter().map(std::sync::Arc::new));
                 if batch.finished {
                     self.searching = false;
                     self.apply_sort();
@@ -1796,13 +1800,14 @@ impl Component for Explorer {
                     icon_button(icons::Icon::ArrowUp, tr("Up"), true, 2, Message::Parent),
                     icon_button(icons::Icon::ArrowClockwise, tr("Refresh"), true, 3, Message::Refresh),
                     address_view,
-                    TextBox::new()
-                        .grid_column(5)
-                        .vertical_alignment(VerticalAlignment::Center)
-                        .text(&self.filter)
-                        .automation_name(tr("Filter by name"))
-                        .placeholder_text(tr("Filter by name"))
-                        .on_text_changed(context.callback(Message::Filter)),
+                    Grid::new().grid_column(5).vertical_alignment(VerticalAlignment::Center).children((
+                        TextBox::new()
+                            .text(&self.filter)
+                            .automation_name(tr("Filter by name"))
+                            .placeholder_text(tr("Filter by name"))
+                            .on_text_changed(context.callback(Message::Filter)),
+                        self.subfolders_toggle(context),
+                    )),
                 )),
             command_bar,
             Grid::new()
@@ -2230,6 +2235,26 @@ impl Explorer {
         let _task = context.spawn_background(move |_| Message::UndoComplete(action.run()));
     }
 
+    // Sits inside the filter box; its own Border carries the hover because a Button's template padding clips a small icon.
+    fn subfolders_toggle(&self, context: &ViewContext<Self>) -> View {
+        let theme = self.theme.as_ref();
+        let fill = if self.recursive || self.hovered_subfolders { theme.and_then(Theme::selection) } else { theme.map(Theme::surface) };
+        Border::new()
+            .horizontal_alignment(HorizontalAlignment::Right)
+            .vertical_alignment(VerticalAlignment::Center)
+            .automation_name(tr("Subfolders"))
+            .width(TOGGLE_SIZE)
+            .height(TOGGLE_SIZE)
+            .margin(Thickness::new(0.0, 0.0, TOGGLE_INSET, 0.0))
+            .corner_radius(CornerRadius::uniform(CARD_RADIUS))
+            .background_optional(fill)
+            .on_pointer_entered(context.callback(|_: PointerEventInfo| Message::SubfoldersHover(true)))
+            .on_pointer_exited(context.callback(|_: PointerEventInfo| Message::SubfoldersHover(false)))
+            .on_pointer_pressed(context.callback(|_: PointerEventInfo| Message::ToggleRecursive))
+            .content(Border::new().horizontal_alignment(HorizontalAlignment::Center).vertical_alignment(VerticalAlignment::Center).content(icon(icons::Icon::FolderOpen, ICON_SIZE_SMALL, theme)))
+            .tooltip(tr(if self.recursive { "Subfolders included: click to search only this folder" } else { "Click to include subfolders in the list and the filter" }))
+    }
+
     fn command_bar(&self, context: &ViewContext<Self>) -> View {
         let theme = self.theme.as_ref();
         let commands = self.commands();
@@ -2284,6 +2309,7 @@ impl Explorer {
         left.push(dropdown(icons::Icon::SortAscending, tr("Sort"), MenuKind::Sort));
         left.push(more);
         let details = Border::new()
+            .grid_column(1)
             .corner_radius(CornerRadius::uniform(CARD_RADIUS))
             .background_optional(if self.hide_pane { None } else { theme.and_then(Theme::selection) })
             .content(
@@ -2299,23 +2325,7 @@ impl Explorer {
                     )
                     .tooltip(tr("Preview pane")),
             );
-        let subfolders = Border::new()
-            .corner_radius(CornerRadius::uniform(CARD_RADIUS))
-            .background_optional(if self.recursive { theme.and_then(Theme::selection) } else { None })
-            .content(
-                Button::new()
-                    .style(ButtonStyle::Subtle)
-                    .automation_name(tr("Subfolders"))
-                    .on_click(context.message(Message::ToggleRecursive))
-                    .content(
-                        StackPanel::new()
-                            .orientation(Orientation::Horizontal)
-                            .spacing(ROW_GAP)
-                            .children((icon(icons::Icon::FolderOpen, ICON_SIZE, theme), text(tr("Subfolders"), theme.map(Theme::foreground)))),
-                    )
-                    .tooltip(tr("Include subfolders in the list and the filter")),
-            );
-        let right = StackPanel::new().grid_column(1).orientation(Orientation::Horizontal).children((subfolders, details));
+        let right = details;
         Grid::new()
             .columns([GridLength::STAR, GridLength::Auto])
             .children((
@@ -2404,7 +2414,7 @@ impl Explorer {
         self.list_width = (self.window_width - self.chrome_width() - pane).max(MIN_LIST_WIDTH);
     }
 
-    fn visible_entries(&self) -> Vec<Entry> {
+    fn visible_entries(&self) -> Vec<std::sync::Arc<Entry>> {
         let needle = self.filter.to_lowercase();
         let visible = self.entries.iter().filter(|entry| self.matches(entry, &needle)).cloned().collect();
         group::arrange(visible, self.group, std::time::SystemTime::now())
