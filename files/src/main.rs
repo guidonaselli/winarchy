@@ -132,6 +132,7 @@ struct Explorer {
     redo: Vec<Undo>,
     pending_inverse: Option<Undo>,
     redoing: bool,
+    details: String,
     show_hidden: bool,
     recursive: bool,
     sort: SortKey,
@@ -182,6 +183,7 @@ impl Component for Explorer {
             redo: Vec::new(),
             pending_inverse: None,
             redoing: false,
+            details: String::new(),
             show_hidden: false,
             recursive: false,
             sort: SortKey::Name,
@@ -591,6 +593,7 @@ impl Component for Explorer {
                 &self.path.to_string_lossy(),
                 self.theme.as_ref().map(Theme::muted),
             ),
+            text(&self.details, self.theme.as_ref().map(Theme::muted)),
             text(
                 &self.status,
                 self.theme.as_ref().map(|theme| {
@@ -836,9 +839,11 @@ impl Explorer {
             if self.recursive && self.entries.len() >= directory::SEARCH_LIMIT {
                 self.status.push_str(" · limited to the first 20000");
             }
+            self.details.clear();
             if let [path] = self.selected.iter().collect::<Vec<_>>()[..]
                 && let Some(entry) = self.entries.iter().find(|entry| &entry.path == path)
             {
+                self.details = directory::properties(entry);
                 let kind = if entry.is_directory { "Folder" } else { "File" };
                 self.status.push_str(&format!(
                     " · {kind} “{}” {} {}",

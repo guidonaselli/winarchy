@@ -12,6 +12,8 @@ pub struct Entry {
     pub path: PathBuf,
     pub is_directory: bool,
     pub hidden: bool,
+    pub attributes: u32,
+    pub created: Option<std::time::SystemTime>,
     pub size: u64,
     pub modified: Option<std::time::SystemTime>,
 }
@@ -29,6 +31,8 @@ pub fn read(path: &PathBuf) -> io::Result<Vec<Entry>> {
                 hidden: metadata
                     .as_ref()
                     .is_some_and(|m| m.file_attributes() & HIDDEN_OR_SYSTEM != 0),
+                attributes: metadata.as_ref().map_or(0, |m| m.file_attributes()),
+                created: metadata.as_ref().and_then(|m| m.created().ok()),
                 size: metadata.as_ref().map_or(0, |m| m.len()),
                 modified: metadata.and_then(|m| m.modified().ok()),
             })
@@ -118,7 +122,29 @@ pub fn format_size(entry: &Entry) -> String {
 }
 
 pub fn format_modified(entry: &Entry) -> String {
-    let Some(modified) = entry.modified else {
+    format_time(entry.modified)
+}
+
+pub fn format_attributes(attributes: u32) -> String {
+    let names: Vec<_> = [(0x1, "Read-only"), (0x2, "Hidden"), (0x4, "System"), (0x20, "Archive")]
+        .into_iter()
+        .filter(|(bit, _)| attributes & bit != 0)
+        .map(|(_, name)| name)
+        .collect();
+    if names.is_empty() { "None".to_owned() } else { names.join(", ") }
+}
+
+pub fn properties(entry: &Entry) -> String {
+    format!(
+        "Path: {} · Created: {} · Attributes: {}",
+        entry.path.display(),
+        format_time(entry.created),
+        format_attributes(entry.attributes)
+    )
+}
+
+fn format_time(time: Option<std::time::SystemTime>) -> String {
+    let Some(modified) = time else {
         return String::new();
     };
     let Ok(seconds) = modified.duration_since(std::time::UNIX_EPOCH) else {
@@ -154,6 +180,8 @@ mod tests {
             path: PathBuf::new(),
             is_directory: dir,
             hidden: false,
+            attributes: 0,
+            created: None,
             size,
             modified: Some(UNIX_EPOCH + Duration::from_secs(secs)),
         }
@@ -194,5 +222,12 @@ mod tests {
             "top.txt".to_owned(),
         ];
         assert_eq!(names, expected);
+    }
+
+    #[test]
+    fn lists_set_attributes_only() {
+        assert_eq!(format_attributes(0), "None");
+        assert_eq!(format_attributes(0x1 | 0x2), "Read-only, Hidden");
+        assert_eq!(format_attributes(0x10), "None");
     }
 }
