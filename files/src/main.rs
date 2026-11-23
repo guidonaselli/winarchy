@@ -3781,10 +3781,10 @@ fn tile(
             let edge = if layout == Layout::Grid { THUMB_GRID_SIZE } else { THUMB_TILE_SIZE };
             image.width(edge).height(edge).stretch(Stretch::Uniform).into()
         }
-        None => icon(directory::icon(entry), if layout == Layout::Grid { ICON_SIZE_LARGE } else { ICON_SIZE }, theme),
+        None => icon(directory::icon(entry), if layout == Layout::Grid { GRID_ICON_SIZE } else { ICON_SIZE }, theme),
     };
     let content: View = if layout == Layout::Grid {
-        StackPanel::new().spacing(TIGHT_GAP).width(GRID_CELL_WIDTH - 2.0 * CARD_MARGIN - BUTTON_CONTENT_INSET).horizontal_alignment(HorizontalAlignment::Center).children((icon, name.horizontal_alignment(HorizontalAlignment::Center))).into()
+        StackPanel::new().spacing(TIGHT_GAP).width(GRID_CELL_WIDTH - 2.0 * CARD_MARGIN - BUTTON_CONTENT_INSET).horizontal_alignment(HorizontalAlignment::Center).children((icon, name.text_wrapping(TextWrapping::Wrap).max_lines(2).horizontal_alignment(HorizontalAlignment::Center))).into()
     } else {
         let detail = if entry.is_directory { tr("Folder").to_owned() } else { directory::format_size(entry) };
         let lines = vec![KeyedView::new(0usize, name), KeyedView::new(1usize, caption(&detail, theme.map(Theme::muted)))];
@@ -3932,6 +3932,7 @@ fn handler_command() -> Option<i32> {
     let outcome = match flag.as_str() {
         "--register-handler" => handler::register(&std::env::current_exe().ok()?).map(|()| "Files is now the folder handler for this user".to_owned()),
         "--unregister-handler" => handler::unregister().map(|()| "Folder handler restored".to_owned()),
+        "--install" => install().map(|folder| format!("Installed in {}", folder.display())),
         "--handler-status" => {
             let registered = handler::is_registered(&std::env::current_exe().ok()?);
             Ok(format!("folder handler: {}", if registered { "Files" } else { "not registered" }))
@@ -3943,6 +3944,20 @@ fn handler_command() -> Option<i32> {
         Err(error) => format!("error: {error}"),
     });
     Some(i32::from(outcome.is_err()))
+}
+
+// Copies the exe to a fixed per-user folder and adds a Start menu entry; the folder handler stays untouched.
+fn install() -> Result<PathBuf, String> {
+    let folder = PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA is not set")?).join("Programs").join("winarchy-files");
+    std::fs::create_dir_all(&folder).map_err(|error| error.to_string())?;
+    let target = folder.join("winarchy-files.exe");
+    let source = std::env::current_exe().map_err(|error| error.to_string())?;
+    if source != target {
+        std::fs::copy(&source, &target).map_err(|error| format!("{}: {error}", target.display()))?;
+    }
+    let menu = PathBuf::from(std::env::var_os("APPDATA").ok_or("APPDATA is not set")?).join(r"Microsoft\Windows\Start Menu\Programs");
+    shell::create_app_shortcut(&target, &menu.join("Files.lnk"), shell::APP_ID)?;
+    Ok(folder)
 }
 
 fn main() {

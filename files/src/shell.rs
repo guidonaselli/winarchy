@@ -332,6 +332,42 @@ pub fn print_to_parent_console(line: &str) {
     println!("{line}");
 }
 
+// A Start menu shortcut that carries the app's taskbar identity, so pinning it and running it group as one app.
+#[cfg(windows)]
+pub fn create_app_shortcut(target: &Path, link: &Path, app_id: &str) -> Result<(), String> {
+    use windows::{
+        Win32::{
+            System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, IPersistFile},
+            UI::Shell::{
+                IShellLinkW, ShellLink,
+                PropertiesSystem::IPropertyStore,
+            },
+        },
+        core::{GUID, HSTRING, Interface},
+    };
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let shell_link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(|e| e.to_string())?;
+        shell_link.SetPath(&HSTRING::from(target.as_os_str())).map_err(|e| e.to_string())?;
+        if let Some(folder) = target.parent() {
+            shell_link.SetWorkingDirectory(&HSTRING::from(folder.as_os_str())).map_err(|e| e.to_string())?;
+        }
+        let store: IPropertyStore = shell_link.cast().map_err(|e| e.to_string())?;
+        let key = windows::Win32::Foundation::PROPERTYKEY { fmtid: GUID::from_u128(0x9F4C2855_9F79_4B39_A8D0_E1D42DE1D5F3), pid: 5 };
+        let value = windows::Win32::System::Com::StructuredStorage::PROPVARIANT::from(app_id);
+        store.SetValue(&key, &value).map_err(|e| e.to_string())?;
+        store.Commit().map_err(|e| e.to_string())?;
+        shell_link.cast::<IPersistFile>().and_then(|file| file.Save(&HSTRING::from(link.as_os_str()), true)).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(not(windows))]
+pub fn create_app_shortcut(_target: &Path, _link: &Path, _app_id: &str) -> Result<(), String> {
+    Err("Shortcuts are supported only on Windows".to_owned())
+}
+
+pub const APP_ID: &str = "Winarchy.Files";
+
 // Groups every window and pin of the app under one taskbar identity instead of the exe path.
 #[cfg(windows)]
 pub fn set_app_id() {
