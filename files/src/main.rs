@@ -3639,11 +3639,11 @@ fn select_box(entry: &Entry, is_selected: bool, shown: bool, sender: &LocalSende
         )
 }
 
-fn open_button(entry: &Entry, sender: &LocalSender<Message>, column: i32, content: impl Into<View>) -> View {
+fn open_button(entry: &Entry, sender: &LocalSender<Message>, column: i32, align: HorizontalAlignment, content: impl Into<View>) -> View {
     let action = Message::RowClick(entry.path.clone());
     Button::new()
         .grid_column(column)
-        .horizontal_content_alignment(HorizontalAlignment::Left)
+        .horizontal_content_alignment(align)
         .style(ButtonStyle::Subtle)
         .automation_name(entry.name.clone())
         .on_click(sender.message(action))
@@ -3709,7 +3709,7 @@ fn row(
             text(&display_name(entry, hide_extensions), theme.map(Theme::foreground)),
         ));
     let check = select_box(entry, is_selected, hovered, sender, busy).grid_column(0);
-    let button = open_button(entry, sender, 1, name);
+    let button = open_button(entry, sender, 1, HorizontalAlignment::Left, name);
     let grid = Grid::new().column_spacing(COLUMN_GAP);
     let content: View = if compact {
         grid.columns([GridLength::Auto, GridLength::STAR]).children((check, button)).into()
@@ -3766,7 +3766,7 @@ fn tile(
         None => icon(directory::icon(entry), if layout == Layout::Grid { ICON_SIZE_LARGE } else { ICON_SIZE }, theme),
     };
     let content: View = if layout == Layout::Grid {
-        StackPanel::new().spacing(TIGHT_GAP).horizontal_alignment(HorizontalAlignment::Center).children((icon, name)).into()
+        StackPanel::new().spacing(TIGHT_GAP).width(GRID_CELL_WIDTH - 2.0 * CARD_MARGIN - BUTTON_CONTENT_INSET).horizontal_alignment(HorizontalAlignment::Center).children((icon, name.horizontal_alignment(HorizontalAlignment::Center))).into()
     } else {
         let detail = if entry.is_directory { tr("Folder").to_owned() } else { directory::format_size(entry) };
         let lines = vec![KeyedView::new(0usize, name), KeyedView::new(1usize, caption(&detail, theme.map(Theme::muted)))];
@@ -3786,14 +3786,18 @@ fn tile(
         .margin(Thickness::new(CARD_MARGIN, CARD_MARGIN, CARD_MARGIN, CARD_MARGIN))
         .corner_radius(CornerRadius::uniform(CARD_RADIUS))
         .background_optional(card)
-        .content(
-            Grid::new()
-                .columns([GridLength::Auto, GridLength::STAR])
-                .children((
-                    select_box(entry, is_selected, hovered, sender, busy).grid_column(0),
-                    open_button(entry, sender, 1, content),
-                )),
-        )
+        .content(if layout == Layout::Grid {
+            // one cell: the icon and name centered on the whole card, the checkbox floating over its corner
+            Grid::new().children((
+                open_button(entry, sender, 0, HorizontalAlignment::Center, content),
+                select_box(entry, is_selected, hovered, sender, busy).horizontal_alignment(HorizontalAlignment::Left).vertical_alignment(VerticalAlignment::Top),
+            ))
+        } else {
+            Grid::new().columns([GridLength::Auto, GridLength::STAR]).children((
+                select_box(entry, is_selected, hovered, sender, busy).grid_column(0),
+                open_button(entry, sender, 1, HorizontalAlignment::Left, content),
+            ))
+        })
         .into()
 }
 

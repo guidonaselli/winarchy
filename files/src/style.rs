@@ -90,3 +90,4 @@ pub const THIS_PC_KEY: usize = 10_011;
 pub const RECYCLE_BIN_KEY: usize = 10_012;
 pub const THUMB_GRID_SIZE: f64 = 64.0;
 pub const THUMB_TILE_SIZE: f64 = 32.0;
+pub const BUTTON_CONTENT_INSET: f64 = 24.0;
