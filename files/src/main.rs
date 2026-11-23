@@ -3411,6 +3411,12 @@ impl Explorer {
                 (entry.path.clone(), parent.join(format!("{stem} ({}){extension}", index + 1)))
             })
             .collect();
+        let sources: Vec<&PathBuf> = pairs.iter().map(|(from, _)| from).collect();
+        if let Some((_, taken)) = pairs.iter().find(|(_, to)| to.exists() && !sources.contains(&to)) {
+            self.status = format!("{}: {}", tr("Cannot rename this item"), taken.display());
+            self.has_error = true;
+            return;
+        }
         self.pending_undo = None;
         self.status = tr("Renaming…").to_owned();
         self.has_error = false;

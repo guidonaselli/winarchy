@@ -937,7 +937,7 @@ pub fn resolve_address(text: &str) -> PathBuf {
         },
         core::HSTRING,
     };
-    let expanded = expand_variables(text.trim());
+    let expanded = expand_variables(text.trim().trim_matches('"'));
     if expanded.len() > 6 && expanded[..6].eq_ignore_ascii_case("shell:") {
         unsafe {
             let mut list: *mut ITEMIDLIST = std::ptr::null_mut();
@@ -984,6 +984,7 @@ mod address_tests {
         assert_eq!(resolve_address(r"%SystemRoot%\System32"), std::path::PathBuf::from(format!(r"{root}\System32")));
         assert!(resolve_address("shell:Downloads").ends_with("Downloads"));
         assert_eq!(resolve_address(r"C:\Temp"), std::path::PathBuf::from(r"C:\Temp"));
+        assert_eq!(resolve_address(r#"  "C:\Temp"  "#), std::path::PathBuf::from(r"C:\Temp"));
     }
 }
 
