@@ -822,9 +822,9 @@ pub fn drag_started() -> bool {
     }
 }
 
-// Shows the hand cursor and a label that follows the pointer until the left button is released; returns where it was released.
+// Shows the hand cursor and a label that follows the pointer until the left button is released; returns where it was released and whether Ctrl was down just before.
 #[cfg(windows)]
-pub fn follow_drag(label: &str, colors: Option<[[u8; 3]; 3]>) -> (i32, i32) {
+pub fn follow_drag(label: &str, colors: Option<[[u8; 3]; 3]>) -> ((i32, i32), bool) {
     use windows::Win32::{
         Foundation::POINT,
         UI::{
@@ -838,6 +838,7 @@ pub fn follow_drag(label: &str, colors: Option<[[u8; 3]; 3]>) -> (i32, i32) {
     let [_, accent, background] = colors.unwrap_or(DEFAULT_ICON_COLORS);
     let ghost = Ghost::new(label, background, accent);
     let mut point = POINT::default();
+    let mut ctrl = false;
     unsafe {
         // the system arrow becomes the hand while dragging; the user's cursor scheme is reloaded on release
         if let Ok(hand) = LoadCursorW(None, IDC_HAND).and_then(|cursor| CopyIcon(HICON(cursor.0))) {
@@ -845,6 +846,7 @@ pub fn follow_drag(label: &str, colors: Option<[[u8; 3]; 3]>) -> (i32, i32) {
         }
         while GetAsyncKeyState(VK_LBUTTON.0 as i32) < 0 {
             let _ = GetCursorPos(&mut point);
+            ctrl = crate::keys::ctrl_down();
             if let Some(ghost) = &ghost {
                 ghost.follow(point.x, point.y);
             }
@@ -858,7 +860,7 @@ pub fn follow_drag(label: &str, colors: Option<[[u8; 3]; 3]>) -> (i32, i32) {
         let _ = SystemParametersInfoW(SPI_SETCURSORS, 0, None, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
         let _ = GetCursorPos(&mut point);
     }
-    (point.x, point.y)
+    ((point.x, point.y), ctrl)
 }
 
 #[cfg(not(windows))]
@@ -867,8 +869,8 @@ pub fn drag_started() -> bool {
 }
 
 #[cfg(not(windows))]
-pub fn follow_drag(_label: &str, _colors: Option<[[u8; 3]; 3]>) -> (i32, i32) {
-    (0, 0)
+pub fn follow_drag(_label: &str, _colors: Option<[[u8; 3]; 3]>) -> ((i32, i32), bool) {
+    ((0, 0), false)
 }
 
 // Starts a real XAML drag of `paths` from the element the latest pointer event came from, so other apps can receive the files.

@@ -72,7 +72,7 @@ pub fn set_menu_open(open: bool) {
 }
 
 pub fn ctrl_down() -> bool {
-    (unsafe { GetKeyState(VK_CONTROL.0 as i32) }) < 0
+    (unsafe { GetAsyncKeyState(VK_CONTROL.0 as i32) }) < 0
 }
 
 pub fn shift_down() -> bool {

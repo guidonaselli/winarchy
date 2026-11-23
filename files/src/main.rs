@@ -547,7 +547,7 @@ enum Message {
     RowDrag(PathBuf),
     PinDrag(PathBuf),
     DragStarted(PathBuf, String, Option<[[u8; 3]; 3]>, bool),
-    DragEnded((i32, i32)),
+    DragEnded((i32, i32), bool),
     DroppedOnSidebar(DroppedData),
     NativeMenu,
     ContextKey(Option<PathBuf>, Option<(f64, f64)>),
@@ -1635,7 +1635,10 @@ impl Component for Explorer {
                 if self.pin_drag.is_some() {
                     // the release that ends this drag must not count as a click on the pin
                     self.pin_armed = None;
-                    let _task = context.spawn_background(move |_| Message::DragEnded(shell::follow_drag(&label, colors)));
+                    let _task = context.spawn_background(move |_| {
+                        let (point, copy) = shell::follow_drag(&label, colors);
+                        Message::DragEnded(point, copy)
+                    });
                     return;
                 }
                 if !self.selected.contains(&origin) {
@@ -1648,9 +1651,12 @@ impl Component for Explorer {
                     self.status = format!("{}: {error}", tr("Drag failed"));
                     self.has_error = true;
                 }
-                let _task = context.spawn_background(move |_| Message::DragEnded(shell::follow_drag(&label, colors)));
+                let _task = context.spawn_background(move |_| {
+                        let (point, copy) = shell::follow_drag(&label, colors);
+                        Message::DragEnded(point, copy)
+                    });
             }
-            Message::DragEnded((x, y)) => {
+            Message::DragEnded((x, y), copy) => {
                 self.drag_polling = false;
                 self.dragged.clear();
                 self.last_drag_end = Some(std::time::Instant::now());
@@ -1680,7 +1686,7 @@ impl Component for Explorer {
                     self.pinned = settings::load().pinned;
                     match self.sidebar_drop(&name, fraction) {
                         SidebarDrop::Into(destination) if !dragged.contains(&destination) => {
-                            let (cut, label) = if keys::ctrl_down() { (false, tr("Copying selected items…")) } else { (true, tr("Moving selected items…")) };
+                            let (cut, label) = if copy { (false, tr("Copying selected items…")) } else { (true, tr("Moving selected items…")) };
                             self.begin_transfer(dragged, cut, destination, label, context);
                         }
                         SidebarDrop::Into(_) => {}
