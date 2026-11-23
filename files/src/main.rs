@@ -210,7 +210,7 @@ impl Explorer {
     fn commands(&self) -> Vec<Command> {
         let (some, one) = (!self.selected.is_empty(), self.selected.len() == 1);
         let idle = !self.deleting && !self.transferring;
-        let in_folder = idle && !self.in_favorites;
+        let in_folder = idle && self.view == Place::Folder;
         let command = |label: &str, message: Message, icon: Option<icons::Icon>, enabled: bool| Command {
             label: tr_dynamic(label),
             message: Some(message),
@@ -473,7 +473,7 @@ enum Message {
     Eject(PathBuf),
     RefreshDrives,
     ToggleFavorite,
-    OpenFavorites,
+    OpenView(Place),
     PinDown(PathBuf),
     OpenPin(PathBuf),
     MovePin(i32),
@@ -640,7 +640,7 @@ struct Explorer {
     drives: Vec<directory::Drive>,
     pinned: Vec<PathBuf>,
     favorites: Vec<PathBuf>,
-    in_favorites: bool,
+    view: Place,
     pin_armed: Option<PathBuf>,
     tags: std::collections::BTreeMap<PathBuf, Vec<String>>,
     list_width: f64,
@@ -749,7 +749,7 @@ impl Component for Explorer {
             drives: directory::drives(),
             pinned: saved.pinned.clone(),
             favorites: saved.favorites.clone(),
-            in_favorites: false,
+            view: Place::Folder,
             pin_armed: None,
             list_width: DEFAULT_LIST_WIDTH,
         };
@@ -887,19 +887,32 @@ impl Component for Explorer {
                     }
                 }
                 self.write_settings(self.pinned.clone(), self.favorites.clone());
-                if self.in_favorites {
-                    self.update(Message::OpenFavorites, context);
+                if self.view == Place::Favorites {
+                    self.update(Message::OpenView(Place::Favorites), context);
                 }
             }
-            Message::OpenFavorites => {
-                self.favorites = settings::load().favorites;
+            Message::OpenView(view) => {
                 self.load_generation += 1;
-                self.in_favorites = true;
+                self.view = view;
                 self.recursive = false;
                 self.selected.clear();
-                self.address = tr("Favorites").to_owned();
-                self.entries = self.favorites.iter().filter_map(|path| directory::entry_at(path)).map(std::sync::Arc::new).collect();
-                self.apply_sort();
+                self.address = tr(view.title()).to_owned();
+                self.entries = match view {
+                    Place::Favorites => {
+                        self.favorites = settings::load().favorites;
+                        self.favorites.iter().filter_map(|path| directory::entry_at(path)).map(std::sync::Arc::new).collect()
+                    }
+                    Place::Recent => directory::recent(RECENT_LIMIT).into_iter().map(std::sync::Arc::new).collect(),
+                    Place::ThisPc => directory::drives()
+                        .iter()
+                        .filter_map(|drive| directory::entry_at(&drive.path).map(|entry| Entry { name: drive.label.clone(), ..entry }))
+                        .map(std::sync::Arc::new)
+                        .collect(),
+                    Place::Folder => Vec::new(),
+                };
+                if view != Place::Recent {
+                    self.apply_sort();
+                }
                 self.loaded = true;
                 self.has_error = false;
                 self.refresh_status();
@@ -1441,7 +1454,7 @@ impl Component for Explorer {
                 }
             }
             Message::RetryFocus => self.request_address_focus(context),
-            Message::Refresh if self.in_favorites => self.update(Message::OpenFavorites, context),
+            Message::Refresh if self.view != Place::Folder => self.update(Message::OpenView(self.view), context),
             Message::Refresh => self.navigate(self.path.clone(), context),
             Message::Sort(key) => {
                 self.descending = self.sort == key && !self.descending;
@@ -1789,7 +1802,7 @@ impl Component for Explorer {
             Message::Loaded(_, _, _) => {}
             // the drag's own delayed refresh covers moves made by the target app; reloading mid-drag would cancel it
             Message::DirChanged(path, changed) => {
-                if !changed || path != self.path || self.recursive || self.in_favorites {
+                if !changed || path != self.path || self.recursive || self.view != Place::Folder {
                     return;
                 }
                 if self.drag_polling || self.last_drag_end.is_some_and(|end| end.elapsed() < OWN_DROP_WINDOW) {
@@ -2262,19 +2275,27 @@ impl Component for Explorer {
         let mut sidebar_items: Vec<KeyedView> = Vec::new();
         sidebar_items.push(KeyedView::new(
             FAVORITES_KEY,
-            place(tr("Favorites"), icons::Icon::Star, self.in_favorites, tr("Favorites").to_owned(), Message::OpenFavorites, None, None),
+            place(tr("Favorites"), icons::Icon::Star, self.view == Place::Favorites, tr("Favorites").to_owned(), Message::OpenView(Place::Favorites), None, None),
+        ));
+        sidebar_items.push(KeyedView::new(
+            RECENT_KEY,
+            place(tr("Recent"), icons::Icon::Clock, self.view == Place::Recent, tr("Recent").to_owned(), Message::OpenView(Place::Recent), None, None),
+        ));
+        sidebar_items.push(KeyedView::new(
+            THIS_PC_KEY,
+            place(tr("This PC"), icons::Icon::DesktopTower, self.view == Place::ThisPc, tr("This PC").to_owned(), Message::OpenView(Place::ThisPc), None, None),
         ));
         for (index, (label, path)) in self.places.iter().enumerate() {
             let target = path.clone();
             sidebar_items.push(KeyedView::new(
                 index,
-                place(label, place_icon(path, false), !self.in_favorites && *path == self.path, path.to_string_lossy().into_owned(), Message::OpenFolder(path.clone()), Some(target), None),
+                place(label, place_icon(path, false), self.view == Place::Folder && *path == self.path, path.to_string_lossy().into_owned(), Message::OpenFolder(path.clone()), Some(target), None),
             ));
         }
         if !self.pinned.is_empty() {
             let pins = self.pinned.iter().map(|path| {
                 let label = path.file_name().map_or_else(|| path.to_string_lossy().into_owned(), |name| name.to_string_lossy().into_owned());
-                let current = !self.in_favorites && *path == self.path;
+                let current = self.view == Place::Folder && *path == self.path;
                 let (opened, new_tab, armed) = (path.clone(), path.clone(), path.clone());
                 let glyph = if path.is_dir() { place_icon(path, true) } else { icons::Icon::File };
                 KeyedView::new(
@@ -2331,7 +2352,7 @@ impl Component for Explorer {
                     place(
                         &drive.label,
                         glyph,
-                        !self.in_favorites && drive.path == self.path,
+                        self.view == Place::Folder && drive.path == self.path,
                         drive.path.to_string_lossy().into_owned(),
                         Message::OpenFolder(drive.path.clone()),
                         Some(drive.path.clone()),
@@ -3110,7 +3131,7 @@ impl Explorer {
         self.git_branch = None;
         self.status = tr("Loading folder…").to_owned();
         self.loaded = false;
-        self.in_favorites = false;
+        self.view = Place::Folder;
         self.has_error = false;
         self.queue_load(path, context);
     }
@@ -3489,6 +3510,27 @@ fn open_button(entry: &Entry, sender: &LocalSender<Message>, column: i32, conten
         .on_click(sender.message(action))
         .content(content)
 }
+
+#[derive(Clone, Copy, PartialEq)]
+enum Place {
+    Folder,
+    Favorites,
+    Recent,
+    ThisPc,
+}
+
+impl Place {
+    fn title(self) -> &'static str {
+        match self {
+            Place::Folder => "",
+            Place::Favorites => "Favorites",
+            Place::Recent => "Recent",
+            Place::ThisPc => "This PC",
+        }
+    }
+}
+
+const RECENT_LIMIT: usize = 200;
 
 enum SidebarDrop {
     Into(PathBuf),

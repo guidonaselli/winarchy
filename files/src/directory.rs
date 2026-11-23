@@ -100,6 +100,21 @@ pub fn entry_at(path: &std::path::Path) -> Option<Entry> {
     })
 }
 
+// Newest first, as the shell lists them: the target of every shortcut in the user's Recent folder.
+pub fn recent(limit: usize) -> Vec<Entry> {
+    let Some(folder) = std::env::var_os("APPDATA").map(|appdata| PathBuf::from(appdata).join("Microsoft\\Windows\\Recent")) else {
+        return Vec::new();
+    };
+    let Ok(read) = fs::read_dir(folder) else { return Vec::new() };
+    let mut links: Vec<_> = read
+        .filter_map(Result::ok)
+        .filter(|link| link.path().extension().is_some_and(|extension| extension.eq_ignore_ascii_case("lnk")))
+        .filter_map(|link| Some((link.metadata().ok()?.modified().ok()?, link.path())))
+        .collect();
+    links.sort_by(|a, b| b.0.cmp(&a.0));
+    links.into_iter().filter_map(|(_, link)| entry_at(&crate::shell::link_target(&link)?)).filter(|entry| !entry.is_directory).take(limit).collect()
+}
+
 pub fn read(path: &PathBuf) -> io::Result<Vec<Entry>> {
     let mut entries = fs::read_dir(path)?.map(|entry| entry_of(&entry?)).collect::<io::Result<Vec<_>>>()?;
     entries.sort_by_key(|entry| (!entry.is_directory, entry.name.to_lowercase()));

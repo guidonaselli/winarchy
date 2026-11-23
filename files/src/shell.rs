@@ -320,6 +320,32 @@ pub fn free_name(dir: &Path, stem: &str, extension: &str) -> PathBuf {
 }
 
 #[cfg(windows)]
+pub fn link_target(link: &Path) -> Option<PathBuf> {
+    use windows::{
+        Win32::{
+            Storage::FileSystem::WIN32_FIND_DATAW,
+            System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, IPersistFile, STGM_READ},
+            UI::Shell::{IShellLinkW, ShellLink},
+        },
+        core::{HSTRING, Interface},
+    };
+    unsafe {
+        let shell_link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+        shell_link.cast::<IPersistFile>().ok()?.Load(&HSTRING::from(link.as_os_str()), STGM_READ).ok()?;
+        let mut buffer = [0u16; 520];
+        let mut data = WIN32_FIND_DATAW::default();
+        shell_link.GetPath(&mut buffer, &mut data, 0).ok()?;
+        let length = buffer.iter().position(|&c| c == 0)?;
+        (length > 0).then(|| PathBuf::from(String::from_utf16_lossy(&buffer[..length])))
+    }
+}
+
+#[cfg(not(windows))]
+pub fn link_target(_link: &Path) -> Option<PathBuf> {
+    None
+}
+
+#[cfg(windows)]
 pub fn create_shortcut(target: &Path, link: &Path) -> Result<(), String> {
     use windows::{
         Win32::{

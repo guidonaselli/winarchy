@@ -85,3 +85,5 @@ pub const CAPTION_BUTTONS_WIDTH: f64 = 140.0;
 pub const ROW_INSET: f64 = 4.0;
 pub const DROP_EDGE: f64 = 0.3;
 pub const OWN_DROP_WINDOW: std::time::Duration = std::time::Duration::from_millis(1500);
+pub const RECENT_KEY: usize = 10_001;
+pub const THIS_PC_KEY: usize = 10_002;
