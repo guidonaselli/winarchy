@@ -186,6 +186,20 @@ function Get-WinarchyMonitorIndexMap {
         $index++
         if ($monitor.device_id) { $map[$monitor.device_id] = $index }
     }
+    # Windows reasigna el sufijo UID del device_id al reconectar o reordenar pantallas, y el id guardado deja de
+    # coincidir con un monitor que sigue ahí. El modelo (lo que va antes del primer '-') es estable: un id guardado
+    # sin coincidencia exacta se resuelve por modelo, solo si hay un único monitor vivo de ese modelo.
+    $path = Get-WinarchyWindowPrefsPath
+    if (Test-Path $path) {
+        $data = Import-WinarchyToml -Path $path
+        $saved = foreach ($section in $data.Values) { if ($section -is [System.Collections.IEnumerable] -and $section -isnot [string]) { foreach ($entry in $section) { if ($entry -is [System.Collections.IDictionary] -and $entry['monitor']) { $entry['monitor'] } } } }
+        foreach ($id in @($saved | Select-Object -Unique)) {
+            if ($map.ContainsKey($id)) { continue }
+            $model = ($id -split '-')[0]
+            $candidates = @($map.Keys | Where-Object { ($_ -split '-')[0] -eq $model })
+            if ($candidates.Count -eq 1) { $map[$id] = $map[$candidates[0]] }
+        }
+    }
     $map
 }
 
