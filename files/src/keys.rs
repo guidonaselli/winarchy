@@ -50,6 +50,7 @@ pub enum Key {
     ReopenTab,
     JumpTab(usize),
     Rename,
+    QuickLook,
     NewFolder,
     CopyPath,
     Properties,
@@ -155,6 +156,7 @@ fn map_key(virtual_key: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Key> 
     }
     match (virtual_key, ctrl) {
         (0x46, true) => Some(Key::FocusFilter),
+        (0x20, true) => Some(Key::QuickLook),
         (0x71, false) => Some(Key::Rename),
         (0x25, false) => Some(Key::MoveLeft),
         (0x27, false) => Some(Key::MoveRight),

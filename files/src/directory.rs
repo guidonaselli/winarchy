@@ -434,16 +434,39 @@ pub fn format_size(entry: &Entry) -> String {
     if entry.is_directory {
         return String::new();
     }
-    let mut size = entry.size as f64;
+    format_bytes(entry.size)
+}
+
+pub fn format_bytes(bytes: u64) -> String {
+    let mut size = bytes as f64;
     let mut unit = 0;
     while size >= 1024.0 && unit < 4 {
         size /= 1024.0;
         unit += 1;
     }
     match unit {
-        0 => format!("{} B", entry.size),
+        0 => format!("{bytes} B"),
         _ => format!("{size:.1} {}", ["", "KB", "MB", "GB", "TB"][unit]),
     }
+}
+
+// Total size and file count of everything below `root`; symlinks are not followed, unreadable folders count as empty.
+pub fn tree_size(root: &std::path::Path) -> (u64, u64) {
+    let (mut bytes, mut files) = (0, 0);
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(folder) = pending.pop() {
+        let Ok(read) = fs::read_dir(&folder) else { continue };
+        for item in read.filter_map(Result::ok) {
+            let Ok(kind) = item.file_type() else { continue };
+            if kind.is_dir() {
+                pending.push(item.path());
+            } else if let Ok(metadata) = item.metadata() {
+                bytes += metadata.len();
+                files += 1;
+            }
+        }
+    }
+    (bytes, files)
 }
 
 pub fn format_modified(entry: &Entry) -> String {

@@ -279,6 +279,8 @@ impl Explorer {
             command("Open in editor", Message::OpenEditor, Some(icons::Icon::PencilSimple), true),
             command("Settings file", Message::OpenSettings, None, true),
             command("Storage settings", Message::OpenStorageSense, None, true),
+            command("Copy SHA-256", Message::Hash, None, one && self.selected.iter().all(|path| path.is_file())),
+            command("Folder size", Message::FolderSize, None, self.view == Place::Folder),
             command("Restore", Message::RestoreSelected, None, some && self.view == Place::RecycleBin),
             command("Open Recycle Bin", Message::OpenRecycleBin, Some(icons::Icon::Trash), true),
             command("Empty Recycle Bin", Message::EmptyRecycleBin, Some(icons::Icon::Trash), true),
@@ -475,6 +477,10 @@ enum Message {
     EmptyRecycleBin,
     OpenRecycleBin,
     RestoreSelected,
+    Hash,
+    Hashed(PathBuf, Result<String, String>),
+    FolderSize,
+    FolderSized(PathBuf, u64, u64),
     Thumbs(u64, Vec<(PathBuf, PathBuf)>, Vec<thumbs::Job>),
     TogglePin,
     Eject(PathBuf),
@@ -1291,6 +1297,45 @@ impl Component for Explorer {
                     self.thumbs = std::sync::Arc::new(map);
                 }
                 self.render_thumbs(generation, rest, context);
+            }
+            Message::Hash => {
+                let Some(path) = self.selected.iter().next().filter(|path| self.selected.len() == 1 && path.is_file()).cloned() else { return };
+                self.status = tr("Calculating SHA-256…").to_owned();
+                self.has_error = false;
+                let _task = context.spawn_background(move |_| {
+                    use std::os::windows::process::CommandExt;
+                    let output = std::process::Command::new("certutil").args(["-hashfile"]).arg(&path).arg("SHA256").creation_flags(0x0800_0000).output();
+                    let hash = output.map_err(|error| error.to_string()).and_then(|output| {
+                        let text = String::from_utf8_lossy(&output.stdout).into_owned();
+                        text.lines().nth(1).map(|line| line.replace(' ', "")).filter(|line| line.len() == 64).ok_or_else(|| text.trim().to_owned())
+                    });
+                    Message::Hashed(path, hash)
+                });
+            }
+            Message::Hashed(path, hash) => match hash {
+                Ok(hash) => {
+                    let _ = clipboard::set_text(&hash);
+                    self.status = format!("SHA-256 {}: {hash}", file_label(&path).unwrap_or_default());
+                }
+                Err(error) => {
+                    self.status = format!("SHA-256: {error}");
+                    self.has_error = true;
+                }
+            },
+            Message::FolderSize => {
+                let target = match self.selected.iter().next() {
+                    Some(path) if self.selected.len() == 1 && path.is_dir() => path.clone(),
+                    _ => self.path.clone(),
+                };
+                self.status = tr("Calculating folder size…").to_owned();
+                self.has_error = false;
+                let _task = context.spawn_background(move |_| {
+                    let (bytes, files) = directory::tree_size(&target);
+                    Message::FolderSized(target, bytes, files)
+                });
+            }
+            Message::FolderSized(path, bytes, files) => {
+                self.status = format!("{}: {} · {files} {}", file_label(&path).unwrap_or_else(|| path.display().to_string()), directory::format_bytes(bytes), tr("files"));
             }
             Message::RestoreSelected => {
                 let moves: Vec<_> = self.selected.iter().filter_map(|data| Some((data.clone(), self.bin_origins.get(data)?.clone()))).collect();
@@ -2699,6 +2744,7 @@ impl Explorer {
                     self.update(Message::SwitchTab(index), context);
                 }
             }
+            keys::Key::QuickLook => self.update(Message::TogglePane, context),
             keys::Key::Rename => self.update(Message::Command(tr_dynamic("Rename selected")), context),
             keys::Key::NewFolder => self.update(Message::Command(tr_dynamic("Create folder")), context),
             keys::Key::CopyPath => self.update(Message::CopyPath(false), context),
