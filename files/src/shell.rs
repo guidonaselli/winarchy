@@ -212,6 +212,11 @@ fn perform_transfer(
     let operation: IFileOperation =
         unsafe { CoCreateInstance(&FileOperation, None::<&IUnknown>, CLSCTX_ALL)? };
     let destination_item = shell_item(destination)?;
+    // pasting into the folder the items came from makes "name - Copy" instead of a conflict
+    if !move_items && paths.iter().any(|path| path.parent() == Some(destination)) {
+        use windows::Win32::UI::Shell::{FOF_ALLOWUNDO, FOF_RENAMEONCOLLISION};
+        unsafe { operation.SetOperationFlags(FOF_ALLOWUNDO | FOF_RENAMEONCOLLISION)? };
+    }
     for path in paths {
         let source = shell_item(path)?;
         unsafe {
