@@ -619,14 +619,14 @@ pub fn apply_window_icon(_colors: Option<[[u8; 3]; 3]>, _wait_for_window: bool) 
 
 // The classic Explorer menu, including third-party entries; shown at the pointer and run when one is chosen.
 #[cfg(windows)]
-pub fn native_menu(paths: &[PathBuf]) -> Result<bool, String> {
+pub fn native_menu(paths: &[PathBuf], background: bool) -> Result<bool, String> {
     use windows::{
         Win32::{
             Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
             UI::{
                 Shell::{
-                    BHID_SFUIObject, CMF_NORMAL, CMINVOKECOMMANDINFO, DefSubclassProc, IContextMenu, IContextMenu2,
-                    SHCreateShellItemArrayFromIDLists, SHParseDisplayName, SetWindowSubclass, RemoveWindowSubclass,
+                    BHID_SFUIObject, CMF_NORMAL, CMINVOKECOMMANDINFO, DefSubclassProc, IContextMenu, IContextMenu2, IShellFolder,
+                    SHBindToObject, SHCreateShellItemArrayFromIDLists, SHParseDisplayName, SetWindowSubclass, RemoveWindowSubclass,
                 },
                 WindowsAndMessaging::{
                     CreatePopupMenu, DestroyMenu, GetCursorPos, GetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
@@ -661,10 +661,16 @@ pub fn native_menu(paths: &[PathBuf]) -> Result<bool, String> {
             SHParseDisplayName(PCWSTR(wide.as_ptr()), None, &mut identifier, 0, None).map_err(|error| error.to_string())?;
             identifiers.push(identifier as *const _);
         }
-        let items = SHCreateShellItemArrayFromIDLists(&identifiers).map_err(|error| error.to_string())?;
-        let menu: IContextMenu = items.BindToHandler(None, &BHID_SFUIObject).map_err(|error| error.to_string())?;
-        let popup = CreatePopupMenu().map_err(|error| error.to_string())?;
         let window = GetForegroundWindow();
+        let menu: IContextMenu = if background {
+            // the menu of the empty area of the folder: New, Paste, Properties and the extensions registered for it
+            let folder: IShellFolder = SHBindToObject(None::<&IShellFolder>, identifiers[0], None).map_err(|error| error.to_string())?;
+            folder.CreateViewObject(window).map_err(|error| error.to_string())?
+        } else {
+            let items = SHCreateShellItemArrayFromIDLists(&identifiers).map_err(|error| error.to_string())?;
+            items.BindToHandler(None, &BHID_SFUIObject).map_err(|error| error.to_string())?
+        };
+        let popup = CreatePopupMenu().map_err(|error| error.to_string())?;
         let outcome = (|| -> Result<bool, String> {
             menu.QueryContextMenu(popup, 0, 1, 0x7FFF, CMF_NORMAL).ok().map_err(|error| error.to_string())?;
             let second = menu.cast::<IContextMenu2>().ok();
@@ -697,7 +703,7 @@ pub fn native_menu(paths: &[PathBuf]) -> Result<bool, String> {
 }
 
 #[cfg(not(windows))]
-pub fn native_menu(_paths: &[PathBuf]) -> Result<bool, String> {
+pub fn native_menu(_paths: &[PathBuf], _background: bool) -> Result<bool, String> {
     Err("not supported on this platform".to_owned())
 }
 

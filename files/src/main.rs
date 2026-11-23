@@ -1768,7 +1768,7 @@ impl Component for Explorer {
             }
             Message::NativeMenuRun => {
                 let paths: Vec<PathBuf> = if self.selected.is_empty() { vec![self.path.clone()] } else { self.selected.iter().cloned().collect() };
-                match shell::native_menu(&paths) {
+                match shell::native_menu(&paths, self.selected.is_empty()) {
                     Ok(true) => self.update(Message::Refresh, context),
                     Ok(false) => {}
                     Err(error) => {
