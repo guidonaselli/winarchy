@@ -2272,12 +2272,13 @@ impl Component for Explorer {
                 let glyph = if path.is_dir() { place_icon(path, true) } else { icons::Icon::File };
                 KeyedView::new(
                     path.to_string_lossy().into_owned(),
-                    ListViewItem::new().tag(path.to_string_lossy().into_owned()).content(
+                    {
                         Border::new()
                             .automation_name(label.clone())
                             .corner_radius(CornerRadius::uniform(CARD_RADIUS))
-                            .background_optional(if current { theme.and_then(Theme::selection) } else { None })
-                            .padding(Thickness::new(ACCENT_BAR_WIDTH + ROW_GAP - PIN_INDENT_TRIM, PIN_PADDING, 0.0, PIN_PADDING))
+                            // a transparent brush still takes pointer hits across the whole row
+                            .background(if current { theme.and_then(Theme::selection).unwrap_or(Brush::Solid(Color::transparent())) } else { Brush::Solid(Color::transparent()) })
+                            .padding(Thickness::new(ACCENT_BAR_WIDTH + ROW_GAP - PIN_INDENT_TRIM + PIN_ITEM_INSET, PIN_PADDING, 0.0, PIN_PADDING))
                             .on_pointer_pressed(context.callback(move |info: PointerEventInfo| {
                                 if info.is_middle_button_pressed {
                                     Message::OpenInTab(new_tab.clone())
@@ -2292,15 +2293,13 @@ impl Component for Explorer {
                                 icon(glyph, ICON_SIZE, theme),
                                 text(&label, theme.map(Theme::foreground)),
                             ))
-                            .tooltip(path.to_string_lossy().into_owned())),
-                    ),
+                            .tooltip(path.to_string_lossy().into_owned()))
+                    },
                 )
             });
             sidebar_items.push(KeyedView::new(
                 PINS_KEY,
-                ListView::new()
-                    .selection_mode(ListViewSelectionMode::None)
-                    .collection_slot(ListViewSlot::Items, pins),
+                StackPanel::new().spacing(TIGHT_GAP).keyed_children(pins),
             ));
         }
         let mut device_items: Vec<KeyedView> = Vec::new();

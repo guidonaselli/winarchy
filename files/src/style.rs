@@ -71,6 +71,7 @@ pub const FAVORITES_KEY: usize = 10_000;
 pub const PINS_KEY: usize = 10_001;
 pub const PIN_PADDING: f64 = 6.0;
 pub const PIN_INDENT_TRIM: f64 = 5.0;
+pub const PIN_ITEM_INSET: f64 = 16.0;
 pub const DEVICES_KEY: usize = 20_000;
 pub const DEVICES_HEADER_KEY: usize = 10_003;
 pub const DEVICES_RULE_OPACITY: f64 = 0.3;
