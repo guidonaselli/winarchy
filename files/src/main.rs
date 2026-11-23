@@ -6,6 +6,7 @@ mod i18n;
 mod pdf;
 mod clipboard;
 mod iconset;
+mod instance;
 mod icons;
 mod keys;
 mod scroll;
@@ -443,6 +444,7 @@ enum Message {
     Dropped(DroppedData),
     NewWindow,
     NewTab,
+    Remote(Option<PathBuf>),
     Back,
     Forward,
     CreateFile,
@@ -769,6 +771,7 @@ impl Component for Explorer {
                 app.has_error = true;
             }
         }
+        let _remote = context.spawn_background(|_| Message::Remote(instance::receive()));
         app
     }
 
@@ -998,6 +1001,19 @@ impl Component for Explorer {
                 if let Err(error) = opened {
                     self.status = format!("{}: {error}", tr("Could not open terminal"));
                 }
+            }
+            Message::Remote(request) => {
+                instance::raise();
+                if let Some(path) = request {
+                    let (folder, item) = if path.is_dir() { (path, None) } else { (path.parent().map_or_else(|| path.clone(), Path::to_path_buf), Some(path)) };
+                    self.tabs.push(folder.clone());
+                    self.active_tab = self.tabs.len() - 1;
+                    self.back.clear();
+                    self.forward.clear();
+                    self.load_path(folder, context);
+                    self.selected.extend(item);
+                }
+                let _next = context.spawn_background(|_| Message::Remote(instance::receive()));
             }
             Message::NewTab => {
                 self.tabs.push(self.path.clone());
@@ -3752,7 +3768,12 @@ fn launch_target() -> Option<(PathBuf, Option<PathBuf>)> {
 }
 
 fn main() {
-    let path = launch_target()
+    let target = launch_target();
+    if !instance::claim(target.as_ref().map(|(folder, item)| item.as_deref().unwrap_or(folder.as_path()))) {
+        return;
+    }
+    shell::set_app_id();
+    let path = target
         .map(|(folder, _)| folder)
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("C:\\"));

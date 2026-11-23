@@ -319,6 +319,15 @@ pub fn free_name(dir: &Path, stem: &str, extension: &str) -> PathBuf {
     candidate
 }
 
+// Groups every window and pin of the app under one taskbar identity instead of the exe path.
+#[cfg(windows)]
+pub fn set_app_id() {
+    let _ = unsafe { windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(windows::core::w!("Winarchy.Files")) };
+}
+
+#[cfg(not(windows))]
+pub fn set_app_id() {}
+
 #[cfg(windows)]
 pub fn link_target(link: &Path) -> Option<PathBuf> {
     use windows::{
