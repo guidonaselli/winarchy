@@ -1578,6 +1578,7 @@ AccentWatch() {
 #+Enter::Run(DefaultBrowser())                   ; browser
 #+b::Run(DefaultBrowser())
 #+f::Run('explorer.exe')                         ; file explorer
+#e::OpenFiles()                                   ; Files if installed, else Explorer
 ; Win+N stays with Windows (notification center; the YASB bell mirrors it)
 #+m::LaunchMusic()                               ; music (Spotify / YT Music)
 #+o::LaunchObsidian()                            ; Obsidian
@@ -1797,3 +1798,8 @@ $#v::Send(InTerminal() ? '^+v' : '^v')           ; paste ($: SUPER+Ctrl+V sends 
 ; "User", or under their own "; --- Title ---" headers.
 #HotIf
 #Include *i %A_ScriptDir%\user.ahk
+
+OpenFiles() {
+    exe := EnvGet('LOCALAPPDATA') '\Programs\winarchy-files\winarchy-files.exe'
+    Run(FileExist(exe) ? '"' exe '"' : 'explorer.exe')
+}
