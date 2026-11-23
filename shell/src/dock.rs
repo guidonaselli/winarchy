@@ -1410,8 +1410,16 @@ fn draw_icon(buf: &mut [u32], stride: i32, rows: i32, ic: &Icon, cx: f32, cy: f3
     }
 }
 
+// shortcut: only Files redraws its own window icon with the theme; other apps keep the shell icon of their exe, which is sharper. Generalize if more apps do the same.
+fn is_files(i: &Item) -> bool {
+    i.exe.to_lowercase().ends_with("winarchy-files.exe")
+}
+
 fn icon_sources(i: &Item, pins: &[Pin]) -> Vec<String> {
     let mut v = Vec::new();
+    if is_files(i) {
+        v.extend(i.wins.first().map(|w| format!("window:{w}")));
+    }
     if let Some(p) = i.pin.as_ref().and_then(|id| pins.iter().find(|p| &p.id == id)) {
         if !p.open.starts_with("shell:") {
             v.push(p.open.clone());
@@ -1640,12 +1648,42 @@ fn drain_ready() {
     });
 }
 
+// The window icon changes at runtime (theme), so the icons of such windows are asked for again every tick; the worker skips unchanged ones.
+fn refresh_window_icons() {
+    let asks: Vec<Ask> = with(|d| {
+        let size = px(style(&d.theme).icon, d.scale);
+        d.items.iter().filter(|i| is_files(i) && !i.wins.is_empty()).map(|i| (i.key.clone(), size, icon_sources(i, &d.pins))).collect()
+    });
+    if let Some(tx) = ASKS.lock().unwrap().as_ref() {
+        for a in asks {
+            let _ = tx.send(a);
+        }
+    }
+}
+
+static WINDOW_ICONS: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
+
+fn window_icon_unchanged(sources: &[String]) -> bool {
+    let Some(source) = sources.first().filter(|s| s.starts_with("window:")) else { return false };
+    let hwnd: isize = source[7..].parse().unwrap_or(0);
+    let mut handle = 0usize;
+    unsafe {
+        let _ = SendMessageTimeoutW(HWND(hwnd as *mut _), WM_GETICON, WPARAM(ICON_BIG as usize), LPARAM(0), SMTO_ABORTIFHUNG, 200, Some(&mut handle));
+    }
+    let mut known = WINDOW_ICONS.lock().unwrap();
+    let known = known.get_or_insert_with(HashMap::new);
+    handle != 0 && known.get(source) == Some(&handle)
+}
+
 fn spawn_icon_worker(target: isize) {
     let (tx, rx) = std::sync::mpsc::channel::<Ask>();
     *ASKS.lock().unwrap() = Some(tx);
     std::thread::spawn(move || unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         while let Ok((key, size, sources)) = rx.recv() {
+            if window_icon_unchanged(&sources) {
+                continue;
+            }
             // shortcut: reintenta 3 veces con 400 ms en el mismo hilo (bloquea la cola un máximo de ~0,8 s); un ícono que sigue fallando queda en placeholder hasta recargar el dock.
             let found = (0..3).find_map(|n| {
                 if n > 0 {
@@ -1662,10 +1700,34 @@ fn spawn_icon_worker(target: isize) {
     });
 }
 
+unsafe fn fetch_window_icon(source: &str) -> Option<Icon> {
+    let hwnd: isize = source[7..].parse().ok()?;
+    let mut handle = 0usize;
+    let _ = SendMessageTimeoutW(HWND(hwnd as *mut _), WM_GETICON, WPARAM(ICON_BIG as usize), LPARAM(0), SMTO_ABORTIFHUNG, 200, Some(&mut handle));
+    if handle == 0 {
+        return None;
+    }
+    let mut info = ICONINFO::default();
+    GetIconInfo(HICON(handle as *mut _), &mut info).ok()?;
+    let _ = DeleteObject(info.hbmMask);
+    let icon = icon_from_bitmap(info.hbmColor);
+    if icon.is_some() {
+        WINDOW_ICONS.lock().unwrap().get_or_insert_with(HashMap::new).insert(source.to_owned(), handle);
+    }
+    icon
+}
+
 unsafe fn fetch_icon(source: &str, size: i32) -> Option<Icon> {
+    if source.starts_with("window:") {
+        return fetch_window_icon(source);
+    }
     let wide: Vec<u16> = source.encode_utf16().chain(std::iter::once(0)).collect();
     let item: IShellItemImageFactory = SHCreateItemFromParsingName(PCWSTR(wide.as_ptr()), None).ok()?;
     let bmp = item.GetImage(SIZE { cx: size, cy: size }, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK).ok()?;
+    icon_from_bitmap(bmp)
+}
+
+unsafe fn icon_from_bitmap(bmp: HBITMAP) -> Option<Icon> {
     let mut bm = BITMAP::default();
     if GetObjectW(bmp, std::mem::size_of::<BITMAP>() as i32, Some(&mut bm as *mut _ as *mut _)) == 0 || bm.bmWidth <= 0 || bm.bmHeight <= 0 {
         let _ = DeleteObject(bmp);
@@ -2552,6 +2614,7 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         }
         WM_TIMER if wp.0 == T_TICK => {
             tick();
+            refresh_window_icons();
             LRESULT(0)
         }
         WM_TIMER if wp.0 == T_CLICK => {
