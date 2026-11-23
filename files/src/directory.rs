@@ -409,6 +409,24 @@ pub fn drives() -> Vec<Drive> {
     drives
 }
 
+// Files under `scope` whose name contains `term`, answered by the Windows Search index (the same one Explorer uses).
+// The term travels through the environment so it can never become part of the script.
+pub fn search_index(scope: &std::path::Path, term: &str) -> Result<Vec<PathBuf>, String> {
+    use std::os::windows::process::CommandExt;
+    const SCRIPT: &str = "$c = New-Object System.Data.OleDb.OleDbConnection \"Provider=Search.CollatorDSO;Extended Properties='Application=Windows'\"; $c.Open();         $q = $env:WINARCHY_TERM.Replace(\"'\", \"''\").Replace('%', '[%]').Replace('_', '[_]'); $s = $env:WINARCHY_SCOPE.Replace(\"'\", \"''\");         $m = $c.CreateCommand(); $m.CommandText = \"SELECT TOP 500 System.ItemPathDisplay FROM SystemIndex WHERE SCOPE='file:$s' AND System.FileName LIKE '%$q%'\";         $r = $m.ExecuteReader(); while ($r.Read()) { $r.GetString(0) }";
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
+        .env("WINARCHY_TERM", term)
+        .env("WINARCHY_SCOPE", scope)
+        .creation_flags(0x0800_0000)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).lines().next().unwrap_or("search failed").to_owned());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).lines().map(str::trim).filter(|line| !line.is_empty()).map(PathBuf::from).collect())
+}
+
 pub fn places() -> Vec<(String, PathBuf)> {
     let mut places = Vec::new();
     if let Some(home) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
@@ -426,6 +444,10 @@ pub fn places() -> Vec<(String, PathBuf)> {
             }
         }
         places.insert(0, (tr("Home").to_owned(), home));
+    }
+    // only whether WSL is installed is checked here: touching the share itself can start the WSL VM and stall startup
+    if std::env::var_os("SystemRoot").is_some_and(|root| PathBuf::from(root).join(r"System32\wsl.exe").exists()) {
+        places.push(("WSL".to_owned(), PathBuf::from(r"\\wsl.localhost")));
     }
     places
 }

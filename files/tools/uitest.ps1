@@ -155,14 +155,22 @@ try {
         $second = Start-Process (Resolve-Path $Exe) -ArgumentList $b -PassThru
         Start-Sleep 3
         [void][Win]::SetForegroundWindow($script:App.MainWindowHandle)
-        $before = (Find 'kb').Current.BoundingRectangle.X
+        Click (Find 'kb')
         [void][Win]::SetForegroundWindow($script:App.MainWindowHandle); Start-Sleep 1
         [Windows.Forms.SendKeys]::SendWait('^+{PGUP}'); Start-Sleep 1
-        Check 'Ctrl+Shift+PageUp moves the tab left' ((Find 'kb').Current.BoundingRectangle.X -lt $before) "$before -> $((Find 'kb').Current.BoundingRectangle.X)"
+        $tabKb = Find 'kb' 2; $tabKa = Find 'ka' 2
+        $left = if ($tabKb) { $tabKb.Current.BoundingRectangle.X }; $right = if ($tabKa) { $tabKa.Current.BoundingRectangle.X }
+        Check 'Ctrl+Shift+PageUp moves the active tab left' (($null -ne $left) -and ($null -ne $right) -and $left -lt $right) "kb $left, ka $right"
         [void][Win]::SetForegroundWindow($script:App.MainWindowHandle); Start-Sleep 1
         [Windows.Forms.SendKeys]::SendWait('^+p'); Start-Sleep 1
         [Windows.Forms.SendKeys]::SendWait('Crear carpeta{ENTER}'); Start-Sleep 1
         Check 'palette runs a command' ($null -ne (Find 'Nombre de la carpeta nueva' 2)) 'prompt for the new folder'
+        [Windows.Forms.SendKeys]::SendWait('{ESC}'); Start-Sleep 1
+        Check 'WSL entry shows when WSL is installed' ((Test-Path "$env:SystemRoot\System32\wsl.exe") -eq ($null -ne (Find 'WSL' 2))) ''
+        [void][Win]::SetForegroundWindow($script:App.MainWindowHandle); Start-Sleep 1
+        [Windows.Forms.SendKeys]::SendWait('^+f'); Start-Sleep 1
+        [Windows.Forms.SendKeys]::SendWait('sample{ENTER}'); Start-Sleep 4
+        Check 'index search shows a results view or a clear error' ((Status) -match 'elementos' -and (Status) -notmatch '^1 elementos') (Status)
         Stop-App
     }
 

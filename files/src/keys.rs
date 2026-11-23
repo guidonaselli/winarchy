@@ -50,6 +50,7 @@ pub enum Key {
     MoveTabLeft,
     MoveTabRight,
     Palette,
+    Search,
     ReopenTab,
     JumpTab(usize),
     Rename,
@@ -151,6 +152,7 @@ fn map_key(virtual_key: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Key> 
             0x21 => Some(Key::MoveTabLeft),
             0x22 => Some(Key::MoveTabRight),
             0x50 => Some(Key::Palette),
+            0x46 => Some(Key::Search),
             _ => None,
         };
     }

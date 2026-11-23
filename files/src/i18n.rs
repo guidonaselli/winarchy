@@ -140,6 +140,8 @@ const ES: &[(&str, &str)] = &[
     ("This PC", "Este equipo"),
     ("Restore", "Restaurar"),
     ("Restored", "Restaurado"),
+    ("Search in this folder (Windows index)", "Buscar en esta carpeta (índice de Windows)"),
+    ("Search results", "Resultados de búsqueda"),
     ("Run command", "Ejecutar comando"),
     ("No matching command", "Ningún comando coincide"),
     ("Press Delete permanently again to erase these items for good", "Volvé a elegir Eliminar definitivamente para borrar estos elementos para siempre"),

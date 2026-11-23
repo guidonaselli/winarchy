@@ -18,6 +18,11 @@ pub fn wanted(path: &Path) -> bool {
     path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| EXTENSIONS.iter().any(|known| known.eq_ignore_ascii_case(extension)))
 }
 
+// Programs and shortcuts look different from one another, so their rows show the real icon even in the compact layouts.
+pub fn has_own_icon(path: &Path) -> bool {
+    path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| extension.eq_ignore_ascii_case("exe") || extension.eq_ignore_ascii_case("lnk"))
+}
+
 fn cache_file(path: &Path, modified: Option<SystemTime>, size: u64) -> Option<PathBuf> {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     (path, modified, size, EDGE).hash(&mut hasher);

@@ -393,6 +393,7 @@ enum Prompt {
     CopyTo,
     MoveTo,
     Palette,
+    Search,
 }
 
 impl Prompt {
@@ -406,6 +407,7 @@ impl Prompt {
             Prompt::CopyTo => "Copy to this folder",
             Prompt::MoveTo => "Move to this folder",
             Prompt::Palette => "Run command",
+            Prompt::Search => "Search in this folder (Windows index)",
         }
     }
 
@@ -423,6 +425,7 @@ impl Prompt {
             Prompt::CopyTo => Message::TransferSelected(false),
             Prompt::MoveTo => Message::TransferSelected(true),
             Prompt::Palette => Message::RunPalette,
+            Prompt::Search => Message::IndexSearch,
         }
     }
 }
@@ -471,6 +474,8 @@ enum Message {
     NextTab,
     MoveTab(isize),
     RunPalette,
+    IndexSearch,
+    IndexSearched(u64, Result<Vec<PathBuf>, String>),
     SwitchTab(usize),
     ToggleRecursive,
     ToggleHidden,
@@ -940,7 +945,7 @@ impl Component for Explorer {
                         self.bin_origins = items.iter().map(|(entry, original)| (entry.path.clone(), original.clone())).collect();
                         items.into_iter().map(|(entry, _)| std::sync::Arc::new(entry)).collect()
                     }
-                    Place::Folder => Vec::new(),
+                    Place::Folder | Place::Search => Vec::new(),
                 };
                 if view != Place::Recent {
                     self.apply_sort();
@@ -1103,6 +1108,40 @@ impl Component for Explorer {
                     self.tabs.swap(self.active_tab, target as usize);
                     self.active_tab = target as usize;
                     self.save_settings();
+                }
+            }
+            Message::IndexSearch => {
+                let term = self.new_folder_name.trim().to_owned();
+                if term.is_empty() || self.view != Place::Folder {
+                    return;
+                }
+                self.new_folder_name.clear();
+                self.prompt = None;
+                self.status = tr("Searching…").to_owned();
+                self.has_error = false;
+                let (scope, generation) = (self.path.clone(), self.load_generation);
+                let _task = context.spawn_background(move |_| Message::IndexSearched(generation, directory::search_index(&scope, &term)));
+            }
+            Message::IndexSearched(generation, result) => {
+                if generation != self.load_generation {
+                    return;
+                }
+                match result {
+                    Ok(paths) => {
+                        self.load_generation += 1;
+                        self.view = Place::Search;
+                        self.selected.clear();
+                        self.entries = paths.iter().filter_map(|path| directory::entry_at(path)).map(std::sync::Arc::new).collect();
+                        self.address = tr(Place::Search.title()).to_owned();
+                        self.apply_sort();
+                        self.request_thumbs(context);
+                        self.loaded = true;
+                        self.refresh_status();
+                    }
+                    Err(error) => {
+                        self.has_error = true;
+                        self.status = error;
+                    }
                 }
             }
             Message::RunPalette => {
@@ -2024,6 +2063,7 @@ impl Component for Explorer {
                         columns,
                         hide_extensions,
                         compact,
+                        thumbs.get(&entry.path).map(PathBuf::as_path),
                     ),
                     Layout::Tiles | Layout::Grid => {
                         let thumb = thumbs.get(&entry.path).map(PathBuf::as_path);
@@ -2776,6 +2816,7 @@ impl Explorer {
             keys::Key::PrevTab => self.update(Message::SwitchTab((self.active_tab + self.tabs.len() - 1) % self.tabs.len()), context),
             keys::Key::MoveTabLeft => self.update(Message::MoveTab(-1), context),
             keys::Key::MoveTabRight => self.update(Message::MoveTab(1), context),
+            keys::Key::Search => self.update(Message::Ask(Prompt::Search), context),
             keys::Key::Palette => self.update(Message::Ask(Prompt::Palette), context),
             keys::Key::ReopenTab => self.update(Message::ReopenTab, context),
             keys::Key::JumpTab(index) => {
@@ -3115,13 +3156,11 @@ impl Explorer {
     // Only the tile layouts show thumbnails. Rendering is sequential in a worker, a few at a time, so the list fills in as it goes.
     // shortcut: only the first THUMB_LIMIT entries of a folder get one, until thumbnails are requested for the visible rows only.
     fn request_thumbs(&mut self, context: &ComponentContext<Self>) {
-        if !matches!(self.layout, Layout::Tiles | Layout::Grid) {
-            return;
-        }
+        let previews = matches!(self.layout, Layout::Tiles | Layout::Grid);
         let jobs: Vec<thumbs::Job> = self
             .entries
             .iter()
-            .filter(|entry| !entry.is_directory && thumbs::wanted(&entry.path) && !self.thumbs.contains_key(&entry.path))
+            .filter(|entry| !entry.is_directory && thumbs::wanted(&entry.path) && (previews || thumbs::has_own_icon(&entry.path)) && !self.thumbs.contains_key(&entry.path))
             .take(THUMB_LIMIT)
             .map(|entry| (entry.path.clone(), entry.modified, entry.size))
             .collect();
@@ -3707,6 +3746,7 @@ enum Place {
     Recent,
     ThisPc,
     RecycleBin,
+    Search,
 }
 
 impl Place {
@@ -3717,6 +3757,7 @@ impl Place {
             Place::Recent => "Recent",
             Place::ThisPc => "This PC",
             Place::RecycleBin => "Recycle Bin",
+            Place::Search => "Search results",
         }
     }
 }
@@ -3749,13 +3790,18 @@ fn row(
     columns: Columns,
     hide_extensions: bool,
     compact: bool,
+    thumb: Option<&Path>,
 ) -> View {
+    let glyph: View = match thumb.and_then(|file| Image::new().source_file(file).ok()) {
+        Some(image) => image.width(ICON_SIZE).height(ICON_SIZE).stretch(Stretch::Uniform).into(),
+        None => icon(directory::icon(entry), ICON_SIZE, theme),
+    };
     let name = StackPanel::new()
         .horizontal_alignment(HorizontalAlignment::Left)
         .orientation(Orientation::Horizontal)
         .spacing(ROW_GAP)
         .children((
-            icon(directory::icon(entry), ICON_SIZE, theme),
+            glyph,
             text(&display_name(entry, hide_extensions), theme.map(Theme::foreground)),
         ));
     let check = select_box(entry, is_selected, hovered, sender, busy).grid_column(0);
