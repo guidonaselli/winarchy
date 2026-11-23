@@ -2707,7 +2707,7 @@ impl Explorer {
             MenuKind::Item => ["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Compress to zip", "Extract here", ORGANIZE, "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
             MenuKind::Organize => ["Copy path", "Share", "Add tags", "Add to favorites", "Remove from favorites", "Pin to sidebar", "Unpin from sidebar", "Terminal here", "Open with…"].iter().filter_map(|label| find(label)).collect(),
             MenuKind::Side => ["Open in new tab", "Pin to sidebar", "Unpin from sidebar", "Add to favorites", "Remove from favorites", "Copy path", "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
-            MenuKind::Background => ["Paste here", "Paste as shortcut", "Create folder", "Create file", "Terminal here", "Open in editor", "Select none"].iter().filter_map(|label| find(label)).collect(),
+            MenuKind::Background => ["Paste here", "Paste as shortcut", "Create folder", "Create file", "Terminal here", "Open in editor", "Select none", "Show more options"].iter().filter_map(|label| find(label)).collect(),
             MenuKind::New => NEW_LABELS.iter().filter_map(|label| find(label)).collect(),
             MenuKind::Sort => self.sort_labels().iter().filter_map(|label| find(label)).collect(),
             MenuKind::More => {
