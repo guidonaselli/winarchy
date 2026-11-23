@@ -1,6 +1,6 @@
 # End-to-end checks of the release build through UI Automation and real input.
-# Usage: pwsh -File tools/uitest.ps1 [-Only views,instance,bin,commands,thumbs,handler]
-param([string[]]$Only = @('views', 'instance', 'bin', 'commands', 'thumbs', 'handler'))
+# Usage: pwsh -File tools/uitest.ps1 [-Only views,instance,bin,commands,thumbs,handler,keys]
+param([string[]]$Only = @('views', 'instance', 'bin', 'commands', 'thumbs', 'handler', 'keys'))
 $ErrorActionPreference = 'Stop'
 $Only = $Only -split ','
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing, System.Windows.Forms
@@ -144,6 +144,25 @@ try {
         Start-Sleep 5
         Shot 'uitest-grid.png'
         Check 'thumbnails are cached' ((Get-ChildItem "$env:LOCALAPPDATA\winarchy\thumbs" -Filter *.png -ErrorAction SilentlyContinue).Count -gt 0) 'see %TEMP%\uitest-grid.png'
+        Stop-App
+    }
+
+    if ('keys' -in $Only) {
+        $a = Join-Path $Work 'ka'; $b = Join-Path $Work 'kb'
+        New-Item -ItemType Directory -Force $a, $b | Out-Null
+        Set-Content (Join-Path $a 'only-in-a.txt') 'x'
+        Start-App $a (New-Settings)
+        $second = Start-Process (Resolve-Path $Exe) -ArgumentList $b -PassThru
+        Start-Sleep 3
+        [void][Win]::SetForegroundWindow($script:App.MainWindowHandle)
+        $before = (Find 'kb').Current.BoundingRectangle.X
+        [void][Win]::SetForegroundWindow($script:App.MainWindowHandle); Start-Sleep 1
+        [Windows.Forms.SendKeys]::SendWait('^+{PGUP}'); Start-Sleep 1
+        Check 'Ctrl+Shift+PageUp moves the tab left' ((Find 'kb').Current.BoundingRectangle.X -lt $before) "$before -> $((Find 'kb').Current.BoundingRectangle.X)"
+        [void][Win]::SetForegroundWindow($script:App.MainWindowHandle); Start-Sleep 1
+        [Windows.Forms.SendKeys]::SendWait('^+p'); Start-Sleep 1
+        [Windows.Forms.SendKeys]::SendWait('Crear carpeta{ENTER}'); Start-Sleep 1
+        Check 'palette runs a command' ($null -ne (Find 'Nombre de la carpeta nueva' 2)) 'prompt for the new folder'
         Stop-App
     }
 

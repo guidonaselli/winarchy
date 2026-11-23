@@ -1556,7 +1556,8 @@ impl Component for Explorer {
                 } else if let Some(prompt) = self.prompt {
                     self.has_error = false;
                     self.update(prompt.message(), context);
-                    if !self.has_error {
+                    // a command run from the palette may have opened another prompt
+                    if !self.has_error && self.prompt == Some(prompt) {
                         self.prompt = None;
                     }
                 }
