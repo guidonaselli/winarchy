@@ -1014,3 +1014,21 @@ mod long_path_tests {
         assert_eq!(seen, (true, true));
     }
 }
+
+#[cfg(all(test, windows))]
+mod elevated_tests {
+    use super::create_item;
+    use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
+
+    // writes under Program Files, so it only passes where elevation is silent or the prompt is accepted
+    #[test]
+    #[ignore]
+    fn creates_in_protected_folder_through_elevation() {
+        let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+        let folder = std::path::Path::new(r"C:\Program Files").join(format!("winarchy-uac-{}", std::process::id()));
+        let result = create_item(&folder, true);
+        assert!(result.is_ok(), "create: {result:?}");
+        assert!(folder.is_dir());
+        println!("{}", folder.display());
+    }
+}
