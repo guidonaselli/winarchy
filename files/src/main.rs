@@ -392,6 +392,7 @@ enum Prompt {
     GitClone,
     CopyTo,
     MoveTo,
+    Palette,
 }
 
 impl Prompt {
@@ -404,6 +405,7 @@ impl Prompt {
             Prompt::GitClone => "Repository URL",
             Prompt::CopyTo => "Copy to this folder",
             Prompt::MoveTo => "Move to this folder",
+            Prompt::Palette => "Run command",
         }
     }
 
@@ -420,6 +422,7 @@ impl Prompt {
             Prompt::GitClone => Message::Git("clone"),
             Prompt::CopyTo => Message::TransferSelected(false),
             Prompt::MoveTo => Message::TransferSelected(true),
+            Prompt::Palette => Message::RunPalette,
         }
     }
 }
@@ -466,6 +469,8 @@ enum Message {
     ReopenTab,
     CloseOtherTabs,
     NextTab,
+    MoveTab(isize),
+    RunPalette,
     SwitchTab(usize),
     ToggleRecursive,
     ToggleHidden,
@@ -1091,6 +1096,29 @@ impl Component for Explorer {
             Message::NextTab => {
                 let next = (self.active_tab + 1) % self.tabs.len();
                 self.update(Message::SwitchTab(next), context);
+            }
+            Message::MoveTab(delta) => {
+                let target = self.active_tab as isize + delta;
+                if (0..self.tabs.len() as isize).contains(&target) {
+                    self.tabs.swap(self.active_tab, target as usize);
+                    self.active_tab = target as usize;
+                    self.save_settings();
+                }
+            }
+            Message::RunPalette => {
+                let needle = self.new_folder_name.trim().to_lowercase();
+                let found = self.commands().into_iter().find(|c| c.enabled && c.message.is_some() && !needle.is_empty() && c.label.to_lowercase().contains(&needle));
+                match found {
+                    Some(command) => {
+                        self.new_folder_name.clear();
+                        self.prompt = None;
+                        self.update(Message::Command(command.label), context);
+                    }
+                    None => {
+                        self.has_error = true;
+                        self.status = tr("No matching command").to_owned();
+                    }
+                }
             }
             Message::SwitchTab(index) => {
                 if index < self.tabs.len() && index != self.active_tab {
@@ -2745,6 +2773,9 @@ impl Explorer {
             keys::Key::Back => self.update(Message::Back, context),
             keys::Key::Forward => self.update(Message::Forward, context),
             keys::Key::PrevTab => self.update(Message::SwitchTab((self.active_tab + self.tabs.len() - 1) % self.tabs.len()), context),
+            keys::Key::MoveTabLeft => self.update(Message::MoveTab(-1), context),
+            keys::Key::MoveTabRight => self.update(Message::MoveTab(1), context),
+            keys::Key::Palette => self.update(Message::Ask(Prompt::Palette), context),
             keys::Key::ReopenTab => self.update(Message::ReopenTab, context),
             keys::Key::JumpTab(index) => {
                 if index < self.tabs.len() {

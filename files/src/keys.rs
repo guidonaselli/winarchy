@@ -47,6 +47,9 @@ pub enum Key {
     Back,
     Forward,
     PrevTab,
+    MoveTabLeft,
+    MoveTabRight,
+    Palette,
     ReopenTab,
     JumpTab(usize),
     Rename,
@@ -145,6 +148,9 @@ fn map_key(virtual_key: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Key> 
             0x54 => Some(Key::ReopenTab),
             0x43 => Some(Key::CopyPath),
             0x09 => Some(Key::PrevTab),
+            0x21 => Some(Key::MoveTabLeft),
+            0x22 => Some(Key::MoveTabRight),
+            0x50 => Some(Key::Palette),
             _ => None,
         };
     }
