@@ -88,3 +88,5 @@ pub const OWN_DROP_WINDOW: std::time::Duration = std::time::Duration::from_milli
 pub const RECENT_KEY: usize = 10_010;
 pub const THIS_PC_KEY: usize = 10_011;
 pub const RECYCLE_BIN_KEY: usize = 10_012;
+pub const THUMB_GRID_SIZE: f64 = 64.0;
+pub const THUMB_TILE_SIZE: f64 = 32.0;

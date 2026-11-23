@@ -136,6 +136,8 @@ const ES: &[(&str, &str)] = &[
     ("Open Recycle Bin", "Abrir la Papelera (restaurar elementos)"),
     ("Empty Recycle Bin", "Vaciar la Papelera"),
     ("Recycle Bin", "Papelera de reciclaje"),
+    ("Recent", "Recientes"),
+    ("This PC", "Este equipo"),
     ("Restore", "Restaurar"),
     ("Restored", "Restaurado"),
     ("Delete permanently?", "¿Eliminar definitivamente?"),

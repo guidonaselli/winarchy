@@ -15,6 +15,7 @@ mod settings;
 mod shell;
 mod style;
 mod theme;
+mod thumbs;
 #[cfg(windows)]
 mod xaml_drag;
 
@@ -474,6 +475,7 @@ enum Message {
     EmptyRecycleBin,
     OpenRecycleBin,
     RestoreSelected,
+    Thumbs(u64, Vec<(PathBuf, PathBuf)>, Vec<thumbs::Job>),
     TogglePin,
     Eject(PathBuf),
     RefreshDrives,
@@ -646,6 +648,7 @@ struct Explorer {
     pinned: Vec<PathBuf>,
     favorites: Vec<PathBuf>,
     bin_origins: std::collections::HashMap<PathBuf, PathBuf>,
+    thumbs: std::sync::Arc<std::collections::HashMap<PathBuf, PathBuf>>,
     view: Place,
     pin_armed: Option<PathBuf>,
     tags: std::collections::BTreeMap<PathBuf, Vec<String>>,
@@ -756,6 +759,7 @@ impl Component for Explorer {
             pinned: saved.pinned.clone(),
             favorites: saved.favorites.clone(),
             bin_origins: std::collections::HashMap::new(),
+            thumbs: std::sync::Arc::default(),
             view: Place::Folder,
             pin_armed: None,
             list_width: DEFAULT_LIST_WIDTH,
@@ -926,6 +930,7 @@ impl Component for Explorer {
                 if view != Place::Recent {
                     self.apply_sort();
                 }
+                self.request_thumbs(context);
                 self.loaded = true;
                 self.has_error = false;
                 self.refresh_status();
@@ -1101,6 +1106,7 @@ impl Component for Explorer {
             }
             Message::CycleLayout => {
                 self.layout = self.layout.next();
+                self.request_thumbs(context);
                 self.save_settings();
             }
             Message::Tag(add) => {
@@ -1274,6 +1280,17 @@ impl Component for Explorer {
                 } else if self.view == Place::RecycleBin {
                     self.update(Message::OpenView(Place::RecycleBin), context);
                 }
+            }
+            Message::Thumbs(generation, ready, rest) => {
+                if generation != self.load_generation {
+                    return;
+                }
+                if !ready.is_empty() {
+                    let mut map = (*self.thumbs).clone();
+                    map.extend(ready);
+                    self.thumbs = std::sync::Arc::new(map);
+                }
+                self.render_thumbs(generation, rest, context);
             }
             Message::RestoreSelected => {
                 let moves: Vec<_> = self.selected.iter().filter_map(|data| Some((data.clone(), self.bin_origins.get(data)?.clone()))).collect();
@@ -1822,6 +1839,7 @@ impl Component for Explorer {
                         self.entries = entries.into_iter().map(std::sync::Arc::new).collect();
                         self.selected.retain(|selected| self.entries.iter().any(|entry| entry.path == *selected));
                         self.apply_sort();
+                        self.request_thumbs(context);
                         self.refresh_status();
                         if let Some(notice) = self.notice.take() {
                             self.status = notice;
@@ -1898,6 +1916,7 @@ impl Component for Explorer {
         let width = self.list_width;
         let hide_extensions = self.hide_extensions;
         let layout = self.layout;
+        let thumbs = self.thumbs.clone();
         let per_row = layout.cell_width().map_or(1, |cell| ((width / cell) as usize).max(1));
         let group = self.group;
         let columns = self.columns;
@@ -1926,7 +1945,8 @@ impl Component for Explorer {
                         compact,
                     ),
                     Layout::Tiles | Layout::Grid => {
-                        tile(entry, selected.contains(&entry.path), hovered.as_ref() == Some(&entry.path), theme.as_ref(), &sender, busy, layout, hide_extensions)
+                        let thumb = thumbs.get(&entry.path).map(PathBuf::as_path);
+                        tile(entry, selected.contains(&entry.path), hovered.as_ref() == Some(&entry.path), theme.as_ref(), &sender, busy, layout, hide_extensions, thumb)
                     }
                 };
                 let build = |entry: &Entry| -> View {
@@ -2749,6 +2769,7 @@ impl Explorer {
             self.list_width.to_bits(),
         )
             .hash(&mut hasher);
+        self.thumbs.len().hash(&mut hasher);
         self.dragged.is_empty().hash(&mut hasher);
         // order-independent so HashSet iteration order cannot change the revision
         let selection = self
@@ -3004,6 +3025,33 @@ impl Explorer {
 
     fn chrome_width(&self) -> f64 {
         self.sidebar_width + SPLITTER_WIDTH + SCROLL_ALLOWANCE + 2.0 * WINDOW_MARGIN + 2.0 * CARD_PADDING
+    }
+
+    // Only the tile layouts show thumbnails. Rendering is sequential in a worker, a few at a time, so the list fills in as it goes.
+    // shortcut: only the first THUMB_LIMIT entries of a folder get one, until thumbnails are requested for the visible rows only.
+    fn request_thumbs(&mut self, context: &ComponentContext<Self>) {
+        if !matches!(self.layout, Layout::Tiles | Layout::Grid) {
+            return;
+        }
+        let jobs: Vec<thumbs::Job> = self
+            .entries
+            .iter()
+            .filter(|entry| !entry.is_directory && thumbs::wanted(&entry.path) && !self.thumbs.contains_key(&entry.path))
+            .take(THUMB_LIMIT)
+            .map(|entry| (entry.path.clone(), entry.modified, entry.size))
+            .collect();
+        self.render_thumbs(self.load_generation, jobs, context);
+    }
+
+    fn render_thumbs(&self, generation: u64, mut jobs: Vec<thumbs::Job>, context: &ComponentContext<Self>) {
+        if jobs.is_empty() {
+            return;
+        }
+        let rest = jobs.split_off(jobs.len().min(THUMB_BATCH));
+        let _task = context.spawn_background(move |_| {
+            let ready = jobs.iter().filter_map(|job| Some((job.0.clone(), thumbs::ensure(job)?))).collect();
+            Message::Thumbs(generation, ready, rest)
+        });
     }
 
     fn apply_sort(&mut self) {
@@ -3578,6 +3626,8 @@ impl Place {
 }
 
 const RECENT_LIMIT: usize = 200;
+const THUMB_LIMIT: usize = 400;
+const THUMB_BATCH: usize = 6;
 
 enum SidebarDrop {
     Into(PathBuf),
@@ -3659,9 +3709,16 @@ fn tile(
     busy: bool,
     layout: Layout,
     hide_extensions: bool,
+    thumb: Option<&Path>,
 ) -> View {
     let name = text(&display_name(entry, hide_extensions), theme.map(Theme::foreground));
-    let icon = icon(directory::icon(entry), if layout == Layout::Grid { ICON_SIZE_LARGE } else { ICON_SIZE }, theme);
+    let icon: View = match thumb.and_then(|file| Image::new().source_file(file).ok()) {
+        Some(image) => {
+            let edge = if layout == Layout::Grid { THUMB_GRID_SIZE } else { THUMB_TILE_SIZE };
+            image.width(edge).height(edge).stretch(Stretch::Uniform).into()
+        }
+        None => icon(directory::icon(entry), if layout == Layout::Grid { ICON_SIZE_LARGE } else { ICON_SIZE }, theme),
+    };
     let content: View = if layout == Layout::Grid {
         StackPanel::new().spacing(TIGHT_GAP).horizontal_alignment(HorizontalAlignment::Center).children((icon, name)).into()
     } else {
