@@ -986,3 +986,28 @@ mod address_tests {
         assert_eq!(resolve_address(r"C:\Temp"), std::path::PathBuf::from(r"C:\Temp"));
     }
 }
+
+#[cfg(all(test, windows))]
+mod long_path_tests {
+    use super::{create_item, transfer};
+
+    #[test]
+    fn copies_and_creates_beyond_260_characters() {
+        let base = std::env::temp_dir().join(format!("wf-long-{}", std::process::id()));
+        let mut deep = base.clone();
+        for _ in 0..12 {
+            deep.push("d".repeat(30));
+        }
+        std::fs::create_dir_all(&deep).unwrap();
+        assert!(deep.as_os_str().len() > 260);
+        let source = base.join("origen.txt");
+        std::fs::write(&source, "x").unwrap();
+        let copied = transfer(&[source], &deep, false);
+        let created = create_item(&deep.join("nuevo.txt"), false);
+        let seen = (deep.join("origen.txt").exists(), deep.join("nuevo.txt").exists());
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(copied.is_ok(), "copy: {copied:?}");
+        assert!(created.is_ok(), "create: {created:?}");
+        assert_eq!(seen, (true, true));
+    }
+}
