@@ -249,6 +249,7 @@ impl Explorer {
             command("Clear tags", Message::Tag(false), Some(icons::Icon::Tag),editable),
             command("Open with…", Message::RunVerb("openas"), None, one && self.selected.iter().all(|path| path.is_file())),
             command("Properties", Message::RunVerb("properties"), Some(icons::Icon::Info), one),
+            command(ORGANIZE, Message::CloseMenu, Some(icons::Icon::DotsThree), some),
             command("Show more options", Message::NativeMenu, Some(icons::Icon::DotsThree), self.view == Place::Folder || editable),
             command("Terminal here", Message::OpenTerminal, Some(icons::Icon::TerminalWindow), true),
             command("Terminal as administrator", Message::RunVerb("admin-terminal"), Some(icons::Icon::TerminalWindow), true),
@@ -1538,6 +1539,13 @@ impl Component for Explorer {
             }
             Message::CloseMenu => self.close_side_menu(),
             Message::MenuCommand(label) => {
+                if label == tr_dynamic(ORGANIZE) {
+                    if let Some((x, y, _)) = self.menu {
+                        self.menu = Some((x, y, MenuKind::Organize));
+                        self.menu_focus = None;
+                    }
+                    return;
+                }
                 let side = self.menu.is_some_and(|(_, _, kind)| kind == MenuKind::Side);
                 self.close_menu();
                 self.update(Message::Command(label), context);
@@ -2696,13 +2704,14 @@ impl Explorer {
             commands.iter().find(|command| command.label == label)
         };
         match kind {
-            MenuKind::Item => ["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Compress to zip", "Extract here", "Copy path", "Share", "Add tags", "Add to favorites", "Remove from favorites", "Pin to sidebar", "Unpin from sidebar", "Terminal here", "Open with…", "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
+            MenuKind::Item => ["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Compress to zip", "Extract here", ORGANIZE, "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
+            MenuKind::Organize => ["Copy path", "Share", "Add tags", "Add to favorites", "Remove from favorites", "Pin to sidebar", "Unpin from sidebar", "Terminal here", "Open with…"].iter().filter_map(|label| find(label)).collect(),
             MenuKind::Side => ["Open in new tab", "Pin to sidebar", "Unpin from sidebar", "Add to favorites", "Remove from favorites", "Copy path", "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
             MenuKind::Background => ["Paste here", "Paste as shortcut", "Create folder", "Create file", "Terminal here", "Open in editor", "Select none"].iter().filter_map(|label| find(label)).collect(),
             MenuKind::New => NEW_LABELS.iter().filter_map(|label| find(label)).collect(),
             MenuKind::Sort => self.sort_labels().iter().filter_map(|label| find(label)).collect(),
             MenuKind::More => {
-                let shown: Vec<String> = NEW_LABELS.iter().chain(&TOOL_LABELS).copied().chain(self.sort_labels()).map(tr_dynamic).collect();
+                let shown: Vec<String> = NEW_LABELS.iter().chain(&TOOL_LABELS).copied().chain(self.sort_labels()).chain(std::iter::once(ORGANIZE)).map(tr_dynamic).collect();
                 commands.iter().filter(|command| command.message.is_some() && !shown.contains(&command.label)).collect()
             }
         }
@@ -3933,6 +3942,8 @@ fn icon_state(glyph: icons::Icon, size: f64, theme: Option<&Theme>, enabled: boo
     Border::new().opacity(if enabled { 1.0 } else { ICON_DISABLED_OPACITY }).content(icon(glyph, size, theme)).into()
 }
 
+// opens the submenu of the less common actions on an item
+const ORGANIZE: &str = "Organize ▸";
 const NEW_LABELS: [&str; 4] = ["Create folder", "Create file", "Create shortcut", "Git clone"];
 const TOOL_LABELS: [&str; 7] = ["Cut", "Copy", "Copy path", "Paste here", "Rename selected", "Share", "Delete to Recycle Bin"];
 
@@ -3944,6 +3955,7 @@ enum MenuKind {
     New,
     Sort,
     More,
+    Organize,
 }
 
 // Duotone icon: an accent-tinted layer under a foreground outline, drawn from a themed SVG.

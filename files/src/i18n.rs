@@ -140,6 +140,7 @@ const ES: &[(&str, &str)] = &[
     ("This PC", "Este equipo"),
     ("Restore", "Restaurar"),
     ("Restored", "Restaurado"),
+    ("Organize ▸", "Organizar ▸"),
     ("Search in this folder (Windows index)", "Buscar en esta carpeta (índice de Windows)"),
     ("Search results", "Resultados de búsqueda"),
     ("Run command", "Ejecutar comando"),
