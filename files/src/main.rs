@@ -652,7 +652,8 @@ impl Component for Explorer {
 
     fn create(input: &PathBuf, context: &ComponentContext<Self>) -> Self {
         let saved = settings::load();
-        let explicit = std::env::args_os().nth(1).is_some_and(|arg| PathBuf::from(arg).is_dir());
+        let target = launch_target();
+        let explicit = target.is_some();
         let restored: Vec<PathBuf> = if explicit { Vec::new() } else { saved.tabs.iter().filter(|tab| tab.is_dir()).cloned().collect() };
         let (tabs, active_tab) = if restored.is_empty() { (vec![input.clone()], 0) } else { (restored.clone(), saved.active_tab.min(restored.len() - 1)) };
         let path = tabs[active_tab].clone();
@@ -729,7 +730,7 @@ impl Component for Explorer {
             path: path.clone(),
             load_generation: 0,
             entries: Vec::new(),
-            selected: HashSet::new(),
+            selected: target.and_then(|(_, item)| item).into_iter().collect(),
             deleting: false,
             transferring: false,
             status,
@@ -3677,15 +3678,64 @@ fn text(value: &str, foreground: Option<Brush>) -> TextBlock {
         .unwrap_or(block)
 }
 
+// The location the command line asks for, as Explorer's own switches spell it: a folder, a file (opens its folder with it
+// selected), `/select,<path>`, `/root,<path>`; `/e` and other flags are ignored.
+fn raw_launch_path(args: &[String]) -> Option<String> {
+    let mut select_next = false;
+    for arg in args {
+        let lower = arg.to_lowercase();
+        let rest = if lower.starts_with("/select,") || lower.starts_with("/root,") { Some(&arg[arg.find(',')? + 1..]) } else { None };
+        match rest {
+            Some("") => select_next = true,
+            Some(path) => return Some(path.trim_matches('"').to_owned()),
+            None if select_next => return Some(arg.trim_matches('"').to_owned()),
+            None if arg.starts_with('/') => {}
+            None => return Some(arg.clone()),
+        }
+    }
+    None
+}
+
+// The folder to show and the item to leave selected in it.
+fn launch_target() -> Option<(PathBuf, Option<PathBuf>)> {
+    let args: Vec<String> = std::env::args_os().skip(1).map(|arg| arg.to_string_lossy().into_owned()).collect();
+    let path = shell::resolve_address(&raw_launch_path(&args)?);
+    if path.is_dir() && !args.iter().any(|arg| arg.to_lowercase().starts_with("/select")) {
+        Some((path, None))
+    } else if path.exists() {
+        Some((path.parent()?.to_path_buf(), Some(path)))
+    } else {
+        None
+    }
+}
+
 fn main() {
-    let path = std::env::args_os()
-        .nth(1)
-        .map(PathBuf::from)
-        .filter(|path| path.is_dir())
+    let path = launch_target()
+        .map(|(folder, _)| folder)
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("C:\\"));
     shell::apply_window_icon(Theme::load().ok().flatten().and_then(|theme| theme.icon_colors()), true);
     App::run_component::<Explorer>(path).unwrap();
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::raw_launch_path;
+
+    fn parse(args: &[&str]) -> Option<String> {
+        raw_launch_path(&args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn reads_explorer_switches() {
+        assert_eq!(parse(&[r"C:\Temp"]).as_deref(), Some(r"C:\Temp"));
+        assert_eq!(parse(&["/e,", r"C:\Temp"]).as_deref(), Some(r"C:\Temp"));
+        assert_eq!(parse(&[r#"/select,"C:\Temp\a b.txt""#]).as_deref(), Some(r"C:\Temp\a b.txt"));
+        assert_eq!(parse(&["/select,", r"C:\Temp\a.txt"]).as_deref(), Some(r"C:\Temp\a.txt"));
+        assert_eq!(parse(&[r"/root,C:\"]).as_deref(), Some(r"C:\"));
+        assert_eq!(parse(&["/e"]), None);
+        assert_eq!(parse(&[]), None);
+    }
 }
 
 #[cfg(test)]
