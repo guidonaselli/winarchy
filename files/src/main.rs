@@ -2,6 +2,7 @@
 
 mod directory;
 mod group;
+mod handler;
 mod i18n;
 mod pdf;
 mod clipboard;
@@ -3767,7 +3768,29 @@ fn launch_target() -> Option<(PathBuf, Option<PathBuf>)> {
     }
 }
 
+// `--register-handler` and friends: no window, the result is the exit code (and a line on the parent console).
+fn handler_command() -> Option<i32> {
+    let flag = std::env::args().nth(1)?;
+    let outcome = match flag.as_str() {
+        "--register-handler" => handler::register(&std::env::current_exe().ok()?).map(|()| "Files is now the folder handler for this user".to_owned()),
+        "--unregister-handler" => handler::unregister().map(|()| "Folder handler restored".to_owned()),
+        "--handler-status" => {
+            let registered = handler::is_registered(&std::env::current_exe().ok()?);
+            Ok(format!("folder handler: {}", if registered { "Files" } else { "not registered" }))
+        }
+        _ => return None,
+    };
+    shell::print_to_parent_console(&match &outcome {
+        Ok(line) => line.clone(),
+        Err(error) => format!("error: {error}"),
+    });
+    Some(i32::from(outcome.is_err()))
+}
+
 fn main() {
+    if let Some(code) = handler_command() {
+        std::process::exit(code);
+    }
     let target = launch_target();
     if !instance::claim(target.as_ref().map(|(folder, item)| item.as_deref().unwrap_or(folder.as_path()))) {
         return;

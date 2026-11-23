@@ -319,6 +319,19 @@ pub fn free_name(dir: &Path, stem: &str, extension: &str) -> PathBuf {
     candidate
 }
 
+#[cfg(windows)]
+pub fn print_to_parent_console(line: &str) {
+    use windows::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+    if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) }.is_ok() {
+        println!("{line}");
+    }
+}
+
+#[cfg(not(windows))]
+pub fn print_to_parent_console(line: &str) {
+    println!("{line}");
+}
+
 // Groups every window and pin of the app under one taskbar identity instead of the exe path.
 #[cfg(windows)]
 pub fn set_app_id() {
