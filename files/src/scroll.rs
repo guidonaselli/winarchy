@@ -125,3 +125,31 @@ pub fn anchor(name: &str) -> Option<(f64, f64)> {
         Some((f64::from(rect.left + 40 - origin.x) / scale, f64::from(rect.bottom - origin.y) / scale))
     }
 }
+
+// What lies under a screen point: its position in window DIPs, the accessible name of the element there and how far
+// down (0..1) the point sits within the largest element of that name, i.e. the whole row rather than its label.
+pub fn locate(x: i32, y: i32) -> Option<(f64, f64, String, f64)> {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let window = GetForegroundWindow();
+        let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
+        let name = automation.ElementFromPoint(POINT { x, y }).ok()?.CurrentName().ok()?.to_string();
+        let mut fraction = 0.5;
+        if let Ok(root) = automation.ElementFromHandle(window)
+            && let Ok(condition) = automation.CreatePropertyCondition(UIA_NamePropertyId, &VARIANT::from(BSTR::from(name.as_str())))
+            && let Ok(found) = root.FindAll(TreeScope_Descendants, &condition)
+        {
+            let row = (0..found.Length().unwrap_or(0))
+                .filter_map(|index| found.GetElement(index).ok()?.CurrentBoundingRectangle().ok())
+                .filter(|rect| rect.left <= x && x < rect.right && rect.top <= y && y < rect.bottom)
+                .max_by_key(area);
+            if let Some(rect) = row {
+                fraction = f64::from(y - rect.top) / f64::from((rect.bottom - rect.top).max(1));
+            }
+        }
+        let mut origin = POINT::default();
+        let _ = ClientToScreen(window, &mut origin);
+        let scale = f64::from(GetDpiForWindow(window)) / 96.0;
+        Some((f64::from(x - origin.x) / scale, f64::from(y - origin.y) / scale, name, fraction))
+    }
+}

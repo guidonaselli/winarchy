@@ -272,6 +272,8 @@ dependencies = [
  "windows",
  "windows-collections 0.3.2",
  "windows-core 0.62.2",
+ "windows-future 0.3.2",
+ "windows-numerics 0.3.1",
  "windows-reactor",
 ]
 
@@ -407,8 +409,6 @@ dependencies = [
 [[package]]
 name = "windows-reactor"
 version = "0.100.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e3f0c06995fb2b791584562e32c76d4fed2241d0460a82c3fcdf30a32beadc3"
 dependencies = [
  "rustc-hash",
  "windows-collections 0.100.0",

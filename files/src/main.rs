@@ -13,6 +13,8 @@ mod settings;
 mod shell;
 mod style;
 mod theme;
+#[cfg(windows)]
+mod xaml_drag;
 
 use directory::Entry;
 use group::{Group, Line};
@@ -224,7 +226,7 @@ impl Explorer {
             command("Copy", Message::Clip(false), Some(icons::Icon::Copy), some),
             command("Paste here", Message::Paste, Some(icons::Icon::ClipboardText), clipboard::has_files() && in_folder),
             separator(),
-            command("Rename selected", Message::Ask(Prompt::Rename), Some(icons::Icon::PencilSimple), one && idle),
+            command("Rename selected", Message::Ask(Prompt::Rename), Some(icons::Icon::PencilSimple), some && idle),
             command("Copy to…", Message::Ask(Prompt::CopyTo), Some(icons::Icon::Copy), some && idle),
             command("Move to…", Message::Ask(Prompt::MoveTo), Some(icons::Icon::Scissors), some && idle),
             command("Delete to Recycle Bin", Message::DeleteSelected, Some(icons::Icon::Trash), some && idle),
@@ -240,6 +242,7 @@ impl Explorer {
             command("Share", Message::Share, Some(icons::Icon::ShareNetwork), some),
             command("Add tags", Message::Ask(Prompt::Tags), Some(icons::Icon::Tag), some),
             command("Clear tags", Message::Tag(false), Some(icons::Icon::Tag), some),
+            command("Open with…", Message::RunVerb("openas"), None, one && self.selected.iter().all(|path| path.is_file())),
             command("Properties", Message::RunVerb("properties"), Some(icons::Icon::Info), one),
             command("Show more options", Message::NativeMenu, Some(icons::Icon::DotsThree), true),
             command("Terminal here", Message::OpenTerminal, Some(icons::Icon::TerminalWindow), true),
@@ -269,6 +272,7 @@ impl Explorer {
                 Some(icons::Icon::Star),
                 some,
             ),
+            command("Open in new tab", Message::OpenInTab(self.pin_target()), Some(icons::Icon::FolderOpen), one),
             command("Open in editor", Message::OpenEditor, Some(icons::Icon::PencilSimple), true),
             command("Settings file", Message::OpenSettings, None, true),
             command("Storage settings", Message::OpenStorageSense, None, true),
@@ -472,7 +476,6 @@ enum Message {
     OpenFavorites,
     PinDown(PathBuf),
     OpenPin(PathBuf),
-    PinsReordered(Vec<String>),
     MovePin(i32),
     OpenEditor,
     OpenSettings,
@@ -511,6 +514,7 @@ enum Message {
     OpenDropdown(MenuKind),
     ContextItem(PathBuf, f64, f64),
     ContextBackground(f64, f64),
+    ContextSide(PathBuf, f64, f64),
     CloseMenu,
     MenuCommand(String),
     SidebarStart(f64),
@@ -526,6 +530,7 @@ enum Message {
     CreateFolder,
     FolderCreated(PathBuf, String, Result<(), String>),
     Selection(PathBuf, bool),
+    SelectAll(bool),
     RenameSelected,
     RenameComplete(PathBuf, String, Result<(), String>),
     DeleteSelected,
@@ -539,7 +544,10 @@ enum Message {
     RowClick(PathBuf),
     OpenInTab(PathBuf),
     RowHover(Option<PathBuf>),
-    RowDrag(PathBuf, f64, f64),
+    RowDrag(PathBuf),
+    PinDrag(PathBuf),
+    DragStarted(PathBuf, String, Option<[[u8; 3]; 3]>, bool),
+    DragEnded((i32, i32)),
     DroppedOnSidebar(DroppedData),
     NativeMenu,
     ContextKey(Option<PathBuf>, Option<(f64, f64)>),
@@ -548,6 +556,7 @@ enum Message {
     OpenFile(PathBuf),
     Parent,
     Loaded(u64, PathBuf, Result<Vec<Entry>, String>),
+    DirChanged(PathBuf, bool),
     Searched(u64, PathBuf, directory::Batch),
 }
 
@@ -588,7 +597,11 @@ struct Explorer {
     menu_focus: Option<usize>,
     menu_closed_at: Option<std::time::Instant>,
     hovered_row: Option<PathBuf>,
-    drag_origin: Option<(PathBuf, f64, f64, std::time::Instant)>,
+    drag_polling: bool,
+    last_drag_end: Option<std::time::Instant>,
+    caption_styled: bool,
+    dragged: HashSet<PathBuf>,
+    pin_drag: Option<PathBuf>,
     type_ahead: (String, std::time::Instant),
     filter_ref: ElementRef<TextBox>,
     hovered_handle: Option<Column>,
@@ -695,6 +708,11 @@ impl Component for Explorer {
             menu_focus: None,
             menu_closed_at: None,
             hovered_row: None,
+            drag_polling: false,
+            last_drag_end: None,
+            caption_styled: false,
+            dragged: HashSet::new(),
+            pin_drag: None,
             type_ahead: (String::new(), std::time::Instant::now()),
             filter_ref: ElementRef::new(),
             hovered_handle: None,
@@ -732,7 +750,6 @@ impl Component for Explorer {
             favorites: saved.favorites.clone(),
             in_favorites: false,
             pin_armed: None,
-            drag_origin: None,
             list_width: DEFAULT_LIST_WIDTH,
         };
         app.queue_load(path, context);
@@ -786,7 +803,7 @@ impl Component for Explorer {
                     // dragging items out of this folder and releasing over the window must not duplicate them
                     let paths: Vec<PathBuf> = items.into_iter().map(|item| PathBuf::from(item.path)).filter(|path| path.parent() != Some(self.path.as_path())).collect();
                     if !paths.is_empty() {
-                        self.begin_transfer(paths, false, tr("Copying dropped items…"), context);
+                        self.begin_transfer(paths, false, self.path.clone(), tr("Copying dropped items…"), context);
                     }
                 }
             }
@@ -810,8 +827,8 @@ impl Component for Explorer {
                     return;
                 }
                 let file = self.path.join(&name);
-                match fs::File::create_new(&file) {
-                    Ok(_) => {
+                match shell::create_item(&file, false) {
+                    Ok(()) => {
                         self.record(Undo::RemoveFile(file));
                         self.new_folder_name.clear();
                         self.load_path(self.path.clone(), context);
@@ -886,7 +903,10 @@ impl Component for Explorer {
                 self.has_error = false;
                 self.refresh_status();
             }
-            Message::PinDown(path) => self.pin_armed = Some(path),
+            Message::PinDown(path) => {
+                self.pin_armed = Some(path.clone());
+                self.update(Message::PinDrag(path), context);
+            }
             Message::OpenPin(path) => {
                 if self.pin_armed.take().as_ref() != Some(&path) {
                     return;
@@ -895,13 +915,6 @@ impl Component for Explorer {
                     self.navigate(path, context);
                 } else {
                     self.update(Message::OpenFile(path), context);
-                }
-            }
-            Message::PinsReordered(order) => {
-                let reordered: Vec<PathBuf> = order.iter().map(PathBuf::from).filter(|path| self.pinned.contains(path)).collect();
-                if reordered.len() == self.pinned.len() {
-                    self.pinned = reordered;
-                    self.write_settings(self.pinned.clone(), self.favorites.clone());
                 }
             }
             Message::MovePin(delta) => {
@@ -1318,6 +1331,12 @@ impl Component for Explorer {
                 }
                 self.menu = Some((x, y, MenuKind::Item));
             }
+            Message::ContextSide(path, x, y) => {
+                self.menu_focus = None;
+                self.selected = HashSet::from([path]);
+                self.refresh_status();
+                self.menu = Some((x, y, MenuKind::Side));
+            }
             Message::ContextBackground(x, y) => {
                 if self.menu.is_none() {
                     self.menu_focus = None;
@@ -1333,10 +1352,15 @@ impl Component for Explorer {
                 let (x, y) = self.bar_anchor;
                 self.menu = if self.menu.as_ref().is_some_and(|(_, _, open)| *open == kind) { None } else { Some((x, y + BAR_BUTTON_HEIGHT, kind)) };
             }
-            Message::CloseMenu => self.close_menu(),
+            Message::CloseMenu => self.close_side_menu(),
             Message::MenuCommand(label) => {
+                let side = self.menu.is_some_and(|(_, _, kind)| kind == MenuKind::Side);
                 self.close_menu();
                 self.update(Message::Command(label), context);
+                if side {
+                    self.selected.clear();
+                    self.refresh_status();
+                }
             }
             Message::SidebarStart(x) => self.sidebar_drag = Some((x, self.sidebar_width)),
             Message::SidebarDrag(x, pressed) => {
@@ -1358,6 +1382,9 @@ impl Component for Explorer {
                 self.window_width = size.width;
                 self.window_height = size.height;
                 self.fit_list_width();
+                if !self.caption_styled {
+                    self.caption_styled = self.theme.as_ref().and_then(Theme::icon_colors).is_none_or(shell::style_caption_buttons);
+                }
             }
             Message::TogglePane => {
                 self.hide_pane = !self.hide_pane;
@@ -1500,6 +1527,7 @@ impl Component for Explorer {
                     match Theme::load() {
                         Ok(Some(theme)) => {
                             shell::apply_window_icon(theme.icon_colors(), false);
+                            theme.icon_colors().map(shell::style_caption_buttons);
                             self.theme = Some(theme);
                             self.theme_version += 1;
                             self.has_error = false;
@@ -1527,7 +1555,7 @@ impl Component for Explorer {
             Message::FolderCreated(parent, name, result) => {
                 self.folder_created(parent, name, result, context)
             }
-            Message::Go => self.navigate(PathBuf::from(&self.address), context),
+            Message::Go => self.navigate(shell::resolve_address(&self.address), context),
             Message::RowClick(path) => {
                 // Enter on a keyboard-driven menu also clicks the row that still holds focus; that click must not change the selection.
                 if self.menu.is_some() || self.menu_closed_at.is_some_and(|at| at.elapsed() < MENU_CLICK_GUARD) {
@@ -1566,33 +1594,113 @@ impl Component for Explorer {
                     self.save_settings();
                 }
             }
-            Message::RowHover(path) => self.hovered_row = path,
-            // A button swallows the press, so a drag is recognised from the first pointer moves that arrive with the left button held.
-            Message::RowDrag(path, x, y) => {
-                let now = std::time::Instant::now();
-                let streak = self.drag_origin.take().filter(|(_, _, _, at)| now.duration_since(*at) < DRAG_STREAK);
-                let Some((origin, ox, oy, _)) = streak else {
-                    self.drag_origin = Some((path, x, y, now));
-                    return;
+            Message::SelectAll(all) => {
+                let needle = self.filter.to_lowercase();
+                self.selected = if all {
+                    self.entries.iter().filter(|entry| self.matches(entry, &needle)).map(|entry| entry.path.clone()).collect()
+                } else {
+                    HashSet::new()
                 };
-                if (x - ox).hypot(y - oy) < DRAG_THRESHOLD {
-                    self.drag_origin = Some((origin, ox, oy, now));
+                self.refresh_status();
+            }
+            Message::RowHover(path) => self.hovered_row = path,
+            // A button captures the pointer, so only its first move reaches the row; that move starts the poll that follows the drag.
+            Message::RowDrag(path) => {
+                if self.drag_polling || self.deleting || self.transferring {
                     return;
                 }
-                if self.deleting || self.transferring {
+                self.drag_polling = true;
+                let count = if self.selected.contains(&path) { self.selected.len() } else { 1 };
+                let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+                let label = if count > 1 { format!("{name}  +{}", count - 1) } else { name };
+                let colors = self.theme.as_ref().and_then(Theme::icon_colors);
+                let _task = context.spawn_background(move |_| Message::DragStarted(path, label, colors, shell::drag_started()));
+            }
+            Message::PinDrag(path) => {
+                if self.drag_polling || self.deleting || self.transferring {
+                    return;
+                }
+                self.drag_polling = true;
+                self.pin_drag = Some(path.clone());
+                let label = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+                let colors = self.theme.as_ref().and_then(Theme::icon_colors);
+                let _task = context.spawn_background(move |_| Message::DragStarted(path, label, colors, shell::drag_started()));
+            }
+            Message::DragStarted(origin, label, colors, started) => {
+                if !started {
+                    self.drag_polling = false;
+                    self.pin_drag = None;
+                    return;
+                }
+                if self.pin_drag.is_some() {
+                    // the release that ends this drag must not count as a click on the pin
+                    self.pin_armed = None;
+                    let _task = context.spawn_background(move |_| Message::DragEnded(shell::follow_drag(&label, colors)));
                     return;
                 }
                 if !self.selected.contains(&origin) {
                     self.selected = HashSet::from([origin]);
                     self.refresh_status();
                 }
+                self.dragged = self.selected.clone();
                 let paths: Vec<PathBuf> = self.selected.iter().cloned().collect();
-                if let Err(error) = shell::drag_out(&paths) {
+                if let Err(error) = shell::xaml_drag(&paths) {
                     self.status = format!("{}: {error}", tr("Drag failed"));
                     self.has_error = true;
                 }
-                self.update(Message::Refresh, context);
+                let _task = context.spawn_background(move |_| Message::DragEnded(shell::follow_drag(&label, colors)));
             }
+            Message::DragEnded((x, y)) => {
+                self.drag_polling = false;
+                self.dragged.clear();
+                self.last_drag_end = Some(std::time::Instant::now());
+                if let Some(pin) = self.pin_drag.take() {
+                    let Some((_, _, name, fraction)) = scroll::locate(x, y) else { return };
+                    self.pinned = settings::load().pinned;
+                    let target = self.pinned.iter().position(|path| *path != pin && file_label(path).as_deref() == Some(name.as_str()));
+                    if let (Some(from), Some(target)) = (self.pinned.iter().position(|path| *path == pin), target) {
+                        let mut to = target + usize::from(fraction >= 0.5);
+                        if from < to {
+                            to -= 1;
+                        }
+                        let moved = self.pinned.remove(from);
+                        self.pinned.insert(to, moved);
+                        self.write_settings(self.pinned.clone(), self.favorites.clone());
+                    }
+                    return;
+                }
+                // the target app finishes the move after the release; refreshing sooner would cancel the drag still in flight
+                let _task = context.spawn_background(|_| {
+                    std::thread::sleep(std::time::Duration::from_millis(DRAG_REFRESH_DELAY_MS));
+                    Message::Refresh
+                });
+                let dragged: Vec<PathBuf> = self.selected.iter().cloned().collect();
+                let Some((dip_x, _, name, fraction)) = scroll::locate(x, y) else { return };
+                if dip_x >= 0.0 && dip_x < self.sidebar_width {
+                    self.pinned = settings::load().pinned;
+                    match self.sidebar_drop(&name, fraction) {
+                        SidebarDrop::Into(destination) if !dragged.contains(&destination) => {
+                            let (cut, label) = if keys::ctrl_down() { (false, tr("Copying selected items…")) } else { (true, tr("Moving selected items…")) };
+                            self.begin_transfer(dragged, cut, destination, label, context);
+                        }
+                        SidebarDrop::Into(_) => {}
+                        SidebarDrop::Pin(mut index) => {
+                            for path in dragged {
+                                if !self.pinned.contains(&path) {
+                                    self.pinned.insert(index.min(self.pinned.len()), path);
+                                    index += 1;
+                                }
+                            }
+                            self.write_settings(self.pinned.clone(), self.favorites.clone());
+                        }
+                    }
+                } else if let Some(target) = self.entries.iter().find(|entry| entry.is_directory && entry.name == name && !dragged.contains(&entry.path)) {
+                    let destination = target.path.clone();
+                    self.begin_transfer(dragged, true, destination, tr("Moving selected items…"), context);
+                }
+            }
+            // a drag that started in this window is resolved by DragEnded, which knows where in the sidebar it ended
+            Message::DroppedOnSidebar(_) if self.drag_polling || self.last_drag_end.is_some_and(|end| end.elapsed() < OWN_DROP_WINDOW) => {}
             Message::DroppedOnSidebar(DroppedData::StorageItems(items)) => {
                 self.pinned = settings::load().pinned;
                 for item in items {
@@ -1658,6 +1766,7 @@ impl Component for Explorer {
                             self.request_address_focus(context);
                         }
                         self.entries = entries.into_iter().map(std::sync::Arc::new).collect();
+                        self.selected.retain(|selected| self.entries.iter().any(|entry| entry.path == *selected));
                         self.apply_sort();
                         self.refresh_status();
                         if let Some(notice) = self.notice.take() {
@@ -1671,6 +1780,20 @@ impl Component for Explorer {
                 }
             }
             Message::Loaded(_, _, _) => {}
+            // the drag's own delayed refresh covers moves made by the target app; reloading mid-drag would cancel it
+            Message::DirChanged(path, changed) => {
+                if !changed || path != self.path || self.recursive || self.in_favorites {
+                    return;
+                }
+                if self.drag_polling || self.last_drag_end.is_some_and(|end| end.elapsed() < OWN_DROP_WINDOW) {
+                    let _task = context.spawn_background(move |_| {
+                        std::thread::sleep(OWN_DROP_WINDOW);
+                        Message::DirChanged(path, true)
+                    });
+                } else {
+                    self.queue_load(path, context);
+                }
+            }
             Message::Searched(generation, path, batch) if generation == self.load_generation && path == self.path => {
                 self.loaded = true;
                 if let Some(error) = batch.error {
@@ -1711,6 +1834,7 @@ impl Component for Explorer {
         let revision = self.list_revision(&needle, visible.len());
         keys::set_menu_open(self.menu.is_some());
         let hovered = self.hovered_row.clone();
+        let moving = self.dragged.clone();
         let (selected, theme, sender, busy) = (
             self.selected.clone(),
             self.theme.clone(),
@@ -1756,10 +1880,12 @@ impl Component for Explorer {
                     let entered = entry.path.clone();
                     let dragged = entry.path.clone();
                     let drag_sender = sender.clone();
+                    let opacity = if moving.contains(&entry.path) { DRAG_SOURCE_OPACITY } else { 1.0 };
                     Border::new()
+                        .opacity(opacity)
                         .on_pointer_moved(move |info: PointerEventInfo| {
                             if info.is_left_button_pressed {
-                                let _ = drag_sender.send(Message::RowDrag(dragged.clone(), info.window_x, info.window_y));
+                                let _ = drag_sender.send(Message::RowDrag(dragged.clone()));
                             }
                         })
                         .on_pointer_entered(sender.callback(move |_: PointerEventInfo| Message::RowHover(Some(entered.clone()))))
@@ -1847,7 +1973,8 @@ impl Component for Explorer {
                     .tooltip(tr("New tab"))
                     .into(),
             );
-            StackPanel::new().orientation(Orientation::Horizontal).keyed_children(tabs.into_iter().enumerate().map(|(index, view)| KeyedView::new(index, view)).collect::<Vec<_>>())
+            // the title bar centers its content, so the strip takes the full width left of the caption buttons to stay at the left edge
+            Grid::new().width((self.window_width - CAPTION_BUTTONS_WIDTH).max(0.0)).children((StackPanel::new().orientation(Orientation::Horizontal).horizontal_alignment(HorizontalAlignment::Left).keyed_children(tabs.into_iter().enumerate().map(|(index, view)| KeyedView::new(index, view)).collect::<Vec<_>>()),))
         };
         let command_bar = self.command_bar(context);
         let muted = self.theme.as_ref().map(Theme::muted);
@@ -1871,7 +1998,7 @@ impl Component for Explorer {
         }
         let header: View = if self.layout == Layout::Details && !compact {
             Grid::new()
-                .width(self.list_width)
+                .width(self.list_width - ROW_INSET)
                 .horizontal_alignment(HorizontalAlignment::Left)
                 .columns([
                     GridLength::Pixel(CHECK_WIDTH),
@@ -1881,6 +2008,14 @@ impl Component for Explorer {
                 ])
                 .column_spacing(COLUMN_GAP)
                 .children((
+                    CheckBox::new()
+                        .automation_name(tr("Select all"))
+                        .min_width(0.0)
+                        .width(CHECK_WIDTH)
+                        .is_enabled(!self.deleting && !self.transferring)
+                        .is_checked(!self.entries.is_empty() && self.selected.len() >= self.entries.len())
+                        .on_is_checked_changed(context.callback(Message::SelectAll))
+                        .tooltip(tr("Select all").to_owned()),
                     self.sort_button(context, SortKey::Name, tr("Name"), 1, HorizontalAlignment::Left),
                     self.sort_button(context, SortKey::Size, tr("Size"), 2, HorizontalAlignment::Right),
                     self.sort_button(context, SortKey::Modified, tr("Modified"), 3, HorizontalAlignment::Right),
@@ -2020,7 +2155,6 @@ impl Component for Explorer {
                 .into()
         };
         let top = StackPanel::new().spacing(BAR_GAP).children((
-            tab_strip,
             Grid::new()
                 .columns([
                     GridLength::Auto,
@@ -2061,7 +2195,7 @@ impl Component for Explorer {
             )]))
             .rows([GridLength::Auto, GridLength::STAR, GridLength::Auto])
             .children((
-                Grid::new().grid_row(0).margin(Thickness::new(CARD_PADDING, 0.0, 0.0, 0.0)).children((header,)),
+                Grid::new().grid_row(0).margin(Thickness::new(CARD_PADDING + ROW_INSET, 0.0, 0.0, 0.0)).children((header,)),
                 Border::new()
                     .grid_row(1)
                     .corner_radius(CornerRadius::uniform(CONTENT_RADIUS))
@@ -2109,8 +2243,9 @@ impl Component for Explorer {
                 None => Border::new().grid_column(2).into(),
             };
             Border::new()
-                .on_pointer_pressed(context.callback(move |info: PointerEventInfo| match (&middle, info.is_middle_button_pressed) {
-                    (Some(path), true) => Message::OpenInTab(path.clone()),
+                .on_pointer_pressed(context.callback(move |info: PointerEventInfo| match (&middle, info.is_middle_button_pressed, info.is_right_button_pressed) {
+                    (Some(path), true, _) => Message::OpenInTab(path.clone()),
+                    (Some(path), _, true) => Message::ContextSide(path.clone(), info.window_x, info.window_y),
                     _ => Message::CloseMenu,
                 }))
                 .corner_radius(CornerRadius::uniform(CARD_RADIUS))
@@ -2143,7 +2278,15 @@ impl Component for Explorer {
                             .corner_radius(CornerRadius::uniform(CARD_RADIUS))
                             .background_optional(if current { theme.and_then(Theme::selection) } else { None })
                             .padding(Thickness::new(ACCENT_BAR_WIDTH + ROW_GAP - PIN_INDENT_TRIM, PIN_PADDING, 0.0, PIN_PADDING))
-                            .on_pointer_pressed(context.callback(move |info: PointerEventInfo| if info.is_middle_button_pressed { Message::OpenInTab(new_tab.clone()) } else { Message::PinDown(armed.clone()) }))
+                            .on_pointer_pressed(context.callback(move |info: PointerEventInfo| {
+                                if info.is_middle_button_pressed {
+                                    Message::OpenInTab(new_tab.clone())
+                                } else if info.is_right_button_pressed {
+                                    Message::ContextSide(armed.clone(), info.window_x, info.window_y)
+                                } else {
+                                    Message::PinDown(armed.clone())
+                                }
+                            }))
                             .on_pointer_released(context.callback(move |_: PointerEventInfo| Message::OpenPin(opened.clone())))
                             .content(StackPanel::new().orientation(Orientation::Horizontal).spacing(ROW_GAP).children((
                                 icon(glyph, ICON_SIZE, theme),
@@ -2157,9 +2300,6 @@ impl Component for Explorer {
                 PINS_KEY,
                 ListView::new()
                     .selection_mode(ListViewSelectionMode::None)
-                    .can_reorder_items(true)
-                    .allow_drop(true)
-                    .on_reordered(context.callback(Message::PinsReordered))
                     .collection_slot(ListViewSlot::Items, pins),
             ));
         }
@@ -2235,10 +2375,12 @@ impl Component for Explorer {
             ));
         let background = self.theme.as_ref().map(Theme::background);
         let page = Grid::new()
-            .margin(Thickness::new(WINDOW_MARGIN, WINDOW_MARGIN, WINDOW_MARGIN, WINDOW_MARGIN))
+            .margin(Thickness::new(WINDOW_MARGIN, TITLE_BAR_HEIGHT, WINDOW_MARGIN, WINDOW_MARGIN))
             .rows([GridLength::Auto, GridLength::STAR])
             .children((Grid::new().grid_row(0).margin(Thickness::new(0.0, 0.0, 0.0, BAR_GAP)).children((top,)), body));
         let mut items = vec![KeyedView::new(0usize, page)];
+        // the tabs live in the title bar, next to the caption buttons
+        items.push(KeyedView::new(2usize, TitleBar::new().title("").vertical_alignment(VerticalAlignment::Top).slot(TitleBarSlot::Content, tab_strip)));
         if let Some((x, y, target)) = &self.menu {
             items.push(KeyedView::new(1usize, self.context_menu(context, *x, *y, *target)));
         }
@@ -2247,6 +2389,16 @@ impl Component for Explorer {
 }
 
 impl Explorer {
+    // A sidebar menu borrows the selection for its target, so closing it without a command gives the selection back.
+    fn close_side_menu(&mut self) {
+        let side = self.menu.is_some_and(|(_, _, kind)| kind == MenuKind::Side);
+        self.close_menu();
+        if side {
+            self.selected.clear();
+            self.refresh_status();
+        }
+    }
+
     fn close_menu(&mut self) {
         if self.menu.take().is_some() {
             self.menu_closed_at = Some(std::time::Instant::now());
@@ -2338,7 +2490,8 @@ impl Explorer {
             commands.iter().find(|command| command.label == label)
         };
         match kind {
-            MenuKind::Item => ["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Compress to zip", "Extract here", "Copy path", "Share", "Add tags", "Add to favorites", "Remove from favorites", "Pin to sidebar", "Unpin from sidebar", "Terminal here", "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
+            MenuKind::Item => ["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Compress to zip", "Extract here", "Copy path", "Share", "Add tags", "Add to favorites", "Remove from favorites", "Pin to sidebar", "Unpin from sidebar", "Terminal here", "Open with…", "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
+            MenuKind::Side => ["Open in new tab", "Pin to sidebar", "Unpin from sidebar", "Add to favorites", "Remove from favorites", "Copy path", "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
             MenuKind::Background => ["Paste here", "Paste as shortcut", "Create folder", "Create file", "Terminal here", "Open in editor", "Select none"].iter().filter_map(|label| find(label)).collect(),
             MenuKind::New => NEW_LABELS.iter().filter_map(|label| find(label)).collect(),
             MenuKind::Sort => self.sort_labels().iter().filter_map(|label| find(label)).collect(),
@@ -2488,16 +2641,7 @@ impl Explorer {
                     self.update(message, context);
                 }
             }
-            keys::Key::SelectAll => {
-                let needle = self.filter.to_lowercase();
-                self.selected = self
-                    .entries
-                    .iter()
-                    .filter(|entry| self.matches(entry, &needle))
-                    .map(|entry| entry.path.clone())
-                    .collect();
-                self.refresh_status();
-            }
+            keys::Key::SelectAll => self.update(Message::SelectAll(true), context),
         }
     }
 
@@ -2540,6 +2684,7 @@ impl Explorer {
             self.list_width.to_bits(),
         )
             .hash(&mut hasher);
+        self.dragged.is_empty().hash(&mut hasher);
         // order-independent so HashSet iteration order cannot change the revision
         let selection = self
             .selected
@@ -2626,17 +2771,17 @@ impl Explorer {
                 return;
             }
         };
-        self.begin_transfer(paths, cut, tr("Pasting…"), context);
+        self.begin_transfer(paths, cut, self.path.clone(), tr("Pasting…"), context);
     }
 
     fn begin_transfer(
         &mut self,
         paths: Vec<PathBuf>,
         cut: bool,
+        destination: PathBuf,
         label: &str,
         context: &ComponentContext<Self>,
     ) {
-        let destination = self.path.clone();
         self.pending_undo = undo_for_transfer(&paths, &destination, cut);
         self.transferring = true;
         self.has_error = false;
@@ -2776,6 +2921,20 @@ impl Explorer {
 
     fn pane_hidden(&self) -> bool {
         self.hide_pane || self.window_width < AUTO_HIDE_PANE_BELOW
+    }
+
+    // Where a drop on the sidebar row `name` lands: inside a folder row's middle, otherwise as a pin at the nearer edge.
+    fn sidebar_drop(&self, name: &str, fraction: f64) -> SidebarDrop {
+        let edge = !(DROP_EDGE..=1.0 - DROP_EDGE).contains(&fraction);
+        if let Some(index) = self.pinned.iter().position(|path| file_label(path).as_deref() == Some(name)) {
+            return if edge || !self.pinned[index].is_dir() { SidebarDrop::Pin(index + usize::from(fraction >= 0.5)) } else { SidebarDrop::Into(self.pinned[index].clone()) };
+        }
+        let folder = self.places.iter().find(|(label, _)| label == name).map(|(_, path)| path)
+            .or_else(|| self.drives.iter().find(|drive| drive.label == name).map(|drive| &drive.path));
+        match folder {
+            Some(path) if !edge => SidebarDrop::Into(path.clone()),
+            _ => SidebarDrop::Pin(if fraction < 0.5 && self.pinned.is_empty() { 0 } else { self.pinned.len() }),
+        }
     }
 
     fn chrome_width(&self) -> f64 {
@@ -2963,11 +3122,17 @@ impl Explorer {
             previous.cancel();
         }
         self.searching = self.recursive;
+        let token = directory::next_watch_token();
         if self.recursive {
             let walk = directory::Walk::start(path);
             self.walk = Some(walk.clone());
             self.wait_for_batch(generation, requested_path, walk, context);
         } else {
+            let watched = path.clone();
+            let _watch = context.spawn_background(move |_| {
+                let changed = directory::wait_for_change(&watched, token);
+                Message::DirChanged(watched, changed)
+            });
             let _task = context.spawn_background(move |_| {
                 let result = directory::read(&path).map_err(|error| format!("{}: {error}", path.display()));
                 Message::Loaded(generation, requested_path, result)
@@ -3182,11 +3347,14 @@ impl Explorer {
         if self.deleting || self.transferring {
             return;
         }
+        if self.selected.len() > 1 {
+            self.rename_many(context);
+            return;
+        }
         let Some(source) = self
             .selected
             .iter()
             .next()
-            .filter(|_| self.selected.len() == 1)
             .cloned()
         else {
             self.status = tr("Select one item to rename").to_owned();
@@ -3224,6 +3392,34 @@ impl Explorer {
         });
     }
 
+    // Explorer style: "name (1).ext", "name (2).ext"… in list order; not undoable.
+    fn rename_many(&mut self, context: &ComponentContext<Self>) {
+        let stem = self.new_folder_name.trim().to_owned();
+        if !is_single_name(&stem) {
+            self.status = tr("Enter a single item name").to_owned();
+            self.has_error = true;
+            return;
+        }
+        let parent = self.path.clone();
+        let pairs: Vec<(PathBuf, PathBuf)> = self
+            .visible_entries()
+            .iter()
+            .filter(|entry| self.selected.contains(&entry.path))
+            .enumerate()
+            .map(|(index, entry)| {
+                let extension = if entry.is_directory { String::new() } else { entry.path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default() };
+                (entry.path.clone(), parent.join(format!("{stem} ({}){extension}", index + 1)))
+            })
+            .collect();
+        self.pending_undo = None;
+        self.status = tr("Renaming…").to_owned();
+        self.has_error = false;
+        let _task = context.spawn_background(move |_| {
+            let result = pairs.iter().try_for_each(|(from, to)| shell::rename(from, to));
+            Message::RenameComplete(parent, stem, result)
+        });
+    }
+
     fn create_folder(&mut self, context: &ComponentContext<Self>) {
         if self.deleting || self.transferring {
             return;
@@ -3242,7 +3438,7 @@ impl Explorer {
         self.status = tr("Creating folder…").to_owned();
         self.has_error = false;
         let _task = context.spawn_background(move |_| {
-            let result = fs::create_dir(folder).map_err(|error| error.to_string());
+            let result = shell::create_item(&folder, true);
             Message::FolderCreated(parent, name, result)
         });
     }
@@ -3282,6 +3478,15 @@ fn open_button(entry: &Entry, sender: &LocalSender<Message>, column: i32, conten
         .content(content)
 }
 
+enum SidebarDrop {
+    Into(PathBuf),
+    Pin(usize),
+}
+
+fn file_label(path: &Path) -> Option<String> {
+    path.file_name().map(|name| name.to_string_lossy().into_owned())
+}
+
 fn selection_background(is_selected: bool, theme: Option<&Theme>) -> Option<Brush> {
     if is_selected { theme.and_then(Theme::selection) } else { None }
 }
@@ -3308,19 +3513,16 @@ fn row(
         ));
     let check = select_box(entry, is_selected, hovered, sender, busy).grid_column(0);
     let button = open_button(entry, sender, 1, name);
-    let grid = Grid::new()
-        .width(width)
-        .background_optional(selection_background(is_selected, theme))
-        .column_spacing(COLUMN_GAP);
-    if compact {
-        return grid.columns([GridLength::Auto, GridLength::STAR]).children((check, button)).into();
-    }
-    grid.columns([
-        GridLength::Pixel(CHECK_WIDTH),
-        GridLength::STAR,
-        GridLength::Pixel(columns.size),
-        GridLength::Pixel(columns.modified + ROW_TRAILING),
-    ])
+    let grid = Grid::new().column_spacing(COLUMN_GAP);
+    let content: View = if compact {
+        grid.columns([GridLength::Auto, GridLength::STAR]).children((check, button)).into()
+    } else {
+        grid.columns([
+            GridLength::Pixel(CHECK_WIDTH),
+            GridLength::STAR,
+            GridLength::Pixel(columns.size),
+            GridLength::Pixel(columns.modified + ROW_TRAILING),
+        ])
         .children((
             check,
             button,
@@ -3334,6 +3536,15 @@ fn row(
                 .vertical_alignment(VerticalAlignment::Center)
                 .margin(Thickness::new(0.0, 0.0, ROW_TRAILING, 0.0)),
         ))
+        .into()
+    };
+    // a Grid has no corner radius, so the highlight lives on a rounded Border around it
+    Border::new()
+        .width(width)
+        .corner_radius(CornerRadius::uniform(CARD_RADIUS))
+        .padding(Thickness::new(ROW_INSET, 0.0, 0.0, 0.0))
+        .background_optional(selection_background(is_selected, theme))
+        .content(content)
         .into()
 }
 
@@ -3424,6 +3635,7 @@ const TOOL_LABELS: [&str; 7] = ["Cut", "Copy", "Copy path", "Paste here", "Renam
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MenuKind {
     Item,
+    Side,
     Background,
     New,
     Sort,

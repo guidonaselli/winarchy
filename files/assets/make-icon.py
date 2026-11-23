@@ -13,7 +13,7 @@ def render(source, size):
     stroke = 6.0 if size <= 24 else 4.5 if size <= 48 else 3.25
     values = {**VALUES, "--icon-stroke-width": str(stroke)}
     svg = re.sub(r"var\((--[\w-]+)[^)]*\)", lambda m: values[m.group(1)], source)
-    svg = svg.replace("currentColor", VALUES["--icon-stroke"]).replace("width=\"64\" height=\"64\"", f"width=\"{size}\" height=\"{size}\"")
+    svg = svg.replace("currentColor", VALUES["--icon-stroke"]).replace("width=\"64\" height=\"64\"", f"width=\"{size}\" height=\"{size}\"").replace("viewBox=\"0 0 64 64\"", "viewBox=\"10 7 48 48\"")
     return Image.open(io.BytesIO(bytes(resvg_py.svg_to_bytes(svg_string=svg)))).convert("RGBA")
 
 

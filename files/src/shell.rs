@@ -239,6 +239,43 @@ fn perform_transfer(
     }
 }
 
+// Creates a folder or an empty file; in a protected folder the shell operation asks for elevation, like Explorer does.
+#[cfg(windows)]
+pub fn create_item(path: &Path, directory: bool) -> Result<(), String> {
+    let created = if directory { std::fs::create_dir(path).map(|()| ()) } else { std::fs::File::create_new(path).map(|_| ()) };
+    match created {
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => new_item_elevated(path, directory).map_err(|_| error.to_string()),
+        other => other.map_err(|error| error.to_string()),
+    }
+}
+
+#[cfg(windows)]
+fn new_item_elevated(path: &Path, directory: bool) -> windows::core::Result<()> {
+    use windows::{
+        Win32::{
+            Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL},
+            System::Com::{CLSCTX_ALL, CoCreateInstance},
+            UI::Shell::{FileOperation, IFileOperation, IFileOperationProgressSink},
+        },
+        core::{HSTRING, IUnknown},
+    };
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else { return Err(windows::core::Error::empty()) };
+    let operation: IFileOperation = unsafe { CoCreateInstance(&FileOperation, None::<&IUnknown>, CLSCTX_ALL)? };
+    let attributes = if directory { FILE_ATTRIBUTE_DIRECTORY } else { FILE_ATTRIBUTE_NORMAL };
+    unsafe {
+        operation.NewItem(&shell_item(parent)?, attributes.0, &HSTRING::from(name), None, None::<&IFileOperationProgressSink>)?;
+        operation.PerformOperations()?;
+        if operation.GetAnyOperationsAborted()?.as_bool() { return Err(windows::core::Error::empty()) }
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn create_item(path: &Path, directory: bool) -> Result<(), String> {
+    let created = if directory { std::fs::create_dir(path) } else { std::fs::File::create_new(path).map(|_| ()) };
+    created.map_err(|error| error.to_string())
+}
+
 #[cfg(windows)]
 fn shell_item(path: &Path) -> windows::core::Result<windows::Win32::UI::Shell::IShellItem> {
     use std::os::windows::ffi::OsStrExt;
@@ -419,15 +456,36 @@ const ICON_SIZES: [usize; 4] = [16, 24, 32, 48];
 const ICON_OPACITY: [f32; 3] = [0.55, 0.45, 1.0];
 const DEFAULT_ICON_COLORS: [[u8; 3]; 3] = [[0xe6, 0xd9, 0xdb], [0xf3, 0x8d, 0x70], [0x2c, 0x25, 0x25]];
 
-// BGRA pixels of the icon: back folder, accent panel and front outline tinted and stacked.
+// The baked 48px layers carry about a fifth of padding per side; this crop (origin and side) trims it so the icon fills its slot like its neighbours.
+const ICON_CROP: (f32, f32, f32) = (8.0, 6.0, 36.0);
+const ICON_SOURCE: usize = 48;
+const ICON_SUPERSAMPLE: usize = 3;
+
+// BGRA pixels of the icon: back folder, accent panel and front outline tinted and stacked, cropped from the largest bake and box-filtered to `size`.
 fn icon_pixels(size: usize, tints: [[u8; 3]; 3]) -> Vec<u8> {
-    let area = size * size;
-    let start: usize = ICON_SIZES.iter().take_while(|&&candidate| candidate != size).map(|candidate| 3 * candidate * candidate).sum();
-    let mut pixels = vec![0u8; area * 4];
-    for pixel in 0..area {
+    let source_area = ICON_SOURCE * ICON_SOURCE;
+    let start: usize = ICON_SIZES.iter().take_while(|&&candidate| candidate != ICON_SOURCE).map(|candidate| 3 * candidate * candidate).sum();
+    let (origin_x, origin_y, side) = ICON_CROP;
+    let step = side / (size * ICON_SUPERSAMPLE) as f32;
+    let sample = |layer: usize, x: f32, y: f32| {
+        let column = (x as usize).min(ICON_SOURCE - 1);
+        let row = (y as usize).min(ICON_SOURCE - 1);
+        f32::from(ICON_LAYERS[start + layer * source_area + row * ICON_SOURCE + column]) / 255.0
+    };
+    let mut pixels = vec![0u8; size * size * 4];
+    for pixel in 0..size * size {
+        let (column, row) = (pixel % size, pixel / size);
         let (mut color, mut alpha) = ([0f32; 3], 0f32);
         for (layer, tint) in tints.iter().enumerate() {
-            let coverage = f32::from(ICON_LAYERS[start + layer * area + pixel]) / 255.0 * ICON_OPACITY[layer];
+            let mut sum = 0f32;
+            for dy in 0..ICON_SUPERSAMPLE {
+                for dx in 0..ICON_SUPERSAMPLE {
+                    let x = origin_x + ((column * ICON_SUPERSAMPLE + dx) as f32 + 0.5) * step;
+                    let y = origin_y + ((row * ICON_SUPERSAMPLE + dy) as f32 + 0.5) * step;
+                    sum += sample(layer, x, y);
+                }
+            }
+            let coverage = sum / (ICON_SUPERSAMPLE * ICON_SUPERSAMPLE) as f32 * ICON_OPACITY[layer];
             let out = coverage + alpha * (1.0 - coverage);
             if out > 0.0 {
                 for channel in 0..3 {
@@ -590,73 +648,6 @@ pub fn native_menu(_paths: &[PathBuf]) -> Result<bool, String> {
     Err("not supported on this platform".to_owned())
 }
 
-// Starts an OS drag of `paths` with the shell's own data object, so Explorer and other apps receive real files; blocks until the drop ends.
-#[cfg(windows)]
-pub fn drag_out(paths: &[PathBuf]) -> Result<(), String> {
-    use windows::{
-        Win32::{
-            Foundation::{DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, S_OK},
-            System::{
-                Com::CoTaskMemFree,
-                Ole::{DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_LINK, DROPEFFECT_MOVE, IDropSource, IDropSource_Impl, OleInitialize},
-                SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS},
-            },
-            UI::{
-                Shell::{SHCreateDataObject, SHDoDragDrop, SHParseDisplayName},
-                WindowsAndMessaging::GetForegroundWindow,
-            },
-        },
-        core::{BOOL, HRESULT, PCWSTR, implement},
-    };
-
-    #[implement(IDropSource)]
-    struct Source;
-
-    impl IDropSource_Impl for Source_Impl {
-        fn QueryContinueDrag(&self, escape: BOOL, state: MODIFIERKEYS_FLAGS) -> HRESULT {
-            if escape.as_bool() {
-                DRAGDROP_S_CANCEL
-            } else if state.0 & MK_LBUTTON.0 == 0 {
-                DRAGDROP_S_DROP
-            } else {
-                S_OK
-            }
-        }
-
-        fn GiveFeedback(&self, _effect: DROPEFFECT) -> HRESULT {
-            DRAGDROP_S_USEDEFAULTCURSORS
-        }
-    }
-
-    if paths.is_empty() {
-        return Ok(());
-    }
-    unsafe {
-        let _ = OleInitialize(None);
-        let mut identifiers: Vec<*const windows::Win32::UI::Shell::Common::ITEMIDLIST> = Vec::new();
-        for path in paths {
-            let wide: Vec<u16> = path.as_os_str().to_string_lossy().encode_utf16().chain(Some(0)).collect();
-            let mut identifier = std::ptr::null_mut();
-            SHParseDisplayName(PCWSTR(wide.as_ptr()), None, &mut identifier, 0, None).map_err(|error| error.to_string())?;
-            identifiers.push(identifier as *const _);
-        }
-        let data = SHCreateDataObject(None, Some(&identifiers), None);
-        let source: IDropSource = Source.into();
-        let outcome = data.and_then(|data: windows::Win32::System::Com::IDataObject| {
-            SHDoDragDrop(Some(GetForegroundWindow()), &data, &source, DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK).map(|_| ())
-        });
-        for identifier in identifiers {
-            CoTaskMemFree(Some(identifier.cast()));
-        }
-        outcome.map_err(|error| error.to_string())
-    }
-}
-
-#[cfg(not(windows))]
-pub fn drag_out(_paths: &[PathBuf]) -> Result<(), String> {
-    Err("not supported on this platform".to_owned())
-}
-
 // Ejects a removable drive the way Explorer does: through the drive's own shell "eject" verb.
 #[cfg(windows)]
 pub fn eject(path: &Path) -> Result<(), String> {
@@ -694,4 +685,299 @@ pub fn eject(path: &Path) -> Result<(), String> {
 #[cfg(not(windows))]
 pub fn eject(_path: &Path) -> Result<(), String> {
     Err("not supported on this platform".to_owned())
+}
+
+// A small click-through pill that follows the pointer while something is dragged, so the object seems to travel with it.
+#[cfg(windows)]
+struct Ghost {
+    window: windows::Win32::Foundation::HWND,
+    bitmap: windows::Win32::Graphics::Gdi::HBITMAP,
+    context: windows::Win32::Graphics::Gdi::HDC,
+}
+
+#[cfg(windows)]
+impl Ghost {
+    const OPACITY: u8 = 225;
+    const PADDING: i32 = 10;
+    const OFFSET: i32 = 14;
+
+    fn new(label: &str, foreground: [u8; 3], fill: [u8; 3]) -> Option<Self> {
+        use windows::{
+            Win32::{
+                Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM},
+                Graphics::Gdi::{
+                    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection, CreateFontW, CreateRoundRectRgn, DIB_RGB_COLORS, DT_NOPREFIX,
+                    DT_SINGLELINE, DT_VCENTER, DrawTextW, GetDC, GetTextExtentPoint32W, ReleaseDC, SelectObject, SetBkMode, SetWindowRgn, SetTextColor, TRANSPARENT,
+                },
+                System::LibraryLoader::GetModuleHandleW,
+                UI::{
+                    HiDpi::GetDpiForSystem,
+                    WindowsAndMessaging::{
+                        CreateWindowExW, DefWindowProcW, RegisterClassW, ULW_ALPHA, UpdateLayeredWindow, WNDCLASSW,
+                        WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+                    },
+                },
+            },
+            core::w,
+        };
+        use windows::Win32::Graphics::Gdi::BLENDFUNCTION;
+
+        unsafe extern "system" fn procedure(window: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+            unsafe { DefWindowProcW(window, message, w, l) }
+        }
+
+        unsafe {
+            let instance = GetModuleHandleW(None).ok()?;
+            let class = WNDCLASSW { lpfnWndProc: Some(procedure), hInstance: instance.into(), lpszClassName: w!("WinarchyDragGhost"), ..Default::default() };
+            RegisterClassW(&class);
+            let scale = GetDpiForSystem() as i32;
+            let screen = GetDC(None);
+            let context = CreateCompatibleDC(Some(screen));
+            let font = CreateFontW(-(15 * scale / 96), 0, 0, 0, 600, 0, 0, 0, Default::default(), Default::default(), Default::default(), Default::default(), 0, w!("Segoe UI Variable Text"));
+            let previous = SelectObject(context, font.into());
+            let text: Vec<u16> = label.encode_utf16().collect();
+            let mut extent = SIZE::default();
+            let _ = GetTextExtentPoint32W(context, &text, &mut extent);
+            let padding = Self::PADDING * scale / 96;
+            let (width, height) = (extent.cx + 2 * padding, extent.cy + padding);
+            let info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: width, biHeight: -height, biPlanes: 1, biBitCount: 32, biCompression: BI_RGB.0, ..Default::default() },
+                ..Default::default()
+            };
+            let mut bits = std::ptr::null_mut();
+            let bitmap = CreateDIBSection(Some(context), &info, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
+            SelectObject(context, bitmap.into());
+            let pixels = std::slice::from_raw_parts_mut(bits as *mut u8, (width * height * 4) as usize);
+            for pixel in pixels.chunks_exact_mut(4) {
+                pixel.copy_from_slice(&[fill[2], fill[1], fill[0], 255]);
+            }
+            SelectObject(context, font.into());
+            SetBkMode(context, TRANSPARENT);
+            SetTextColor(context, COLORREF(u32::from(foreground[0]) | u32::from(foreground[1]) << 8 | u32::from(foreground[2]) << 16));
+            let mut rect = windows::Win32::Foundation::RECT { left: 0, top: 0, right: width, bottom: height };
+            let mut line = text.clone();
+            DrawTextW(context, &mut line, &mut rect, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | windows::Win32::Graphics::Gdi::DT_CENTER);
+            SelectObject(context, previous);
+            let window = CreateWindowExW(
+                WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+                w!("WinarchyDragGhost"), None, WS_POPUP, 0, 0, width, height, None, None, Some(instance.into()), None,
+            ).ok()?;
+            let radius = height;
+            SetWindowRgn(window, Some(CreateRoundRectRgn(0, 0, width + 1, height + 1, radius, radius)), false);
+            let blend = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: Self::OPACITY, AlphaFormat: 0 };
+            let (origin, size) = (POINT::default(), SIZE { cx: width, cy: height });
+            let _ = UpdateLayeredWindow(window, Some(screen), None, Some(&size), Some(context), Some(&origin), COLORREF(0), Some(&blend), ULW_ALPHA);
+            ReleaseDC(None, screen);
+            Some(Self { window, bitmap, context })
+        }
+    }
+
+    fn follow(&self, x: i32, y: i32) {
+        use windows::Win32::UI::WindowsAndMessaging::{HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOSIZE, SWP_SHOWWINDOW, SetWindowPos};
+        let offset = Self::OFFSET;
+        let _ = unsafe { SetWindowPos(self.window, Some(HWND_TOPMOST), x + offset, y + offset, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW) };
+    }
+}
+
+#[cfg(windows)]
+impl Drop for Ghost {
+    fn drop(&mut self) {
+        use windows::Win32::Graphics::Gdi::{DeleteDC, DeleteObject};
+        unsafe {
+            let _ = windows::Win32::UI::WindowsAndMessaging::DestroyWindow(self.window);
+            let _ = DeleteObject(self.bitmap.into());
+            let _ = DeleteDC(self.context);
+        }
+    }
+}
+
+// Blocks while the left button is held; true once the pointer leaves the system drag rectangle, false if it is released first.
+#[cfg(windows)]
+pub fn drag_started() -> bool {
+    use windows::Win32::{
+        Foundation::POINT,
+        UI::{
+            Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON},
+            WindowsAndMessaging::{GetCursorPos, GetSystemMetrics, SM_CXDRAG, SM_CYDRAG},
+        },
+    };
+    unsafe {
+        let mut start = POINT::default();
+        let _ = GetCursorPos(&mut start);
+        let (limit_x, limit_y) = (GetSystemMetrics(SM_CXDRAG), GetSystemMetrics(SM_CYDRAG));
+        while GetAsyncKeyState(VK_LBUTTON.0 as i32) < 0 {
+            let mut now = POINT::default();
+            let _ = GetCursorPos(&mut now);
+            if (now.x - start.x).abs() >= limit_x || (now.y - start.y).abs() >= limit_y {
+                return true;
+            }
+            std::thread::sleep(crate::style::DRAG_POLL);
+        }
+        false
+    }
+}
+
+// Shows the hand cursor and a label that follows the pointer until the left button is released; returns where it was released.
+#[cfg(windows)]
+pub fn follow_drag(label: &str, colors: Option<[[u8; 3]; 3]>) -> (i32, i32) {
+    use windows::Win32::{
+        Foundation::POINT,
+        UI::{
+            Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON},
+            WindowsAndMessaging::{
+                CopyIcon, DispatchMessageW, GetCursorPos, HCURSOR, HICON, IDC_HAND, LoadCursorW, MSG, OCR_NORMAL, PM_REMOVE, PeekMessageW, SPI_SETCURSORS,
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetSystemCursor, SystemParametersInfoW,
+            },
+        },
+    };
+    let [_, accent, background] = colors.unwrap_or(DEFAULT_ICON_COLORS);
+    let ghost = Ghost::new(label, background, accent);
+    let mut point = POINT::default();
+    unsafe {
+        // the system arrow becomes the hand while dragging; the user's cursor scheme is reloaded on release
+        if let Ok(hand) = LoadCursorW(None, IDC_HAND).and_then(|cursor| CopyIcon(HICON(cursor.0))) {
+            let _ = SetSystemCursor(HCURSOR(hand.0), OCR_NORMAL);
+        }
+        while GetAsyncKeyState(VK_LBUTTON.0 as i32) < 0 {
+            let _ = GetCursorPos(&mut point);
+            if let Some(ghost) = &ghost {
+                ghost.follow(point.x, point.y);
+            }
+            // the ghost window belongs to this thread, so its messages must keep flowing
+            let mut message = MSG::default();
+            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = DispatchMessageW(&message);
+            }
+            std::thread::sleep(crate::style::DRAG_POLL);
+        }
+        let _ = SystemParametersInfoW(SPI_SETCURSORS, 0, None, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
+        let _ = GetCursorPos(&mut point);
+    }
+    (point.x, point.y)
+}
+
+#[cfg(not(windows))]
+pub fn drag_started() -> bool {
+    false
+}
+
+#[cfg(not(windows))]
+pub fn follow_drag(_label: &str, _colors: Option<[[u8; 3]; 3]>) -> (i32, i32) {
+    (0, 0)
+}
+
+// Starts a real XAML drag of `paths` from the element the latest pointer event came from, so other apps can receive the files.
+#[cfg(windows)]
+pub fn xaml_drag(paths: &[PathBuf]) -> Result<(), String> {
+    use crate::xaml_drag::{DragStartingEventArgs, PointerRoutedEventArgs, UIElement};
+    use windows::{
+        ApplicationModel::DataTransfer::DataPackageOperation,
+        Foundation::TypedEventHandler,
+        Storage::{IStorageItem, StorageFile, StorageFolder},
+        core::{HSTRING, IUnknown, Interface},
+    };
+    use windows_collections::IIterable;
+
+    let failed = |error: windows::core::Error| error.message();
+    let (element, arguments) = windows_reactor::take_last_pointer().ok_or("no pointer press to drag from")?;
+    let (element, arguments) = unsafe { (IUnknown::from_raw(element), IUnknown::from_raw(arguments)) };
+    let element: UIElement = element.cast().map_err(failed)?;
+    let arguments: PointerRoutedEventArgs = arguments.cast().map_err(failed)?;
+    let point = arguments.GetCurrentPoint(&element).map_err(failed)?;
+    let paths = paths.to_vec();
+    element
+        .DragStarting(&TypedEventHandler::new(move |_, arguments: windows::core::Ref<DragStartingEventArgs>| {
+            if let Some(arguments) = arguments.as_ref() {
+                arguments.SetAllowedOperations(DataPackageOperation::Copy | DataPackageOperation::Move | DataPackageOperation::Link)?;
+                let mut items = Vec::new();
+                for path in &paths {
+                    let name = HSTRING::from(path.to_string_lossy().as_ref());
+                    items.push(Some(if path.is_dir() {
+                        StorageFolder::GetFolderFromPathAsync(&name)?.join()?.cast::<IStorageItem>()?
+                    } else {
+                        StorageFile::GetFileFromPathAsync(&name)?.join()?.cast::<IStorageItem>()?
+                    }));
+                }
+                arguments.Data()?.SetStorageItems(&IIterable::<IStorageItem>::from(items), true)?;
+            }
+            Ok(())
+        }))
+        .map_err(failed)?;
+    element.StartDragAsync(&point).map_err(failed)?;
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn xaml_drag(_paths: &[PathBuf]) -> Result<(), String> {
+    Err("not supported on this platform".to_owned())
+}
+
+// The caption buttons of the extended title bar keep the system colours unless told otherwise; tints them with the theme. False until the title bar exists.
+pub fn style_caption_buttons(colors: [[u8; 3]; 3]) -> bool {
+    #[cfg(windows)]
+    return windows_reactor::style_caption_buttons(colors[0]);
+    #[cfg(not(windows))]
+    return true;
+}
+
+// Expands %VARS% and resolves `shell:` names to a folder path; anything else is taken as typed.
+// shortcut: `shell:` locations that are not file system folders (Recycle Bin, This PC) fall back to the typed text.
+#[cfg(windows)]
+pub fn resolve_address(text: &str) -> PathBuf {
+    use windows::{
+        Win32::{
+            Foundation::MAX_PATH,
+            System::Com::CoTaskMemFree,
+            UI::Shell::{Common::ITEMIDLIST, SHGetPathFromIDListW, SHParseDisplayName},
+        },
+        core::HSTRING,
+    };
+    let expanded = expand_variables(text.trim());
+    if expanded.len() > 6 && expanded[..6].eq_ignore_ascii_case("shell:") {
+        unsafe {
+            let mut list: *mut ITEMIDLIST = std::ptr::null_mut();
+            if SHParseDisplayName(&HSTRING::from(expanded.as_str()), None, &mut list, 0, None).is_ok() {
+                let mut buffer = [0u16; MAX_PATH as usize];
+                let found = SHGetPathFromIDListW(list, &mut buffer).as_bool();
+                CoTaskMemFree(Some(list.cast()));
+                if found {
+                    return PathBuf::from(String::from_utf16_lossy(&buffer[..buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len())]));
+                }
+            }
+        }
+    }
+    PathBuf::from(expanded)
+}
+
+#[cfg(windows)]
+fn expand_variables(text: &str) -> String {
+    use windows::{Win32::System::Environment::ExpandEnvironmentStringsW, core::HSTRING};
+    let source = HSTRING::from(text);
+    let needed = unsafe { ExpandEnvironmentStringsW(&source, None) } as usize;
+    if needed == 0 {
+        return text.to_owned();
+    }
+    let mut buffer = vec![0u16; needed];
+    let written = unsafe { ExpandEnvironmentStringsW(&source, Some(&mut buffer)) } as usize;
+    String::from_utf16_lossy(&buffer[..written.saturating_sub(1)])
+}
+
+#[cfg(not(windows))]
+pub fn resolve_address(text: &str) -> PathBuf {
+    PathBuf::from(text)
+}
+
+
+#[cfg(all(test, windows))]
+mod address_tests {
+    use super::resolve_address;
+
+    #[test]
+    fn expands_variables_and_known_folders() {
+        unsafe { let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED); }
+        let root = std::env::var("SystemRoot").unwrap();
+        assert_eq!(resolve_address(r"%SystemRoot%\System32"), std::path::PathBuf::from(format!(r"{root}\System32")));
+        assert!(resolve_address("shell:Downloads").ends_with("Downloads"));
+        assert_eq!(resolve_address(r"C:\Temp"), std::path::PathBuf::from(r"C:\Temp"));
+    }
 }

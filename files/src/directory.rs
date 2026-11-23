@@ -5,12 +5,59 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Condvar, Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
 
 const HIDDEN_OR_SYSTEM: u32 = 0x2 | 0x4;
+
+static WATCH_TOKEN: AtomicU64 = AtomicU64::new(0);
+
+// Retires every running watcher and returns the token for the next one.
+pub fn next_watch_token() -> u64 {
+    WATCH_TOKEN.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+// Blocks until something in `path` changes, then waits for the burst to settle; false when superseded or unwatchable.
+// shortcut: shares of network drives may not report changes, F5 still refreshes them.
+pub fn wait_for_change(path: &std::path::Path, token: u64) -> bool {
+    use windows::{
+        Win32::{
+            Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT},
+            Storage::FileSystem::{FILE_NOTIFY_CHANGE_ATTRIBUTES, FILE_NOTIFY_CHANGE_DIR_NAME, FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_SIZE, FindCloseChangeNotification, FindFirstChangeNotificationW, FindNextChangeNotification},
+            System::Threading::WaitForSingleObject,
+        },
+        core::HSTRING,
+    };
+    const FILTER: windows::Win32::Storage::FileSystem::FILE_NOTIFY_CHANGE =
+        windows::Win32::Storage::FileSystem::FILE_NOTIFY_CHANGE(FILE_NOTIFY_CHANGE_FILE_NAME.0 | FILE_NOTIFY_CHANGE_DIR_NAME.0 | FILE_NOTIFY_CHANGE_ATTRIBUTES.0 | FILE_NOTIFY_CHANGE_SIZE.0 | FILE_NOTIFY_CHANGE_LAST_WRITE.0);
+    const SETTLE_MS: u32 = 250;
+    let Ok(handle) = (unsafe { FindFirstChangeNotificationW(&HSTRING::from(path.as_os_str()), false, FILTER) }) else { return false };
+    let mut changed = false;
+    loop {
+        if WATCH_TOKEN.load(Ordering::SeqCst) != token {
+            break;
+        }
+        let wait = if changed { SETTLE_MS } else { 500 };
+        match unsafe { WaitForSingleObject(handle, wait) } {
+            WAIT_OBJECT_0 => {
+                changed = true;
+                if unsafe { FindNextChangeNotification(handle) }.is_err() {
+                    break;
+                }
+            }
+            WAIT_TIMEOUT if changed => break,
+            WAIT_TIMEOUT => {}
+            _ => {
+                changed = false;
+                break;
+            }
+        }
+    }
+    let _ = unsafe { FindCloseChangeNotification(handle) };
+    changed && WATCH_TOKEN.load(Ordering::SeqCst) == token
+}
 
 #[derive(Clone)]
 pub struct Entry {
@@ -296,13 +343,20 @@ pub fn format_attributes(attributes: u32) -> String {
     if names.is_empty() { tr("None").to_owned() } else { names.join(", ") }
 }
 
+// OFFLINE | RECALL_ON_OPEN | RECALL_ON_DATA_ACCESS: reading such a file makes the cloud provider download it.
+const CLOUD_ONLY: u32 = 0x1000 | 0x40000 | 0x400000;
+
+pub fn is_cloud_only(entry: &Entry) -> bool {
+    entry.attributes & CLOUD_ONLY != 0
+}
+
 const PREVIEW_BYTES: u64 = 2048;
 const PREVIEW_LINES: usize = 6;
 
 // None for folders, empty files and anything that is not valid UTF-8 text without NUL bytes.
 pub fn preview(entry: &Entry) -> Option<String> {
     use std::io::Read;
-    if entry.is_directory || entry.size == 0 {
+    if entry.is_directory || entry.size == 0 || is_cloud_only(entry) {
         return None;
     }
     let mut buffer = Vec::new();
@@ -322,13 +376,14 @@ pub fn preview(entry: &Entry) -> Option<String> {
 
 pub fn is_image(entry: &Entry) -> bool {
     !entry.is_directory
+        && !is_cloud_only(entry)
         && entry.path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| {
             ["png", "jpg", "jpeg", "gif", "bmp", "webp", "ico"].contains(&ext.to_lowercase().as_str())
         })
 }
 
 pub fn is_pdf(entry: &Entry) -> bool {
-    !entry.is_directory && entry.path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
+    !entry.is_directory && !is_cloud_only(entry) && entry.path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
 }
 
 pub fn icon(entry: &Entry) -> crate::icons::Icon {

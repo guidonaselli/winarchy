@@ -4,7 +4,7 @@ use windows::Win32::{
     Foundation::{LPARAM, LRESULT, WPARAM},
     System::{
         Com::{CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx},
-        Threading::GetCurrentThreadId,
+        Threading::{GetCurrentProcessId, GetCurrentThreadId},
     },
     UI::{
         Accessibility::{
@@ -12,8 +12,8 @@ use windows::Win32::{
             UIA_GroupControlTypeId, UIA_ListControlTypeId, UIA_ListItemControlTypeId, UIA_MenuControlTypeId,
             UIA_MenuItemControlTypeId, UIA_PaneControlTypeId, UIA_WindowControlTypeId, UIA_CONTROLTYPE_ID,
         },
-        Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT},
-        WindowsAndMessaging::{CallNextHookEx, HC_ACTION, MOUSEHOOKSTRUCTEX, SetWindowsHookExW, WH_KEYBOARD, WH_MOUSE},
+        Input::KeyboardAndMouse::{GetAsyncKeyState, GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT, VK_XBUTTON1, VK_XBUTTON2},
+        WindowsAndMessaging::{CallNextHookEx, GetForegroundWindow, GetWindowThreadProcessId, HC_ACTION, SetWindowsHookExW, WH_KEYBOARD},
     },
 };
 use windows_reactor::CancellationToken;
@@ -71,6 +71,10 @@ pub fn set_menu_open(open: bool) {
     MENU_OPEN.store(open, Ordering::Relaxed);
 }
 
+pub fn ctrl_down() -> bool {
+    (unsafe { GetKeyState(VK_CONTROL.0 as i32) }) < 0
+}
+
 pub fn shift_down() -> bool {
     (unsafe { GetKeyState(VK_SHIFT.0 as i32) }) < 0
 }
@@ -84,8 +88,7 @@ pub fn install() -> Result<Receiver, String> {
         .map_err(|_| "keyboard hook already installed".to_owned())?;
     unsafe { SetWindowsHookExW(WH_KEYBOARD, Some(hook), None, GetCurrentThreadId()) }
         .map_err(|error| error.to_string())?;
-    unsafe { SetWindowsHookExW(WH_MOUSE, Some(mouse_hook), None, GetCurrentThreadId()) }
-        .map_err(|error| error.to_string())?;
+    std::thread::spawn(poll_side_buttons);
     Ok(Arc::new(Mutex::new(receiver)))
 }
 
@@ -103,21 +106,24 @@ unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRE
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
-const WM_XBUTTONUP: usize = 0x020C;
-
-unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if code == HC_ACTION as i32 && wparam.0 == WM_XBUTTONUP {
-        let data = unsafe { &*(lparam.0 as *const MOUSEHOOKSTRUCTEX) };
-        let key = match data.mouseData >> 16 {
-            1 => Some(Key::Back),
-            2 => Some(Key::Forward),
-            _ => None,
+// WinUI runs in pointer-input mode, which stops the legacy mouse messages a mouse hook relies on, so the side buttons are polled.
+fn poll_side_buttons() {
+    let mut was_down = [false; 2];
+    loop {
+        std::thread::sleep(Duration::from_millis(15));
+        let ours = unsafe {
+            let mut process = 0;
+            GetWindowThreadProcessId(GetForegroundWindow(), Some(&mut process));
+            process == GetCurrentProcessId()
         };
-        if let (Some(key), Some(sender)) = (key, SENDER.get()) {
-            let _ = sender.send(key);
+        for (index, (button, key)) in [(VK_XBUTTON1, Key::Back), (VK_XBUTTON2, Key::Forward)].into_iter().enumerate() {
+            let down = unsafe { GetAsyncKeyState(button.0 as i32) } < 0;
+            if down && !was_down[index] && ours && let Some(sender) = SENDER.get() {
+                let _ = sender.send(key);
+            }
+            was_down[index] = down;
         }
     }
-    unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
 fn map_key(virtual_key: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Key> {
