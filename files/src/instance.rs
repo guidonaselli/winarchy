@@ -1,8 +1,20 @@
 use std::path::PathBuf;
 
-const PIPE: &str = r"\\.\pipe\winarchy-files";
+const PIPE_PREFIX: &str = r"\\.\pipe\winarchy-files-";
 const MUTEX: &str = r"Local\winarchy-files-instance";
 const CONNECT_ATTEMPTS: u32 = 20;
+
+// One pipe per user, so another account on the machine can neither receive nor block this one's launches.
+fn pipe_name() -> String {
+    format!("{PIPE_PREFIX}{}", std::env::var("USERNAME").unwrap_or_default())
+}
+
+#[derive(Clone)]
+pub enum Request {
+    Failed,
+    Focus,
+    Open(PathBuf),
+}
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(Some(0)).collect()
@@ -29,7 +41,7 @@ pub fn claim(target: Option<&std::path::Path>) -> bool {
             return true;
         }
         let text = target.map(|path| path.to_string_lossy().into_owned()).unwrap_or_default();
-        let name = wide(PIPE);
+        let name = wide(&pipe_name());
         for _ in 0..CONNECT_ATTEMPTS {
             if let Ok(pipe) = CreateFileW(PCWSTR(name.as_ptr()), GENERIC_WRITE.0, FILE_SHARE_NONE, None, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, None) {
                 let sent = WriteFile(pipe, Some(text.as_bytes()), None, None).is_ok();
@@ -52,19 +64,19 @@ pub fn claim(_target: Option<&std::path::Path>) -> bool {
 
 // Blocks until another launch forwards a request; `None` is a plain "bring the window forward".
 #[cfg(windows)]
-pub fn receive() -> Option<PathBuf> {
+pub fn receive() -> Request {
     use windows::{
         Win32::{
             Foundation::CloseHandle,
-            Storage::FileSystem::{FILE_FLAGS_AND_ATTRIBUTES, PIPE_ACCESS_INBOUND, ReadFile},
+            Storage::FileSystem::{FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAGS_AND_ATTRIBUTES, PIPE_ACCESS_INBOUND, ReadFile},
             System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT},
         },
         core::PCWSTR,
     };
     unsafe {
         let pipe = CreateNamedPipeW(
-            PCWSTR(wide(PIPE).as_ptr()),
-            FILE_FLAGS_AND_ATTRIBUTES(PIPE_ACCESS_INBOUND.0),
+            PCWSTR(wide(&pipe_name()).as_ptr()),
+            FILE_FLAGS_AND_ATTRIBUTES(PIPE_ACCESS_INBOUND.0 | FILE_FLAG_FIRST_PIPE_INSTANCE.0),
             PIPE_TYPE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
             1,
             0,
@@ -73,24 +85,28 @@ pub fn receive() -> Option<PathBuf> {
             None,
         );
         if pipe.is_invalid() {
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            return None;
+            return Request::Failed;
         }
         let _ = ConnectNamedPipe(pipe, None);
-        let mut buffer = vec![0u8; 4096];
-        let mut read = 0u32;
-        let _ = ReadFile(pipe, Some(&mut buffer), Some(&mut read), None);
+        let mut received = Vec::new();
+        let mut chunk = vec![0u8; 4096];
+        loop {
+            let mut read = 0u32;
+            if ReadFile(pipe, Some(&mut chunk), Some(&mut read), None).is_err() || read == 0 {
+                break;
+            }
+            received.extend_from_slice(&chunk[..read as usize]);
+        }
         let _ = DisconnectNamedPipe(pipe);
         let _ = CloseHandle(pipe);
-        let text = String::from_utf8_lossy(&buffer[..read as usize]).into_owned();
-        (!text.is_empty()).then(|| PathBuf::from(text))
+        let text = String::from_utf8_lossy(&received).into_owned();
+        if text.is_empty() { Request::Focus } else { Request::Open(PathBuf::from(text)) }
     }
 }
 
 #[cfg(not(windows))]
-pub fn receive() -> Option<PathBuf> {
-    std::thread::sleep(std::time::Duration::from_secs(3600));
-    None
+pub fn receive() -> Request {
+    Request::Failed
 }
 
 // Raises this process's window above the others, as a launch from Explorer or a shortcut would.

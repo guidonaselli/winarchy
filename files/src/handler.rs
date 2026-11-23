@@ -117,8 +117,9 @@ fn register_at(classes: &str, backup: &str, exe: &std::path::Path) -> Result<(),
         let saved = format!(r"{backup}\{class}");
         // a second registration must not replace the saved original with our own entries
         if registry::get(&saved, "shell").is_none() {
-            registry::set(&saved, "shell", &registry::get(&shell, "").unwrap_or_else(|| ABSENT.to_owned()))?;
+            // `shell` goes last: its presence marks a complete backup
             registry::set(&saved, "command", &registry::get(&command, "").unwrap_or_else(|| ABSENT.to_owned()))?;
+            registry::set(&saved, "shell", &registry::get(&shell, "").unwrap_or_else(|| ABSENT.to_owned()))?;
         }
         registry::set(&shell, "", "open")?;
         registry::set(&command, "", &command_line(exe))?;

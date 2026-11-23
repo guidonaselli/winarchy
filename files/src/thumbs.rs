@@ -35,7 +35,7 @@ pub fn ensure(job: &Job) -> Option<PathBuf> {
     let (width, height, rgba) = render(path)?;
     std::fs::create_dir_all(file.parent()?).ok()?;
     // written under a temporary name so a reader never sees half a file
-    let partial = file.with_extension("tmp");
+    let partial = file.with_extension(format!("{:?}.tmp", std::thread::current().id()));
     std::fs::write(&partial, png(width, height, &rgba)).ok()?;
     std::fs::rename(&partial, &file).ok()?;
     Some(file)

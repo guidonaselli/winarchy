@@ -214,6 +214,8 @@ impl Explorer {
         let (some, one) = (!self.selected.is_empty(), self.selected.len() == 1);
         let idle = !self.deleting && !self.transferring;
         let in_folder = idle && self.view == Place::Folder;
+        // Recycle Bin rows are the shell's `$R…` files: only Restore and Delete permanently are safe on them
+        let editable = some && self.view != Place::RecycleBin;
         let command = |label: &str, message: Message, icon: Option<icons::Icon>, enabled: bool| Command {
             label: tr_dynamic(label),
             message: Some(message),
@@ -225,29 +227,29 @@ impl Explorer {
             command("Create folder", Message::Ask(Prompt::NewFolder), Some(icons::Icon::FolderPlus), in_folder),
             command("Create file", Message::Ask(Prompt::NewFile), Some(icons::Icon::FilePlus), in_folder),
             separator(),
-            command("Cut", Message::Clip(true), Some(icons::Icon::Scissors), some),
+            command("Cut", Message::Clip(true), Some(icons::Icon::Scissors),editable),
             command("Copy", Message::Clip(false), Some(icons::Icon::Copy), some),
             command("Paste here", Message::Paste, Some(icons::Icon::ClipboardText), clipboard::has_files() && in_folder),
             separator(),
-            command("Rename selected", Message::Ask(Prompt::Rename), Some(icons::Icon::PencilSimple), some && idle),
-            command("Copy to…", Message::Ask(Prompt::CopyTo), Some(icons::Icon::Copy), some && idle),
-            command("Move to…", Message::Ask(Prompt::MoveTo), Some(icons::Icon::Scissors), some && idle),
-            command("Delete to Recycle Bin", Message::DeleteSelected, Some(icons::Icon::Trash), some && idle),
+            command("Rename selected", Message::Ask(Prompt::Rename), Some(icons::Icon::PencilSimple), editable && idle),
+            command("Copy to…", Message::Ask(Prompt::CopyTo), Some(icons::Icon::Copy), editable && idle),
+            command("Move to…", Message::Ask(Prompt::MoveTo), Some(icons::Icon::Scissors), editable && idle),
+            command("Delete to Recycle Bin", Message::DeleteSelected, Some(icons::Icon::Trash), editable && idle),
             command("Delete permanently", Message::DeletePermanently, Some(icons::Icon::Trash), some && idle),
             command("Copy path", Message::CopyPath(false), Some(icons::Icon::LinkSimple), true),
             command("Copy path with quotes", Message::CopyPath(true), Some(icons::Icon::LinkSimple), true),
             command("Show in folder", Message::ShowInFolder, Some(icons::Icon::FolderOpen), one),
             command("Paste as shortcut", Message::PasteShortcut, Some(icons::Icon::LinkSimple), clipboard::has_files() && in_folder),
-            command("Create shortcut", Message::CreateShortcut, Some(icons::Icon::LinkSimple), one),
-            command("Compress to zip", Message::Compress, Some(icons::Icon::FileZip), some && !self.transferring),
+            command("Create shortcut", Message::CreateShortcut, Some(icons::Icon::LinkSimple), one && editable),
+            command("Compress to zip", Message::Compress, Some(icons::Icon::FileZip), editable && !self.transferring),
             command("Extract here", Message::Extract, Some(icons::Icon::FileZip), one && !self.transferring && self.selected.iter().next().is_some_and(|path| path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")))),
             command("Edit in Notepad", Message::RunVerb("notepad"), Some(icons::Icon::PencilSimple), one),
-            command("Share", Message::Share, Some(icons::Icon::ShareNetwork), some),
-            command("Add tags", Message::Ask(Prompt::Tags), Some(icons::Icon::Tag), some),
-            command("Clear tags", Message::Tag(false), Some(icons::Icon::Tag), some),
+            command("Share", Message::Share, Some(icons::Icon::ShareNetwork),editable),
+            command("Add tags", Message::Ask(Prompt::Tags), Some(icons::Icon::Tag),editable),
+            command("Clear tags", Message::Tag(false), Some(icons::Icon::Tag),editable),
             command("Open with…", Message::RunVerb("openas"), None, one && self.selected.iter().all(|path| path.is_file())),
             command("Properties", Message::RunVerb("properties"), Some(icons::Icon::Info), one),
-            command("Show more options", Message::NativeMenu, Some(icons::Icon::DotsThree), true),
+            command("Show more options", Message::NativeMenu, Some(icons::Icon::DotsThree), self.view == Place::Folder || editable),
             command("Terminal here", Message::OpenTerminal, Some(icons::Icon::TerminalWindow), true),
             command("Terminal as administrator", Message::RunVerb("admin-terminal"), Some(icons::Icon::TerminalWindow), true),
             command("Git init", Message::Git("init"), Some(icons::Icon::GitBranch), !self.transferring),
@@ -449,7 +451,7 @@ enum Message {
     Dropped(DroppedData),
     NewWindow,
     NewTab,
-    Remote(Option<PathBuf>),
+    Remote(instance::Request),
     Back,
     Forward,
     CreateFile,
@@ -654,6 +656,7 @@ struct Explorer {
     pinned: Vec<PathBuf>,
     favorites: Vec<PathBuf>,
     bin_origins: std::collections::HashMap<PathBuf, PathBuf>,
+    purge_armed: HashSet<PathBuf>,
     thumbs: std::sync::Arc<std::collections::HashMap<PathBuf, PathBuf>>,
     view: Place,
     pin_armed: Option<PathBuf>,
@@ -765,6 +768,7 @@ impl Component for Explorer {
             pinned: saved.pinned.clone(),
             favorites: saved.favorites.clone(),
             bin_origins: std::collections::HashMap::new(),
+            purge_armed: HashSet::new(),
             thumbs: std::sync::Arc::default(),
             view: Place::Folder,
             pin_armed: None,
@@ -1023,9 +1027,16 @@ impl Component for Explorer {
                     self.status = format!("{}: {error}", tr("Could not open terminal"));
                 }
             }
+            Message::Remote(instance::Request::Failed) => {
+                // nothing can reach this window; try again later instead of spinning
+                let _next = context.spawn_background(|_| {
+                    std::thread::sleep(std::time::Duration::from_secs(30));
+                    Message::Remote(instance::receive())
+                });
+            }
             Message::Remote(request) => {
                 instance::raise();
-                if let Some(path) = request {
+                if let instance::Request::Open(path) = request {
                     let (folder, item) = if path.is_dir() { (path, None) } else { (path.parent().map_or_else(|| path.clone(), Path::to_path_buf), Some(path)) };
                     self.tabs.push(folder.clone());
                     self.active_tab = self.tabs.len() - 1;
@@ -1339,14 +1350,10 @@ impl Component for Explorer {
             }
             Message::RestoreSelected => {
                 let moves: Vec<_> = self.selected.iter().filter_map(|data| Some((data.clone(), self.bin_origins.get(data)?.clone()))).collect();
-                let failure = moves.iter().find_map(|(data, original)| directory::restore(data, original).err());
-                self.has_error = failure.is_some();
+                let failures: Vec<String> = moves.iter().filter_map(|(data, original)| directory::restore(data, original).err()).collect();
                 self.update(Message::OpenView(Place::RecycleBin), context);
-                if let Some(error) = failure {
-                    self.status = error;
-                } else {
-                    self.status = tr("Restored").to_owned();
-                }
+                self.has_error = !failures.is_empty();
+                self.status = if failures.is_empty() { tr("Restored").to_owned() } else { failures.join(" · ") };
             }
             Message::Crumb(label) => {
                 let index = label.chars().rev().take_while(|c| *c == ZERO_WIDTH).count();
@@ -3310,10 +3317,21 @@ impl Explorer {
         }
         let paths: Vec<_> = self.selected.iter().cloned().collect();
         if self.view == Place::RecycleBin {
-            let failure = paths.iter().find_map(|data| directory::purge(data).err());
-            self.has_error = failure.is_some();
+            if !permanent {
+                return;
+            }
+            if self.purge_armed != self.selected {
+                self.purge_armed = self.selected.clone();
+                self.status = tr("Press Delete permanently again to erase these items for good").to_owned();
+                return;
+            }
+            self.purge_armed.clear();
+            let failures: Vec<String> = paths.iter().filter_map(|data| directory::purge(data).err()).collect();
             self.update(Message::OpenView(Place::RecycleBin), context);
-            self.status = failure.unwrap_or_else(|| self.status.clone());
+            self.has_error = !failures.is_empty();
+            if !failures.is_empty() {
+                self.status = failures.join(" · ");
+            }
             return;
         }
         let parent = self.path.clone();
@@ -3895,7 +3913,10 @@ fn raw_launch_path(args: &[String]) -> Option<String> {
 // The folder to show and the item to leave selected in it.
 fn launch_target() -> Option<(PathBuf, Option<PathBuf>)> {
     let args: Vec<String> = std::env::args_os().skip(1).map(|arg| arg.to_string_lossy().into_owned()).collect();
-    let path = shell::resolve_address(&raw_launch_path(&args)?);
+    let raw = raw_launch_path(&args)?;
+    // `"D:\"` reaches us as `D:` once the shell's quoting eats the backslash
+    let raw = if raw.len() == 2 && raw.ends_with(':') { format!("{raw}\\") } else { raw };
+    let path = shell::resolve_address(&raw);
     if path.is_dir() && !args.iter().any(|arg| arg.to_lowercase().starts_with("/select")) {
         Some((path, None))
     } else if path.exists() {

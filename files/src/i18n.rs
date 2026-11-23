@@ -140,6 +140,7 @@ const ES: &[(&str, &str)] = &[
     ("This PC", "Este equipo"),
     ("Restore", "Restaurar"),
     ("Restored", "Restaurado"),
+    ("Press Delete permanently again to erase these items for good", "Volvé a elegir Eliminar definitivamente para borrar estos elementos para siempre"),
     ("Copy SHA-256", "Copiar SHA-256"),
     ("Folder size", "Tamaño de la carpeta"),
     ("Calculating SHA-256…", "Calculando SHA-256…"),
