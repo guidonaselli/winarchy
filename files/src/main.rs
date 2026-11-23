@@ -278,6 +278,7 @@ impl Explorer {
             command("Open in editor", Message::OpenEditor, Some(icons::Icon::PencilSimple), true),
             command("Settings file", Message::OpenSettings, None, true),
             command("Storage settings", Message::OpenStorageSense, None, true),
+            command("Restore", Message::RestoreSelected, None, some && self.view == Place::RecycleBin),
             command("Open Recycle Bin", Message::OpenRecycleBin, Some(icons::Icon::Trash), true),
             command("Empty Recycle Bin", Message::EmptyRecycleBin, Some(icons::Icon::Trash), true),
             command(self.sort_label(SortKey::Name, "Sort by name"), Message::Sort(SortKey::Name), None, true),
@@ -472,6 +473,7 @@ enum Message {
     RunVerb(&'static str),
     EmptyRecycleBin,
     OpenRecycleBin,
+    RestoreSelected,
     TogglePin,
     Eject(PathBuf),
     RefreshDrives,
@@ -643,6 +645,7 @@ struct Explorer {
     drives: Vec<directory::Drive>,
     pinned: Vec<PathBuf>,
     favorites: Vec<PathBuf>,
+    bin_origins: std::collections::HashMap<PathBuf, PathBuf>,
     view: Place,
     pin_armed: Option<PathBuf>,
     tags: std::collections::BTreeMap<PathBuf, Vec<String>>,
@@ -752,6 +755,7 @@ impl Component for Explorer {
             drives: directory::drives(),
             pinned: saved.pinned.clone(),
             favorites: saved.favorites.clone(),
+            bin_origins: std::collections::HashMap::new(),
             view: Place::Folder,
             pin_armed: None,
             list_width: DEFAULT_LIST_WIDTH,
@@ -912,6 +916,11 @@ impl Component for Explorer {
                         .filter_map(|drive| directory::entry_at(&drive.path).map(|entry| Entry { name: drive.label.clone(), ..entry }))
                         .map(std::sync::Arc::new)
                         .collect(),
+                    Place::RecycleBin => {
+                        let items = directory::recycle_bin();
+                        self.bin_origins = items.iter().map(|(entry, original)| (entry.path.clone(), original.clone())).collect();
+                        items.into_iter().map(|(entry, _)| std::sync::Arc::new(entry)).collect()
+                    }
                     Place::Folder => Vec::new(),
                 };
                 if view != Place::Recent {
@@ -1257,16 +1266,24 @@ impl Component for Explorer {
                     }
                 }
             }
-            Message::OpenRecycleBin => {
-                if let Err(error) = shell::execute("open", "shell:RecycleBinFolder", None) {
-                    self.status = format!("{}: {error}", tr("Could not run"));
-                    self.has_error = true;
-                }
-            }
+            Message::OpenRecycleBin => self.update(Message::OpenView(Place::RecycleBin), context),
             Message::EmptyRecycleBin => {
                 if let Err(error) = shell::empty_recycle_bin() {
                     self.status = format!("{}: {error}", tr("Could not run"));
                     self.has_error = true;
+                } else if self.view == Place::RecycleBin {
+                    self.update(Message::OpenView(Place::RecycleBin), context);
+                }
+            }
+            Message::RestoreSelected => {
+                let moves: Vec<_> = self.selected.iter().filter_map(|data| Some((data.clone(), self.bin_origins.get(data)?.clone()))).collect();
+                let failure = moves.iter().find_map(|(data, original)| directory::restore(data, original).err());
+                self.has_error = failure.is_some();
+                self.update(Message::OpenView(Place::RecycleBin), context);
+                if let Some(error) = failure {
+                    self.status = error;
+                } else {
+                    self.status = tr("Restored").to_owned();
                 }
             }
             Message::Crumb(label) => {
@@ -2299,6 +2316,10 @@ impl Component for Explorer {
             place(tr("Recent"), icons::Icon::Clock, self.view == Place::Recent, tr("Recent").to_owned(), Message::OpenView(Place::Recent), None, None),
         ));
         sidebar_items.push(KeyedView::new(
+            RECYCLE_BIN_KEY,
+            place(tr("Recycle Bin"), icons::Icon::Trash, self.view == Place::RecycleBin, tr("Recycle Bin").to_owned(), Message::OpenView(Place::RecycleBin), None, None),
+        ));
+        sidebar_items.push(KeyedView::new(
             THIS_PC_KEY,
             place(tr("This PC"), icons::Icon::DesktopTower, self.view == Place::ThisPc, tr("This PC").to_owned(), Message::OpenView(Place::ThisPc), None, None),
         ));
@@ -3194,6 +3215,13 @@ impl Explorer {
             return;
         }
         let paths: Vec<_> = self.selected.iter().cloned().collect();
+        if self.view == Place::RecycleBin {
+            let failure = paths.iter().find_map(|data| directory::purge(data).err());
+            self.has_error = failure.is_some();
+            self.update(Message::OpenView(Place::RecycleBin), context);
+            self.status = failure.unwrap_or_else(|| self.status.clone());
+            return;
+        }
         let parent = self.path.clone();
         self.deleting = true;
         self.status = tr(if permanent { "Deleting permanently…" } else { "Deleting to Recycle Bin…" }).to_owned();
@@ -3534,6 +3562,7 @@ enum Place {
     Favorites,
     Recent,
     ThisPc,
+    RecycleBin,
 }
 
 impl Place {
@@ -3543,6 +3572,7 @@ impl Place {
             Place::Favorites => "Favorites",
             Place::Recent => "Recent",
             Place::ThisPc => "This PC",
+            Place::RecycleBin => "Recycle Bin",
         }
     }
 }

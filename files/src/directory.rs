@@ -115,6 +115,111 @@ pub fn recent(limit: usize) -> Vec<Entry> {
     links.into_iter().filter_map(|(_, link)| entry_at(&crate::shell::link_target(&link)?)).filter(|entry| !entry.is_directory).take(limit).collect()
 }
 
+// What the shell put in the Recycle Bin of every local drive, read from its own bookkeeping: each deleted item `$R<id>`
+// has a sibling `$I<id>` recording where it came from and when. Returns the entry (named as it was) and its origin.
+pub fn recycle_bin() -> Vec<(Entry, PathBuf)> {
+    let Some(sid) = user_sid() else { return Vec::new() };
+    let mut items = Vec::new();
+    for drive in drives().iter().filter(|drive| drive.kind == DriveKind::Fixed) {
+        let Ok(read) = fs::read_dir(drive.path.join("$Recycle.Bin").join(&sid)) else { continue };
+        for info in read.filter_map(Result::ok).filter(|item| item.file_name().to_string_lossy().starts_with("$I")) {
+            let Some((original, deleted)) = parse_recycle_info(&fs::read(info.path()).unwrap_or_default()) else { continue };
+            let data = info.path().with_file_name(info.file_name().to_string_lossy().replacen("$I", "$R", 1));
+            let Some(mut entry) = entry_at(&data) else { continue };
+            entry.name = original.file_name().map_or_else(|| original.to_string_lossy().into_owned(), |name| name.to_string_lossy().into_owned());
+            entry.modified = Some(deleted);
+            items.push((entry, original));
+        }
+    }
+    items.sort_by(|a, b| b.0.modified.cmp(&a.0.modified));
+    items
+}
+
+fn parse_recycle_info(bytes: &[u8]) -> Option<(PathBuf, std::time::SystemTime)> {
+    let word = |at: usize, len: usize| -> Option<u64> {
+        let mut padded = [0u8; 8];
+        padded[..len].copy_from_slice(bytes.get(at..at + len)?);
+        Some(u64::from_le_bytes(padded))
+    };
+    let version = word(0, 8)?;
+    let filetime = word(16, 8)?;
+    let name_at = if version >= 2 { 28 } else { 24 };
+    let units: Vec<u16> = bytes.get(name_at..)?.chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).take_while(|&unit| unit != 0).collect();
+    let deleted = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(filetime.checked_sub(116_444_736_000_000_000)? / 10_000_000);
+    Some((PathBuf::from(String::from_utf16_lossy(&units)), deleted))
+}
+
+fn user_sid() -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    static SID: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    SID.get_or_init(|| {
+        let output = std::process::Command::new("whoami").args(["/user", "/nh", "/fo", "csv"]).creation_flags(0x0800_0000).output().ok()?;
+        let line = String::from_utf8_lossy(&output.stdout).into_owned();
+        line.trim().rsplit(',').next().map(|sid| sid.trim_matches('"').to_owned()).filter(|sid| sid.starts_with("S-"))
+    })
+    .clone()
+}
+
+// Puts a deleted item back where it was; refuses to overwrite something that has taken its place.
+pub fn restore(data: &std::path::Path, original: &std::path::Path) -> Result<(), String> {
+    if original.exists() {
+        return Err(format!("{} already exists", original.display()));
+    }
+    if let Some(parent) = original.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::rename(data, original).map_err(|error| error.to_string())?;
+    let _ = fs::remove_file(info_of(data));
+    Ok(())
+}
+
+// Deletes a Recycle Bin item for good, together with its bookkeeping file.
+pub fn purge(data: &std::path::Path) -> Result<(), String> {
+    let removed = if data.is_dir() { fs::remove_dir_all(data) } else { fs::remove_file(data) };
+    removed.map_err(|error| format!("{}: {error}", data.display()))?;
+    let _ = fs::remove_file(info_of(data));
+    Ok(())
+}
+
+fn info_of(data: &std::path::Path) -> PathBuf {
+    data.with_file_name(data.file_name().map_or_else(String::new, |name| name.to_string_lossy().replacen("$R", "$I", 1)))
+}
+
+#[cfg(test)]
+mod recycle_tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_bookkeeping_of_a_deleted_item() {
+        let mut info = Vec::new();
+        info.extend(2u64.to_le_bytes());
+        info.extend(10u64.to_le_bytes());
+        info.extend((116_444_736_000_000_000u64 + 86_400 * 10_000_000).to_le_bytes());
+        let path: Vec<u16> = r"C:\Users\a\note.txt".encode_utf16().chain(Some(0)).collect();
+        info.extend((path.len() as u32).to_le_bytes());
+        info.extend(path.iter().flat_map(|unit| unit.to_le_bytes()));
+        let (original, deleted) = parse_recycle_info(&info).unwrap();
+        assert_eq!(original, PathBuf::from(r"C:\Users\a\note.txt"));
+        assert_eq!(deleted, std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(86_400));
+    }
+
+    #[test]
+    fn restore_refuses_to_overwrite() {
+        let dir = std::env::temp_dir().join(format!("winarchy-bin-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let (data, original) = (dir.join("$RABC.txt"), dir.join("a.txt"));
+        fs::write(&data, "x").unwrap();
+        fs::write(dir.join("$IABC.txt"), "i").unwrap();
+        fs::write(&original, "y").unwrap();
+        assert!(restore(&data, &original).is_err());
+        fs::remove_file(&original).unwrap();
+        restore(&data, &original).unwrap();
+        assert!(original.exists() && !data.exists() && !dir.join("$IABC.txt").exists());
+        fs::remove_file(&original).unwrap();
+        fs::remove_dir(&dir).unwrap();
+    }
+}
+
 pub fn read(path: &PathBuf) -> io::Result<Vec<Entry>> {
     let mut entries = fs::read_dir(path)?.map(|entry| entry_of(&entry?)).collect::<io::Result<Vec<_>>>()?;
     entries.sort_by_key(|entry| (!entry.is_directory, entry.name.to_lowercase()));

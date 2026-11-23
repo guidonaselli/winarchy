@@ -87,3 +87,4 @@ pub const DROP_EDGE: f64 = 0.3;
 pub const OWN_DROP_WINDOW: std::time::Duration = std::time::Duration::from_millis(1500);
 pub const RECENT_KEY: usize = 10_010;
 pub const THIS_PC_KEY: usize = 10_011;
+pub const RECYCLE_BIN_KEY: usize = 10_012;
