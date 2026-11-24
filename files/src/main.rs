@@ -543,6 +543,9 @@ enum Message {
     Refresh,
     Focus(bool),
     Resize(WindowSize),
+    MarqueeStart(f64, f64),
+    MarqueeMove(bool),
+    MarqueeEnd,
     ResizeStart(Column, f64),
     ResizeDrag(f64, bool),
     ResizeEnd,
@@ -649,6 +652,7 @@ struct Explorer {
     walk: Option<std::sync::Arc<directory::Walk>>,
     searching: bool,
     drag: Option<(Column, f64, f64)>,
+    marquee: Option<Marquee>,
     terminal: String,
     sidebar_width: f64,
     sidebar_drag: Option<(f64, f64)>,
@@ -739,6 +743,7 @@ impl Component for Explorer {
             columns: Columns::from_saved(saved.size_width, saved.modified_width),
             tags: saved.tags.clone(),
             drag: None,
+            marquee: None,
             sidebar_width: if saved.sidebar_width > 0.0 { saved.sidebar_width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH) } else { SIDEBAR_DEFAULT_WIDTH },
             sidebar_drag: None,
             terminal: saved.terminal.clone(),
@@ -1518,6 +1523,39 @@ impl Component for Explorer {
                     self.handle_key(key, context);
                 }
             }
+            Message::MarqueeStart(x, y) => {
+                let start = shell::cursor_pos();
+                let names: HashSet<&str> = self.entries.iter().map(|entry| entry.name.as_str()).collect();
+                let mut rows = scroll::row_rects(!matches!(self.layout, Layout::Tiles | Layout::Grid));
+                rows.retain(|(name, _)| names.contains(name.as_str()));
+                let on_row = rows.iter().any(|(_, rect)| rect.0 <= start.0 && start.0 < rect.2 && rect.1 <= start.1 && start.1 < rect.3);
+                if !on_row {
+                    let keep = keys::ctrl_down() || keys::shift_down();
+                    if !keep && !self.selected.is_empty() {
+                        self.selected.clear();
+                        self.refresh_status();
+                    }
+                    self.marquee = Some(Marquee { origin: (x, y), current: (x, y), screen: start, rows, base: if keep { self.selected.clone() } else { HashSet::new() } });
+                }
+            }
+            Message::MarqueeMove(pressed) => {
+                if !pressed {
+                    self.marquee = None;
+                } else if let Some(marquee) = self.marquee.as_mut() {
+                    let now = shell::cursor_pos();
+                    let scale = shell::dip_scale();
+                    marquee.current = (marquee.origin.0 + f64::from(now.0 - marquee.screen.0) / scale, marquee.origin.1 + f64::from(now.1 - marquee.screen.1) / scale);
+                    let (left, top, right, bottom) = (marquee.screen.0.min(now.0), marquee.screen.1.min(now.1), marquee.screen.0.max(now.0), marquee.screen.1.max(now.1));
+                    let hit: HashSet<&str> = marquee.rows.iter().filter(|(_, rect)| rect.0 < right && rect.2 > left && rect.1 < bottom && rect.3 > top).map(|(name, _)| name.as_str()).collect();
+                    let mut selected = marquee.base.clone();
+                    selected.extend(self.entries.iter().filter(|entry| hit.contains(entry.name.as_str())).map(|entry| entry.path.clone()));
+                    if selected != self.selected {
+                        self.selected = selected;
+                        self.refresh_status();
+                    }
+                }
+            }
+            Message::MarqueeEnd => self.marquee = None,
             Message::ResizeStart(column, x) => self.drag = Some((column, x, self.columns.get(column))),
             Message::ResizeDrag(x, pressed) => {
                 if let (Some((column, start_x, start_width)), true) = (self.drag, pressed) {
@@ -2273,19 +2311,39 @@ impl Component for Explorer {
             Border::new()
                 .grid_column(0)
                 .background_optional(self.theme.as_ref().map(Theme::surface))
+                .capture_pointer_on_press(true)
                 .on_pointer_pressed(context.callback(|info: PointerEventInfo| {
                     if info.is_right_button_pressed {
                         Message::ContextBackground(info.window_x, info.window_y)
+                    } else if info.is_left_button_pressed {
+                        Message::MarqueeStart(info.x, info.y)
                     } else {
                         Message::CloseMenu
                     }
                 }))
+                .on_pointer_moved(context.callback(|info: PointerEventInfo| Message::MarqueeMove(info.is_left_button_pressed)))
+                .on_pointer_released(context.callback(|_: PointerEventInfo| Message::MarqueeEnd))
                 .content(
                     ScrollViewer::new()
                         .horizontal_scroll_bar_visibility(ScrollBarVisibility::Disabled)
                         .content(ItemsRepeater::new().horizontal_alignment(HorizontalAlignment::Stretch).virtual_source(source)),
                 ),
         )];
+        if let Some(marquee) = &self.marquee {
+            let (left, top) = (marquee.origin.0.min(marquee.current.0), marquee.origin.1.min(marquee.current.1));
+            body_items.push(KeyedView::new(
+                3usize,
+                Border::new()
+                    .grid_column(0)
+                    .horizontal_alignment(HorizontalAlignment::Left)
+                    .vertical_alignment(VerticalAlignment::Top)
+                    .margin(Thickness::new(left, top, 0.0, 0.0))
+                    .width((marquee.origin.0 - marquee.current.0).abs())
+                    .height((marquee.origin.1 - marquee.current.1).abs())
+                    .opacity(MARQUEE_OPACITY)
+                    .background_optional(self.theme.as_ref().map(Theme::accent)),
+            ));
+        }
         if self.loaded && !self.has_error && visible.is_empty() {
             let message = match (self.filter.is_empty(), self.entries.is_empty()) {
                 (true, true) => "This folder is empty",
@@ -3984,6 +4042,16 @@ fn icon_state(glyph: icons::Icon, size: f64, theme: Option<&Theme>, enabled: boo
 }
 
 // opens the submenu of the less common actions on an item
+const MARQUEE_OPACITY: f64 = 0.25;
+
+struct Marquee {
+    origin: (f64, f64),
+    current: (f64, f64),
+    screen: (i32, i32),
+    rows: Vec<(String, (i32, i32, i32, i32))>,
+    base: HashSet<PathBuf>,
+}
+
 const ORGANIZE: &str = "Organize ▸";
 const OPEN_WITH: &str = "Open with ▸";
 const NEW_LABELS: [&str; 4] = ["Create folder", "Create file", "Create shortcut", "Git clone"];

@@ -1222,3 +1222,31 @@ pub fn open_with_handlers(path: &std::path::Path) -> Vec<(String, std::path::Pat
 pub fn open_with_handlers(_path: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
     Vec::new()
 }
+
+// Screen position in physical pixels.
+#[cfg(windows)]
+pub fn cursor_pos() -> (i32, i32) {
+    use windows::Win32::{Foundation::POINT, UI::WindowsAndMessaging::GetCursorPos};
+    let mut point = POINT::default();
+    // SAFETY: `point` is a valid out pointer for the duration of the call.
+    unsafe {
+        let _ = GetCursorPos(&mut point);
+    }
+    (point.x, point.y)
+}
+
+#[cfg(not(windows))]
+pub fn cursor_pos() -> (i32, i32) {
+    (0, 0)
+}
+
+// Physical pixels per layout unit on the primary display.
+#[cfg(windows)]
+pub fn dip_scale() -> f64 {
+    f64::from(unsafe { windows::Win32::UI::HiDpi::GetDpiForSystem() }.max(96)) / 96.0
+}
+
+#[cfg(not(windows))]
+pub fn dip_scale() -> f64 {
+    1.0
+}
