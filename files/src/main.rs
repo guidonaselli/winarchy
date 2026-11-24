@@ -1167,7 +1167,16 @@ impl Component for Explorer {
             }
             Message::RunPalette => {
                 let needle = self.new_folder_name.trim().to_lowercase();
-                let found = self.commands().into_iter().find(|c| c.enabled && c.message.is_some() && !needle.is_empty() && c.label.to_lowercase().contains(&needle));
+                let candidates: Vec<Command> = self
+                    .commands()
+                    .into_iter()
+                    .filter(|c| c.enabled && !needle.is_empty() && !matches!(c.message, Some(Message::CloseMenu | Message::OpenWithApp(_)) | None) && c.label.to_lowercase().contains(&needle))
+                    .collect();
+                let found = match candidates.iter().position(|c| c.label.to_lowercase() == needle) {
+                    Some(exact) => candidates.into_iter().nth(exact),
+                    None if candidates.len() == 1 => candidates.into_iter().next(),
+                    None => None,
+                };
                 match found {
                     Some(command) => {
                         self.new_folder_name.clear();
@@ -1329,6 +1338,7 @@ impl Component for Explorer {
                         self.status = format!("{}: {error}", tr("Could not run"));
                     }
                 }
+                self.open_with.clear();
             }
             Message::RunVerb(verb) => {
                 let target = match &self.selected.iter().collect::<Vec<_>>()[..] {
@@ -1711,6 +1721,7 @@ impl Component for Explorer {
             }
             Message::RetryFocus => self.request_address_focus(context),
             Message::Refresh if self.view != Place::Folder => self.update(Message::OpenView(self.view), context),
+            Message::Refresh if self.view == Place::Search => {}
             Message::Refresh => self.navigate(self.path.clone(), context),
             Message::Sort(key) => {
                 self.descending = self.sort == key && !self.descending;
@@ -2810,7 +2821,7 @@ impl Explorer {
             MenuKind::Sort => self.sort_labels().iter().filter_map(|label| find(label)).collect(),
             MenuKind::More => {
                 let shown: Vec<String> = NEW_LABELS.iter().chain(&TOOL_LABELS).copied().chain(self.sort_labels()).chain([ORGANIZE, OPEN_WITH]).map(tr_dynamic).collect();
-                commands.iter().filter(|command| command.message.is_some() && !shown.contains(&command.label)).collect()
+                commands.iter().filter(|command| command.message.is_some() && !matches!(command.message, Some(Message::OpenWithApp(_))) && !shown.contains(&command.label)).collect()
             }
         }
     }

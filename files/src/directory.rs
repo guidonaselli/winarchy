@@ -413,7 +413,7 @@ pub fn drives() -> Vec<Drive> {
 // The term travels through the environment so it can never become part of the script.
 pub fn search_index(scope: &std::path::Path, term: &str) -> Result<Vec<PathBuf>, String> {
     use std::os::windows::process::CommandExt;
-    const SCRIPT: &str = "$c = New-Object System.Data.OleDb.OleDbConnection \"Provider=Search.CollatorDSO;Extended Properties='Application=Windows'\"; $c.Open();         $q = $env:WINARCHY_TERM.Replace(\"'\", \"''\").Replace('%', '[%]').Replace('_', '[_]'); $s = $env:WINARCHY_SCOPE.Replace(\"'\", \"''\");         $m = $c.CreateCommand(); $m.CommandText = \"SELECT TOP 500 System.ItemPathDisplay FROM SystemIndex WHERE SCOPE='file:$s' AND System.FileName LIKE '%$q%'\";         $r = $m.ExecuteReader(); while ($r.Read()) { $r.GetString(0) }";
+    const SCRIPT: &str = "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); $c = New-Object System.Data.OleDb.OleDbConnection \"Provider=Search.CollatorDSO;Extended Properties='Application=Windows'\"; $c.Open();         $q = $env:WINARCHY_TERM.Replace(\"'\", \"''\").Replace('%', '[%]').Replace('_', '[_]'); $s = $env:WINARCHY_SCOPE.Replace(\"'\", \"''\");         $m = $c.CreateCommand(); $m.CommandText = \"SELECT TOP 500 System.ItemPathDisplay FROM SystemIndex WHERE SCOPE='file:$s' AND System.FileName LIKE '%$q%'\";         $r = $m.ExecuteReader(); while ($r.Read()) { $r.GetString(0) }";
     let output = std::process::Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
         .env("WINARCHY_TERM", term)
