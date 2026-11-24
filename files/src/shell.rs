@@ -653,6 +653,63 @@ pub fn apply_window_icon(colors: Option<[[u8; 3]; 3]>, wait_for_window: bool) {
 #[cfg(not(windows))]
 pub fn apply_window_icon(_colors: Option<[[u8; 3]; 3]>, _wait_for_window: bool) {}
 
+// komorebi draws each window's border as a click-catching window stacked just below it, but a window it tiles right after
+// it appears can end up under that border, and then every click lands on the border until something reorders the stack.
+// So while the window is visible, if what sits over its centre is a komorebi border, raise the window above it (without activating).
+#[cfg(windows)]
+pub fn stay_above_tiling_border() {
+    use windows::Win32::{
+        Foundation::{HWND, LPARAM, POINT, RECT},
+        System::Threading::GetCurrentProcessId,
+        UI::WindowsAndMessaging::{
+            EnumWindows, GA_ROOT, GetAncestor, GetClassNameW, GetWindowRect, GetWindowThreadProcessId, HWND_TOP, IsIconic, IsWindowVisible, SWP_NOACTIVATE,
+            SWP_NOMOVE, SWP_NOSIZE, SetWindowPos, WindowFromPoint,
+        },
+    };
+    use windows::core::BOOL;
+    const POLL: std::time::Duration = std::time::Duration::from_millis(400);
+
+    unsafe extern "system" fn find(window: HWND, data: LPARAM) -> BOOL {
+        let mut process = 0;
+        // SAFETY: plain Win32 queries on a window handle supplied by EnumWindows; `data` points at an HWND slot
+        unsafe {
+            GetWindowThreadProcessId(window, Some(&mut process));
+            if process == GetCurrentProcessId() && IsWindowVisible(window).as_bool() && GetWindowRect(window, &mut RECT::default()).is_ok() {
+                *(data.0 as *mut HWND) = window;
+                return false.into();
+            }
+        }
+        true.into()
+    }
+
+    std::thread::spawn(|| loop {
+        std::thread::sleep(POLL);
+        unsafe {
+            let mut window = HWND::default();
+            let _ = EnumWindows(Some(find), LPARAM(&mut window as *mut HWND as isize));
+            if window.0.is_null() || IsIconic(window).as_bool() {
+                continue;
+            }
+            let mut rect = RECT::default();
+            if GetWindowRect(window, &mut rect).is_err() {
+                continue;
+            }
+            let covering = GetAncestor(WindowFromPoint(POINT { x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 }), GA_ROOT);
+            if covering == window || covering.0.is_null() {
+                continue;
+            }
+            let mut name = [0u16; 32];
+            let length = GetClassNameW(covering, &mut name) as usize;
+            if String::from_utf16_lossy(&name[..length]).starts_with("komoborder") {
+                let _ = SetWindowPos(window, Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+        }
+    });
+}
+
+#[cfg(not(windows))]
+pub fn stay_above_tiling_border() {}
+
 // The classic Explorer menu, including third-party entries; shown at the pointer and run when one is chosen.
 #[cfg(windows)]
 pub fn native_menu(paths: &[PathBuf], background: bool) -> Result<bool, String> {

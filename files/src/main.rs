@@ -4065,6 +4065,7 @@ fn main() {
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("C:\\"));
     shell::apply_window_icon(Theme::load().ok().flatten().and_then(|theme| theme.icon_colors()), true);
+    shell::stay_above_tiling_border();
     App::run_component::<Explorer>(path).unwrap();
 }
 
