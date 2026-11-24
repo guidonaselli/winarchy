@@ -123,6 +123,20 @@ Describe 'Get-WinarchyStaleIgnores' {
     }
 }
 
+Describe 'Get-WinarchyMonitorIndexMap' {
+    It 'resolves a saved id by model when Windows reassigned the UID suffix, and leaves ambiguous ones alone' {
+        InModuleScope Winarchy {
+            $file = Join-Path $TestDrive 'windows.toml'
+            Set-Content $file "[[windows]]`nexe = 'a.exe'`nmonitor = 'MSI3BA4-5&1&UID1'`nworkspace = 0`n[[windows]]`nexe = 'b.exe'`nmonitor = 'GONE000-5&1&UID9'`nworkspace = 0"
+            Mock Get-WinarchyWindowPrefsPath { $file }
+            $state = '{"monitors":{"elements":[{"device_id":"SAC2763-5&1&UID2"},{"device_id":"MSI3BA4-5&1&UID3"}]}}' | ConvertFrom-Json
+            $map = Get-WinarchyMonitorIndexMap -State $state
+            $map['MSI3BA4-5&1&UID1'] | Should -Be 1
+            $map.ContainsKey('GONE000-5&1&UID9') | Should -BeFalse
+        }
+    }
+}
+
 Describe 'Get-WinarchyKomorebiHwnds' {
     It 'lists every managed window, or only the floating ones' {
         InModuleScope Winarchy {
@@ -3150,6 +3164,20 @@ Describe 'native shell guardrails' {
         (Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw) | Should -Match ([regex]::Escape("FileOpen('\\.\pipe\winarchy-shell', 'w')"))
     }
 
+    It 'recovers a hung native shell with a bounded UI probe and restores taskbars before relaunch' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $ahk = Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw
+        $watchdog = [regex]::Match($ahk, '(?s); --- Native shell watchdog.*?(?=; --- Monitor watchdog)').Value
+        $watchdog | Should -Not -BeNullOrEmpty
+        $watchdog | Should -Not -Match "if !native \|\| ProcessExist\('winarchy-shell\.exe'\)"
+        $watchdog | Should -Match 'SendMessageTimeoutW'
+        $watchdog | Should -Match "(?s)SendMessageTimeoutW[^\r\n]*'UInt',\s*(?:0x0+|0)\s*,"
+        $watchdog | Should -Match "(?s)SendMessageTimeoutW.*?'UInt',\s*[1-9][0-9]{0,3}\s*,\s*'(?:U?Ptr)\*'"
+        $watchdog | Should -Match "'missing'"
+        $watchdog | Should -Match "'hung'"
+        $watchdog | Should -Match "(?s)(?:ProcessClose\(|taskkill[^\r\n]*/F).*?ShowTaskbars\(\).*?Run\("
+    }
+
     It 'points the YASB watchdog at state\bar so it does not relaunch YASB under the native bar' {
         $root = Split-Path $PSScriptRoot -Parent
         (Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw) | Should -Match ([regex]::Escape('BarFile := StateDir "\bar"'))
@@ -3431,20 +3459,6 @@ Describe 'Install-WinarchyFilesBinary' {
     }
 }
 
-Describe 'Start-WinarchyFiles' {
-    It 'tries the release when no binary exists and explains how to build when that fails' {
-        $repo = Join-Path $TestDrive 'repo-files'
-        New-Item -ItemType Directory -Path $repo -Force | Out-Null
-        InModuleScope Winarchy -Parameters @{ Repo = $repo } {
-            param($Repo)
-            Mock Get-WinarchyRoot { $Repo }
-            Mock Install-WinarchyFilesRelease { throw 'offline' }
-            { Start-WinarchyFiles } | Should -Throw '*release download failed (offline)*cargo build*'
-            Should -Invoke Install-WinarchyFilesRelease -Times 1 -Exactly
-        }
-    }
-}
-
 Describe 'Restore-WinarchyFilesPrevious' {
     It 'swaps the current binary with the previous one and refuses without a previous one' {
         $repo = Join-Path $TestDrive 'repo-rollback'
@@ -3460,6 +3474,20 @@ Describe 'Restore-WinarchyFilesPrevious' {
             Restore-WinarchyFilesPrevious
             Get-Content (Join-Path $Bin 'winarchy-files.exe') -Raw | Should -Be 'old'
             Get-Content (Join-Path $Bin 'winarchy-files.exe.prev') -Raw | Should -Be 'new'
+        }
+    }
+}
+
+Describe 'Start-WinarchyFiles' {
+    It 'tries the release when no binary exists and explains how to build when that fails' {
+        $repo = Join-Path $TestDrive 'repo-files'
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        InModuleScope Winarchy -Parameters @{ Repo = $repo } {
+            param($Repo)
+            Mock Get-WinarchyRoot { $Repo }
+            Mock Install-WinarchyFilesRelease { throw 'offline' }
+            { Start-WinarchyFiles } | Should -Throw '*release download failed (offline)*cargo build*'
+            Should -Invoke Install-WinarchyFilesRelease -Times 1 -Exactly
         }
     }
 }
