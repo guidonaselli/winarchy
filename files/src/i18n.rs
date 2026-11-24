@@ -61,6 +61,8 @@ const ES: &[(&str, &str)] = &[
     ("Show in folder", "Mostrar en su carpeta"),
     ("Open in new tab", "Abrir en pestaña nueva"),
     ("Open with…", "Abrir con…"),
+    ("Open with ▸", "Abrir con ▸"),
+    ("Choose another app…", "Elegir otra app…"),
     ("Shortcut", "Acceso directo"),
     ("Create shortcut", "Crear acceso directo"),
     ("Could not create shortcut", "No se pudo crear el acceso directo"),

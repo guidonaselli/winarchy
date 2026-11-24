@@ -175,6 +175,7 @@ struct Command {
     label: String,
     message: Option<Message>,
     icon: Option<icons::Icon>,
+    image: Option<PathBuf>,
     enabled: bool,
 }
 
@@ -220,10 +221,18 @@ impl Explorer {
             label: tr_dynamic(label),
             message: Some(message),
             icon,
+            image: None,
             enabled,
         };
-        let separator = || Command { label: String::new(), message: None, icon: None, enabled: true };
-        vec![
+        let separator = || Command { label: String::new(), message: None, icon: None, image: None, enabled: true };
+        let apps = self.open_with.iter().map(|(name, exe, image)| Command {
+            label: name.clone(),
+            message: Some(Message::OpenWithApp(exe.clone())),
+            icon: None,
+            image: image.clone(),
+            enabled: true,
+        });
+        let mut all = vec![
             command("Create folder", Message::Ask(Prompt::NewFolder), Some(icons::Icon::FolderPlus), in_folder),
             command("Create file", Message::Ask(Prompt::NewFile), Some(icons::Icon::FilePlus), in_folder),
             separator(),
@@ -247,7 +256,7 @@ impl Explorer {
             command("Share", Message::Share, Some(icons::Icon::ShareNetwork),editable),
             command("Add tags", Message::Ask(Prompt::Tags), Some(icons::Icon::Tag),editable),
             command("Clear tags", Message::Tag(false), Some(icons::Icon::Tag),editable),
-            command("Open with…", Message::RunVerb("openas"), None, one && self.selected.iter().all(|path| path.is_file())),
+            command(OPEN_WITH, Message::CloseMenu, None, one && self.selected.iter().all(|path| path.is_file())),
             command("Properties", Message::RunVerb("properties"), Some(icons::Icon::Info), one),
             command(ORGANIZE, Message::CloseMenu, Some(icons::Icon::DotsThree), some),
             command("Show more options", Message::NativeMenu, Some(icons::Icon::DotsThree), self.view == Place::Folder || editable),
@@ -313,7 +322,10 @@ impl Explorer {
                 None,
                 true,
             ),
-        ]
+        ];
+        all.extend(apps);
+        all.push(command("Choose another app…", Message::RunVerb("openas"), None, one && self.selected.iter().all(|path| path.is_file())));
+        all
     }
 }
 
@@ -487,6 +499,7 @@ enum Message {
     Extract,
     ArchiveDone(Result<(), String>, Option<PathBuf>),
     RunVerb(&'static str),
+    OpenWithApp(PathBuf),
     EmptyRecycleBin,
     OpenRecycleBin,
     RestoreSelected,
@@ -669,6 +682,7 @@ struct Explorer {
     bin_origins: std::collections::HashMap<PathBuf, PathBuf>,
     purge_armed: HashSet<PathBuf>,
     thumbs: std::sync::Arc<std::collections::HashMap<PathBuf, PathBuf>>,
+    open_with: Vec<(String, PathBuf, Option<PathBuf>)>,
     view: Place,
     pin_armed: Option<PathBuf>,
     tags: std::collections::BTreeMap<PathBuf, Vec<String>>,
@@ -781,6 +795,7 @@ impl Component for Explorer {
             bin_origins: std::collections::HashMap::new(),
             purge_armed: HashSet::new(),
             thumbs: std::sync::Arc::default(),
+            open_with: Vec::new(),
             view: Place::Folder,
             pin_armed: None,
             list_width: DEFAULT_LIST_WIDTH,
@@ -1301,6 +1316,15 @@ impl Component for Explorer {
                     }
                 }
             }
+            Message::OpenWithApp(exe) => {
+                if let [file] = &self.selected.iter().collect::<Vec<_>>()[..] {
+                    let result = shell::execute("open", &exe.to_string_lossy(), Some(&format!("\"{}\"", file.display())));
+                    self.has_error = result.is_err();
+                    if let Err(error) = result {
+                        self.status = format!("{}: {error}", tr("Could not run"));
+                    }
+                }
+            }
             Message::RunVerb(verb) => {
                 let target = match &self.selected.iter().collect::<Vec<_>>()[..] {
                     [one] => (*one).clone(),
@@ -1539,6 +1563,21 @@ impl Component for Explorer {
             }
             Message::CloseMenu => self.close_side_menu(),
             Message::MenuCommand(label) => {
+                if label == tr_dynamic(OPEN_WITH) {
+                    if let (Some((x, y, _)), [file]) = (self.menu, &self.selected.iter().collect::<Vec<_>>()[..]) {
+                        self.open_with = shell::open_with_handlers(file)
+                            .into_iter()
+                            .map(|(name, exe)| {
+                                let job = (exe.clone(), None, 0);
+                                let image = thumbs::ensure(&job);
+                                (name, exe, image)
+                            })
+                            .collect();
+                        self.menu = Some((x, y, MenuKind::OpenWith));
+                        self.menu_focus = None;
+                    }
+                    return;
+                }
                 if label == tr_dynamic(ORGANIZE) {
                     if let Some((x, y, _)) = self.menu {
                         self.menu = Some((x, y, MenuKind::Organize));
@@ -2704,14 +2743,15 @@ impl Explorer {
             commands.iter().find(|command| command.label == label)
         };
         match kind {
-            MenuKind::Item => ["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Compress to zip", "Extract here", ORGANIZE, "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
-            MenuKind::Organize => ["Copy path", "Share", "Add tags", "Add to favorites", "Remove from favorites", "Pin to sidebar", "Unpin from sidebar", "Terminal here", "Open with…"].iter().filter_map(|label| find(label)).collect(),
+            MenuKind::Item => ["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Compress to zip", "Extract here", OPEN_WITH, ORGANIZE, "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
+            MenuKind::Organize => ["Copy path", "Share", "Add tags", "Add to favorites", "Remove from favorites", "Pin to sidebar", "Unpin from sidebar", "Terminal here"].iter().filter_map(|label| find(label)).collect(),
+            MenuKind::OpenWith => commands.iter().filter(|command| matches!(command.message, Some(Message::OpenWithApp(_))) || command.label == tr_dynamic("Choose another app…")).collect(),
             MenuKind::Side => ["Open in new tab", "Pin to sidebar", "Unpin from sidebar", "Add to favorites", "Remove from favorites", "Copy path", "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
             MenuKind::Background => ["Paste here", "Paste as shortcut", "Create folder", "Create file", "Terminal here", "Open in editor", "Select none", "Show more options"].iter().filter_map(|label| find(label)).collect(),
             MenuKind::New => NEW_LABELS.iter().filter_map(|label| find(label)).collect(),
             MenuKind::Sort => self.sort_labels().iter().filter_map(|label| find(label)).collect(),
             MenuKind::More => {
-                let shown: Vec<String> = NEW_LABELS.iter().chain(&TOOL_LABELS).copied().chain(self.sort_labels()).chain(std::iter::once(ORGANIZE)).map(tr_dynamic).collect();
+                let shown: Vec<String> = NEW_LABELS.iter().chain(&TOOL_LABELS).copied().chain(self.sort_labels()).chain([ORGANIZE, OPEN_WITH]).map(tr_dynamic).collect();
                 commands.iter().filter(|command| command.message.is_some() && !shown.contains(&command.label)).collect()
             }
         }
@@ -2747,9 +2787,10 @@ impl Explorer {
                             .orientation(Orientation::Horizontal)
                             .spacing(ROW_GAP)
                             .children((
-                                match command.icon {
-                                    Some(glyph) => icon_state(glyph, ICON_SIZE, self.theme.as_ref(), command.enabled),
-                                    None => StackPanel::new().width(ICON_SIZE).into(),
+                                match (command.icon, command.image.as_ref().and_then(|file| Image::new().source_file(file).ok())) {
+                                    (_, Some(image)) => image.width(ICON_SIZE).height(ICON_SIZE).stretch(Stretch::Uniform).into(),
+                                    (Some(glyph), None) => icon_state(glyph, ICON_SIZE, self.theme.as_ref(), command.enabled),
+                                    (None, None) => StackPanel::new().width(ICON_SIZE).into(),
                                 },
                                 text(&command.label, self.theme.as_ref().map(Theme::foreground)),
                             )),
@@ -3944,6 +3985,7 @@ fn icon_state(glyph: icons::Icon, size: f64, theme: Option<&Theme>, enabled: boo
 
 // opens the submenu of the less common actions on an item
 const ORGANIZE: &str = "Organize ▸";
+const OPEN_WITH: &str = "Open with ▸";
 const NEW_LABELS: [&str; 4] = ["Create folder", "Create file", "Create shortcut", "Git clone"];
 const TOOL_LABELS: [&str; 7] = ["Cut", "Copy", "Copy path", "Paste here", "Rename selected", "Share", "Delete to Recycle Bin"];
 
@@ -3956,6 +3998,7 @@ enum MenuKind {
     Sort,
     More,
     Organize,
+    OpenWith,
 }
 
 // Duotone icon: an accent-tinted layer under a foreground outline, drawn from a themed SVG.

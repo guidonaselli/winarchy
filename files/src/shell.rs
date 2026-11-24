@@ -1179,3 +1179,46 @@ mod elevated_tests {
         println!("{}", folder.display());
     }
 }
+
+// Programs registered for the file's type, as (display name, executable); packaged apps without an executable path are left out.
+#[cfg(windows)]
+pub fn open_with_handlers(path: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
+    use windows::{
+        Win32::{
+            System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoTaskMemFree},
+            UI::Shell::{ASSOC_FILTER_RECOMMENDED, IAssocHandler, SHAssocEnumHandlers},
+        },
+        core::{HSTRING, PWSTR},
+    };
+    let Some(extension) = path.extension() else { return Vec::new() };
+    let read = |text: PWSTR| {
+        let value = unsafe { text.to_string().ok() };
+        unsafe { CoTaskMemFree(Some(text.0.cast())) };
+        value
+    };
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let Ok(handlers) = SHAssocEnumHandlers(&HSTRING::from(format!(".{}", extension.to_string_lossy())), ASSOC_FILTER_RECOMMENDED) else { return Vec::new() };
+        let mut found = Vec::new();
+        loop {
+            let mut batch: [Option<IAssocHandler>; 1] = [None];
+            let mut fetched = 0u32;
+            if handlers.Next(&mut batch, Some(&mut fetched)).is_err() || fetched == 0 {
+                break;
+            }
+            let Some(handler) = batch[0].take() else { break };
+            let (Ok(name), Ok(label)) = (handler.GetName(), handler.GetUIName()) else { continue };
+            if let (Some(exe), Some(label)) = (read(name), read(label))
+                && std::path::Path::new(&exe).is_file()
+            {
+                found.push((label, std::path::PathBuf::from(exe)));
+            }
+        }
+        found
+    }
+}
+
+#[cfg(not(windows))]
+pub fn open_with_handlers(_path: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
+    Vec::new()
+}
