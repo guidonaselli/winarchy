@@ -543,7 +543,7 @@ pub fn share(_paths: &[PathBuf]) -> Result<(), String> {
 const ICON_LAYERS: &[u8] = include_bytes!("../assets/icon-layers.bin");
 const ICON_SIZES: [usize; 4] = [16, 24, 32, 48];
 const ICON_OPACITY: [f32; 3] = [0.55, 0.45, 1.0];
-const DEFAULT_ICON_COLORS: [[u8; 3]; 3] = [[0xC1, 0xC4, 0x97], [0x50, 0x94, 0x75], [0x11, 0x1c, 0x18]];
+const DEFAULT_ICON_COLORS: [[u8; 3]; 3] = [[0xd4, 0xd4, 0xd8], [0x8b, 0x91, 0x9c], [0x1f, 0x21, 0x25]];
 
 // The baked 48px layers carry about a fifth of padding per side; this crop (origin and side) trims it so the icon fills its slot like its neighbours.
 const ICON_CROP: (f32, f32, f32) = (8.0, 6.0, 36.0);
