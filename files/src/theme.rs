@@ -23,6 +23,8 @@ enum ThemeMode {
     Light,
 }
 
+const POINTER: &str = "theme-path.txt";
+
 impl Theme {
     pub fn window_theme(&self) -> WindowTheme {
         match self.mode {
@@ -36,12 +38,20 @@ impl Theme {
         if let Some(path) = std::env::var_os("WINARCHY_FILES_THEME") {
             Some(path.into())
         } else {
-            Some(
-                std::env::current_exe()
-                    .ok()?
-                    .parent()?
-                    .join("config/files/theme.json"),
-            )
+            let folder = std::env::current_exe().ok()?.parent()?.to_path_buf();
+            let beside = folder.join("config/files/theme.json");
+            // an installed copy has no config next to it: `--install` leaves the path of the stack's theme here
+            Some(if beside.exists() { beside } else { std::fs::read_to_string(folder.join(POINTER)).map_or(beside, |text| text.trim().into()) })
+        }
+    }
+
+    // Records where the stack's theme lives, found by walking up from the build being installed.
+    pub fn remember_location(installed: &std::path::Path, source: &std::path::Path) {
+        let found = std::env::var_os("WINARCHY_FILES_THEME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| source.ancestors().map(|dir| dir.join("config/files/theme.json")).find(|candidate| candidate.exists()));
+        if let Some(theme) = found {
+            let _ = std::fs::write(installed.join(POINTER), theme.to_string_lossy().as_bytes());
         }
     }
 

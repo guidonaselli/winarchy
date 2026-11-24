@@ -4045,6 +4045,7 @@ fn install() -> Result<PathBuf, String> {
     if source != target {
         std::fs::copy(&source, &target).map_err(|error| format!("{}: {error}", target.display()))?;
     }
+    Theme::remember_location(&folder, &source);
     let menu = PathBuf::from(std::env::var_os("APPDATA").ok_or("APPDATA is not set")?).join(r"Microsoft\Windows\Start Menu\Programs");
     shell::create_app_shortcut(&target, &menu.join("Files.lnk"), shell::APP_ID)?;
     Ok(folder)
