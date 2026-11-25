@@ -60,7 +60,7 @@ pub fn spawn(theme: Theme, scale: f32) -> bool {
     }).is_err() {
         return false;
     }
-    ready_rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap_or(false)
+    ready_rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap_or(false)
 }
 
 unsafe extern "system" fn proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {

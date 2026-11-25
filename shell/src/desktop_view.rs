@@ -18,6 +18,61 @@ use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+const RECYCLE_BIN: &str = "{645FF040-5081-101B-9F08-00AA002F954E}";
+
+fn desktop_dirs() -> Vec<PathBuf> {
+    [FOLDERID_Desktop, FOLDERID_PublicDesktop]
+        .iter()
+        .filter_map(|id| unsafe { SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, None) }.ok())
+        .map(|p| unsafe {
+            let path = PathBuf::from(p.to_string().unwrap_or_default());
+            CoTaskMemFree(Some(p.0 as *const _));
+            path
+        })
+        .collect()
+}
+
+fn hide_desktop_icon(guid: &str) -> Option<u32> {
+    use windows::core::HSTRING;
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+    let mut value = 0u32;
+    let mut len = 4u32;
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            windows::core::w!(r"Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel"),
+            &HSTRING::from(guid),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut value as *mut u32 as *mut _),
+            Some(&mut len),
+        )
+    };
+    (rc.0 == 0).then_some(value)
+}
+
+/// Lo que Explorer deja ver en el escritorio: lo que hay en las carpetas Desktop y los íconos
+/// del sistema que activa "Configuración de íconos del escritorio" (solo la Papelera por defecto).
+fn desktop_item_visible(
+    parsing_name: &str,
+    desktops: &[PathBuf],
+    hide_flag: impl Fn(&str) -> Option<u32>,
+) -> bool {
+    if let Some(guid) = parsing_name.strip_prefix("::") {
+        let guid = guid.to_ascii_uppercase();
+        return match hide_flag(&guid) {
+            Some(hidden) => hidden == 0,
+            None => guid == RECYCLE_BIN,
+        };
+    }
+    let Some(parent) = Path::new(parsing_name).parent() else {
+        return false;
+    };
+    desktops
+        .iter()
+        .any(|d| d.as_os_str().eq_ignore_ascii_case(parent.as_os_str()))
+}
+
 pub const WM_FILES_OPEN_FAILED: u32 = WM_APP + 94;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -234,9 +289,22 @@ impl ICommDlgBrowser_Impl for Browser_Impl {
     fn IncludeObject(
         &self,
         _: Option<&IShellView>,
-        _: *const windows::Win32::UI::Shell::Common::ITEMIDLIST,
+        pidl: *const windows::Win32::UI::Shell::Common::ITEMIDLIST,
     ) -> windows::core::Result<()> {
-        Ok(())
+        // sin Explorer nadie filtra el espacio de nombres: salen Home, Galería, Documentos, etc.
+        let name = unsafe { SHGetNameFromIDList(pidl, SIGDN_DESKTOPABSOLUTEPARSING) }
+            .ok()
+            .map(|n| unsafe {
+                let text = n.to_string().unwrap_or_default();
+                CoTaskMemFree(Some(n.0 as *const _));
+                text
+            });
+        match name {
+            Some(name) if !desktop_item_visible(&name, &desktop_dirs(), hide_desktop_icon) => {
+                Err(S_FALSE.into())
+            }
+            _ => Ok(()),
+        }
     }
 }
 

@@ -1306,28 +1306,44 @@ fn shell_paths(args: &[String], executable: Option<PathBuf>) -> (PathBuf, PathBu
     (root, theme)
 }
 
+fn boot_log(root: &Path, text: &str) {
+    use std::io::Write;
+    let path = root.join("state").join("shell-boot.log");
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > 64 * 1024) { let _ = std::fs::remove_file(&path); }
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{} pid={} {text}", chrono_stamp(), std::process::id());
+    }
+}
+
+fn chrono_stamp() -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    format!("t={secs}")
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let explicit_session_shell = args.iter().any(|arg| arg == "--session-shell");
     let (root, theme_path) = shell_paths(&args, std::env::current_exe().ok());
-    if !theme_path.is_file() { return; }
-    let Some(session_id) = current_session_id() else { return };
-    let Some(identity) = current_logon_identity() else { return };
+    if !theme_path.is_file() { boot_log(&root, &format!("exit: theme missing {}", theme_path.display())); return; }
+    let Some(session_id) = current_session_id() else { boot_log(&root, "exit: no session id"); return };
+    let Some(identity) = current_logon_identity() else { boot_log(&root, "exit: no logon identity"); return };
     let pid = unsafe { windows::Win32::System::Threading::GetCurrentProcessId() };
     if explicit_session_shell {
         let marker = shell_session_marker(&root, session_id);
-        if std::fs::create_dir_all(marker.parent().unwrap_or(&root)).is_err() || write_shell_marker(&marker, pid, &identity).is_err() { return; }
+        if std::fs::create_dir_all(marker.parent().unwrap_or(&root)).is_err() || write_shell_marker(&marker, pid, &identity).is_err() { boot_log(&root, "exit: cannot write session marker"); return; }
     }
     let instance = unsafe { windows::Win32::System::Threading::CreateMutexW(None, true, w!("Local\\WinarchyShellInstance")).expect("create shell instance mutex") };
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
         unsafe { let _ = CloseHandle(instance); }
+        boot_log(&root, "exit: another shell instance owns the mutex");
         return;
     }
     let session_shell = explicit_session_shell || session_shell_mode(&shell_session_marker(&root, session_id), &identity);
     let (session_status, session_marker) = match update_shell_session_state(&root, session_id, pid, session_shell, &identity) {
         Ok(paths) => (Some(paths.0), Some(paths.1)),
-        Err(_) => return,
+        Err(_) => { boot_log(&root, "exit: cannot write session status"); return }
     };
+    boot_log(&root, &format!("start session_shell={session_shell}"));
 
     let state_dir = root.join("state");
     let prev_hook = std::panic::take_hook();
@@ -1410,6 +1426,7 @@ fn main() {
                     cluster::notify();
                 });
             } else {
+                boot_log(&root, "tray host failed; returning to Explorer");
                 request_explorer_return(strip);
             }
         } else {
@@ -1426,6 +1443,7 @@ fn main() {
                 let _ = DispatchMessageW(&msg);
             }
         }
+        boot_log(&root, "message loop ended");
         if let Some(status) = &session_status { let _ = std::fs::remove_file(status); }
         if session_shell {
             if let Some(marker) = &session_marker { let _ = std::fs::remove_file(marker); }

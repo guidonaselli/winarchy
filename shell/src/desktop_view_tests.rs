@@ -152,3 +152,17 @@ fn an_accelerator_is_not_consumed_for_s_false() {
 fn an_accelerator_is_not_consumed_for_a_failure() {
     assert!(!accelerator_consumed(windows::Win32::Foundation::E_FAIL));
 }
+
+#[test]
+fn desktop_shows_only_its_folders_and_enabled_system_icons() {
+    let dirs = [PathBuf::from(r"C:\Users\a\Desktop"), PathBuf::from(r"C:\Users\Public\Desktop")];
+    let none = |_: &str| None;
+    assert!(desktop_item_visible(r"C:\Users\Public\Desktop\Steam.lnk", &dirs, none));
+    assert!(desktop_item_visible(r"c:\users\a\desktop\x.txt", &dirs, none));
+    assert!(!desktop_item_visible(r"C:\Users\a\Documents", &dirs, none));
+    assert!(!desktop_item_visible(r"C:\Users\a\Desktop", &dirs, none));
+    assert!(desktop_item_visible("::{645FF040-5081-101B-9F08-00AA002F954E}", &dirs, none));
+    assert!(!desktop_item_visible("::{F874310E-B6B7-47DC-BC84-B9E6B38F5903}", &dirs, none));
+    assert!(desktop_item_visible("::{20D04FE0-3AEA-1069-A2D8-08002B30309D}", &dirs, |_| Some(0)));
+    assert!(!desktop_item_visible("::{645FF040-5081-101B-9F08-00AA002F954E}", &dirs, |_| Some(1)));
+}
