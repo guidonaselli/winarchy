@@ -147,6 +147,13 @@ That means Winarchy optimizes for:
 
 ---
 
+## Performance
+
+The native shell is a 1.5 MB Rust binary. In a live session (30 s sample, dock and cluster on) it used
+**53 MB** of working set and **0.38 %** of one core, while `explorer.exe` on the same machine used
+294 MB and 2.58 %. Hot paths take nanoseconds (`hit_test` 16 ns, dock layout 88 ns). Method, commands
+and caveats are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+
 ## Installation
 
 From a normal (non-admin) PowerShell window on Windows 11:

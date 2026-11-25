@@ -102,6 +102,7 @@ function Invoke-WinarchySelfUpdate {
       - Aborta si el working tree tiene cambios sin commitear en archivos versionados.
       - Tras el pull, reusa install.ps1 (sin -Activate) como migración.
     #>
+    Assert-WinarchyCustomShellPolicySafeForMaintenance
     $root = Get-WinarchyRoot
 
     if (-not (Test-WinarchyGitCheckout)) {

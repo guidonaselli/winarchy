@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 const HELP: &str = "winarchy-assistant serve | ask <texto> | login | logout | status | levels [s] | listen <python> <stt/server.py> [s]";
 
-fn main() {
+fn main() -> std::process::ExitCode {
     let a: Vec<String> = std::env::args().collect();
     let code = match a.get(1).map(String::as_str) {
         Some("serve") => report(serve::run()),
@@ -40,7 +40,7 @@ fn main() {
             2
         }
     };
-    std::process::exit(code);
+    std::process::ExitCode::from(code as u8)
 }
 
 fn report(r: Result<(), String>) -> i32 {

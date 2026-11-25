@@ -72,10 +72,14 @@ fn a_setting_picks_exactly_one_dock() {
 
 #[test]
 fn a_crowded_dock_leaves_room_for_the_cluster_on_a_narrow_monitor() {
-    let mon = (0, 0, 1920, 1080);
-    let bar = crate::dock::layout(60, 1.0, mon, true, 6).bar;
-    let width = 188 + 4 * 28;
-    assert!(place(mon, 1.0, true, bar.x + bar.w, width).is_some(), "bar right edge {}", bar.x + bar.w);
+    for scale in [1.0f32, 1.25, 1.5, 2.0] {
+        for w in [1366, 1536, 1920, 2560, 3840].into_iter().filter(|w| *w as f32 / scale >= 1280.0) {
+            let mon = (0, 0, w, 1080);
+            let bar = crate::dock::layout_for(60, scale, mon, true, 6, true).bar;
+            let width = shape(scale, true, true, crate::tray::PINNED_MAX, 48).width;
+            assert!(place(mon, scale, true, bar.x + bar.w, width).is_some(), "scale {scale} width {w}: bar right edge {}", bar.x + bar.w);
+        }
+    }
 }
 
 #[test]
@@ -98,4 +102,29 @@ fn pinned_tray_icons_sit_left_of_the_status_without_overlapping_it() {
     assert_eq!(hit(&s, s.tray[1].x + 2, 24, 48), Some(Part::Tray(1)));
     assert_eq!(hit(&s, s.status.x + 2, 24, 48), Some(Part::Status));
     assert_eq!(plain.tray.len(), 0);
+}
+
+#[test]
+fn the_tray_chevron_leads_the_pill_and_opens_before_any_pinned_icon() {
+    for pinned in [0, 3] {
+        let s = shape(1.0, true, true, pinned, 48);
+        assert!(s.chevron.w > 0 && s.chevron.x + s.chevron.w <= s.status.x);
+        assert_eq!(hit(&s, s.chevron.x + 2, 24, 48), Some(Part::Chevron));
+        if pinned > 0 {
+            assert!(s.chevron.x + s.chevron.w <= s.tray[0].x);
+        }
+    }
+}
+
+#[test]
+fn the_status_and_clock_menus_offer_what_windows_offers() {
+    use crate::i18n::K;
+    let volume = context_entries(Part::Status, StatusPart::Volume);
+    assert!(volume.iter().any(|(k, e)| *k == K::MenuMute && *e == MenuEntry::Mute));
+    assert!(context_entries(Part::Status, StatusPart::Network).iter().any(|(_, e)| *e == MenuEntry::Open("ms-settings:network")));
+    assert!(context_entries(Part::Clock, StatusPart::Volume).iter().any(|(_, e)| *e == MenuEntry::Open("ms-settings:dateandtime")));
+    assert!(context_entries(Part::Desktop, StatusPart::Volume).is_empty());
+    let s = shape(1.0, true, false, 0, 48);
+    assert_eq!(status_part(&s, 1.0, s.status.x + 2), StatusPart::Network);
+    assert_eq!(status_part(&s, 1.0, s.status.x + s.status.w - 2), StatusPart::Battery);
 }

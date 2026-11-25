@@ -36,6 +36,8 @@ function Invoke-Step {
     try { & $Action; Write-WinarchyOk $Done }
     catch { Write-WinarchyWarn "$($Describe): $($_.Exception.Message)" }
 }
+if (-not $DryRun) { Assert-WinarchyCustomShellPolicySafeForMaintenance }
+if (-not $DryRun -and -not (Stop-WinarchyShell)) { throw 'Explorer could not be restored; uninstall stopped before Winarchy services were removed.' }
 
 Invoke-Step 'Stop komorebi, YASB and the Winarchy AHK script' {
     Stop-WinarchyWindowSlots
@@ -46,7 +48,6 @@ Invoke-Step 'Stop komorebi, YASB and the Winarchy AHK script' {
         $komorebi | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
     }
     Stop-Process -Name yasb -Force -ErrorAction SilentlyContinue
-    Stop-WinarchyShell
     Get-Process -Name powershell, pwsh -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -like '*Start-NetIcon.ps1*' } |
         Stop-Process -Force -ErrorAction SilentlyContinue

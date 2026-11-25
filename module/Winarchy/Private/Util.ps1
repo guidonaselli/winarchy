@@ -94,8 +94,17 @@ function Start-WinarchyKomorebi {
       algunas máquinas (os error 1920: reintenta y puede colgarse varios segundos), así
       que lanzamos komorebi.exe directo, que arranca al toque y hereda KOMOREBI_CONFIG_HOME
       del entorno (User var que registra install.ps1). No-op si ya está corriendo.
+      -Resilient: lo delega en scripts/Start-Komorebi.ps1 (limpia el socket stale, reintenta
+      si otra app retiene el foreground y deja log); para reinicios desatendidos, donde un
+      arranque fallido pasaba sin rastro.
     #>
+    param([switch]$Resilient)
     if (Test-WinarchyProcess 'komorebi') { return }
+    if ($Resilient) {
+        $launcher = Join-Path (Get-WinarchyRoot) 'scripts\Start-Komorebi.ps1'
+        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $launcher
+        return
+    }
     $exe = Get-WinarchyKomorebiExe
     if (-not $exe) { Write-WinarchyWarn 'komorebi.exe not found; tiling not started.'; return }
     Start-Process $exe -WindowStyle Hidden

@@ -3,20 +3,19 @@
 # Lo lanza la Scheduled Task At-LogOn (oculto). Resuelve dos causas de que komorebi
 # quedara OFFLINE al prender/desbloquear la PC:
 #   a) panic temprano (Application Error 0xc0000409 = abort de Rust).
-#   b) "failed call to AllowSetForegroundWindow after 5 retries" (main.rs:219): komorebi
-#      arranca antes de que la sesión tenga una ventana de foreground real. Pasa típico
-#      al desbloquear rápido: el LogonTrigger dispara y el escritorio no asentó todavía.
-# Antes el launcher cortaba a los 5 intentos en <1 min y quedaba muerto hasta reiniciar
-# a mano. Este launcher:
+#   b) "failed call to AllowSetForegroundWindow after 5 retries" (main.rs:219): la sesión
+#      no estaba lista cuando komorebi intentó tomar permiso de foreground.
+# Este launcher:
 #   1. Redirige stdout/stderr de komorebi a un log.
-#   2. Espera a que exista foreground real (explorer + GetForegroundWindow != 0), no solo
-#      a que explorer exista, y baja el foreground lock timeout a 0.
-#   3. Reintenta con presupuesto de tiempo (~5 min) y re-espera el foreground en cada
-#      vuelta, en vez de rendirse a los pocos segundos.
+#   2. Espera a Explorer con foreground o al shell Winarchy de esta sesión. Las ventanas
+#      Winarchy no activan foreground, así que komorebi valida el permiso al arrancar.
+#   3. Reinicia el foreground lock, sintetiza Alt y reintenta hasta 5 min, verificando
+#      que komorebi siga vivo tras 8 s.
 #
 # No-op si komorebi ya está corriendo.
 
 $root = Split-Path $PSScriptRoot -Parent
+$sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
 $env:KOMOREBI_CONFIG_HOME = Join-Path $root 'config\komorebi'
 $exe    = Join-Path $env:ProgramFiles 'komorebi\bin\komorebi.exe'
 $logDir = Join-Path $env:LOCALAPPDATA 'komorebi'
@@ -43,9 +42,10 @@ function Reset-ForegroundLock {
     [Win.Fg]::keybd_event(0x12, 0, 0x2, [System.UIntPtr]::Zero)      # VK_MENU up (KEYEVENTF_KEYUP)
 }
 
-function Test-ForegroundReady {
-    [bool]((Get-Process explorer -ErrorAction SilentlyContinue) -and `
-           ([Win.Fg]::GetForegroundWindow() -ne [System.IntPtr]::Zero))
+function Test-ShellReady {
+    $shells = @(Get-Process -Name explorer, 'winarchy-shell' -ErrorAction SilentlyContinue | Where-Object SessionId -eq $sessionId)
+    [bool]($shells.Count -gt 0 -and (($shells.ProcessName -contains 'winarchy-shell') -or
+           ([Win.Fg]::GetForegroundWindow() -ne [System.IntPtr]::Zero)))
 }
 
 function Write-Log([string]$m) {
@@ -86,28 +86,27 @@ foreach ($stale in @('game-mode.flag', 'game-mode-floated')) {
     }
 }
 
-# Presupuesto total para que el escritorio asiente y komorebi quede arriba. Cubre el
-# caso de desbloqueo rápido, donde el foreground tarda en existir.
+# Presupuesto total para que el shell asiente y komorebi quede arriba.
 $overallDeadline = (Get-Date).AddMinutes(5)
 
-# 1) Esperar foreground real (explorer + ventana de foreground != 0), no solo explorer.
-while ((Get-Date) -lt $overallDeadline -and -not (Test-ForegroundReady)) {
+# 1) Esperar Explorer con foreground o el shell Winarchy de esta sesión.
+while ((Get-Date) -lt $overallDeadline -and -not (Test-ShellReady)) {
     Start-Sleep -Milliseconds 500
 }
 Start-Sleep -Seconds 2
 
-# 2) Intentos con presupuesto de tiempo: re-esperar foreground en cada vuelta, bajar el
-#    lock timeout, lanzar oculto y verificar que sobrevive >8s. No nos rendimos a los
-#    pocos segundos: reintentamos hasta $overallDeadline.
+# 2) Intentos con presupuesto de tiempo: revalidar el shell, bajar el lock timeout,
+#    lanzar oculto y verificar que sobrevive >8s. Reintentamos hasta $overallDeadline.
 $attempt = 0
 while ((Get-Date) -lt $overallDeadline) {
     if (Test-KomorebiRunning) { Write-Log 'komorebi vivo; listo.'; exit 0 }
     $attempt++
 
-    # Asegurar la precondición de AllowSetForegroundWindow antes de cada intento.
-    while ((Get-Date) -lt $overallDeadline -and -not (Test-ForegroundReady)) {
+    # Reiniciar la condición de foreground antes de cada intento.
+    while ((Get-Date) -lt $overallDeadline -and -not (Test-ShellReady)) {
         Start-Sleep -Milliseconds 500
     }
+    if ((Get-Date) -ge $overallDeadline) { break }
     [Win.Fg]::SystemParametersInfo(0x2001, 0, [System.IntPtr]::Zero, 0x3) | Out-Null
     Reset-ForegroundLock
 

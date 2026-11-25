@@ -64,11 +64,12 @@ pub fn place(anchor: R, mon: (i32, i32, i32, i32), bottom: bool, size: (i32, i32
     let margin = px(MARGIN_DIP, scale);
     let x = (anchor.x + anchor.w / 2 - size.0 / 2).clamp(mon.0 + margin, (mon.2 - margin - size.0).max(mon.0 + margin));
     let y = if bottom { anchor.y - margin - size.1 } else { anchor.y + anchor.h + margin };
-    (x, y)
+    // Con muchas filas el flyout podría no entrar entre el dock y el borde del monitor: se queda dentro.
+    (x, y.clamp(mon.1 + margin, (mon.3 - margin - size.1).max(mon.1 + margin)))
 }
 
 // Reduce (o amplía) un ícono BGRA con alfa recta a `side`×`side`, ya premultiplicado.
-pub fn scaled(src: &[u8], (w, h): (u32, u32), side: i32) -> Vec<u32> {
+pub(crate) fn scaled(src: &[u8], (w, h): (u32, u32), side: i32) -> Vec<u32> {
     let side = side.max(1) as usize;
     let texel = |x: i32, y: i32| -> [f32; 4] {
         let i = ((y.clamp(0, h as i32 - 1) as usize) * w as usize + x.clamp(0, w as i32 - 1) as usize) * 4;
@@ -119,6 +120,11 @@ struct Flyout {
 }
 
 static HWND_ATOMIC: AtomicIsize = AtomicIsize::new(0);
+// Ventana en primer plano al abrir: si cambia (clic en otra app, Alt+Tab, tecla Win) el flyout se cierra.
+static FG_AT_OPEN: AtomicIsize = AtomicIsize::new(0);
+// Hasta este GetTickCount64 el foco lo puede tomar el menú contextual del ícono sin cerrar el flyout.
+static FG_GRACE_UNTIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+const MENU_GRACE_MS: u64 = 1500;
 thread_local! { static FLY: RefCell<Option<Flyout>> = const { RefCell::new(None) }; }
 
 fn with<R>(f: impl FnOnce(&mut Flyout) -> R) -> Option<R> {
@@ -151,10 +157,15 @@ pub fn toggle(anchor: R, mon: (i32, i32, i32, i32), bottom: bool, scale: f32, th
     });
     let Some(h) = started else { return false };
     unsafe {
+        FG_AT_OPEN.store(GetForegroundWindow().0 as isize, Ordering::Relaxed);
         SetTimer(h, T_WATCH, WATCH_MS, None);
         start_anim(h);
     }
     paint();
+    // una ventana activada antes puede ser topmost y quedar encima; solo al abrir, para no tapar el menú de la app durante el fundido de salida
+    unsafe {
+        let _ = SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
     true
 }
 
@@ -348,8 +359,8 @@ fn cell_at(x: i32, y: i32) -> Option<usize> {
     .flatten()
 }
 
-fn icon_at(index: usize) -> Option<(u32, u32)> {
-    tray::with_visible(|v| v.get(index).map(|i| (i.hwnd, i.uid)))
+fn icon_at(index: usize) -> Option<(u32, u32, [u8; 16])> {
+    tray::with_visible(|v| v.get(index).map(|i| (i.hwnd, i.uid, i.guid)))
 }
 
 fn on_pin(index: usize, x: i32, y: i32) -> bool {
@@ -365,13 +376,25 @@ fn send(index: usize, gesture: Gesture) {
     unsafe {
         let _ = GetCursorPos(&mut p);
     }
-    if let Some((hwnd, uid)) = icon_at(index) {
-        tray::click(hwnd, uid, gesture, (p.x, p.y));
+    if let Some((hwnd, uid, guid)) = icon_at(index) {
+        if gesture != Gesture::Left {
+            FG_GRACE_UNTIL.store(unsafe { windows::Win32::System::SystemInformation::GetTickCount64() } + MENU_GRACE_MS, Ordering::Relaxed);
+        }
+        tray::click_identity(hwnd, uid, guid, gesture, (p.x, p.y));
     }
 }
 
 // Un clic fuera del flyout (lo que haya debajo del cursor, menús contextuales incluidos) lo cierra; sin hooks de mouse.
 unsafe fn watch(h: HWND) {
+    let fg = GetForegroundWindow();
+    let baseline = FG_AT_OPEN.load(Ordering::Relaxed);
+    if baseline == 0 {
+        // abierto en una transición sin ventana activa: el primer primer plano real es la referencia
+        FG_AT_OPEN.store(fg.0 as isize, Ordering::Relaxed);
+    } else if fg.0 as isize != 0 && fg.0 as isize != baseline && GetAncestor(fg, GA_ROOT) != h && windows::Win32::System::SystemInformation::GetTickCount64() >= FG_GRACE_UNTIL.load(Ordering::Relaxed) {
+        close();
+        return;
+    }
     let down = GetAsyncKeyState(VK_LBUTTON.0 as i32) < 0 || GetAsyncKeyState(VK_RBUTTON.0 as i32) < 0;
     let mut p = POINT::default();
     if !down || GetCursorPos(&mut p).is_err() {

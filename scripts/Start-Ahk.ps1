@@ -10,6 +10,7 @@ $exe    = $AhkExe
 $script = $ScriptPath
 $logDir = Join-Path $env:LOCALAPPDATA 'Winarchy'
 $log    = Join-Path $logDir 'ahk-autostart.log'
+$sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
 
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 
@@ -17,9 +18,10 @@ Add-Type -Namespace Win -Name FgAhk -MemberDefinition @'
 [DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
 '@
 
-function Test-ForegroundReady {
-    [bool]((Get-Process explorer -ErrorAction SilentlyContinue) -and `
-           ([Win.FgAhk]::GetForegroundWindow() -ne [System.IntPtr]::Zero))
+function Test-ShellReady {
+    $shells = @(Get-Process -Name explorer, 'winarchy-shell' -ErrorAction SilentlyContinue | Where-Object SessionId -eq $sessionId)
+    [bool]($shells.Count -gt 0 -and (($shells.ProcessName -contains 'winarchy-shell') -or
+           ([Win.FgAhk]::GetForegroundWindow() -ne [System.IntPtr]::Zero)))
 }
 
 function Write-Log([string]$m) {
@@ -29,7 +31,7 @@ function Write-Log([string]$m) {
 
 function Test-AhkRunning {
     [bool](Get-CimInstance Win32_Process -Filter "Name = 'AutoHotkey64.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -like "*$([IO.Path]::GetFileName($script))*" })
+        Where-Object { $_.SessionId -eq $sessionId -and $_.CommandLine -like "*$([IO.Path]::GetFileName($script))*" })
 }
 
 if (-not (Test-Path $exe)) { Write-Log "AutoHotkey64.exe no encontrado en $exe; abortando."; exit 1 }
@@ -44,9 +46,10 @@ while ((Get-Date) -lt $overallDeadline) {
     if (Test-AhkRunning) { Write-Log 'AHK vivo; listo.'; exit 0 }
     $attempt++
 
-    while ((Get-Date) -lt $overallDeadline -and -not (Test-ForegroundReady)) {
+    while ((Get-Date) -lt $overallDeadline -and -not (Test-ShellReady)) {
         Start-Sleep -Milliseconds 500
     }
+    if ((Get-Date) -ge $overallDeadline) { break }
 
     Write-Log "intento ${attempt}: lanzando AutoHotkey64.exe"
     try {

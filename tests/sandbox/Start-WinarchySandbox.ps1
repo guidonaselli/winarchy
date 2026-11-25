@@ -2,8 +2,9 @@
 .SYNOPSIS
   Installs Winarchy in a clean Windows Sandbox as a regular (non-elevated) user and checks the result.
 .DESCRIPTION
-  Tests what is committed (HEAD), not the working tree: the sandbox clones a bare copy of the
-  repo whose `release` branch points at HEAD.
+  Tests what is committed (HEAD) unless -WorkingTree is given, which snapshots the working tree
+  (tracked and untracked, not ignored) without touching any branch or the index of the repo. The sandbox
+  clones a bare copy of the repo whose `release` branch points at that commit.
     install     winget -> git + pwsh, clone, install.ps1 twice, Assert-Install
     uninstall   install -Activate, uninstall.ps1 twice (no pins, env vars, PATH entry, logon task,
                 running stack, profile hook or Start menu command left), reinstall, Assert-Install
@@ -27,6 +28,7 @@
 param(
     [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'barswitch')][string]$Scenario,
     [switch]$Keep,
+    [switch]$WorkingTree,
     [string]$Out = (Join-Path $env:TEMP 'winarchy-sandbox')
 )
 $ErrorActionPreference = 'Stop'
@@ -38,6 +40,17 @@ $run = Join-Path $Out "$(Get-Date -Format 'yyyyMMdd-HHmmss')-$Scenario"
 New-Item -ItemType Directory -Path $run -Force | Out-Null
 git clone --quiet --bare $root (Join-Path $run 'winarchy.git')
 git -C (Join-Path $run 'winarchy.git') branch -f release HEAD
+if ($WorkingTree) {
+    # snapshot of the working tree (tracked + untracked, not ignored) as a child of HEAD that no ref in the repo points at
+    $idx = Join-Path $run 'snapshot.index'
+    $env:GIT_INDEX_FILE = $idx
+    try {
+        git -C $root read-tree HEAD
+        git -C $root add -A
+        $tip = (git -C $root commit-tree (git -C $root write-tree) -p HEAD -m 'working tree snapshot').Trim()
+    } finally { Remove-Item Env:\GIT_INDEX_FILE; Remove-Item $idx -ErrorAction SilentlyContinue }
+    git -C $root push --quiet (Join-Path $run 'winarchy.git') "${tip}:refs/heads/release"
+}
 Copy-Item (Join-Path $root 'boot.ps1') $run
 Copy-Item $PSScriptRoot (Join-Path $run 'scripts') -Recurse
 

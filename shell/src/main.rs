@@ -1,8 +1,12 @@
 #![windows_subsystem = "windows"]
 
 mod apps;
+#[cfg(test)]
+mod bench_tests;
 mod accessibility;
 mod dock;
+mod desktop;
+mod desktop_view;
 mod dock_drop;
 mod dock_menu;
 mod dock_recent;
@@ -23,9 +27,11 @@ mod system;
 mod theme;
 mod tray;
 mod tray_flyout;
+mod tray_host;
+mod tray_notifications;
 
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use i18n::{lang, t as tr, K};
 use layout::{px, Hit, Inputs, Layout, PanelShape, R};
@@ -42,6 +48,16 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 const WM_CMD_RELOAD: u32 = WM_APP + 2;
 const WM_CMD_QUIT: u32 = WM_APP + 3;
+const WM_CMD_RESTART: u32 = WM_APP + 11;
+
+enum RestartAction { Reload, Exit }
+
+fn restart_action(session_shell: bool) -> RestartAction {
+    if session_shell { RestartAction::Reload } else { RestartAction::Exit }
+}
+const WM_CMD_RETURN: u32 = WM_APP + 12;
+const WM_CMD_RETURN_READY: u32 = WM_APP + 44;
+const WM_CMD_RETURN_FAILED: u32 = WM_APP + 45;
 const WM_WORKSPACES: u32 = WM_APP + 4;
 const WM_CMD_TRAY: u32 = WM_APP + 8;
 const WM_CMD_TRAY_DISMISS: u32 = WM_APP + 9;
@@ -61,8 +77,11 @@ const FLASH_MS: u32 = 800;
 const HOVER_MS: u32 = 120;
 const PILL_MAX_W: i32 = 1400;
 const FADE_SECS: f32 = 0.18;
+static RETURN_TO_EXPLORER_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 struct State {
+    session_shell: bool,
+    state_dir: PathBuf,
     theme: Theme,
     theme_path: PathBuf,
     theme_mtime: Option<SystemTime>,
@@ -124,6 +143,23 @@ struct CalView {
     marks: Vec<bool>,
     agenda: Vec<String>,
     world: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum DockChange {
+    Enable,
+    Disable,
+    Update,
+    None,
+}
+
+fn dock_change(previous: bool, current: bool) -> DockChange {
+    match (previous, current) {
+        (false, true) => DockChange::Enable,
+        (true, false) => DockChange::Disable,
+        (true, true) => DockChange::Update,
+        (false, false) => DockChange::None,
+    }
 }
 
 const AGENDA_LINES: usize = 3;
@@ -650,7 +686,7 @@ unsafe fn animations_enabled() -> bool {
 }
 
 unsafe fn fullscreen_busy() -> bool {
-    matches!(SHQueryUserNotificationState(), Ok(s) if s == QUNS_BUSY || s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE)
+    !desktop::is_host_window(GetForegroundWindow()) && matches!(SHQueryUserNotificationState(), Ok(s) if s == QUNS_BUSY || s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE)
 }
 
 // Parte la etiqueta en palabras; las claves en mayúsculas al inicio de un ítem ("CPU", "VOL") y los separadores van atenuados.
@@ -769,6 +805,7 @@ unsafe fn tick(_strip: HWND) {
 }
 
 unsafe fn tick_inner() {
+    desktop::tick();
     let (pill, hidden, last) = with(|s| (s.pill, s.hidden, s.last_minute));
     let minute_now = GetLocalTime().wMinute;
     if with(|s| s.countdown_minute != minute_now) {
@@ -792,11 +829,12 @@ unsafe fn tick_inner() {
         if m != s.theme_mtime {
             s.theme_mtime = m;
             if let Some(t) = Theme::load(&s.theme_path) {
+                let was_dock = s.theme.dock;
                 s.theme = t;
-                return true;
+                return Some((was_dock, s.theme.dock, s.theme.clone(), s.state_dir.clone()));
             }
         }
-        false
+        None
     });
     let sig = layout_sig();
     if with(|s| s.layout_sig != sig) {
@@ -812,14 +850,17 @@ unsafe fn tick_inner() {
     let minute = GetLocalTime().wMinute;
     let fm = focus_monitor();
     let moved = with(|s| (fm.left, fm.top) != (s.pill_mon.left, s.pill_mon.top));
-    if reloaded {
-        if with(|s| s.theme.dock) {
-            dock::set_theme(&with(|s| s.theme.clone()));
-        } else {
-            dock::restore_native_taskbar();
+    if let Some((was_dock, has_dock, theme, state_dir)) = &reloaded {
+        desktop::set_fallback_color(&theme.background);
+        if with(|s| s.session_shell) { tray_notifications::update_theme(theme.clone()); }
+        match dock_change(*was_dock, *has_dock) {
+            DockChange::Enable => { let _ = dock::init(theme, state_dir); }
+            DockChange::Disable => dock::shutdown(),
+            DockChange::Update => dock::set_theme(theme),
+            DockChange::None => {}
         }
     }
-    if !busy && (reloaded || expanding || moved || minute != last) {
+    if !busy && (reloaded.is_some() || expanding || moved || minute != last) {
         with(|s| s.last_minute = minute);
         render_pill(pill);
     }
@@ -937,11 +978,43 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             LRESULT(0)
         }
         WM_CMD_QUIT => {
+            if with(|s| s.session_shell) {
+                request_explorer_return(h);
+            } else {
+                let _ = DestroyWindow(h);
+            }
+            LRESULT(0)
+        }
+        WM_CMD_RESTART => {
+            match restart_action(with(|s| s.session_shell)) {
+                RestartAction::Reload => {
+                    with(|s| s.theme_mtime = None);
+                    tick(h);
+                }
+                RestartAction::Exit => { let _ = DestroyWindow(h); }
+            }
+            LRESULT(0)
+        }
+        WM_CMD_RETURN => {
+            if with(|s| s.session_shell) {
+                request_explorer_return(h);
+            } else {
+                let _ = DestroyWindow(h);
+            }
+            LRESULT(0)
+        }
+        WM_CMD_RETURN_READY => {
+            RETURN_TO_EXPLORER_PENDING.store(false, std::sync::atomic::Ordering::Release);
             let _ = DestroyWindow(h);
+            LRESULT(0)
+        }
+        WM_CMD_RETURN_FAILED => {
+            RETURN_TO_EXPLORER_PENDING.store(false, std::sync::atomic::Ordering::Release);
             LRESULT(0)
         }
         WM_DESTROY => {
             if with(|s| s.strip) == h {
+                desktop::shutdown();
                 dock::restore_native_taskbar();
                 PostQuitMessage(0);
             }
@@ -954,6 +1027,23 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
 unsafe fn shell_open(target: &str) {
     let t = widestr(target);
     let _ = ShellExecuteW(None, w!("open"), PCWSTR(t.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
+}
+
+fn request_explorer_return(hwnd: HWND) {
+    use std::sync::atomic::Ordering;
+    if RETURN_TO_EXPLORER_PENDING.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() {
+        return;
+    }
+    let target = hwnd.0 as isize;
+    if std::thread::Builder::new().name("explorer-return".into()).spawn(move || {
+        let message = if dock::start_system_explorer() { WM_CMD_RETURN_READY } else { WM_CMD_RETURN_FAILED };
+        let posted = unsafe { PostMessageW(HWND(target as *mut _), message, WPARAM(0), LPARAM(0)).is_ok() };
+        if message == WM_CMD_RETURN_FAILED || !posted {
+            RETURN_TO_EXPLORER_PENDING.store(false, Ordering::Release);
+        }
+    }).is_err() {
+        RETURN_TO_EXPLORER_PENDING.store(false, Ordering::Release);
+    }
 }
 
 unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -1100,9 +1190,146 @@ fn workspace_changed(prev: Option<usize>, cur: Option<usize>) -> bool {
     matches!((prev, cur), (Some(p), Some(c)) if p != c)
 }
 
+
+fn shell_status_path(root: &Path, session_id: u32) -> PathBuf {
+    root.join("state").join(format!("shell-session-{session_id}"))
+}
+
+fn shell_session_marker(root: &Path, session_id: u32) -> PathBuf {
+    root.join("state").join(format!("session-shell-{session_id}"))
+}
+
+fn write_shell_status(path: &Path, pid: u32, session_shell: bool, identity: &str) -> std::io::Result<()> {
+    let temp = path.with_extension(format!("tmp-{pid}"));
+    std::fs::write(&temp, format!("{pid}|{}|{identity}", u8::from(session_shell)))?;
+    if let Err(error) = std::fs::rename(&temp, path) {
+        let _ = std::fs::remove_file(temp);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn write_shell_marker(path: &Path, pid: u32, identity: &str) -> std::io::Result<()> {
+    let temp = path.with_extension(format!("tmp-{pid}"));
+    std::fs::write(&temp, identity)?;
+    if let Err(error) = std::fs::rename(&temp, path) {
+        let _ = std::fs::remove_file(temp);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn session_shell_mode(marker: &Path, identity: &str) -> bool {
+    std::fs::read_to_string(marker).is_ok_and(|value| value.trim() == identity)
+}
+
+fn update_shell_session_state(root: &Path, session_id: u32, pid: u32, session_shell: bool, identity: &str) -> std::io::Result<(PathBuf, PathBuf)> {
+    let status = shell_status_path(root, session_id);
+    let marker = shell_session_marker(root, session_id);
+    std::fs::create_dir_all(status.parent().unwrap_or(root))?;
+    if session_shell { write_shell_marker(&marker, pid, identity)?; }
+    write_shell_status(&status, pid, session_shell, identity)?;
+    Ok((status, marker))
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn ProcessIdToSessionId(process_id: u32, session_id: *mut u32) -> BOOL;
+}
+
+fn current_session_id() -> Option<u32> {
+    let mut session_id = 0;
+    unsafe { ProcessIdToSessionId(windows::Win32::System::Threading::GetCurrentProcessId(), &mut session_id).as_bool().then_some(session_id) }
+}
+fn current_logon_identity() -> Option<String> {
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct Luid { low: u32, high: i32 }
+    #[repr(C)]
+    struct TokenStatistics {
+        token_id: Luid, authentication_id: Luid, expiration_time: i64, token_type: u32,
+        impersonation_level: u32, dynamic_charged: u32, dynamic_available: u32,
+        group_count: u32, privilege_count: u32, modified_id: Luid,
+    }
+    #[repr(C)]
+    struct LsaUnicodeString { length: u16, maximum_length: u16, buffer: *mut u16 }
+    #[repr(C)]
+    struct LogonSessionData {
+        size: u32, logon_id: Luid, user_name: LsaUnicodeString, logon_domain: LsaUnicodeString,
+        authentication_package: LsaUnicodeString, logon_type: u32, session: u32,
+        sid: *mut core::ffi::c_void, logon_time: i64,
+    }
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn OpenProcessToken(process: HANDLE, access: u32, token: *mut HANDLE) -> BOOL;
+        fn GetTokenInformation(token: HANDLE, class: u32, info: *mut core::ffi::c_void, size: u32, returned: *mut u32) -> BOOL;
+    }
+    #[link(name = "secur32")]
+    unsafe extern "system" {
+        fn LsaGetLogonSessionData(id: *const Luid, data: *mut *mut LogonSessionData) -> i32;
+        fn LsaFreeReturnBuffer(data: *mut core::ffi::c_void) -> i32;
+    }
+    unsafe {
+        let mut token = HANDLE::default();
+        if !OpenProcessToken(windows::Win32::System::Threading::GetCurrentProcess(), 0x0008, &mut token).as_bool() { return None; }
+        let mut stats = std::mem::MaybeUninit::<TokenStatistics>::zeroed();
+        let mut returned = 0;
+        let ok = GetTokenInformation(token, 10, stats.as_mut_ptr().cast(), std::mem::size_of::<TokenStatistics>() as u32, &mut returned).as_bool();
+        let _ = CloseHandle(token);
+        if !ok || returned < std::mem::size_of::<TokenStatistics>() as u32 { return None; }
+        let authentication_id = stats.assume_init().authentication_id;
+        let mut data = std::ptr::null_mut();
+        if LsaGetLogonSessionData(&authentication_id, &mut data) != 0 || data.is_null() { return None; }
+        let logon_time = (*data).logon_time;
+        let _ = LsaFreeReturnBuffer(data.cast());
+        (logon_time > 0).then(|| format!("{:08x}{:08x}-{:016x}", authentication_id.high as u32, authentication_id.low, logon_time as u64))
+    }
+}
+
+
+fn shell_paths(args: &[String], executable: Option<PathBuf>) -> (PathBuf, PathBuf) {
+    let arg_value = |key: &str| args.windows(2).find(|pair| pair[0] == key).map(|pair| PathBuf::from(&pair[1]));
+    let root = arg_value("--root").or_else(|| {
+        executable.as_ref().and_then(|exe| {
+            let parent = exe.parent()?;
+            if parent.file_name().is_some_and(|name| name.eq_ignore_ascii_case("bin")) {
+                let state = parent.parent()?;
+                if state.file_name().is_some_and(|name| name.eq_ignore_ascii_case("state")) { return state.parent().map(PathBuf::from); }
+            }
+            exe.ancestors().find(|path| path.join("config/shell/theme.json").is_file()).map(PathBuf::from)
+        })
+    }).or_else(|| std::env::current_dir().ok()).unwrap_or_default();
+    let theme = arg_value("--theme").or_else(|| args.iter().enumerate().find(|(i, arg)| {
+        !arg.starts_with("--") && (*i == 0 || !matches!(args[*i - 1].as_str(), "--root" | "--theme"))
+    }).map(|(_, arg)| PathBuf::from(arg)))
+        .unwrap_or_else(|| root.join("config").join("shell").join("theme.json"));
+    (root, theme)
+}
+
 fn main() {
-    let root = std::env::current_exe().ok().and_then(|p| p.ancestors().nth(4).map(|p| p.to_path_buf())).unwrap_or_default();
-    let theme_path = std::env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| root.join("config").join("shell").join("theme.json"));
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let explicit_session_shell = args.iter().any(|arg| arg == "--session-shell");
+    let (root, theme_path) = shell_paths(&args, std::env::current_exe().ok());
+    if !theme_path.is_file() { return; }
+    let Some(session_id) = current_session_id() else { return };
+    let Some(identity) = current_logon_identity() else { return };
+    let pid = unsafe { windows::Win32::System::Threading::GetCurrentProcessId() };
+    if explicit_session_shell {
+        let marker = shell_session_marker(&root, session_id);
+        if std::fs::create_dir_all(marker.parent().unwrap_or(&root)).is_err() || write_shell_marker(&marker, pid, &identity).is_err() { return; }
+    }
+    let instance = unsafe { windows::Win32::System::Threading::CreateMutexW(None, true, w!("Local\\WinarchyShellInstance")).expect("create shell instance mutex") };
+    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        unsafe { let _ = CloseHandle(instance); }
+        return;
+    }
+    let session_shell = explicit_session_shell || session_shell_mode(&shell_session_marker(&root, session_id), &identity);
+    let (session_status, session_marker) = match update_shell_session_state(&root, session_id, pid, session_shell, &identity) {
+        Ok(paths) => (Some(paths.0), Some(paths.1)),
+        Err(_) => return,
+    };
+
+    let state_dir = root.join("state");
     let prev_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |i| {
         if std::thread::current().name() == Some("main") {
@@ -1114,7 +1341,7 @@ fn main() {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let inst = GetModuleHandleW(PCWSTR::null()).unwrap();
         let scale = GetDpiForSystem() as f32 / 96.0;
-        let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
+        let com_initialized = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED).is_ok();
         // SetTimer de 8 ms rinde ~15 ms con la resolución por defecto: 1 ms hace real la animación.
         windows::Win32::Media::timeBeginPeriod(1);
         let theme = Theme::load(&theme_path).unwrap_or_default();
@@ -1130,15 +1357,15 @@ fn main() {
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, layout::bar_h(scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path: theme_path.clone(), scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), last_mode: None, layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig(), fade: 1.0, was_open: false, clock_open: false, cal_ym: (1970, 1), cal_sel: 0, countdown: None, countdown_minute: 99 })
+            *s.borrow_mut() = Some(State { session_shell, state_dir: state_dir.clone(), theme_mtime: Theme::stamp(&theme_path), theme: theme.clone(), theme_path: theme_path.clone(), scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), last_mode: None, layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig(), fade: 1.0, was_open: false, clock_open: false, cal_ym: (1970, 1), cal_sel: 0, countdown: None, countdown_minute: 99 })
         });
+        if session_shell { desktop::init(&theme.background, &root, com_initialized); }
         ics::spawn_feed(theme_path.clone());
         extras::spawn_weather(theme_path);
         render_pill(pill);
         let _ = ShowWindow(pill, SW_SHOWNOACTIVATE);
         let dock_on = with(|s| s.theme.dock);
         if dock_on {
-            let state_dir = with(|s| s.theme_path.ancestors().nth(3).map(|r| r.join("state")).unwrap_or_default());
             let _ = dock::init(&with(|s| s.theme.clone()), &state_dir);
         }
         if !dock_on || !with(|s| s.theme.hide_native_taskbar) {
@@ -1150,11 +1377,13 @@ fn main() {
         brightness::init(move || {
             let _ = PostMessageW(HWND(target as *mut _), WM_BRIGHTNESS, WPARAM(0), LPARAM(0));
         });
-        pipe::serve(move |c| {
+        pipe::serve(session_id, move |c| {
             let mut arg = 0;
             let m = match c {
                 pipe::Command::Reload => WM_CMD_RELOAD,
                 pipe::Command::Quit => WM_CMD_QUIT,
+                pipe::Command::Restart => WM_CMD_RESTART,
+                pipe::Command::ReturnToExplorer => WM_CMD_RETURN,
                 pipe::Command::Redraw => WM_WORKSPACES,
                 pipe::Command::Expand => WM_EXPAND,
                 pipe::Command::Tray => WM_CMD_TRAY,
@@ -1168,26 +1397,55 @@ fn main() {
             let _ = PostMessageW(HWND(target as *mut _), m, WPARAM(arg), LPARAM(0));
         });
 
-        komorebi::spawn(move || {
+        komorebi::spawn(session_id, move || {
             let _ = PostMessageW(HWND(target as *mut _), WM_WORKSPACES, WPARAM(0), LPARAM(0));
         });
         komorebi::follow_foreground();
         system::spawn(cluster::notify);
-        tray::load_pins(&with(|s| s.theme_path.ancestors().nth(3).map(|r| r.join("state")).unwrap_or_default()));
-        let _ = tray::spawn(|| {
-            tray_flyout::notify();
-            cluster::notify();
-        });
+        tray::load_pins(&state_dir);
+        if session_shell {
+            if tray_host::spawn(theme.clone(), scale) {
+                let _ = tray::spawn_cleanup(|| {
+                    tray_flyout::notify();
+                    cluster::notify();
+                });
+            } else {
+                request_explorer_return(strip);
+            }
+        } else {
+            let _ = tray::spawn(|| {
+                tray_flyout::notify();
+                cluster::notify();
+            });
+        }
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-            let _ = DispatchMessageW(&msg);
+            if !desktop_view::translate_accelerator(&msg) {
+                let _ = TranslateMessage(&msg);
+                let _ = DispatchMessageW(&msg);
+            }
+        }
+        if let Some(status) = &session_status { let _ = std::fs::remove_file(status); }
+        if session_shell {
+            if let Some(marker) = &session_marker { let _ = std::fs::remove_file(marker); }
+        }
+        if com_initialized {
+            windows::Win32::System::Com::CoUninitialize();
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
+    #[test]
+    fn restart_reloads_session_shell_and_exits_normal_shell() {
+        assert!(matches!(super::restart_action(true), super::RestartAction::Reload));
+        assert!(matches!(super::restart_action(false), super::RestartAction::Exit));
+    }
+
     #[test]
     fn flash_only_on_a_real_workspace_change() {
         assert!(!super::workspace_changed(None, Some(0)));
@@ -1197,9 +1455,105 @@ mod tests {
     }
 
     #[test]
+    fn shell_paths_resolve_installed_and_explicit_roots() {
+        let root = PathBuf::from(r"C:\Winarchy");
+        assert_eq!(super::shell_status_path(&root, 3), root.join(r"state\shell-session-3"));
+        assert_eq!(super::shell_session_marker(&root, 3), root.join(r"state\session-shell-3"));
+        let (installed, theme) = super::shell_paths(&[], Some(root.join(r"state\bin\winarchy-shell.exe")));
+        assert_eq!(installed, root);
+        assert_eq!(theme, root.join(r"config\shell\theme.json"));
+        let args = ["--root".into(), root.to_string_lossy().into_owned()];
+        let (explicit_root, default_theme) = super::shell_paths(&args, None);
+        assert_eq!(explicit_root, root);
+        assert_eq!(default_theme, root.join(r"config\shell\theme.json"));
+        let explicit_theme = PathBuf::from(r"C:\Themes\custom.json");
+        let args = ["--root".into(), root.to_string_lossy().into_owned(), "--theme".into(), explicit_theme.to_string_lossy().into_owned()];
+        let (explicit, theme) = super::shell_paths(&args, None);
+        assert_eq!(explicit, root);
+        assert_eq!(theme, explicit_theme);
+    }
+
+    #[test]
+    fn current_logon_identity_is_present_well_formed_and_stable() {
+        let identity = super::current_logon_identity().expect("current logon identity");
+        assert_eq!(identity.len(), 33);
+        assert_eq!(identity.as_bytes()[16], b'-');
+        assert!(identity.bytes().enumerate().all(|(i, byte)| i == 16 || byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+        assert_eq!(super::current_logon_identity(), Some(identity.clone()));
+        if let Ok(expected) = std::env::var("WINARCHY_EXPECTED_LOGON_IDENTITY") {
+            assert_eq!(identity, expected);
+        }
+    }
+
+    #[test]
+    fn shell_status_creates_a_missing_status_file() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("winarchy-status-create-{}-{unique}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("shell-session-3");
+        let result = super::write_shell_status(&path, 42, true, "00000000000000ab-01dc000000000001");
+        let content = std::fs::read_to_string(&path);
+        std::fs::remove_dir_all(&root).unwrap();
+        result.unwrap();
+        assert_eq!(content.unwrap(), "42|1|00000000000000ab-01dc000000000001");
+    }
+
+    #[test]
+    fn shell_status_replaces_malformed_existing_status() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("winarchy-status-replace-{}-{unique}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("shell-session-3");
+        std::fs::write(&path, "malformed status").unwrap();
+        let result = super::write_shell_status(&path, 43, false, "00000000000000ab-01dc000000000001");
+        let content = std::fs::read_to_string(&path);
+        std::fs::remove_dir_all(&root).unwrap();
+        result.unwrap();
+        assert_eq!(content.unwrap(), "43|0|00000000000000ab-01dc000000000001");
+    }
+
+    #[test]
+    fn shell_marker_replaces_stale_identity() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("winarchy-marker-write-{}-{unique}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("session-shell-3");
+        std::fs::write(&path, "00000000000000ab-01dc000000000000").unwrap();
+        let result = super::write_shell_marker(&path, 42, "00000000000000ab-01dc000000000001");
+        let content = std::fs::read_to_string(&path);
+        std::fs::remove_dir_all(&root).unwrap();
+        result.unwrap();
+        assert_eq!(content.unwrap(), "00000000000000ab-01dc000000000001");
+    }
+
+    #[test]
+    fn session_shell_mode_requires_a_matching_logon_identity() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("winarchy-marker-mode-{}-{unique}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("session-shell-3");
+        let identity = "00000000000000ab-01dc000000000001";
+        let mut results = vec![super::session_shell_mode(&path, identity)];
+        for content in [identity, "00000000000000ab-01dc000000000000", "malformed", ""] {
+            std::fs::write(&path, content).unwrap();
+            results.push(super::session_shell_mode(&path, identity));
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(results, [false, true, false, false, false]);
+    }
+
+    #[test]
     fn segments_dim_keys_and_separators() {
         let seg = super::segments("CPU 26%  RAM 9% · el SEXO FE");
         assert_eq!(seg.iter().map(|(_, d)| *d).collect::<Vec<_>>(), [true, false, false, true, false, true, false, false, false]);
+    }
+
+    #[test]
+    fn reload_reconciles_each_dock_enabled_transition() {
+        assert_eq!(super::dock_change(false, true), super::DockChange::Enable);
+        assert_eq!(super::dock_change(true, false), super::DockChange::Disable);
+        assert_eq!(super::dock_change(true, true), super::DockChange::Update);
+        assert_eq!(super::dock_change(false, false), super::DockChange::None);
     }
 }
 

@@ -28,6 +28,16 @@ fn the_flyout_sits_above_a_bottom_dock_and_stays_inside_the_monitor() {
 }
 
 #[test]
+fn a_tall_flyout_never_leaves_the_monitor_vertically() {
+    let mon = (0, 0, 1920, 1080);
+    let anchor = R { x: 1000, y: 1020, w: 40, h: 40 };
+    assert_eq!(place(anchor, mon, true, (200, 2000), 1.0).1, MARGIN_DIP);
+    let top = R { y: 8, ..anchor };
+    assert_eq!(place(top, mon, false, (200, 2000), 1.0).1, MARGIN_DIP);
+    assert_eq!(place(top, (0, 0, 1920, 90), false, (200, 100), 1.0).1, MARGIN_DIP);
+}
+
+#[test]
 fn scaling_keeps_color_and_premultiplies_alpha() {
     let opaque = vec![10, 20, 30, 255].repeat(4);
     assert!(scaled(&opaque, (2, 2), 1).iter().all(|p| *p == 0xFF_1E_14_0A), "opaque stays exact (BGRA 10,20,30)");

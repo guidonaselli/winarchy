@@ -838,12 +838,15 @@ function Invoke-WinarchyReload {
     }
     if ((Get-WinarchyActiveBar) -eq 'native') {
         Stop-Process -Name 'yasb' -Force -ErrorAction SilentlyContinue
-        Stop-WinarchyShell
+        $shellRelaunchAllowed = if ($Light) { -not (Test-WinarchyShellRelaunchInhibited) } else { Clear-WinarchyShellRelaunchInhibit }
+        if (-not (Stop-WinarchyShell -Restart)) { throw 'The shell could not reload; Winarchy reload stopped.' }
+        $sessionShell = Test-WinarchySessionShellMarker
+        $shellArgs = Get-WinarchyShellArguments
         $shellExe = Get-WinarchyShellExe
-        if ($shellExe) { Start-Process $shellExe -WindowStyle Hidden }
+        if (-not $sessionShell -and $shellExe -and $shellRelaunchAllowed) { Start-Process $shellExe -ArgumentList $shellArgs -WindowStyle Hidden }
     }
     else {
-        Stop-WinarchyShell
+        if (-not (Stop-WinarchyShell -Restart)) { throw 'The shell could not reload; Winarchy reload stopped.' }
         if (Test-WinarchyTaskbarHidden) { Restore-WinarchyNativeTaskbar }
     }
     if ($Light) { return }

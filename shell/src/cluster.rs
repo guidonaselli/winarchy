@@ -7,7 +7,7 @@ use crate::layout::{px, R};
 use crate::system::{self, Snapshot};
 use crate::theme::{rgb, Theme};
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use windows::core::{w, PCWSTR, PWSTR};
 use windows::Win32::UI::Controls::*;
 use windows::Win32::Foundation::*;
@@ -18,6 +18,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TR
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 const ICONS: &str = "Segoe MDL2 Assets";
+const GLYPH_CHEVRON: &str = "\u{E70E}";
 const GLYPH_NET: &str = "\u{E701}";
 const GLYPH_VOLUME: &str = "\u{E767}";
 const GLYPH_MUTE: &str = "\u{E74F}";
@@ -34,6 +35,7 @@ const TRAY_ICON_DIP: i32 = 18;
 const DESKTOP_DIP: i32 = 10;
 const PART_INSET_DIP: i32 = 6;
 const GAP_DIP: i32 = 4;
+const PAD_DIP: i32 = 4;
 const ANIM_MS: u32 = 16;
 const SECOND_MS: u32 = 1000;
 // Sin manifest comctl32 es v5 y rechaza el TTTOOLINFOW completo: hasta lpszText (offset de lParam).
@@ -48,6 +50,7 @@ pub enum Part {
     Status,
     Clock,
     Desktop,
+    Chevron,
     Tray(usize),
 }
 
@@ -57,13 +60,15 @@ impl Part {
             Part::Status => 0,
             Part::Clock => 1,
             Part::Desktop => 2,
-            Part::Tray(i) => 3 + i,
+            Part::Chevron => 3,
+            Part::Tray(i) => 4 + i,
         }
     }
 }
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Shape {
+    pub chevron: R,
     pub tray: Vec<R>,
     pub status: R,
     pub clock: R,
@@ -76,20 +81,64 @@ pub fn shape(scale: f32, battery: bool, badge: bool, pinned: usize, height: i32)
     let battery_w = if battery { px(BATTERY_DIP, scale) + gap } else { 0 };
     let status_w = 2 * side + 2 * glyph + gap + battery_w;
     let clock_w = px(CLOCK_DIP, scale) + if badge { px(BADGE_DIP, scale) + gap } else { 0 };
-    let pad = px(4, scale);
+    let pad = px(PAD_DIP, scale);
     let cell = px(TRAY_CELL_DIP, scale);
-    let tray: Vec<R> = (0..pinned as i32).map(|i| R { x: pad + i * cell, y: inset, w: cell, h: height - 2 * inset }).collect();
-    let start = pad + pinned as i32 * cell + if pinned > 0 { 2 * gap } else { 0 };
+    let chevron = R { x: pad, y: inset, w: cell, h: height - 2 * inset };
+    let tray: Vec<R> = (0..pinned as i32).map(|i| R { x: pad + (i + 1) * cell, y: inset, w: cell, h: height - 2 * inset }).collect();
+    let start = pad + (pinned as i32 + 1) * cell + 2 * gap;
     let status = R { x: start, y: inset, w: status_w, h: height - 2 * inset };
     let clock = R { x: start + status_w + gap, y: inset, w: clock_w, h: height - 2 * inset };
     let desktop = R { x: clock.x + clock.w + gap, y: inset, w: px(DESKTOP_DIP, scale), h: height - 2 * inset };
-    Shape { tray, status, clock, desktop, width: desktop.x + desktop.w + pad }
+    Shape { chevron, tray, status, clock, desktop, width: desktop.x + desktop.w + pad }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum StatusPart {
+    Network,
+    Volume,
+    Battery,
+}
+
+// Qué glifo de la píldora de estado está bajo `x` (coordenadas del cluster): red, volumen o batería.
+pub fn status_part(s: &Shape, scale: f32, x: i32) -> StatusPart {
+    let (side, glyph, gap) = (px(SIDE_DIP, scale), px(GLYPH_DIP, scale), px(GAP_DIP, scale));
+    let rel = x - s.status.x;
+    let has_battery = s.status.w > 2 * side + 2 * glyph + gap;
+    if rel < side + glyph + gap / 2 {
+        StatusPart::Network
+    } else if !has_battery || rel < side + 2 * glyph + gap + gap / 2 {
+        StatusPart::Volume
+    } else {
+        StatusPart::Battery
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MenuEntry {
+    Open(&'static str),
+    Mute,
+}
+
+pub fn context_entries(part: Part, status: StatusPart) -> Vec<(K, MenuEntry)> {
+    match (part, status) {
+        (Part::Status, StatusPart::Network) => vec![(K::MenuNetworkSettings, MenuEntry::Open("ms-settings:network")), (K::MenuNetworkConnections, MenuEntry::Open("ncpa.cpl"))],
+        (Part::Status, StatusPart::Volume) => vec![
+            (K::MenuSoundSettings, MenuEntry::Open("ms-settings:sound")),
+            (K::MenuVolumeMixer, MenuEntry::Open("ms-settings:apps-volume")),
+            (K::MenuMute, MenuEntry::Mute),
+        ],
+        (Part::Status, StatusPart::Battery) => vec![(K::MenuPowerSettings, MenuEntry::Open("ms-settings:powersleep"))],
+        (Part::Clock, _) => vec![(K::MenuDateTime, MenuEntry::Open("ms-settings:dateandtime")), (K::MenuNotificationSettings, MenuEntry::Open("ms-settings:notifications"))],
+        _ => Vec::new(),
+    }
 }
 
 // Los botones ocupan toda la altura de la píldora: el margen vertical es hover, no un hueco muerto.
 pub fn hit(s: &Shape, x: i32, y: i32, height: i32) -> Option<Part> {
     let inside = |r: R| x >= r.x && x < r.x + r.w && y >= 0 && y < height;
-    if let Some(i) = s.tray.iter().position(|r| inside(*r)) {
+    if inside(s.chevron) {
+        Some(Part::Chevron)
+    } else if let Some(i) = s.tray.iter().position(|r| inside(*r)) {
         Some(Part::Tray(i))
     } else if inside(s.status) {
         Some(Part::Status)
@@ -104,7 +153,10 @@ pub fn hit(s: &Shape, x: i32, y: i32, height: i32) -> Option<Part> {
 
 // Dónde va la píldora: borde derecho del monitor, a la altura de la barra del dock. No se muestra si pisaría al dock.
 // Ancho en dip que el dock deja libre a cada lado para que el cluster siempre entre.
-pub const RESERVE_DIP: i32 = 200 + crate::tray::PINNED_MAX as i32 * TRAY_CELL_DIP;
+// Es el ancho máximo de `shape` (batería, contador y todos los íconos fijados) más el margen de cada lado y holgura por el redondeo de px().
+pub const RESERVE_DIP: i32 = PAD_DIP + (crate::tray::PINNED_MAX as i32 + 1) * TRAY_CELL_DIP + 2 * GAP_DIP
+    + 2 * SIDE_DIP + 2 * GLYPH_DIP + GAP_DIP + BATTERY_DIP + GAP_DIP + GAP_DIP + CLOCK_DIP + BADGE_DIP + GAP_DIP + GAP_DIP + DESKTOP_DIP + PAD_DIP
+    + 2 * crate::dock::MARGIN_DIP + 8;
 
 pub fn place(mon: (i32, i32, i32, i32), scale: f32, bottom: bool, dock_right: i32, width: i32) -> Option<(i32, i32)> {
     let margin = px(MARGIN_DIP, scale);
@@ -177,6 +229,15 @@ struct Cluster {
 }
 
 // El hilo de muestreo no ve el thread_local: avisa por el HWND.
+// El dock que aloja el cluster pone el foco de teclado sobre el chevron (el botón de bandeja ya no es suyo).
+static KEY_FOCUS: AtomicBool = AtomicBool::new(false);
+
+pub fn set_key_focus(on: bool) {
+    if KEY_FOCUS.swap(on, Ordering::Relaxed) != on {
+        notify();
+    }
+}
+
 static HWND_ATOMIC: AtomicIsize = AtomicIsize::new(0);
 
 thread_local! { static CLUSTER: RefCell<Option<Cluster>> = const { RefCell::new(None) }; }
@@ -197,7 +258,7 @@ pub fn init(theme: &Theme, state_dir: &std::path::Path) {
         let ex = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_LAYERED;
         let Ok(hwnd) = CreateWindowExW(ex, w!("WinarchyShellCluster"), w!(""), WS_POPUP, 0, 0, 1, 1, None, None, inst, None) else { return };
         crate::accessibility::create(hwnd, "Winarchy", accesskit::Role::Toolbar);
-        let blank = Shape { tray: Vec::new(), status: R::default(), clock: R::default(), desktop: R::default(), width: 0 };
+        let blank = Shape { chevron: R::default(), tray: Vec::new(), status: R::default(), clock: R::default(), desktop: R::default(), width: 0 };
         let c = Cluster { hwnd, state_dir: state_dir.to_path_buf(), theme: theme.clone(), mon: (0, 0, 0, 0), scale: 1.0, bottom: true, dock_right: 0, vis: 0.0, slide: 0, hover: None, hover_t: Vec::new(), pressed: None, tracking: false, last: None, sig: 0, shape: blank, pos: None, anim_on: false, tip: make_tip(hwnd) };
         CLUSTER.with(|s| *s.borrow_mut() = Some(c));
         HWND_ATOMIC.store(hwnd.0 as isize, Ordering::Relaxed);
@@ -226,13 +287,12 @@ pub fn set_theme(theme: &Theme) {
 }
 
 pub fn destroy() {
-    let hwnd = with(|c| c.hwnd);
+    let Some((hwnd, tip)) = with(|c| (c.hwnd, c.tip)) else { return };
     HWND_ATOMIC.store(0, Ordering::Relaxed);
     CLUSTER.with(|c| *c.borrow_mut() = None);
-    if let Some(h) = hwnd {
-        unsafe {
-            let _ = DestroyWindow(h);
-        }
+    unsafe {
+        let _ = DestroyWindow(hwnd);
+        let _ = DestroyWindow(tip);
     }
 }
 
@@ -284,7 +344,7 @@ fn paint() {
     let sig = {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (snap.volume, snap.online, snap.battery, snap.notifications, (hh, mm, dd, mo, yy), (vis.to_bits(), slide, pos, hover_t.iter().map(|t| t.to_bits()).collect::<Vec<_>>(), shape.width, crate::tray::revision()), (lang() == Lang::Es, &theme.accent, &theme.background, &theme.foreground)).hash(&mut h);
+        (snap.volume, snap.online, snap.battery, snap.notifications, (hh, mm, dd, mo, yy), (vis.to_bits(), slide, pos, hover_t.iter().map(|t| t.to_bits()).collect::<Vec<_>>(), shape.width, crate::tray::revision()), (lang() == Lang::Es, &theme.accent, &theme.background, &theme.foreground), KEY_FOCUS.load(Ordering::Relaxed)).hash(&mut h);
         h.finish()
     };
     if with(|c| std::mem::replace(&mut c.sig, sig) == sig).unwrap_or(true) {
@@ -311,15 +371,19 @@ fn paint() {
             let buf = std::slice::from_raw_parts_mut(bits as *mut u32, (w * h) as usize);
             buf.fill(0);
             fill_round_a(buf, w, h, R { x: 0, y: 0, w, h }, px(st.radius, scale), bg, st.opacity);
-            let parts = [(Part::Status, shape.status), (Part::Clock, shape.clock), (Part::Desktop, shape.desktop)].into_iter().chain(shape.tray.iter().enumerate().map(|(i, r)| (Part::Tray(i), *r)));
+            let parts = [(Part::Status, shape.status), (Part::Clock, shape.clock), (Part::Desktop, shape.desktop), (Part::Chevron, shape.chevron)].into_iter().chain(shape.tray.iter().enumerate().map(|(i, r)| (Part::Tray(i), *r)));
             for (part, r) in parts {
                 let t = hover_t.get(part.index()).copied().unwrap_or(0.0);
                 if t > 0.0 {
                     fill_round_a(buf, w, h, r, px(10, scale), fg, 0.12 * ease(t));
                 }
             }
+            if KEY_FOCUS.load(Ordering::Relaxed) {
+                fill_round_a(buf, w, h, shape.chevron, px(10, scale), accent, 0.5);
+            }
             let rule = R { x: shape.desktop.x + shape.desktop.w / 2 - px(1, scale), y: shape.desktop.y + px(4, scale), w: px(2, scale), h: shape.desktop.h - 2 * px(4, scale) };
             fill_round_a(buf, w, h, rule, px(1, scale), fg, 0.3);
+            draw_label(buf, w, h, shape.chevron, GLYPH_CHEVRON, ICONS, scale, fg, theme.font_size.max(11) + 1);
             draw_tray(buf, w, h, &shape.tray, &hover_t, scale);
             draw_status(buf, w, h, shape.status, &snap, &theme, scale, fg, accent);
             draw_clock(buf, w, h, shape.clock, snap.notifications.unwrap_or(0), (hh, mm, dd, mo, yy), &theme, scale, fg, accent);
@@ -351,7 +415,7 @@ fn draw_tray(buf: &mut [u32], w: i32, h: i32, cells: &[R], hover_t: &[f32], scal
     let side = px(TRAY_ICON_DIP, scale);
     crate::tray::with_pinned(|icons| {
         for (i, (icon, cell)) in icons.iter().zip(cells).enumerate() {
-            let lift = (hover_t.get(3 + i).copied().unwrap_or(0.0) * px(1, scale) as f32) as i32;
+            let lift = (hover_t.get(4 + i).copied().unwrap_or(0.0) * px(1, scale) as f32) as i32;
             let (ox, oy) = (cell.x + (cell.w - side) / 2, cell.y + (cell.h - side) / 2 - lift);
             for (k, p) in crate::tray_flyout::scaled(&icon.bgra, icon.size, side).into_iter().enumerate() {
                 let (x, y) = (ox + (k as i32 % side), oy + (k as i32 / side));
@@ -420,10 +484,41 @@ fn publish(snap: &Snapshot, shape: &Shape, height: i32) {
         _ => clock,
     };
     let mut nodes = crate::tray::with_pinned(|icons| icons.iter().zip(&shape.tray).enumerate().map(|(i, (icon, r))| (format!("tray:{i}"), node(if icon.tip.is_empty() { icon.exe.clone() } else { icon.tip.lines().next().unwrap_or_default().to_string() }, *r))).collect::<Vec<_>>());
+    nodes.push(("chevron".to_string(), node(t(K::SystemTray).to_string(), shape.chevron)));
     nodes.push(("status".to_string(), node(status_label(snap), shape.status)));
     nodes.push(("clock".to_string(), node(clock, shape.clock)));
     nodes.push(("desktop".to_string(), node(t(K::ShowDesktop).to_string(), shape.desktop)));
     crate::accessibility::publish(hwnd, "Winarchy", (shape.width, height), nodes, None);
+}
+
+// Menú contextual nativo, como el de la taskbar de Windows: los ajustes del glifo bajo el cursor.
+unsafe fn context_menu(h: HWND, entries: &[(K, MenuEntry)]) {
+    if entries.is_empty() {
+        return;
+    }
+    let Ok(menu) = CreatePopupMenu() else { return };
+    for (i, (key, _)) in entries.iter().enumerate() {
+        let text: Vec<u16> = t(*key).encode_utf16().chain(std::iter::once(0)).collect();
+        let _ = AppendMenuW(menu, MF_STRING, i + 1, PCWSTR(text.as_ptr()));
+    }
+    let mut p = POINT::default();
+    let _ = GetCursorPos(&mut p);
+    let previous = GetForegroundWindow();
+    let _ = SetForegroundWindow(h);
+    let chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN, p.x, p.y, 0, h, None).0;
+    let _ = DestroyMenu(menu);
+    let _ = PostMessageW(h, WM_NULL, WPARAM(0), LPARAM(0));
+    // sin esto la app del usuario queda desactivada y el teclado no llega a ningún lado hasta el próximo clic
+    if GetForegroundWindow() == h && IsWindow(previous).as_bool() {
+        let _ = SetForegroundWindow(previous);
+    }
+    match chosen.checked_sub(1).and_then(|i| entries.get(i as usize)) {
+        Some((_, MenuEntry::Open(target))) => crate::dock_menu::launch(target, ""),
+        Some((_, MenuEntry::Mute)) => {
+            let _ = crate::metrics::toggle_mute();
+        }
+        None => {}
+    }
 }
 
 fn send_tray(index: usize, gesture: crate::tray::Gesture) {
@@ -431,8 +526,8 @@ fn send_tray(index: usize, gesture: crate::tray::Gesture) {
     unsafe {
         let _ = GetCursorPos(&mut p);
     }
-    if let Some((hwnd, uid)) = crate::tray::with_pinned(|v| v.get(index).map(|i| (i.hwnd, i.uid))) {
-        crate::tray::click(hwnd, uid, gesture, (p.x, p.y));
+    if let Some((hwnd, uid, guid)) = crate::tray::with_pinned(|v| v.get(index).map(|i| (i.hwnd, i.uid, i.guid))) {
+        crate::tray::click_identity(hwnd, uid, guid, gesture, (p.x, p.y));
     }
 }
 
@@ -447,11 +542,23 @@ fn toggle_desktop() {
     }
 }
 
+// El flyout nace sobre el chevron, a la derecha como en Windows.
+pub fn open_tray() {
+    let Some((r, pos, mon, bottom, scale, theme, slide)) = with(|c| (c.shape.chevron, c.pos, c.mon, c.bottom, c.scale, c.theme.clone(), c.slide)) else { return };
+    let Some((x, y)) = pos else { return };
+    let y = y + if bottom { slide } else { -slide };
+    let button = R { x: x + r.x, y: y + r.y, w: r.w, h: r.h };
+    if !crate::tray_flyout::toggle(button, mon, bottom, scale, &theme) {
+        crate::dock::show_tray();
+    }
+}
+
 fn activate(part: Part) {
     let name = match part {
         Part::Status => "show-quick-settings.flag",
         Part::Clock => "show-notifications.flag",
         Part::Desktop => return toggle_desktop(),
+        Part::Chevron => return open_tray(),
         Part::Tray(i) => return send_tray(i, crate::tray::Gesture::Left),
     };
     if let Some(dir) = with(|c| c.state_dir.clone()) {
@@ -470,8 +577,8 @@ unsafe fn anim_tick(h: HWND) {
         let dt = c.last.map_or(ANIM_MS as f32, |l| l.elapsed().as_secs_f32() * 1000.0).min(64.0);
         c.last = Some(std::time::Instant::now());
         let mut busy = false;
-        let parts = [Part::Status, Part::Clock, Part::Desktop].into_iter().chain((0..c.shape.tray.len()).map(Part::Tray));
-        c.hover_t.resize(3 + c.shape.tray.len(), 0.0);
+        let parts = [Part::Status, Part::Clock, Part::Desktop, Part::Chevron].into_iter().chain((0..c.shape.tray.len()).map(Part::Tray));
+        c.hover_t.resize(4 + c.shape.tray.len(), 0.0);
         for part in parts {
             let target = if c.hover == Some(part) { 1.0 } else { 0.0 };
             let i = part.index();
@@ -505,6 +612,7 @@ fn part_tip(part: Part) -> String {
     match part {
         Part::Tray(i) => crate::tray::with_pinned(|icons| icons.get(i).map(|icon| if icon.tip.is_empty() { icon.exe.clone() } else { icon.tip.lines().next().unwrap_or_default().to_string() })).unwrap_or_default(),
         Part::Desktop => t(K::ShowDesktop).to_string(),
+        Part::Chevron => t(K::SystemTray).to_string(),
         Part::Status | Part::Clock => String::new(),
     }
 }
@@ -514,6 +622,7 @@ unsafe fn point_tip(part: Option<Part>) {
         let r = match part {
             Some(Part::Tray(i)) => c.shape.tray.get(i).copied(),
             Some(Part::Desktop) => Some(c.shape.desktop),
+            Some(Part::Chevron) => Some(c.shape.chevron),
             _ => None,
         }
         .unwrap_or_default();
@@ -608,8 +717,14 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
         }
         WM_RBUTTONUP => {
             let (x, y) = client(lp);
-            if let Some(Part::Tray(i)) = hit_at(x, y) {
-                send_tray(i, crate::tray::Gesture::Right);
+            match hit_at(x, y) {
+                Some(Part::Chevron) => open_tray(),
+                Some(Part::Tray(i)) => send_tray(i, crate::tray::Gesture::Right),
+                Some(part @ (Part::Status | Part::Clock)) => {
+                    let status = with(|c| status_part(&c.shape, c.scale, x)).unwrap_or(StatusPart::Volume);
+                    context_menu(h, &context_entries(part, status));
+                }
+                _ => {}
             }
             return LRESULT(0);
         }
@@ -630,6 +745,7 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
                         Some(i) => Part::Tray(i),
                         None if key == "status" => Part::Status,
                         None if key == "desktop" => Part::Desktop,
+                        None if key == "chevron" => Part::Chevron,
                         None => Part::Clock,
                     });
                 }
