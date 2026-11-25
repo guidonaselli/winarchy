@@ -76,7 +76,11 @@ function Enable-WinarchyCustomShell {
     New-Item -ItemType Directory -Path $backup -Force | Out-Null
     Copy-Item -LiteralPath $RecoveryPath -Destination (Join-Path $backup 'custom-shell-recovery.json')
 
-    $result = Set-WinarchyCustomShellPolicyIfUnchanged -Expected $prior -Desired $installed -SubKey $SubKey
+    try { $result = Set-WinarchyCustomShellPolicyIfUnchanged -Expected $prior -Desired $installed -SubKey $SubKey }
+    catch {
+        Remove-Item -LiteralPath $RecoveryPath -Force -ErrorAction SilentlyContinue
+        throw
+    }
     if (-not $result.Applied) {
         Remove-Item -LiteralPath $RecoveryPath -Force -ErrorAction SilentlyContinue
         throw 'The CustomShell policy changed while activating; nothing was written. Try again.'
@@ -102,4 +106,29 @@ function Disable-WinarchyCustomShell {
     }
     Remove-Item -LiteralPath $RecoveryPath -Force -ErrorAction SilentlyContinue
     Get-WinarchyCustomShellStatus -SubKey $SubKey -RecoveryPath $RecoveryPath
+}
+
+function Test-WinarchyElevated {
+    ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Invoke-WinarchyCustomShellChange {
+    <# Windows protege HKCU\...\Policies: un usuario estándar no puede crear ni borrar ahí, solo un administrador. Si hace falta, se relanza elevado (aviso UAC). #>
+    param([Parameter(Mandatory)][ValidateSet('activate', 'deactivate')][string]$Action)
+    $function = if ($Action -eq 'activate') { 'Enable-WinarchyCustomShell' } else { 'Disable-WinarchyCustomShell' }
+    if (Test-WinarchyElevated) { $null = & $function; return Get-WinarchyCustomShellStatus }
+    $manifest = Join-Path (Get-WinarchyRoot) 'module\Winarchy\Winarchy.psd1'
+    $errorFile = Join-Path (Get-WinarchyStateDir) 'custom-shell-elevated.err'
+    Remove-Item -LiteralPath $errorFile -Force -ErrorAction SilentlyContinue
+    $command = "try { Import-Module '$manifest' -Force; & (Get-Module Winarchy) { $function | Out-Null } } catch { Set-Content -LiteralPath '$errorFile' -Value `$_.Exception.Message; exit 1 }"
+    Write-WinarchyInfo 'Changing this policy needs administrator rights: accept the Windows prompt (UAC).'
+    $exe = (Get-Process -Id $PID).Path
+    try { $process = Start-Process $exe -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $command }
+    catch { throw "The administrator prompt was declined or failed: $($_.Exception.Message)" }
+    if ($process.ExitCode -ne 0) {
+        $reason = if (Test-Path -LiteralPath $errorFile) { (Get-Content -LiteralPath $errorFile -Raw).Trim() } else { "exit code $($process.ExitCode)" }
+        Remove-Item -LiteralPath $errorFile -Force -ErrorAction SilentlyContinue
+        throw $reason
+    }
+    Get-WinarchyCustomShellStatus
 }

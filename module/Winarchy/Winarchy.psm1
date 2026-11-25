@@ -317,17 +317,17 @@ function Invoke-Winarchy {
                 }
                 'activate' {
                     if ($rest -notcontains '--yes') {
-                        Write-WinarchyWarn 'This replaces Explorer with the Winarchy shell at your NEXT sign-in (per-user policy, no admin, no reboot).'
+                        Write-WinarchyWarn 'This replaces Explorer with the Winarchy shell at your NEXT sign-in (per-user policy; Windows asks for admin approval once; no reboot).'
                         Write-WinarchyInfo 'Undo: `winarchy shell deactivate`, or without Winarchy: Ctrl+Alt+Del > Task Manager > Run new task > scripts\Restore-Explorer.cmd'
                         Write-WinarchyInfo 'Run `winarchy shell activate --yes` to proceed.'
                         break
                     }
-                    $status = Enable-WinarchyCustomShell
+                    $status = Invoke-WinarchyCustomShellChange -Action activate
                     $theme = Get-WinarchyCurrentTheme; if ($theme) { Set-WinarchyTheme -Name $theme }
                     Write-WinarchyOk "CustomShell policy $($status.State). Sign out and back in to use the Winarchy shell."
                 }
                 'deactivate' {
-                    $status = Disable-WinarchyCustomShell
+                    $status = Invoke-WinarchyCustomShellChange -Action deactivate
                     $theme = Get-WinarchyCurrentTheme; if ($theme) { Set-WinarchyTheme -Name $theme }
                     Write-WinarchyOk "CustomShell policy $($status.State): Explorer returns at next sign-in."
                 }

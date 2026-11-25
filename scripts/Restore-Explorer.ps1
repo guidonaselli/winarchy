@@ -1,6 +1,15 @@
 # Salida de emergencia sin el módulo de Winarchy: devuelve Explorer como shell del usuario.
 # Se puede lanzar desde Administrador de tareas > Ejecutar nueva tarea (scripts\Restore-Explorer.cmd).
+param([switch]$Elevated)
 $ErrorActionPreference = 'Stop'
+# Windows protege HKCU\...\Policies: tocarlo exige administrador. El hijo elevado edita el registro; Explorer lo arranca quien llamó.
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin -and -not $Elevated) {
+    $child = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-Elevated'
+    if ($child.ExitCode -ne 0) { throw 'The administrator step failed or was declined; the policy was not changed.' }
+    if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
+    return
+}
 $key = 'Software\Microsoft\Windows\CurrentVersion\Policies\System'
 $recovery = Join-Path $PSScriptRoot '..\state\custom-shell-recovery.json'
 $hive = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($key, $true)
@@ -20,5 +29,5 @@ if ($hive) {
     $hive.Close()
 }
 Remove-Item -LiteralPath $recovery -Force -ErrorAction SilentlyContinue
-if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
+if (-not $Elevated -and -not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
 Write-Host 'Explorer restored as the shell. Winarchy stays installed; `winarchy shell activate --yes` turns the shell back on.'
