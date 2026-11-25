@@ -215,7 +215,9 @@ Describe 'Session shell lifecycle coordination' {
 }
 
 Describe 'Session shell pipe recovery deadline' {
-    It 'returns from a non-reading shell pipe and releases recovery state on failure' {
+    # the test binds the real per-session pipe: with the live shell running it cannot, so it is skipped there
+    BeforeDiscovery { $script:livePipe = Test-Path "\\.\pipe\winarchy-shell-$([Diagnostics.Process]::GetCurrentProcess().SessionId)" }
+    It 'returns from a non-reading shell pipe and releases recovery state on failure' -Skip:$script:livePipe {
         $probeRoot = Join-Path $TestDrive 'blocked-shell-pipe'
         $moduleRoot = Join-Path $probeRoot 'module/Winarchy'
         $stateRoot = Join-Path $probeRoot 'state'
