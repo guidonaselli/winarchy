@@ -15,6 +15,7 @@ mod brightness;
 mod calendar;
 mod cluster;
 mod world;
+mod wpn;
 mod extras;
 mod i18n;
 mod ics;

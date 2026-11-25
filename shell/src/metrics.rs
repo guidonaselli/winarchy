@@ -175,9 +175,9 @@ mod tests {
 pub fn notification_count() -> Option<usize> {
     use windows::UI::Notifications::Management::{UserNotificationListener, UserNotificationListenerAccessStatus};
     use windows::UI::Notifications::NotificationKinds;
-    let l = UserNotificationListener::Current().ok()?;
-    if l.GetAccessStatus().ok()? != UserNotificationListenerAccessStatus::Allowed {
-        return None;
+    let Some(l) = UserNotificationListener::Current().ok() else { return crate::wpn::toast_count() };
+    if l.GetAccessStatus().ok() != Some(UserNotificationListenerAccessStatus::Allowed) {
+        return crate::wpn::toast_count();
     }
     Some(l.GetNotificationsAsync(NotificationKinds::Toast).ok()?.get().ok()?.Size().ok()? as usize)
 }
