@@ -3189,7 +3189,7 @@ Describe 'native shell guardrails' {
         $ahk = Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw
         $island = [regex]::Match($ahk, '(?ms)^ShellIsland\(.*?^\}').Value
         $island | Should -Match ([regex]::Escape('payload := ''{"v":1,"id":1,"cmd":"'' cmd ''"'' extra ''}'' Chr(10)'))
-        $island | Should -Match "(?s)try \{\s+payload := [^\r\n]+\s+byteCount := StrPut\(payload, 'UTF-8'\) - 1\s+buffer := Buffer\(byteCount \+ 1\)\s+StrPut\(payload, buffer, 'UTF-8'\)\s+written := 0\s+return DllCall\('WriteFile', 'ptr', pipe, 'ptr', buffer, 'uint', byteCount, 'uint\*', &written, 'ptr', 0, 'int'\) && written = byteCount\s+\} finally \{\s+DllCall\('CloseHandle', 'ptr', pipe\)\s+\}"
+        $island | Should -Match "(?s)try \{\s+payload := [^\r\n]+\s+byteCount := StrPut\(payload, 'UTF-8'\) - 1\s+data := Buffer\(byteCount \+ 1\)\s+StrPut\(payload, data, 'UTF-8'\)\s+written := 0\s+return DllCall\('WriteFile', 'ptr', pipe, 'ptr', data, 'uint', byteCount, 'uint\*', &written, 'ptr', 0, 'int'\) && written = byteCount\s+\} finally \{\s+DllCall\('CloseHandle', 'ptr', pipe\)\s+\}"
     }
 
     It 'recovers a hung native shell with a bounded UI probe and restores taskbars before relaunch' {

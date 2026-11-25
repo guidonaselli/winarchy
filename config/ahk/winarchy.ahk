@@ -1392,10 +1392,10 @@ ShellIsland(cmd, extra := '') {
     try {
         payload := '{"v":1,"id":1,"cmd":"' cmd '"' extra '}' Chr(10)
         byteCount := StrPut(payload, 'UTF-8') - 1
-        buffer := Buffer(byteCount + 1)
-        StrPut(payload, buffer, 'UTF-8')
+        data := Buffer(byteCount + 1)
+        StrPut(payload, data, 'UTF-8')
         written := 0
-        return DllCall('WriteFile', 'ptr', pipe, 'ptr', buffer, 'uint', byteCount, 'uint*', &written, 'ptr', 0, 'int') && written = byteCount
+        return DllCall('WriteFile', 'ptr', pipe, 'ptr', data, 'uint', byteCount, 'uint*', &written, 'ptr', 0, 'int') && written = byteCount
     } finally {
         DllCall('CloseHandle', 'ptr', pipe)
     }
