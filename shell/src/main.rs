@@ -1021,6 +1021,7 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             LRESULT(0)
         }
         WM_CMD_QUIT => {
+            exit_log("quit command");
             if with(|s| s.session_shell) {
                 request_explorer_return(h);
             } else {
@@ -1034,11 +1035,12 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
                     with(|s| s.theme_mtime = None);
                     tick(h);
                 }
-                RestartAction::Exit => { let _ = DestroyWindow(h); }
+                RestartAction::Exit => { exit_log("restart command"); let _ = DestroyWindow(h); }
             }
             LRESULT(0)
         }
         WM_CMD_RETURN => {
+            exit_log("return-to-explorer command");
             if with(|s| s.session_shell) {
                 request_explorer_return(h);
             } else {
@@ -1057,6 +1059,7 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
         }
         WM_DESTROY => {
             if with(|s| s.strip) == h {
+                exit_log("main window destroyed");
                 desktop::shutdown();
                 dock::restore_native_taskbar();
                 PostQuitMessage(0);
@@ -1334,6 +1337,13 @@ fn shell_paths(args: &[String], executable: Option<PathBuf>) -> (PathBuf, PathBu
     }).map(|(_, arg)| PathBuf::from(arg)))
         .unwrap_or_else(|| root.join("config").join("shell").join("theme.json"));
     (root, theme)
+}
+
+// Cada salida limpia deja su motivo: una caída sin esta línea no vino de un comando de la shell.
+fn exit_log(why: &str) {
+    if let Some(root) = with(|s| s.state_dir.parent().map(Path::to_path_buf)) {
+        boot_log(&root, &format!("exit: {why}"));
+    }
 }
 
 pub(crate) fn boot_log(root: &Path, text: &str) {
