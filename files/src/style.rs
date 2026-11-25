@@ -35,6 +35,7 @@ pub const CARD_MARGIN: f64 = 4.0;
 pub const CARD_RADIUS: f64 = 6.0;
 pub const PANE_WIDTH: f64 = 300.0;
 pub const FILTER_WIDTH: f64 = 220.0;
+pub const FILTER_COMPACT_WIDTH: f64 = 140.0;
 pub const BAR_GAP: f64 = 2.0;
 pub const MENU_WIDTH: f64 = 240.0;
 pub const MENU_PADDING: f64 = 4.0;

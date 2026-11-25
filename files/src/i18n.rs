@@ -80,6 +80,7 @@ const ES: &[(&str, &str)] = &[
     ("Subfolders included: click to search only this folder", "Subcarpetas incluidas: clic para buscar solo en esta carpeta"),
     ("Click to include subfolders in the list and the filter", "Clic para incluir subcarpetas en la lista y el filtro"),
     ("Searching…", "Buscando…"),
+    ("hidden", "ocultos"),
     ("limited to the first", "limitado a los primeros"),
     ("Show more options", "Mostrar más opciones"),
     ("Favorites", "Favoritos"),

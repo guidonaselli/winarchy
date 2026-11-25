@@ -2137,6 +2137,7 @@ impl Component for Explorer {
                         columns,
                         hide_extensions,
                         compact,
+                        layout == Layout::Details,
                         thumbs.get(&entry.path).map(PathBuf::as_path),
                     ),
                     Layout::Tiles | Layout::Grid => {
@@ -2451,7 +2452,7 @@ impl Component for Explorer {
                     GridLength::Auto,
                     GridLength::Auto,
                     GridLength::STAR,
-                    GridLength::Pixel(FILTER_WIDTH),
+                    GridLength::Pixel(if self.list_width < COMPACT_BELOW { FILTER_COMPACT_WIDTH } else { FILTER_WIDTH }),
                 ])
                 .column_spacing(ROW_GAP)
                 .children((
@@ -2609,7 +2610,7 @@ impl Component for Explorer {
                 DEVICES_HEADER_KEY,
                 StackPanel::new().margin(Thickness::new(0.0, DEVICES_HEADER_GAP, 0.0, 0.0)).children((
                     Border::new().height(1.0).opacity(DEVICES_RULE_OPACITY).background_optional(theme.map(Theme::muted)),
-                    caption(tr("Devices"), theme.map(Theme::muted)).margin(Thickness::new(ROW_GAP, DEVICES_HEADER_GAP, 0.0, 0.0)),
+                    caption(tr("Devices"), theme.map(Theme::muted)).margin(Thickness::new(ACCENT_BAR_WIDTH + ROW_GAP + BUTTON_INSET, DEVICES_HEADER_GAP, 0.0, 0.0)),
                 )),
             ));
             for (index, drive) in self.drives.iter().enumerate() {
@@ -2659,7 +2660,7 @@ impl Component for Explorer {
                     .on_drop(context.callback(Message::DroppedOnSidebar))
                     .content(Grid::new().rows([GridLength::STAR, GridLength::Auto]).children((
                         ScrollViewer::new().grid_row(0).content(StackPanel::new().spacing(TIGHT_GAP).keyed_children(sidebar_items)),
-                        StackPanel::new().grid_row(1).spacing(TIGHT_GAP).keyed_children(device_items),
+                        StackPanel::new().grid_row(1).spacing(TIGHT_GAP).margin(Thickness::new(0.0, 0.0, 0.0, CARD_PADDING)).keyed_children(device_items),
                     ))),
                 splitter,
                 Border::new()
@@ -3369,7 +3370,10 @@ impl Explorer {
                 .iter()
                 .filter(|entry| self.matches(entry, &needle))
                 .count();
-            self.status = if shown == self.entries.len() {
+            let hidden = if needle.is_empty() && !self.show_hidden { self.entries.iter().filter(|entry| entry.hidden).count() } else { 0 };
+            self.status = if hidden > 0 && shown + hidden == self.entries.len() {
+                format!("{shown} {} · {hidden} {} · {} {}", count_word(shown, "item", "items"), tr("hidden"), self.selected.len(), count_word(self.selected.len(), "selected|one", "selected"))
+            } else if shown == self.entries.len() {
                 format!("{shown} {} · {} {}", count_word(shown, "item", "items"), self.selected.len(), count_word(self.selected.len(), "selected|one", "selected"))
             } else {
                 format!(
@@ -3887,6 +3891,7 @@ fn row(
     columns: Columns,
     hide_extensions: bool,
     compact: bool,
+    show_size: bool,
     thumb: Option<&Path>,
 ) -> View {
     let glyph: View = match thumb.and_then(|file| Image::new().source_file(file).ok()) {
@@ -3905,7 +3910,20 @@ fn row(
     let button = open_button(entry, sender, 1, HorizontalAlignment::Left, name);
     let grid = Grid::new().column_spacing(COLUMN_GAP);
     let content: View = if compact {
-        grid.columns([GridLength::Auto, GridLength::STAR]).children((check, button)).into()
+        if show_size {
+            grid.columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
+                .children((
+                    check,
+                    button,
+                    caption(&directory::format_size(entry), theme.map(Theme::muted))
+                        .grid_column(2)
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .margin(Thickness::new(0.0, 0.0, ROW_TRAILING, 0.0)),
+                ))
+                .into()
+        } else {
+            grid.columns([GridLength::Auto, GridLength::STAR]).children((check, button)).into()
+        }
     } else {
         grid.columns([
             GridLength::Pixel(CHECK_WIDTH),
