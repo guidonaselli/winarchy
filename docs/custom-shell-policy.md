@@ -23,7 +23,7 @@ The installed Windows `WinLogon.admx` on the benchmark host maps `CustomShell` t
 `winarchy shell status|activate --yes|deactivate`. Activation is explicit and takes effect at the next sign-in.
 
 - `activate` and `deactivate` relaunch themselves elevated (one UAC prompt) because Windows only lets administrators write that key.
-- `activate` refuses without `winarchy-shell.exe` or `config\shell	heme.json`, writes `state\custom-shell-recovery.json` (prior value, written value, command) and a copy under `backups\`, then writes the policy with a compare-and-write so a concurrent change aborts it.
+- `activate` refuses without `winarchy-shell.exe` or `config\shell\theme.json`, writes `state\custom-shell-recovery.json` (prior value, written value, command) and a copy under `backups\`, then writes the policy with a compare-and-write so a concurrent change aborts it.
 - `deactivate` restores the prior value only if the current one is still what Winarchy wrote; otherwise it stops and leaves the value alone.
 - While the record is valid, update, rollback and uninstall are allowed; without it they still refuse.
 - The rest of the stack (komorebi, AutoHotkey) starts from a scheduled task at logon, not from Explorer, so it does not depend on the shell.
