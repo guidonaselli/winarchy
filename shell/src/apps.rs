@@ -14,9 +14,9 @@ pub struct WinAttrs {
 }
 
 // Filtro estándar de taskbar: WS_EX_APPWINDOW gana sobre owner y toolwindow. komorebi cloakea las
-// ventanas de otros workspaces, así que una cloaked que él gestiona sigue contando.
+// ventanas de otros workspaces (o con window_hiding_behaviour=Hide, las oculta): una que él gestiona sigue contando aunque no se vea.
 pub fn eligible(a: &WinAttrs) -> bool {
-    a.visible && !a.own_process && (!a.owned || a.appwindow) && (!a.toolwindow || a.appwindow) && (!a.cloaked || a.managed)
+    (a.visible || a.managed) && !a.own_process && (!a.owned || a.appwindow) && (!a.toolwindow || a.appwindow) && (!a.cloaked || a.managed)
 }
 
 // Un AUMID agrupa mejor que el exe (Configuración, PWAs y Electron comparten `ApplicationFrameHost`/`msedge`).
@@ -97,6 +97,7 @@ mod tests {
     #[test]
     fn hidden_owned_and_tool_windows_are_not() {
         assert!(!eligible(&WinAttrs { visible: false, ..win() }));
+        assert!(eligible(&WinAttrs { visible: false, managed: true, ..win() }));
         assert!(!eligible(&WinAttrs { owned: true, ..win() }));
         assert!(!eligible(&WinAttrs { toolwindow: true, ..win() }));
     }
