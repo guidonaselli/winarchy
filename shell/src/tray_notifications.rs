@@ -28,6 +28,7 @@ const NIN_BALLOONSHOW: u32 = 0x402;
 const NIN_BALLOONHIDE: u32 = 0x403;
 const NIN_BALLOONTIMEOUT: u32 = 0x404;
 const NIN_BALLOONUSERCLICK: u32 = 0x405;
+const QUNS_UNKNOWN: i32 = 0;
 const QUNS_ACCEPTS_NOTIFICATIONS: i32 = 5;
 const QUNS_QUIET_TIME: i32 = 6;
 const BALLOON_MS: u32 = 0x2016;
@@ -82,7 +83,8 @@ pub fn availability(request: &BalloonRequest) -> Availability {
 fn availability_for_state(state: Option<i32>, flags: u32, realtime: bool, shown: bool) -> Availability {
     match state {
         Some(QUNS_QUIET_TIME) if flags & NIIF_RESPECT_QUIET_TIME != 0 => Availability::Hide,
-        Some(QUNS_ACCEPTS_NOTIFICATIONS) => Availability::Show,
+        // sin Explorer nadie calcula el estado y la API devuelve 0: no hay restricción conocida, así que se muestra
+        Some(QUNS_ACCEPTS_NOTIFICATIONS | QUNS_UNKNOWN) | None => Availability::Show,
         _ if realtime && !shown => Availability::Discard,
         _ => Availability::Wait,
     }
@@ -421,6 +423,8 @@ mod tests {
         assert_eq!(availability_for_state(Some(2), 0, true, true), Availability::Wait);
         assert_eq!(availability_for_state(Some(2), 0x40, false, false), Availability::Wait);
         assert_eq!(availability_for_state(Some(QUNS_ACCEPTS_NOTIFICATIONS), 0, true, false), Availability::Show);
+        assert_eq!(availability_for_state(Some(QUNS_UNKNOWN), 0, true, false), Availability::Show);
+        assert_eq!(availability_for_state(None, 0, false, false), Availability::Show);
     }
 
     #[test]
