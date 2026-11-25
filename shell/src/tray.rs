@@ -465,18 +465,7 @@ fn ingest_packet(packet: Packet) -> bool {
     let (removed, next) = if message == NIM_DELETE || balloon.as_ref().is_some_and(|b| b.text.is_empty()) {
         cancel_balloon(hwnd, uid, guid)
     } else if let Some(balloon) = balloon {
-        let availability = crate::tray_notifications::availability(&balloon);
-        if availability == crate::tray_notifications::Availability::Hide {
-            notify_balloon_owner(&balloon, NIN_BALLOONHIDE);
-        }
-        let became_current = if matches!(availability, crate::tray_notifications::Availability::Hide | crate::tray_notifications::Availability::Discard) {
-            false
-        } else {
-            let mut queue = BALLOONS.lock().unwrap();
-            let was_idle = queue.current().is_none();
-            queue.submit(balloon) && was_idle
-        };
-        if became_current { crate::tray_notifications::start(); }
+        enqueue_balloon(balloon);
         (None, None)
     } else {
         (None, None)
@@ -486,6 +475,30 @@ fn ingest_packet(packet: Packet) -> bool {
     if removed.is_some() { crate::tray_notifications::dismiss(); }
     if next.is_some() { crate::tray_notifications::start(); }
     icon_changed || balloon_changed || has_balloon
+}
+
+fn enqueue_balloon(balloon: BalloonRequest) {
+    let availability = crate::tray_notifications::availability(&balloon);
+    if availability == crate::tray_notifications::Availability::Hide {
+        notify_balloon_owner(&balloon, NIN_BALLOONHIDE);
+    }
+    let became_current = if matches!(availability, crate::tray_notifications::Availability::Hide | crate::tray_notifications::Availability::Discard) {
+        false
+    } else {
+        let mut queue = BALLOONS.lock().unwrap();
+        let was_idle = queue.current().is_none();
+        queue.submit(balloon) && was_idle
+    };
+    if became_current { crate::tray_notifications::start(); }
+}
+
+// Toast de Windows sin ícono de bandeja dueño: no hay ventana a la que devolver eventos (callback 0).
+pub fn submit_toast(title: String, text: String, timeout_ms: u32) {
+    enqueue_balloon(BalloonRequest {
+        hwnd: 0, uid: 0, guid: [0; 16], callback: 0, version: 4,
+        title, text, flags: 0, timeout_ms, realtime: false,
+        sequence: NEXT_BALLOON_SEQUENCE.fetch_add(1, Ordering::Relaxed), icon: None,
+    });
 }
 
 pub fn notify_balloon_owner(balloon: &BalloonRequest, event: u32) {
