@@ -25,7 +25,7 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 | Keybinding | Action |
 |---|---|
 | `SUPER+Alt+Space` | Winarchy menu (Apps/Appearance/Reload/Game mode/Doctor/Update/System/Quit) — same content as right-clicking the tray icon, or the rightmost button on the YASB bar |
-| `SUPER+Esc` | System / power submenu directly (Screensaver/Lock/Sleep/Hibernate/Sign out/Restart/Shut down) |
+| `SUPER+Esc` | System / power submenu directly (Screensaver/Lock/Sleep/Hibernate/Switch user/Sign out/Restart/Shut down/Project) |
 
 The menu's **Apps** entry opens Flow Launcher pre-scoped to the `Program` plugin
 (action keyword `app`), and `SUPER+S` pre-scoped to the `Explorer` plugin's

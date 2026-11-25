@@ -570,6 +570,15 @@ HibernateSystem() {
     Run('shutdown.exe /h', , 'Hide')
 }
 
+SwitchUserSystem() {
+    ; desconecta la sesión sin cerrarla: la pantalla de inicio de sesión permite entrar con otra cuenta
+    DllCall('wtsapi32\WTSDisconnectSession', 'ptr', 0, 'uint', 0xFFFFFFFF, 'int', 0)
+}
+
+ProjectDisplay() {
+    Run('DisplaySwitch.exe')
+}
+
 SignOutSystem() {
     Run('shutdown.exe /l', , 'Hide')
 }
@@ -1232,7 +1241,7 @@ WinarchyText(text) {
         'Scrolling', 'Desplazamiento', 'scrolling strip', 'tira desplazable', 'Next mode', 'Modo siguiente', 'Floating', 'Flotante', 'windows stay where you put them', 'Las ventanas quedan donde las pongas',
         'Move to top', 'Mover arriba', 'Move to bottom', 'Mover abajo', 'Toggle transparency', 'Alternar transparencia',
         'Lock', 'Bloquear', 'Screensaver', 'Protector de pantalla', 'Sleep', 'Suspender', 'Hibernate', 'Hibernar',
-        'Sign out', 'Cerrar sesión', 'Restart', 'Reiniciar', 'Shut down', 'Apagar', 'Settings', 'Configuración',
+        'Switch user', 'Cambiar de usuario', 'Project', 'Proyectar', 'Sign out', 'Cerrar sesión', 'Restart', 'Reiniciar', 'Shut down', 'Apagar', 'Settings', 'Configuración',
         'Region', 'Región', 'Window', 'Ventana', 'Full screen', 'Pantalla completa',
         'Repeat last region', 'Repetir última región', 'Scrolling capture', 'Captura con desplazamiento',
         'Record screen', 'Grabar pantalla', 'Record as GIF', 'Grabar como GIF', 'Stop recording', 'Detener grabación',
@@ -1404,9 +1413,11 @@ WinarchySysItems() {
         {text:'Screensaver',     action:(*)=>LaunchScreensaver()},
         {text:'Sleep',           action:(*)=>SleepSystem()},
         {text:'Hibernate',       action:(*)=>HibernateSystem()},
+        {text:'Switch user',     action:(*)=>SwitchUserSystem()},
         {text:'Sign out',        action:(*)=>SignOutSystem()},
         {text:'Restart',         action:(*)=>RestartSystem()},
         {text:'Shut down',       action:(*)=>ShutdownSystem()},
+        {text:'Project',         action:(*)=>ProjectDisplay()},
         {text:'Settings',        action:(*)=>Run('ms-settings:')} ]
 }
 
