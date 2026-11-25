@@ -14,8 +14,11 @@ pub fn execute(verb: &str, file: &str, parameters: Option<&str>) -> Result<(), S
 
     let wide = |text: &str| text.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
     let operation = wide(verb);
+    let file_text = file;
     let file = wide(file);
     let parameters = parameters.map(wide);
+    // como Explorer: los .bat y programas con rutas relativas corren desde la carpeta del archivo
+    let directory = Path::new(file_text).parent().filter(|dir| dir.is_dir()).map(|dir| wide(&dir.to_string_lossy()));
     // Only the "properties" verb needs INVOKEIDLIST; it makes the shell parse the file as an item id list.
     let mut info = SHELLEXECUTEINFOW {
         cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
@@ -23,6 +26,7 @@ pub fn execute(verb: &str, file: &str, parameters: Option<&str>) -> Result<(), S
         lpVerb: PCWSTR(operation.as_ptr()),
         lpFile: PCWSTR(file.as_ptr()),
         lpParameters: parameters.as_ref().map_or(PCWSTR::null(), |p| PCWSTR(p.as_ptr())),
+        lpDirectory: directory.as_ref().map_or(PCWSTR::null(), |d| PCWSTR(d.as_ptr())),
         nShow: 1,
         ..Default::default()
     };
