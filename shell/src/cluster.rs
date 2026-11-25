@@ -253,7 +253,7 @@ pub fn init(theme: &Theme, state_dir: &std::path::Path) {
     }
     unsafe {
         let Ok(inst) = GetModuleHandleW(PCWSTR::null()) else { return };
-        let class = WNDCLASSW { lpfnWndProc: Some(proc), hInstance: inst.into(), hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(), lpszClassName: w!("WinarchyShellCluster"), ..Default::default() };
+        let class = WNDCLASSW { lpfnWndProc: Some(proc), hInstance: inst.into(), hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(), lpszClassName: w!("WinarchyShellCluster"), style: CS_DBLCLKS, ..Default::default() };
         RegisterClassW(&class);
         let ex = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_LAYERED;
         let Ok(hwnd) = CreateWindowExW(ex, w!("WinarchyShellCluster"), w!(""), WS_POPUP, 0, 0, 1, 1, None, None, inst, None) else { return };
@@ -692,6 +692,17 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
             let (x, y) = client(lp);
             let part = hit_at(x, y);
             with(|c| c.pressed = part);
+            return LRESULT(0);
+        }
+        WM_LBUTTONDBLCLK => {
+            let (x, y) = client(lp);
+            let part = hit_at(x, y);
+            if let Some(Part::Tray(i)) = part {
+                with(|c| c.pressed = None);
+                send_tray(i, crate::tray::Gesture::LeftDouble);
+            } else {
+                with(|c| c.pressed = part);
+            }
             return LRESULT(0);
         }
         WM_LBUTTONUP => {

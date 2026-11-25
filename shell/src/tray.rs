@@ -26,6 +26,7 @@ const MAX_SIDE: u32 = 256;
 
 const WM_LBUTTONDOWN: u32 = 0x201;
 const WM_LBUTTONUP: u32 = 0x202;
+const WM_LBUTTONDBLCLK: u32 = 0x203;
 const WM_RBUTTONDOWN: u32 = 0x204;
 const WM_RBUTTONUP: u32 = 0x205;
 const WM_MBUTTONDOWN: u32 = 0x207;
@@ -164,6 +165,7 @@ fn utf16_field(data: &[u8], start: usize, len: usize) -> String {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Gesture {
     Left,
+    LeftDouble,
     Right,
     Middle,
 }
@@ -259,6 +261,8 @@ pub fn apply(icons: &mut Vec<Icon>, p: Packet) -> bool {
 pub fn messages_for(g: Gesture, version: u32) -> Vec<u32> {
     let mut m = match g {
         Gesture::Left => vec![WM_LBUTTONDOWN, WM_LBUTTONUP],
+        // varias apps (clientes de torrents, VPN) solo abren con el doble clic
+        Gesture::LeftDouble => vec![WM_LBUTTONDBLCLK, WM_LBUTTONUP],
         Gesture::Right => vec![WM_RBUTTONDOWN, WM_RBUTTONUP],
         Gesture::Middle => vec![WM_MBUTTONDOWN, WM_MBUTTONUP],
     };

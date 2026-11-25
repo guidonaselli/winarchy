@@ -261,6 +261,7 @@ fn icons_without_pixels_or_hidden_ones_are_not_shown() {
 fn gestures_send_what_explorer_sends() {
     assert_eq!(messages_for(Gesture::Left, 0), vec![WM_LBUTTONDOWN, WM_LBUTTONUP]);
     assert_eq!(messages_for(Gesture::Left, 4), vec![WM_LBUTTONDOWN, WM_LBUTTONUP, NIN_SELECT]);
+    assert_eq!(messages_for(Gesture::LeftDouble, 4), vec![WM_LBUTTONDBLCLK, WM_LBUTTONUP]);
     assert_eq!(messages_for(Gesture::Right, 4), vec![WM_RBUTTONDOWN, WM_RBUTTONUP, WM_CONTEXTMENU]);
     assert_eq!(messages_for(Gesture::Right, 1), vec![WM_RBUTTONDOWN, WM_RBUTTONUP]);
     assert_eq!(messages_for(Gesture::Middle, 4), vec![WM_MBUTTONDOWN, WM_MBUTTONUP]);

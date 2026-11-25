@@ -29,6 +29,7 @@ const ANIM_MS: u32 = 16;
 const WATCH_MS: u32 = 40;
 const T_ANIM: usize = 1;
 const T_WATCH: usize = 2;
+const T_LATE_CLOSE: usize = 3;
 const MOUSE_LEAVE: u32 = 0x02A3;
 const WM_SYNC: u32 = WM_APP + 41;
 
@@ -184,7 +185,7 @@ pub fn close() {
 fn create(theme: &Theme) -> bool {
     unsafe {
         let Ok(inst) = GetModuleHandleW(PCWSTR::null()) else { return false };
-        let class = WNDCLASSW { lpfnWndProc: Some(proc), hInstance: inst.into(), hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(), lpszClassName: w!("WinarchyShellTray"), ..Default::default() };
+        let class = WNDCLASSW { lpfnWndProc: Some(proc), hInstance: inst.into(), hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(), lpszClassName: w!("WinarchyShellTray"), style: CS_DBLCLKS, ..Default::default() };
         RegisterClassW(&class);
         let ex = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_LAYERED;
         let Ok(hwnd) = CreateWindowExW(ex, w!("WinarchyShellTray"), w!(""), WS_POPUP, 0, 0, 1, 1, None, None, inst, None) else { return false };
@@ -377,7 +378,7 @@ fn send(index: usize, gesture: Gesture) {
         let _ = GetCursorPos(&mut p);
     }
     if let Some((hwnd, uid, guid)) = icon_at(index) {
-        if gesture != Gesture::Left {
+        if !matches!(gesture, Gesture::Left | Gesture::LeftDouble) {
             FG_GRACE_UNTIL.store(unsafe { windows::Win32::System::SystemInformation::GetTickCount64() } + MENU_GRACE_MS, Ordering::Relaxed);
         }
         tray::click_identity(hwnd, uid, guid, gesture, (p.x, p.y));
@@ -454,6 +455,20 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
             start_anim(h);
             return LRESULT(0);
         }
+        WM_TIMER if wp.0 == T_LATE_CLOSE => {
+            let _ = KillTimer(h, T_LATE_CLOSE);
+            close();
+            return LRESULT(0);
+        }
+        WM_LBUTTONDBLCLK => {
+            let (x, y) = client(lp);
+            if let Some(u) = cell_at(x, y).filter(|u| !on_pin(*u, x, y)) {
+                let _ = KillTimer(h, T_LATE_CLOSE);
+                send(u, Gesture::LeftDouble);
+                close();
+            }
+            return LRESULT(0);
+        }
         WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN => {
             let (x, y) = client(lp);
             let cell = cell_at(x, y);
@@ -476,7 +491,8 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
                         _ => Gesture::Middle,
                     });
                     if m == WM_LBUTTONUP {
-                        close();
+                        // el flyout espera el tiempo de doble clic: un segundo clic llega como doble clic al ícono; si la app toma el foco se cierra antes
+                        SetTimer(h, T_LATE_CLOSE, windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime(), None);
                     }
                 }
             }
