@@ -252,10 +252,10 @@ struct Item {
 }
 
 #[derive(Clone)]
-struct Icon {
-    w: i32,
-    h: i32,
-    px: Vec<u32>,
+pub(crate) struct Icon {
+    pub(crate) w: i32,
+    pub(crate) h: i32,
+    pub(crate) px: Vec<u32>,
 }
 
 struct Dock {
@@ -828,6 +828,25 @@ pub fn dismiss_tray() {
 fn request_control_center() {
     let path = with(|d| d.pins_path.with_file_name("show-menu.flag"));
     let _ = std::fs::OpenOptions::new().write(true).create_new(true).open(path);
+}
+
+// Win y el logo abren el Inicio propio sobre el dock del monitor del cursor; sin docks queda el lanzador de siempre.
+pub fn open_start() {
+    if dock_count() == 0 || !crate::start::available() { return request_start(); }
+    let found = unsafe {
+        let mut p = POINT::default();
+        let _ = GetCursorPos(&mut p);
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        let _ = GetMonitorInfoW(MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST), &mut info);
+        let at = (info.rcMonitor.left, info.rcMonitor.top, info.rcMonitor.right, info.rcMonitor.bottom);
+        DOCKS.with(|v| {
+            let v = v.borrow();
+            let d = v.iter().find(|d| d.mon == at).or_else(|| v.first())?;
+            Some((R { x: d.layout.bar.x + d.layout.brand.x, y: d.layout.bar.y + d.layout.brand.y, w: d.layout.brand.w, h: d.layout.brand.h }, d.mon, d.theme.position != "bottom", d.scale, d.theme.clone()))
+        })
+    };
+    let Some((anchor, mon, bottom, scale, theme)) = found else { return request_start() };
+    crate::start::toggle(anchor, mon, bottom, scale, &theme);
 }
 
 fn request_start() {
@@ -1542,6 +1561,10 @@ fn draw_attention_marker(buf: &mut [u32], w: i32, h: i32, marker: R, border: i32
 
 // Texto centrado en una celda: GDI dibuja blanco sobre negro y la luminancia pasa a cobertura (como el tooltip).
 pub(crate) unsafe fn draw_label(buf: &mut [u32], stride: i32, rows: i32, cell: R, text: &str, family: &str, scale: f32, fg: (u8, u8, u8), font_size: i32) {
+    draw_text(buf, stride, rows, cell, text, family, scale, fg, font_size, DT_CENTER)
+}
+
+pub(crate) unsafe fn draw_text(buf: &mut [u32], stride: i32, rows: i32, cell: R, text: &str, family: &str, scale: f32, fg: (u8, u8, u8), font_size: i32, align: DRAW_TEXT_FORMAT) {
     let (w, h) = (cell.w, cell.h);
     let wide: Vec<u16> = text.encode_utf16().collect();
     let family: Vec<u16> = family.encode_utf16().chain(std::iter::once(0)).collect();
@@ -1559,7 +1582,7 @@ pub(crate) unsafe fn draw_label(buf: &mut [u32], stride: i32, rows: i32, cell: R
         SetTextColor(mem, COLORREF(0x00FF_FFFF));
         let mut rc = RECT { left: 0, top: 0, right: w, bottom: h };
         let mut tmp = wide.clone();
-        DrawTextW(mem, &mut tmp, &mut rc, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawTextW(mem, &mut tmp, &mut rc, align | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS);
         for y in 0..h {
             for x in 0..w {
                 let p = src[(y * w + x) as usize];
@@ -1824,7 +1847,7 @@ unsafe fn fetch_window_icon(source: &str) -> Option<Icon> {
     icon
 }
 
-unsafe fn fetch_icon(source: &str, size: i32) -> Option<Icon> {
+pub(crate) unsafe fn fetch_icon(source: &str, size: i32) -> Option<Icon> {
     if source.starts_with("window:") {
         return fetch_window_icon(source);
     }
@@ -2283,7 +2306,7 @@ pub(crate) fn return_keyboard() {
 unsafe fn keyboard_action(context: bool) {
     let target = with(|d| d.key_target.clone());
     match target {
-        Some(KeyTarget::Brand) => { end_keyboard(false); if context { request_control_center(); } else { request_start(); } }
+        Some(KeyTarget::Brand) => { end_keyboard(false); if context { request_control_center(); } else { open_start(); } }
         Some(KeyTarget::Tray) if !context => { end_keyboard(false); open_tray(); }
         Some(KeyTarget::Item(id)) => {
             let index = with(|d| d.items.iter().position(|item| group_id(item) == id));
@@ -2666,7 +2689,7 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 }
                 if action != accesskit::Action::Click { continue }
                 match key.as_str() {
-                    "start" => request_start(),
+                    "start" => open_start(),
                     "tray" => open_tray(),
                     "overflow" => {
                         let first = with(|d| (d.layout.overflow > 0).then(|| d.layout.cells.len().saturating_sub(1)));
@@ -2942,7 +2965,7 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
             if !activate { return LRESULT(0); }
             match hit {
-                Some(Hit::Brand) => request_start(),
+                Some(Hit::Brand) => open_start(),
                 Some(Hit::Tray) => { hide_tip(); open_tray(); },
                 Some(Hit::Item(i)) => click(i),
                 Some(Hit::Overflow) => replay(Replay::Overflow, 0),

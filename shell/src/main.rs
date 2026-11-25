@@ -27,6 +27,8 @@ mod spirit;
 mod system;
 mod theme;
 mod tray;
+mod start;
+mod start_model;
 mod tray_flyout;
 mod tray_host;
 mod tray_notifications;
@@ -65,6 +67,7 @@ const WM_CMD_TRAY_DISMISS: u32 = WM_APP + 9;
 const WM_CMD_TOGGLE_DESKTOP: u32 = WM_APP + 174;
 const WM_CMD_TOGGLE_CLOCK: u32 = WM_APP + 175;
 const WM_CMD_DOCK_FOCUS: u32 = WM_APP + 10;
+const WM_CMD_START: u32 = WM_APP + 13;
 const WM_CMD_DOCK_PIN: u32 = WM_APP + 43;
 const WM_EXPAND: u32 = WM_APP + 5;
 const WM_COLLAPSE: u32 = WM_APP + 6;
@@ -943,6 +946,10 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             dock::focus_keyboard();
             LRESULT(0)
         }
+        WM_CMD_START => {
+            dock::open_start();
+            LRESULT(0)
+        }
         WM_CMD_TRAY => {
             dock::show_tray();
             LRESULT(0)
@@ -1404,6 +1411,7 @@ fn main() {
         if session_shell {
             desktop::init(&theme.background, &root, com_initialized);
             wpn::start_relay();
+            start::init(&root, &theme);
             komorebi::spawn_ahk_watch(root.clone());
             komorebi::spawn_komorebi_watch(root.clone());
         }
@@ -1434,6 +1442,7 @@ fn main() {
                 pipe::Command::Redraw => WM_WORKSPACES,
                 pipe::Command::Expand => WM_EXPAND,
                 pipe::Command::Tray => WM_CMD_TRAY,
+                pipe::Command::Start => WM_CMD_START,
                 pipe::Command::TrayDismiss => WM_CMD_TRAY_DISMISS,
                 pipe::Command::ToggleDesktop => WM_CMD_TOGGLE_DESKTOP,
                 pipe::Command::ToggleClock => WM_CMD_TOGGLE_CLOCK,

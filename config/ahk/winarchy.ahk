@@ -115,7 +115,7 @@ SessionShellActive() {
 #n::ShellIsland('clock.toggle')     ; ni Win+N: el calendario de la isla hace de centro de notificaciones
 ~LWin up:: {
     if A_PriorKey = 'LWin'
-        ToggleFlow()
+        OpenStart()
 }
 ; Al apretar Win se suelta el confinamiento del mouse que fija un juego, para pasar el cursor a otro monitor antes de que el launcher tome el foco.
 ~LWin::DllCall('ClipCursor', 'ptr', 0)
@@ -1488,6 +1488,16 @@ ShellIsland(cmd, extra := '') {
 
 DockPin(n) {
     ShellIsland('dock.pin', ',"params":{"n":' n '}')
+}
+
+; Win abre el Inicio propio de la shell; sin shell que responda queda Flow como lanzador.
+OpenStart() {
+    if (pid := GetShellPid()) {
+        DllCall('user32\AllowSetForegroundWindow', 'uint', pid)
+        if ShellIsland('start.toggle')
+            return
+    }
+    ToggleFlow()
 }
 
 FocusDock() {

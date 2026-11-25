@@ -59,6 +59,7 @@ pub enum Command {
     Redraw,
     Expand,
     Tray,
+    Start,
     TrayDismiss,
     ToggleDesktop,
     ToggleClock,
@@ -174,6 +175,10 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
             }
             None => json!({"v": VERSION, "id": req.id, "ok": false, "error": "bad n"}),
         },
+        "start.toggle" => {
+            dispatch(Command::Start);
+            ok(json!({}))
+        }
         "dock.tray" => {
             dispatch(Command::Tray);
             ok(json!({}))
@@ -280,6 +285,7 @@ mod tests {
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"confirm.request"}"#, &|_| {})["result"], "denied");
         let called = std::cell::Cell::new(false);
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"dock.tray"}"#, &|c| { assert!(matches!(c, Command::Tray)); called.set(true); })["ok"], true);
+        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"start.toggle"}"#, &|c| assert!(matches!(c, Command::Start)))["ok"], true);
         assert!(called.get());
         called.set(false);
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"dock.tray.dismiss"}"#, &|c| { assert!(matches!(c, Command::TrayDismiss)); called.set(true); })["ok"], true);
