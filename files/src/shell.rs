@@ -662,7 +662,7 @@ pub fn stay_above_tiling_border() {
         Foundation::{HWND, LPARAM, POINT, RECT},
         System::Threading::GetCurrentProcessId,
         UI::WindowsAndMessaging::{
-            EnumWindows, GA_ROOT, GetAncestor, GetClassNameW, GetWindowRect, GetWindowThreadProcessId, HWND_TOP, IsIconic, IsWindowVisible, SWP_NOACTIVATE,
+            EnumWindows, GA_ROOT, GetAncestor, GetClassNameW, GetWindowRect, GetWindowThreadProcessId, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindowVisible, SWP_NOACTIVATE,
             SWP_NOMOVE, SWP_NOSIZE, SetWindowPos, WindowFromPoint,
         },
     };
@@ -701,7 +701,10 @@ pub fn stay_above_tiling_border() {
             let mut name = [0u16; 32];
             let length = GetClassNameW(covering, &mut name) as usize;
             if String::from_utf16_lossy(&name[..length]).starts_with("komoborder") {
-                let _ = SetWindowPos(window, Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                // HWND_TOP alone leaves the window under the border (verified live); a topmost round trip does reorder it
+                let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+                let _ = SetWindowPos(window, Some(HWND_TOPMOST), 0, 0, 0, 0, flags);
+                let _ = SetWindowPos(window, Some(HWND_NOTOPMOST), 0, 0, 0, 0, flags);
             }
         }
     });
