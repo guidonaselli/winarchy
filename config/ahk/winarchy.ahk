@@ -117,6 +117,8 @@ SessionShellActive() {
     if A_PriorKey = 'LWin'
         ToggleFlow()
 }
+; Al apretar Win se suelta el confinamiento del mouse que fija un juego, para pasar el cursor a otro monitor antes de que el launcher tome el foco.
+~LWin::DllCall('ClipCursor', 'ptr', 0)
 ; Sin Explorer no hay conmutador de Alt+Tab: un toque vuelve a la ventana anterior y Tab con Alt sostenido sigue por z-order.
 !Tab::AltTabStep(1)
 !+Tab::AltTabStep(-1)
