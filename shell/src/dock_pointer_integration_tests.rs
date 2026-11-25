@@ -979,7 +979,7 @@ unsafe fn run_native_desktop_view_probe() {
                             let _ = TranslateMessage(&message);
                             DispatchMessageW(&message);
                         }
-                        if let Ok(window) = FindWindowW(PCWSTR::null(), w!("Files — Winarchy")) {
+                        if let Ok(window) = FindWindowW(PCWSTR::null(), w!("WinarchyDesktopProbeFolder - Winarchy Files")) {
                             if IsWindowVisible(window).as_bool() && std::time::Instant::now() < deadline {
                                 let visible_at = std::time::Instant::now();
                                 desktop_view_diagnostic(&format!("folder Enter outcome: Files_visible=true; hwnd={window:?}; elapsed_ms={}; BrowseObject_calls={}; frame_readiness=unverified",

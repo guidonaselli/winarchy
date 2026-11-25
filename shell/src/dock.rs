@@ -1433,7 +1433,7 @@ fn brand_mark_polygons(cell: R, scale: f32) -> [MarkQuad; 4] {
         [(53.7, 16.8), (67.7, 16.8), (75.4, 56.0), (61.4, 56.0)],
         [(78.9, 56.0), (92.9, 56.0), (103.9, 0.0), (89.9, 0.0)],
     ];
-    let w = px(30, scale).min(cell.w - px(8, scale)).max(1);
+    let w = px(24, scale).min(cell.w - px(8, scale)).max(1);
     let h = (w as f32 * 56.0 / 104.0).round() as i32;
     let (left, top) = (cell.x + (cell.w - w) / 2, cell.y + (cell.h - h) / 2);
     MARK.map(|quad| quad.map(|(x, y)| (left + (x * w as f32 / 104.0).round() as i32, top + (y * h as f32 / 56.0).round() as i32)))

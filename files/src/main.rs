@@ -2081,7 +2081,8 @@ impl Component for Explorer {
     }
 
     fn view(&self, _input: &PathBuf, context: &mut ViewContext<Self>) -> View {
-        context.window_title("Files — Winarchy");
+        let place = self.path.file_name().map_or_else(|| self.path.display().to_string(), |name| name.to_string_lossy().into_owned());
+        context.window_title(&format!("{place} - Winarchy Files"));
         let pane = if self.pane_hidden() { 0.0 } else { PANE_WIDTH };
         let limits = WindowConstraints { min_width: Some(self.chrome_width() + pane + MIN_LIST_WIDTH), ..Default::default() };
         let visuals = WindowVisuals::new().constraints(limits);
