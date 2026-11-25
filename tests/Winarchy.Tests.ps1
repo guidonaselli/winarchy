@@ -719,6 +719,22 @@ Describe 'Coding agent' {
 }
 
 Describe 'Background gallery' {
+    It 'has a distinct English and Spanish message for every gallery state, formatting the dynamic ones' {
+        InModuleScope Winarchy {
+            foreach ($key in 'title', 'empty', 'dynamic', 'current', 'no-theme', 'apply-error') {
+                $en = Get-WinarchyBackgroundGalleryText -Key $key -Theme 'nord' -File 'a.png' -Reason 'boom' -Language en
+                $es = Get-WinarchyBackgroundGalleryText -Key $key -Theme 'nord' -File 'a.png' -Reason 'boom' -Language es
+                $en | Should -Not -BeNullOrEmpty
+                $es | Should -Not -BeNullOrEmpty
+                $es | Should -Not -Be $en
+            }
+            Get-WinarchyBackgroundGalleryText -Key title -Theme 'nord' -Language en | Should -Match 'nord'
+            $err = Get-WinarchyBackgroundGalleryText -Key apply-error -File 'a.png' -Reason 'boom' -Language es
+            $err | Should -Match 'a\.png'
+            $err | Should -Match 'boom'
+        }
+    }
+
     It 'fits three wallpaper cards in one row' {
         InModuleScope Winarchy {
             $layout = Get-WinarchyBackgroundGalleryLayout -Count 3 -WorkWidth 1920 -WorkHeight 1080
