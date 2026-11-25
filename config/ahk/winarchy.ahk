@@ -841,6 +841,23 @@ ShellRecoveryBridgeBusy := false
 ShellRelaunches := []
 ShellBootUntil := 0
 SetTimer(ShellWatch, 5000)
+; Sin Explorer nadie ejecuta Run/RunOnce ni Startup: la shell de sesión lo delega acá, una vez por inicio de sesión.
+SessionAutostartTries := 0
+SetTimer(SessionAutostart, 5000)
+SessionAutostart() {
+    global ShellSessionMarker, ShellLogonIdentity, RepoRoot, SessionAutostartTries
+    if ++SessionAutostartTries > 12 {
+        SetTimer(SessionAutostart, 0)
+        return
+    }
+    try active := ShellSessionMarker && FileExist(ShellSessionMarker) && Trim(FileRead(ShellSessionMarker)) = ShellLogonIdentity
+    catch
+        return
+    if !active
+        return
+    SetTimer(SessionAutostart, 0)
+    Run('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' RepoRoot '\scripts\Start-SessionAutostart.ps1" -Identity "' ShellLogonIdentity '"', , 'Hide')
+}
 AcquireShellLifecycleMutex() {
     global sessionId
     handle := DllCall('CreateMutexW', 'ptr', 0, 'int', 0, 'str', 'Local\WinarchyShellLifecycle-' sessionId, 'ptr')
