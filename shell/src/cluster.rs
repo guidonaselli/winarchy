@@ -531,14 +531,46 @@ fn send_tray(index: usize, gesture: crate::tray::Gesture) {
     }
 }
 
-// Mostrar escritorio como la taskbar: minimiza todo y la segunda vez lo restaura, con los comandos de Shell_TrayWnd (sin teclas).
-fn toggle_desktop() {
-    static SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    let cmd = if SHOWN.fetch_xor(true, Ordering::Relaxed) { 416 } else { 419 };
+// Mostrar escritorio: minimiza las ventanas de aplicación visibles y la segunda vez restaura las mismas. Sin Explorer
+// los comandos de Shell_TrayWnd no existen (ese HWND es el host de bandeja propio), así que no se depende de ellos.
+thread_local! { static MINIMIZED: RefCell<Vec<isize>> = const { RefCell::new(Vec::new()) }; }
+
+unsafe extern "system" fn collect_app_window(hwnd: HWND, list: LPARAM) -> BOOL {
+    let list = &mut *(list.0 as *mut Vec<isize>);
+    if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() || GetWindow(hwnd, GW_OWNER).is_ok_and(|o| !o.is_invalid()) {
+        return TRUE;
+    }
+    let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+    if ex & WS_EX_TOOLWINDOW.0 != 0 || ex & WS_EX_NOACTIVATE.0 != 0 || GetWindowTextLengthW(hwnd) == 0 {
+        return TRUE;
+    }
+    let mut class = [0u16; 64];
+    let len = GetClassNameW(hwnd, &mut class) as usize;
+    let class = String::from_utf16_lossy(&class[..len]);
+    if !(class.starts_with("WinarchyShell") || matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd")) {
+        list.push(hwnd.0 as isize);
+    }
+    TRUE
+}
+
+pub(crate) fn toggle_desktop() {
+    let restore = MINIMIZED.with(|m| std::mem::take(&mut *m.borrow_mut()));
     unsafe {
-        if let Ok(tray) = FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null()) {
-            let _ = PostMessageW(tray, WM_COMMAND, WPARAM(cmd), LPARAM(0));
+        if !restore.is_empty() {
+            for h in restore.iter().rev() {
+                let hwnd = HWND(*h as *mut _);
+                if IsWindow(hwnd).as_bool() && IsIconic(hwnd).as_bool() {
+                    let _ = ShowWindowAsync(hwnd, SW_RESTORE);
+                }
+            }
+            return;
         }
+        let mut found: Vec<isize> = Vec::new();
+        let _ = EnumWindows(Some(collect_app_window), LPARAM(&mut found as *mut _ as isize));
+        for h in &found {
+            let _ = ShowWindowAsync(HWND(*h as *mut _), SW_SHOWMINNOACTIVE);
+        }
+        MINIMIZED.with(|m| *m.borrow_mut() = found);
     }
 }
 

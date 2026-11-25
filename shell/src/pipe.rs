@@ -60,6 +60,7 @@ pub enum Command {
     Expand,
     Tray,
     TrayDismiss,
+    ToggleDesktop,
     DockFocus,
     DockPin(usize),
 }
@@ -180,6 +181,10 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
             dispatch(Command::TrayDismiss);
             ok(json!({}))
         }
+        "desktop.toggle" => {
+            dispatch(Command::ToggleDesktop);
+            ok(json!({}))
+        }
         "island.dismiss" => {
             *ISLAND.lock().unwrap() = None;
             dispatch(Command::Redraw);
@@ -273,6 +278,7 @@ mod tests {
         assert!(called.get());
         called.set(false);
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"dock.tray.dismiss"}"#, &|c| { assert!(matches!(c, Command::TrayDismiss)); called.set(true); })["ok"], true);
+        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"desktop.toggle"}"#, &|c| assert!(matches!(c, Command::ToggleDesktop)))["ok"], true);
         assert!(called.get());
     }
 

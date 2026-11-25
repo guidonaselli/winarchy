@@ -8,6 +8,7 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 | Keybinding | Action |
 |---|---|
 | `SUPER+Return` | WezTerm (the default terminal) |
+| `SUPER+D` | Show/restore the desktop (only when Winarchy is the session shell; Explorer handles it otherwise) |
 | `SUPER+Space` | Flow Launcher — applications and Winarchy's own commands in one search |
 | `SUPER+S` | File search — Flow scoped to Everything (`f ` prefix), replaces Windows Search |
 | `SUPER+Shift+Return` or `SUPER+Shift+B` | Default browser |

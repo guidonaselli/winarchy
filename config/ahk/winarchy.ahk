@@ -111,6 +111,7 @@ SessionShellActive() {
         return false
 }
 #HotIf SessionShellActive()
+#d::ShellIsland('desktop.toggle')   ; sin Explorer nadie atiende Win+D
 ~LWin up:: {
     if A_PriorKey = 'LWin'
         ToggleFlow()
@@ -561,7 +562,8 @@ LockWorkstation() {
 }
 
 SleepSystem() {
-    Run('rundll32.exe powrprof.dll,SetSuspendState 0,1,0', , 'Hide')
+    ; rundll32 no pasa los tres argumentos y con hibernación activa terminaba hibernando
+    DllCall('powrprof\SetSuspendState', 'char', 0, 'char', 0, 'char', 0)
 }
 
 HibernateSystem() {

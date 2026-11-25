@@ -61,6 +61,7 @@ const WM_CMD_RETURN_FAILED: u32 = WM_APP + 45;
 const WM_WORKSPACES: u32 = WM_APP + 4;
 const WM_CMD_TRAY: u32 = WM_APP + 8;
 const WM_CMD_TRAY_DISMISS: u32 = WM_APP + 9;
+const WM_CMD_TOGGLE_DESKTOP: u32 = WM_APP + 174;
 const WM_CMD_DOCK_FOCUS: u32 = WM_APP + 10;
 const WM_CMD_DOCK_PIN: u32 = WM_APP + 43;
 const WM_EXPAND: u32 = WM_APP + 5;
@@ -923,6 +924,10 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             dock::dismiss_tray();
             LRESULT(0)
         }
+        WM_CMD_TOGGLE_DESKTOP => {
+            cluster::toggle_desktop();
+            LRESULT(0)
+        }
         WM_EXPAND => {
             with(|s| s.expand_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(EXPAND_SECS)));
             tick(h);
@@ -1406,6 +1411,7 @@ fn main() {
                 pipe::Command::Expand => WM_EXPAND,
                 pipe::Command::Tray => WM_CMD_TRAY,
                 pipe::Command::TrayDismiss => WM_CMD_TRAY_DISMISS,
+                pipe::Command::ToggleDesktop => WM_CMD_TOGGLE_DESKTOP,
                 pipe::Command::DockFocus => WM_CMD_DOCK_FOCUS,
                 pipe::Command::DockPin(n) => {
                     arg = n;
