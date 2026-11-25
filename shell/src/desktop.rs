@@ -971,6 +971,15 @@ pub fn set_fallback_color(hex: &str) {
     }
 }
 
+// user32!SetShellWindow no está documentada ni en la crate `windows`: se resuelve en runtime y, si falta, el escritorio sigue sin registrarse.
+unsafe fn register_shell_window(hwnd: HWND) {
+    use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+    let Ok(user32) = LoadLibraryW(w!("user32.dll")) else { return };
+    let Some(proc) = GetProcAddress(user32, windows::core::s!("SetShellWindow")) else { return };
+    let set: unsafe extern "system" fn(HWND) -> BOOL = std::mem::transmute(proc);
+    let _ = set(hwnd);
+}
+
 pub fn init(fallback: &str, root: &std::path::Path, com_initialized: bool) {
     let rect = desktop_rect();
     if rect.right <= rect.left || rect.bottom <= rect.top {
@@ -1037,6 +1046,8 @@ pub fn init(fallback: &str, root: &std::path::Path, com_initialized: bool) {
             rect.bottom - rect.top,
             SWP_NOACTIVATE | SWP_SHOWWINDOW,
         );
+        // Como Progman con Explorer: sin ventana de shell registrada, lo que komorebi manda al fondo queda debajo del escritorio y desaparece.
+        register_shell_window(hwnd);
     }
     if com_initialized {
         let size = RECT {
