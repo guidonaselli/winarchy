@@ -22,10 +22,18 @@ function Get-Disabled([string]$hive, [string]$sub, [string]$name) {
     [bool]($bytes -and ($bytes[0] -band 1))
 }
 
-function Get-ExeName([string]$command) {
-    $expanded = [Environment]::ExpandEnvironmentVariables($command.Trim())
-    $path = if ($expanded -match '^"([^"]+)"') { $matches[1] } elseif ($expanded -match '^(.+?\.(?:exe|bat|cmd|lnk))(\s|$)') { $matches[1] } else { $expanded }
-    [IO.Path]::GetFileNameWithoutExtension($path)
+# Parte una línea de comando como CreateProcess: entre comillas, o el prefijo más corto que exista (rutas con espacios sin comillas).
+function Split-Command([string]$command) {
+    $text = [Environment]::ExpandEnvironmentVariables($command.Trim())
+    if ($text -match '^"([^"]+)"\s*(.*)$') { return [pscustomobject]@{ File = $matches[1]; Arguments = $matches[2] } }
+    $words = $text -split ' '
+    for ($n = 1; $n -le $words.Count; $n++) {
+        $candidate = ($words[0..($n - 1)] -join ' ')
+        foreach ($path in @($candidate, "$candidate.exe")) {
+            if (Test-Path -LiteralPath $path -PathType Leaf) { return [pscustomobject]@{ File = $path; Arguments = ($words[$n..($words.Count)] -join ' ').Trim() } }
+        }
+    }
+    [pscustomobject]@{ File = $text; Arguments = '' }
 }
 
 $entries = [System.Collections.Generic.List[object]]::new()
@@ -55,15 +63,18 @@ foreach ($spec in @(
 }
 
 $running = @{}
-foreach ($p in Get-Process -ErrorAction SilentlyContinue) { $running[$p.ProcessName.ToLowerInvariant()] = $true }
+# solo cuenta lo de esta sesión: un servicio con el mismo nombre (p. ej. Everything en la sesión 0) no es el cliente del usuario
+foreach ($p in Get-Process -ErrorAction SilentlyContinue | Where-Object SessionId -eq $sessionId) { $running[$p.ProcessName.ToLowerInvariant()] = $true }
 foreach ($e in $entries) {
-    $exeName = Get-ExeName $e.Command
-    if ($e.Command -notmatch '\.lnk"?$' -and $exeName -and $running.ContainsKey($exeName.ToLowerInvariant())) { Write-Log "already running: $($e.Name)"; continue }
+    $cmd = Split-Command $e.Command
+    $exeName = [IO.Path]::GetFileNameWithoutExtension($cmd.File)
+    if ($cmd.File -notmatch '\.lnk$' -and $exeName -and $running.ContainsKey($exeName.ToLowerInvariant())) { Write-Log "already running: $($e.Name)"; continue }
     try {
         if ($e.Once) { Remove-ItemProperty -LiteralPath $e.Key -Name $e.Name -ErrorAction SilentlyContinue }
-        $target = [Environment]::ExpandEnvironmentVariables($e.Command)
-        if (Test-Path -LiteralPath $target) { Start-Process -FilePath $target -WorkingDirectory (Split-Path $target) }
-        else { Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" -ArgumentList '/c', "start `"`" $target" -WindowStyle Hidden }
+        if (-not (Test-Path -LiteralPath $cmd.File)) { Write-Log "missing target: $($e.Name): $($cmd.File)"; continue }
+        $start = @{ FilePath = $cmd.File; WorkingDirectory = (Split-Path $cmd.File) }
+        if ($cmd.Arguments) { $start.ArgumentList = $cmd.Arguments }
+        Start-Process @start
         Write-Log "started: $($e.Name)"
     }
     catch { Write-Log "failed: $($e.Name): $($_.Exception.Message)" }
