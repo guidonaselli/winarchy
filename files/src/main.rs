@@ -7,7 +7,6 @@ mod i18n;
 mod pdf;
 mod clipboard;
 mod iconset;
-mod instance;
 mod icons;
 mod keys;
 mod scroll;
@@ -470,7 +469,6 @@ enum Message {
     Dropped(DroppedData),
     NewWindow,
     NewTab,
-    Remote(instance::Request),
     Back,
     Forward,
     CreateFile,
@@ -821,7 +819,6 @@ impl Component for Explorer {
                 app.has_error = true;
             }
         }
-        let _remote = context.spawn_background(|_| Message::Remote(instance::receive()));
         app
     }
 
@@ -1057,26 +1054,6 @@ impl Component for Explorer {
                 if let Err(error) = opened {
                     self.status = format!("{}: {error}", tr("Could not open terminal"));
                 }
-            }
-            Message::Remote(instance::Request::Failed) => {
-                // nothing can reach this window; try again later instead of spinning
-                let _next = context.spawn_background(|_| {
-                    std::thread::sleep(std::time::Duration::from_secs(30));
-                    Message::Remote(instance::receive())
-                });
-            }
-            Message::Remote(request) => {
-                instance::raise();
-                if let instance::Request::Open(path) = request {
-                    let (folder, item) = if path.is_dir() { (path, None) } else { (path.parent().map_or_else(|| path.clone(), Path::to_path_buf), Some(path)) };
-                    self.tabs.push(folder.clone());
-                    self.active_tab = self.tabs.len() - 1;
-                    self.back.clear();
-                    self.forward.clear();
-                    self.load_path(folder, context);
-                    self.selected.extend(item);
-                }
-                let _next = context.spawn_background(|_| Message::Remote(instance::receive()));
             }
             Message::NewTab => {
                 self.tabs.push(self.path.clone());
@@ -4178,9 +4155,6 @@ fn main() {
         std::process::exit(code);
     }
     let target = launch_target();
-    if !instance::claim(target.as_ref().map(|(folder, item)| item.as_deref().unwrap_or(folder.as_path()))) {
-        return;
-    }
     shell::set_app_id();
     let path = target
         .map(|(folder, _)| folder)

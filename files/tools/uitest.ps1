@@ -95,9 +95,8 @@ try {
         Start-App $a (New-Settings)
         $second = Start-Process (Resolve-Path $Exe) -ArgumentList $b -PassThru
         Start-Sleep 3
-        Check 'second launch exits' $second.HasExited ''
-        Check 'one window process' (@(Get-Process winarchy-files).Count -eq 1) ''
-        Check 'second folder is a tab' ($null -ne (Find 'beta' 3)) 'tab "beta"'
+        Check 'second launch stays as its own window' (-not $second.HasExited) ''
+        Check 'two window processes' (@(Get-Process winarchy-files).Count -eq 2) ''
         Stop-App
     }
 
