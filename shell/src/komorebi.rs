@@ -68,6 +68,34 @@ fn ahk_window() -> Option<HWND> {
     None
 }
 
+// AHK vigila a la shell; la shell vigila a AHK, así ninguna de las dos queda muerta sin que la otra la levante.
+// La tarea programada relanza con #SingleInstance Force, por eso es idempotente.
+pub fn spawn_ahk_watch(root: std::path::PathBuf) {
+    const POLL: std::time::Duration = std::time::Duration::from_secs(5);
+    const WINDOW: std::time::Duration = std::time::Duration::from_secs(300);
+    const MAX_RELAUNCHES: usize = 3;
+    std::thread::spawn(move || {
+        let mut misses = 0;
+        let mut relaunches: Vec<std::time::Instant> = Vec::new();
+        loop {
+            std::thread::sleep(POLL);
+            if ahk_window().is_some() {
+                misses = 0;
+                continue;
+            }
+            misses += 1;
+            relaunches.retain(|t| t.elapsed() < WINDOW);
+            if misses < 2 || relaunches.len() >= MAX_RELAUNCHES {
+                continue;
+            }
+            misses = 0;
+            relaunches.push(std::time::Instant::now());
+            let started = std::process::Command::new("schtasks.exe").args(["/run", "/tn", r"\Winarchy\ahk"]).creation_flags(0x0800_0000).status();
+            crate::boot_log(&root, &format!("ahk missing, relaunch via task: {started:?}"));
+        }
+    });
+}
+
 pub fn cycle_mode() {
     if let Some(h) = ahk_window() {
         unsafe {

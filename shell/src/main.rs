@@ -1329,7 +1329,7 @@ fn shell_paths(args: &[String], executable: Option<PathBuf>) -> (PathBuf, PathBu
     (root, theme)
 }
 
-fn boot_log(root: &Path, text: &str) {
+pub(crate) fn boot_log(root: &Path, text: &str) {
     use std::io::Write;
     let path = root.join("state").join("shell-boot.log");
     if std::fs::metadata(&path).is_ok_and(|m| m.len() > 64 * 1024) { let _ = std::fs::remove_file(&path); }
@@ -1404,6 +1404,7 @@ fn main() {
         if session_shell {
             desktop::init(&theme.background, &root, com_initialized);
             wpn::start_relay();
+            komorebi::spawn_ahk_watch(root.clone());
         }
         ics::spawn_feed(theme_path.clone());
         extras::spawn_weather(theme_path);
