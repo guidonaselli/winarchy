@@ -2524,6 +2524,10 @@ fn previewed(d: &Dock, item: &Item) -> Option<isize> {
     d.preview_pick.as_ref().filter(|(k, w)| *k == item.key && item.wins.contains(w)).map(|(_, w)| *w).or_else(|| d.last_active.get(&item.key).copied())
 }
 
+unsafe fn thumb_windows(idx: usize) -> Vec<isize> {
+    with(|d| d.items.get(idx).map(|i| i.wins.clone())).unwrap_or_default()
+}
+
 unsafe fn thumb_target(idx: usize) -> Option<isize> {
     if idx == HUB_INDEX || idx == TRAY_INDEX || with(|d| d.layout.overflow > 0 && idx + 1 == d.layout.cells.len()) {
         return None;
@@ -2590,9 +2594,9 @@ unsafe fn show_tip(idx: usize) {
     let _ = DeleteDC(mem);
     ReleaseDC(None, screen);
     let _ = ShowWindow(tip, SW_SHOWNOACTIVATE);
-    match thumb_target(idx) {
-        Some(target) => crate::dock_thumb::show(target, bar.x + cell.x + cell.w / 2, (x, y, w, h), bottom, mon, scale, &theme),
-        None => crate::dock_thumb::hide(),
+    match (thumb_target(idx), thumb_windows(idx)) {
+        (Some(target), wins) => crate::dock_thumb::show(&wins, target, bar.x + cell.x + cell.w / 2, (x, y, w, h), bottom, mon, scale, &theme),
+        _ => crate::dock_thumb::hide(),
     }
     if animate {
         let dock = with(|d| {
