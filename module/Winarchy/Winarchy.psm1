@@ -323,10 +323,12 @@ function Invoke-Winarchy {
                         break
                     }
                     $status = Enable-WinarchyCustomShell
+                    $theme = Get-WinarchyCurrentTheme; if ($theme) { Set-WinarchyTheme -Name $theme }
                     Write-WinarchyOk "CustomShell policy $($status.State). Sign out and back in to use the Winarchy shell."
                 }
                 'deactivate' {
                     $status = Disable-WinarchyCustomShell
+                    $theme = Get-WinarchyCurrentTheme; if ($theme) { Set-WinarchyTheme -Name $theme }
                     Write-WinarchyOk "CustomShell policy $($status.State): Explorer returns at next sign-in."
                 }
                 default { throw "Unknown subcommand: shell $sub (status|activate|deactivate)" }

@@ -24,6 +24,21 @@ cluster on:
 
 The release binary is 1.5 MB (`opt-level = "s"`, LTO, stripped).
 
+## Session without Explorer (same machine, 2 monitors)
+
+Explorer was stopped with its own clean-exit message and the shell restarted with `--session-shell`; 30 s windows with `scripts/Measure-Shell.ps1`. Explorer was restored afterwards.
+
+| Process | Explorer running | Without Explorer (idle) |
+|---|---|---|
+| `winarchy-shell` | 50 MB, 0.44 % CPU | 72 MB, 0.6 % CPU |
+| `komorebi` | 44 MB, 0.6 % | 66 MB, 0.38 % |
+| `AutoHotkey64` | 14 MB, 0.22 % | 22 MB, 0.0 % |
+| `explorer` | 252 MB, 0.6 % | not running |
+
+The stack without Explorer holds about 160 MB against about 360 MB with it. The shell grows because it then draws the desktop and owns the tray. With the dock set to `hide`, a mouse at the bottom edge revealed it listing the open apps.
+
+Finding: komorebi in `Cloak` mode aborts when Explorer is absent (`Class not registered`, HRESULT 0x80040154, `MoveContainerToWorkspace`), because `Cloak` goes through Explorer's ImmersiveShell COM server. With the custom shell installed, `komorebi.json` is therefore generated with `window_hiding_behaviour: "Hide"`.
+
 ## Hot-path microbenchmarks
 
 ```powershell

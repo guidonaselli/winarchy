@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/LGUG2Z/komorebi/v0.1.41/schema.json",
   "_managed": "managed by winarchy — generado desde templates/komorebi.json.tpl + themes/{{computed.theme_dir}}/theme.toml. NO editar a mano.",
-  "window_hiding_behaviour": "Cloak",
+  "window_hiding_behaviour": "{{computed.window_hiding}}",
   "cross_monitor_move_behaviour": "Insert",
   "default_workspace_padding": 3,
   "default_container_padding": 2,

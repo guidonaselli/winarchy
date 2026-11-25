@@ -73,3 +73,11 @@ Describe 'CustomShell activation and recovery' {
         }
     }
 }
+
+Describe 'komorebi without Explorer' {
+    It 'hides windows with Hide, not the Explorer-hosted Cloak, once the custom shell is installed' {
+        $root = Split-Path $PSScriptRoot -Parent
+        (Get-Content (Join-Path $root 'templates\komorebi.json.tpl') -Raw) | Should -Match '"window_hiding_behaviour": "\{\{computed\.window_hiding\}\}"'
+        (Get-Content (Join-Path $root 'module\Winarchy\Private\ThemeEngine.ps1') -Raw) | Should -Match "(?s)computed\.window_hiding'\] = if \(\(Get-WinarchyCustomShellStatus\)\.State -eq 'Installed'\) \{ 'Hide' \} else \{ 'Cloak' \}"
+    }
+}

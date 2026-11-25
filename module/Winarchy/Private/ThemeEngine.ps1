@@ -147,6 +147,8 @@ function Build-WinarchyThemeContext {
     $ctx['computed.bar_opacity'] = if (Test-WinarchyBarTransparent) { '0.72' } else { '1' }
     $dockOn = Test-WinarchyBarDock
     $offset = if ($dockOn) { Get-WinarchyDockWorkAreaOffset }
+    # Cloak usa el COM de Explorer (ImmersiveShell): sin Explorer komorebi aborta al mover un contenedor (verificado, 0x80040154), así que con la shell de sesión se esconde con Hide
+    $ctx['computed.window_hiding'] = if ((Get-WinarchyCustomShellStatus).State -eq 'Installed') { 'Hide' } else { 'Cloak' }
     $ctx['computed.dock'] = if ($dockOn) { 'true' } else { 'false' }
     $ctx['computed.dock_float'] = if ((Get-WinarchyDockMode) -eq 'float') { 'true' } else { 'false' }
     $ctx['computed.dock_hide'] = if ((Get-WinarchyDockMode) -eq 'hide') { 'true' } else { 'false' }
