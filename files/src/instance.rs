@@ -40,6 +40,8 @@ pub fn claim(target: Option<&std::path::Path>) -> bool {
         if GetLastError() != ERROR_ALREADY_EXISTS {
             return true;
         }
+        // this launch may hold foreground rights the running window lacks; pass them on so its raise is not refused
+        let _ = windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(windows::Win32::UI::WindowsAndMessaging::ASFW_ANY);
         let text = target.map(|path| path.to_string_lossy().into_owned()).unwrap_or_default();
         let name = wide(&pipe_name());
         for _ in 0..CONNECT_ATTEMPTS {
@@ -114,8 +116,8 @@ pub fn receive() -> Request {
 pub fn raise() {
     use windows::Win32::{
         Foundation::{HWND, LPARAM},
-        System::Threading::GetCurrentProcessId,
-        UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SW_RESTORE, SetForegroundWindow, ShowWindow},
+        System::Threading::{AttachThreadInput, GetCurrentProcessId, GetCurrentThreadId},
+        UI::WindowsAndMessaging::{EnumWindows, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SW_RESTORE, SetForegroundWindow, ShowWindow},
     };
     use windows::core::BOOL;
     unsafe extern "system" fn bring(window: HWND, _: LPARAM) -> BOOL {
@@ -129,7 +131,15 @@ pub fn raise() {
             if IsIconic(window).as_bool() {
                 let _ = ShowWindow(window, SW_RESTORE);
             }
-            let _ = SetForegroundWindow(window);
+            if !SetForegroundWindow(window).as_bool() {
+                // refused by the foreground lock: borrow the foreground thread's input state for one call
+                let owner = GetWindowThreadProcessId(GetForegroundWindow(), None);
+                let me = GetCurrentThreadId();
+                if owner != 0 && owner != me && AttachThreadInput(me, owner, true).as_bool() {
+                    let _ = SetForegroundWindow(window);
+                    let _ = AttachThreadInput(me, owner, false);
+                }
+            }
         }
         false.into()
     }
