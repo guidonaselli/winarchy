@@ -6,6 +6,7 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
 ## Invariantes
 - AHK v2 es el ÚNICO dueño de hotkeys globales. Nunca habilitar whkd ni hotkeys de Seelen.
 - komorebi NUNCA se corre elevado.
+- Nunca cerrar Explorer, la shell, komorebi ni terminales en el escritorio del usuario para medir o probar (p. ej. `PostMessage 0x5B4` a `Shell_TrayWnd`): se cae su sesión, WezTerm incluido. Una prueba sin Explorer se pregunta antes y la corre el usuario, o va en Windows Sandbox.
 - Los archivos generados llevan header "managed by winarchy" y NO se editan a mano:
   se regeneran desde `templates/*.tpl` con `winarchy theme set`.
 - Personalización del usuario va en archivos override, no en los generados.
