@@ -121,11 +121,17 @@ pub enum MenuEntry {
 
 pub fn context_entries(part: Part, status: StatusPart) -> Vec<(K, MenuEntry)> {
     match (part, status) {
-        (Part::Status, StatusPart::Network) => vec![(K::MenuNetworkSettings, MenuEntry::Open("ms-settings:network")), (K::MenuNetworkConnections, MenuEntry::Open("ncpa.cpl"))],
+        (Part::Status, StatusPart::Network) => vec![
+            (K::MenuNetworkSettings, MenuEntry::Open("ms-settings:network")),
+            (K::MenuWifiSettings, MenuEntry::Open("ms-settings:network-wifi")),
+            (K::MenuBluetoothSettings, MenuEntry::Open("ms-settings:bluetooth")),
+            (K::MenuNetworkConnections, MenuEntry::Open("ncpa.cpl")),
+        ],
         (Part::Status, StatusPart::Volume) => vec![
             (K::MenuSoundSettings, MenuEntry::Open("ms-settings:sound")),
             (K::MenuVolumeMixer, MenuEntry::Open("ms-settings:apps-volume")),
             (K::MenuMute, MenuEntry::Mute),
+            (K::MenuDisplaySettings, MenuEntry::Open("ms-settings:display")),
         ],
         (Part::Status, StatusPart::Battery) => vec![(K::MenuPowerSettings, MenuEntry::Open("ms-settings:powersleep"))],
         (Part::Clock, _) => vec![(K::MenuDateTime, MenuEntry::Open("ms-settings:dateandtime")), (K::MenuNotificationSettings, MenuEntry::Open("ms-settings:notifications"))],
@@ -587,7 +593,6 @@ pub fn open_tray() {
 
 fn activate(part: Part) {
     let name = match part {
-        Part::Status if crate::session_shell_active() => return unsafe { crate::shell_open("ms-settings:sound") },
         Part::Clock if crate::session_shell_active() => return unsafe { crate::toggle_clock() },
         Part::Status => "show-quick-settings.flag",
         Part::Clock => "show-notifications.flag",
@@ -744,7 +749,12 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
             let down = with(|c| c.pressed.take()).flatten();
             if let (Some(d), Some(u)) = (down, hit_at(x, y)) {
                 if d == u {
-                    activate(u);
+                    if u == Part::Status && crate::session_shell_active() {
+                        let status = with(|c| status_part(&c.shape, c.scale, x)).unwrap_or(StatusPart::Volume);
+                        context_menu(h, &context_entries(u, status));
+                    } else {
+                        activate(u);
+                    }
                 }
             }
             return LRESULT(0);
