@@ -112,6 +112,7 @@ SessionShellActive() {
 }
 #HotIf SessionShellActive()
 #d::ShellIsland('desktop.toggle')   ; sin Explorer nadie atiende Win+D
+#n::ShellIsland('clock.toggle')     ; ni Win+N: el calendario de la isla hace de centro de notificaciones
 ~LWin up:: {
     if A_PriorKey = 'LWin'
         ToggleFlow()

@@ -795,7 +795,7 @@ Describe 'AHK Start key without Explorer' {
     BeforeAll { $script:StartAhk = Get-Content (Join-Path $PSScriptRoot '..\config\ahk\winarchy.ahk') -Raw }
 
     It 'opens the launcher on a lone Win press only while the session shell is active' {
-        $script:StartAhk | Should -Match '(?s)#HotIf SessionShellActive\(\)\s+#d::[^\r\n]*\s+~LWin up::\s*\{\s+if A_PriorKey = ''LWin''\s+ToggleFlow\(\)'
+        $script:StartAhk | Should -Match '(?s)#HotIf SessionShellActive\(\)\s+#d::[^\r\n]*\s+#n::[^\r\n]*\s+~LWin up::\s*\{\s+if A_PriorKey = ''LWin''\s+ToggleFlow\(\)'
     }
 
     It 'routes the dock Start request to the launcher instead of a Win key Explorer would handle' {

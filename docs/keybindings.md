@@ -13,7 +13,7 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 | `SUPER+S` | File search — Flow scoped to Everything (`f ` prefix), replaces Windows Search |
 | `SUPER+Shift+Return` or `SUPER+Shift+B` | Default browser |
 | `SUPER+Shift+F` | File explorer (`SUPER+E` also works: it is Windows' native shortcut, not intercepted) |
-| `SUPER+N` | Notification center (Windows native — not intercepted, so YASB's bell works) |
+| `SUPER+N` | Notification center (Windows native; with the Winarchy session shell it opens the island calendar, since Explorer is not there to handle it) |
 | `SUPER+Shift+M` | Music (Spotify, fallback YT Music webapp) |
 | `SUPER+Shift+O` | Obsidian |
 | `SUPER+Shift+Q` | Calculator |
