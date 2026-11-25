@@ -1376,7 +1376,8 @@ fn main() {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let inst = GetModuleHandleW(PCWSTR::null()).unwrap();
         let scale = GetDpiForSystem() as f32 / 96.0;
-        let com_initialized = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED).is_ok();
+        // OleInitialize (no solo CoInitialize): la vista del escritorio registra su destino de arrastre al crearse y sin OLE falla (papelera, soltar archivos).
+        let com_initialized = windows::Win32::System::Ole::OleInitialize(None).is_ok();
         // SetTimer de 8 ms rinde ~15 ms con la resolución por defecto: 1 ms hace real la animación.
         windows::Win32::Media::timeBeginPeriod(1);
         let theme = Theme::load(&theme_path).unwrap_or_default();
@@ -1473,7 +1474,7 @@ fn main() {
             if let Some(marker) = &session_marker { let _ = std::fs::remove_file(marker); }
         }
         if com_initialized {
-            windows::Win32::System::Com::CoUninitialize();
+            windows::Win32::System::Ole::OleUninitialize();
         }
     }
 }

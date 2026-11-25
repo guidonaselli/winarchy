@@ -570,8 +570,21 @@ pub fn translate_accelerator(message: &MSG) -> bool {
     if message.hwnd != hwnd && !unsafe { IsChild(hwnd, message.hwnd).as_bool() } {
         return false;
     }
+    if matches!(message.message, WM_LBUTTONDOWN | WM_RBUTTONDOWN) {
+        unsafe { take_focus(hwnd, &view) };
+    }
     let result = unsafe { (view.vtable().TranslateAccelerator)(view.as_raw(), message) };
     accelerator_consumed(result)
+}
+
+// La ventana del escritorio no se activa sola (NOACTIVATE): sin esto Suprimir, F2 y Ctrl+C van a la app que tenía el foco.
+unsafe fn take_focus(hwnd: HWND, view: &IShellView) {
+    if GetForegroundWindow() == hwnd {
+        return;
+    }
+    let _ = SetForegroundWindow(hwnd);
+    let _ = SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    let _ = view.UIActivate(SVUIA_ACTIVATE_FOCUS.0 as u32);
 }
 
 pub fn handle_menu_message(message: u32, wp: WPARAM, lp: LPARAM) -> Option<LRESULT> {
