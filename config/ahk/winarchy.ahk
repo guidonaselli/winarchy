@@ -1151,16 +1151,6 @@ ShellResponsive(pid) {
     return false
 }
 
-ShellState() {
-    if !ProcessExist('winarchy-shell.exe')
-        return 'missing'
-    for hwnd in WinGetList('ahk_exe winarchy-shell.exe') {
-        if !DllCall('SendMessageTimeoutW', 'Ptr', hwnd, 'UInt', 0, 'UPtr', 0, 'Ptr', 0, 'UInt', 2, 'UInt', 2000, 'UPtr*', &answer := 0, 'Ptr')
-            return 'hung'
-    }
-    return 'ok'
-}
-
 ; --- Monitor watchdog -------------------------------------------------------------
 ; komorebi can lose a monitor when a display powers off and on, and only a restart brings it
 ; back. No polling: WM_DISPLAYCHANGE, checked once komorebi had time to reconcile the burst.
