@@ -1347,7 +1347,9 @@ fn main() {
 
     let state_dir = root.join("state");
     let prev_hook = std::panic::take_hook();
+    let panic_root = root.clone();
     std::panic::set_hook(Box::new(move |i| {
+        boot_log(&panic_root, &format!("panic in {:?}: {i}", std::thread::current().name()));
         if std::thread::current().name() == Some("main") {
             dock::restore_native_taskbar();
         }

@@ -724,9 +724,9 @@ Describe 'AHK shell watchdog lifecycle contract' {
     }
 
     It 'schedules budget or executable failure recovery only once per AHK lifetime' {
-        $script:LifecycleWatch | Should -Match '(?s)recoverSessionShell := false.*if sessionShell \{\s+if !ShellRecoveryAttempted\s+recoverSessionShell := true\s+\} else if !exe \|\| ShellRelaunches.Length >= 3'
+        $script:LifecycleWatch | Should -Match '(?s)recoverSessionShell := false.*if sessionShell && \(pid \|\| !exe \|\| ShellRelaunches.Length >= 3\) \{\s+if !ShellRecoveryAttempted\s+recoverSessionShell := true\s+\} else if !exe \|\| ShellRelaunches.Length >= 3'
         $script:LifecycleWatch | Should -Match '(?s)if recoverSessionShell \{\s+ShellRecoveryAttempted := true.*RunShellRecoveryBridge\(\)'
-        ([regex]::Matches($script:LifecycleAhk, '(?m)^\s*ShellRecoveryAttempted := false')).Count | Should -Be 1
+        ([regex]::Matches($script:LifecycleAhk, '(?m)^\s*ShellRecoveryAttempted := false')).Count | Should -Be 3
         ([regex]::Matches($script:LifecycleWatch, 'RunShellRecoveryBridge\(')).Count | Should -Be 1
     }
 
@@ -740,7 +740,7 @@ Describe 'AHK shell watchdog lifecycle contract' {
     It 'initializes recovery state before protected inhibit and healthy-shell returns can reach finally' {
         $lockedWatch = $script:LifecycleWatch.Substring($script:LifecycleWatch.IndexOf('WaitForSingleObject'))
 
-        $lockedWatch | Should -Match '(?s)recoverSessionShell := false\s+try \{\s+if ShellRelaunchInhibited\(\) \{\s+ShellMisses := 0\s+ShellBootUntil := 0\s+return\s+\}.*if pid && !modeMismatch && ShellResponsive\(pid\) \{\s+ShellMisses := 0\s+ShellBootUntil := 0\s+return\s+\}.*finally \{.*ShellWatchBusy := recoverSessionShell'
+        $lockedWatch | Should -Match '(?s)recoverSessionShell := false\s+try \{\s+if ShellRelaunchInhibited\(\) \{\s+ShellMisses := 0\s+ShellBootUntil := 0\s+return\s+\}.*if pid && !modeMismatch && ShellResponsive\(pid\) \{\s+ShellMisses := 0\s+ShellBootUntil := 0\s+ShellRecoveryAttempted := false\s+return\s+\}.*finally \{.*ShellWatchBusy := recoverSessionShell'
     }
 
     It 'keeps the watchdog busy across mutex release until bridge recovery completes' {

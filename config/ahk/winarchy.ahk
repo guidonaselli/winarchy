@@ -952,6 +952,7 @@ ShellWatch() {
         if !modeMismatch && ShellResponsive(pid) {
             ShellMisses := 0
             ShellBootUntil := 0
+            ShellRecoveryAttempted := false
             return
         }
         if !modeMismatch && !WinGetList('ahk_class WinarchyShellPill ahk_pid ' pid).Length && A_TickCount < ShellBootUntil
@@ -1001,6 +1002,7 @@ ShellWatch() {
         if pid && !modeMismatch && ShellResponsive(pid) {
             ShellMisses := 0
             ShellBootUntil := 0
+            ShellRecoveryAttempted := false
             return
         }
         hadShellState := sessionShell || ShellStatusFile && FileExist(ShellStatusFile)
@@ -1014,7 +1016,8 @@ ShellWatch() {
             }
         while ShellRelaunches.Length && A_TickCount - ShellRelaunches[1] > 300000
             ShellRelaunches.RemoveAt(1)
-        if sessionShell {
+        ; una shell de sesión viva pero sin responder no se cierra ni se reemplaza; solo una muerta se relanza
+        if sessionShell && (pid || !exe || ShellRelaunches.Length >= 3) {
             if !ShellRecoveryAttempted
                 recoverSessionShell := true
         } else if !exe || ShellRelaunches.Length >= 3 {

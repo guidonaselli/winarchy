@@ -3462,6 +3462,7 @@ Describe 'Install-WinarchyShellBinary' {
         InModuleScope Winarchy -Parameters @{ Repo = $script:repo; Exe = $script:exe } {
             param($Repo, $Exe)
             Mock Get-WinarchyRoot { $Repo }
+            Mock Assert-WinarchyCustomShellPolicySafeForMaintenance {}
             Set-Content (Join-Path $Repo 'versions.lock.toml') "[core]`nkomorebi = `"1`""
             { Install-WinarchyShellBinary -Source $Exe } | Should -Throw '*no [[]shell[]] sha256*'
             Set-Content (Join-Path $Repo 'versions.lock.toml') "[shell]`nsha256 = `"$('0' * 64)`""
@@ -3474,6 +3475,7 @@ Describe 'Install-WinarchyShellBinary' {
         InModuleScope Winarchy -Parameters @{ Repo = $script:repo; Exe = $script:exe } {
             param($Repo, $Exe)
             Mock Get-WinarchyRoot { $Repo }
+            Mock Assert-WinarchyCustomShellPolicySafeForMaintenance {}
             $hash = (Get-FileHash $Exe -Algorithm SHA256).Hash.ToLowerInvariant()
             Set-Content (Join-Path $Repo 'versions.lock.toml') "[shell]`nsha256 = `"$hash`""
             $dest = Install-WinarchyShellBinary -Source $Exe
