@@ -214,9 +214,12 @@ pub fn is_open() -> bool {
 pub fn launch(path: &str, args: &str) {
     let wide = |t: &str| -> Vec<u16> { t.encode_utf16().chain(std::iter::once(0)).collect() };
     let (p, a) = (wide(path), wide(args));
+    // como Explorer: un ancla .exe/.bat con rutas relativas corre desde su carpeta
+    let dir = std::path::Path::new(path).parent().filter(|d| d.is_dir()).map(|d| wide(&d.to_string_lossy()));
     unsafe {
         let params = if args.is_empty() { PCWSTR::null() } else { PCWSTR(a.as_ptr()) };
-        let _ = ShellExecuteW(None, w!("open"), PCWSTR(p.as_ptr()), params, PCWSTR::null(), SW_SHOWNORMAL);
+        let directory = dir.as_ref().map_or(PCWSTR::null(), |d| PCWSTR(d.as_ptr()));
+        let _ = ShellExecuteW(None, w!("open"), PCWSTR(p.as_ptr()), params, directory, SW_SHOWNORMAL);
     }
 }
 
