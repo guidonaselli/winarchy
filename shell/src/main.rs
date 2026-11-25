@@ -1405,6 +1405,7 @@ fn main() {
             desktop::init(&theme.background, &root, com_initialized);
             wpn::start_relay();
             komorebi::spawn_ahk_watch(root.clone());
+            komorebi::spawn_komorebi_watch(root.clone());
         }
         ics::spawn_feed(theme_path.clone());
         extras::spawn_weather(theme_path);

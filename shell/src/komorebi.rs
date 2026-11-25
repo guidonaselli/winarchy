@@ -96,6 +96,84 @@ pub fn spawn_ahk_watch(root: std::path::PathBuf) {
     });
 }
 
+const STOP_MARKER_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+
+// komorebi ausente y nadie lo paró a propósito (marcador fresco) ni hay un juego en primer plano: es una muerte.
+fn should_revive(misses: u32, marker_age: Option<std::time::Duration>, game_mode: bool, recent_relaunches: usize) -> bool {
+    misses >= 2 && !game_mode && recent_relaunches < 3 && marker_age.is_none_or(|age| age >= STOP_MARKER_TTL)
+}
+
+fn komorebi_running() -> bool {
+    use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
+    unsafe {
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return true };
+        let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        let mut found = false;
+        let mut ok = Process32FirstW(snap, &mut entry).is_ok();
+        while ok {
+            let n = entry.szExeFile.iter().position(|c| *c == 0).unwrap_or(entry.szExeFile.len());
+            if String::from_utf16_lossy(&entry.szExeFile[..n]).eq_ignore_ascii_case("komorebi.exe") {
+                found = true;
+                break;
+            }
+            ok = Process32NextW(snap, &mut entry).is_ok();
+        }
+        let _ = CloseHandle(snap);
+        found
+    }
+}
+
+// Con `Hide`, las ventanas de otros workspaces quedan SW_HIDE y un komorebi nuevo no las conoce: se muestran antes de reiniciarlo.
+fn reveal_known_windows() -> usize {
+    use windows::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindow, IsWindowVisible, ShowWindow, SW_SHOWNOACTIVATE};
+    let hwnds: Vec<isize> = WINDOWS.lock().unwrap().as_ref().map(|m| m.keys().copied().collect()).unwrap_or_default();
+    let mut shown = 0;
+    for h in hwnds {
+        let hwnd = HWND(h as *mut _);
+        unsafe {
+            if IsWindow(hwnd).as_bool() && !IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                shown += 1;
+            }
+        }
+    }
+    shown
+}
+
+// Solo vigila si lo vio vivo en esta sesión: quien nunca quiso tiling no lo recibe de golpe.
+pub fn spawn_komorebi_watch(root: std::path::PathBuf) {
+    std::thread::spawn(move || {
+        let (mut seen, mut misses) = (false, 0);
+        let mut relaunches: Vec<std::time::Instant> = Vec::new();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            if komorebi_running() {
+                (seen, misses) = (true, 0);
+                continue;
+            }
+            if !seen {
+                continue;
+            }
+            misses += 1;
+            relaunches.retain(|t| t.elapsed() < std::time::Duration::from_secs(300));
+            let marker_age = std::fs::metadata(root.join("state").join("komorebi-stop")).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
+            if !should_revive(misses, marker_age, root.join("state").join("game-mode.flag").exists(), relaunches.len()) {
+                continue;
+            }
+            misses = 0;
+            relaunches.push(std::time::Instant::now());
+            let shown = reveal_known_windows();
+            let script = root.join("scripts").join("Start-Komorebi.ps1");
+            let started = std::process::Command::new("powershell.exe")
+                .args(["-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File"])
+                .arg(&script)
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn();
+            crate::boot_log(&root, &format!("komorebi missing: showed {shown} hidden windows, relaunch: {:?}", started.map(|c| c.id())));
+        }
+    });
+}
+
 pub fn cycle_mode() {
     if let Some(h) = ahk_window() {
         unsafe {
@@ -298,6 +376,18 @@ unsafe fn read_events(h: HANDLE, on_change: &impl Fn()) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn revive_waits_for_two_misses_and_respects_stops_games_and_the_cap() {
+        use std::time::Duration;
+        let old = Some(Duration::from_secs(600));
+        assert!(!should_revive(1, None, false, 0));
+        assert!(should_revive(2, None, false, 0));
+        assert!(should_revive(2, old, false, 0));
+        assert!(!should_revive(2, Some(Duration::from_secs(5)), false, 0));
+        assert!(!should_revive(2, None, true, 0));
+        assert!(!should_revive(2, None, false, 3));
+    }
+
     use super::*;
 
     #[test]

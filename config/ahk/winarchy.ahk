@@ -818,6 +818,7 @@ QuitStack() {
     ; parada ordenada y NO elevada: el shell personalizado entrega el escritorio antes del teardown
     SetTimer(YasbWatch, 0)
     SetTimer(ShellWatch, 0)
+    try FileOpen(StateDir '\komorebi-stop', 'w').Close()   ; la shell no lo trata como muerte
     try Komorebic('stop')
     try RunWait('taskkill /IM yasb.exe /F', , 'Hide')
     if !sessionShell {

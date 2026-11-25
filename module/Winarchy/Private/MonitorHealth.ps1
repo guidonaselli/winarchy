@@ -62,6 +62,8 @@ function Repair-WinarchyKomorebiMonitors {
     }
     Set-Content -Path $stamp -Value $layout
 
+    $stopMarker = Join-Path (Get-WinarchyStateDir) 'komorebi-stop'
+    Set-Content -Path $stopMarker -Value (Get-Date -Format o)
     $null = Invoke-WinarchyKomorebic stop
     $deadline = (Get-Date).AddSeconds(10)
     while ((Test-WinarchyProcess 'komorebi') -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
@@ -76,6 +78,7 @@ function Repair-WinarchyKomorebiMonitors {
         try { $answered = [bool](Invoke-WinarchyKomorebic state).Trim() } catch { }
         if (-not $answered) { Start-Sleep -Milliseconds 500 }
     }
+    Remove-Item $stopMarker -Force -ErrorAction SilentlyContinue
     if (-not $answered) { throw 'komorebi was stopped to recover a lost monitor and did not come back; run: winarchy doctor' }
     Write-WinarchyOk 'komorebi had lost track of a monitor; restarted it.'
     $true
