@@ -587,6 +587,8 @@ pub fn open_tray() {
 
 fn activate(part: Part) {
     let name = match part {
+        Part::Status if crate::session_shell_active() => return unsafe { crate::shell_open("ms-settings:sound") },
+        Part::Clock if crate::session_shell_active() => return unsafe { crate::toggle_clock() },
         Part::Status => "show-quick-settings.flag",
         Part::Clock => "show-notifications.flag",
         Part::Desktop => return toggle_desktop(),

@@ -171,6 +171,25 @@ fn day_in_month(days: i64, (y, m): (i64, u32)) -> Option<u32> {
 }
 
 // Día que se elige al abrir un mes: hoy si es el actual, si no el 1.
+pub(crate) unsafe fn toggle_clock() {
+    with(|s| {
+        s.clock_open = !s.clock_open;
+        s.fade = 0.0;
+        if s.clock_open {
+            let today = calendar::now_local().0;
+            let (y, m, _) = calendar::civil_from_days(today);
+            s.cal_ym = (y, m);
+            s.cal_sel = today;
+        }
+        s.expand_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(EXPAND_SECS));
+    });
+    tick(with(|s| s.strip));
+}
+
+pub(crate) fn session_shell_active() -> bool {
+    with(|s| s.session_shell)
+}
+
 fn default_sel((y, m): (i64, u32)) -> i64 {
     let today = calendar::now_local().0;
     if day_in_month(today, (y, m)).is_some() { today } else { calendar::days_from_civil(y, m, 1) }
@@ -1029,7 +1048,7 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
     }
 }
 
-unsafe fn shell_open(target: &str) {
+pub(crate) unsafe fn shell_open(target: &str) {
     let t = widestr(target);
     let _ = ShellExecuteW(None, w!("open"), PCWSTR(t.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
 }
@@ -1099,20 +1118,7 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                         shell_open(&w.url());
                     }
                 }
-                Some(Hit::Clock) => {
-                    with(|s| {
-                        s.clock_open = !s.clock_open;
-                        s.fade = 0.0;
-                        if s.clock_open {
-                            let today = calendar::now_local().0;
-                            let (y, m, _) = calendar::civil_from_days(today);
-                            s.cal_ym = (y, m);
-                            s.cal_sel = today;
-                        }
-                        s.expand_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(EXPAND_SECS));
-                    });
-                    tick(with(|s| s.strip));
-                }
+                Some(Hit::Clock) => toggle_clock(),
                 Some(Hit::CalPrev | Hit::CalNext) => {
                     let delta = if matches!(hit(), Some(Hit::CalPrev)) { -1 } else { 1 };
                     with(|s| {
