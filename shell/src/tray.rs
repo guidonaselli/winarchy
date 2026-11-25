@@ -493,18 +493,37 @@ fn enqueue_balloon(balloon: BalloonRequest) {
 }
 
 // Toast de Windows sin ícono de bandeja dueño: no hay ventana a la que devolver eventos (callback 0).
-pub fn submit_toast(title: String, text: String, timeout_ms: u32) {
+// `open` es lo que abre el clic (ruta o shell:AppsFolder\AUMID); la tabla se limpia al terminar el toast.
+pub fn submit_toast(title: String, text: String, timeout_ms: u32, open: Option<String>) {
+    let sequence = NEXT_BALLOON_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    if let Some(open) = open {
+        toast_targets().lock().unwrap().insert(sequence, open);
+    }
     enqueue_balloon(BalloonRequest {
         hwnd: 0, uid: 0, guid: [0; 16], callback: 0, version: 4,
         title, text, flags: 0, timeout_ms, realtime: false,
-        sequence: NEXT_BALLOON_SEQUENCE.fetch_add(1, Ordering::Relaxed), icon: None,
+        sequence, icon: None,
     });
+}
+
+fn toast_targets() -> &'static std::sync::Mutex<std::collections::HashMap<u64, String>> {
+    static T: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<u64, String>>> = std::sync::OnceLock::new();
+    T.get_or_init(Default::default)
 }
 
 pub fn notify_balloon_owner(balloon: &BalloonRequest, event: u32) {
     use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, GetWindowThreadProcessId, IsWindow, SendNotifyMessageW};
-    if balloon.callback == 0 { return; }
+    if balloon.callback == 0 {
+        if balloon.hwnd == 0 && balloon.uid == 0 {
+            let target = {
+                let mut t = toast_targets().lock().unwrap();
+                if event == 0x402 { None } else { t.remove(&balloon.sequence).filter(|_| event == 0x405) }
+            };
+            if let Some(open) = target { crate::dock_menu::launch(&open, ""); }
+        }
+        return;
+    }
     let hwnd = HWND(balloon.hwnd as usize as *mut _);
     unsafe {
         if !IsWindow(hwnd).as_bool() { return; }

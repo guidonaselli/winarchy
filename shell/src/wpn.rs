@@ -1,6 +1,6 @@
 // Lee la base del servicio de notificaciones (WNS): sin Explorer ni identidad de paquete UserNotificationListener
 // no concede acceso y ShellExperienceHost no corre para dibujar toasts. winsqlite3.dll viene con Windows y se carga en runtime.
-// shortcut: solo texto del toast (título y cuerpo), sin imágenes ni botones, mejorar si se quiere un centro de notificaciones completo.
+// shortcut: texto del toast (título y cuerpo) y clic que abre la app, sin imágenes, botones ni argumentos de lanzamiento, mejorar si se quiere un centro de notificaciones completo.
 
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use windows::core::{w, PCSTR};
@@ -17,6 +17,7 @@ pub struct Toast {
     pub arrival: i64,
     pub title: String,
     pub text: String,
+    pub app: Option<String>,
 }
 
 struct Sqlite {
@@ -99,14 +100,30 @@ fn toasts_after(uri: &str, arrival: i64) -> Option<Vec<Toast>> {
     unsafe {
         let db = Sqlite::open(uri)?;
         let mut found = Vec::new();
-        db.each(&format!("SELECT ArrivalTime, CAST(Payload AS TEXT) FROM Notification WHERE Type='toast' AND ArrivalTime>{arrival} ORDER BY ArrivalTime"), |s| {
+        db.each(&format!("SELECT n.ArrivalTime, CAST(n.Payload AS TEXT), h.PrimaryId FROM Notification n LEFT JOIN NotificationHandler h ON h.RecordId=n.HandlerId WHERE n.Type='toast' AND n.ArrivalTime>{arrival} ORDER BY n.ArrivalTime"), |s| {
             let p = (db.text)(s, 1);
             let payload = if p.is_null() { String::new() } else { CStr::from_ptr(p).to_string_lossy().into_owned() };
             let (title, text) = toast_texts(&payload);
-            found.push(Toast { arrival: (db.int64)(s, 0), title, text });
+            let a = (db.text)(s, 2);
+            let app = (!a.is_null()).then(|| CStr::from_ptr(a).to_string_lossy().into_owned()).filter(|a| !a.is_empty());
+            found.push(Toast { arrival: (db.int64)(s, 0), title, text, app });
         })?;
         Some(found)
     }
+}
+
+// PrimaryId es una ruta de exe, un id de carpeta conocida ({GUID}\resto) o un AUMID; este último se abre con shell:AppsFolder.
+fn open_target(app: &str) -> String {
+    let resolved = app.strip_prefix('{').and_then(|r| r.split_once("}\\")).and_then(|(guid, rest)| {
+        // try_from entra en pánico con una cadena inválida
+        let well_formed = guid.len() == 36 && guid.chars().enumerate().all(|(i, c)| if matches!(i, 8 | 13 | 18 | 23) { c == '-' } else { c.is_ascii_hexdigit() });
+        let id = well_formed.then(|| windows::core::GUID::from(guid))?;
+        let dir = unsafe { windows::Win32::UI::Shell::SHGetKnownFolderPath(&id, windows::Win32::UI::Shell::KF_FLAG_DEFAULT, None) }.ok()?;
+        let dir = unsafe { dir.to_string() }.ok()?;
+        Some(std::path::Path::new(&dir).join(rest).to_string_lossy().into_owned())
+    });
+    let path = resolved.as_deref().unwrap_or(app);
+    if std::path::Path::new(path).is_file() { path.to_string() } else { format!(r"shell:AppsFolder\{app}") }
 }
 
 // Primer y segundo <text> del binding del toast: título y cuerpo.
@@ -143,7 +160,7 @@ pub fn start_relay() {
             let Some(new) = toasts_after(&uri, last) else { continue };
             for toast in new {
                 last = last.max(toast.arrival);
-                crate::tray::submit_toast(toast.title, toast.text, TOAST_TIMEOUT_MS);
+                crate::tray::submit_toast(toast.title, toast.text, TOAST_TIMEOUT_MS, toast.app.map(|a| open_target(&a)));
             }
         }
     });
@@ -163,6 +180,15 @@ mod tests {
     fn toast_title_and_body_come_from_the_generic_binding() {
         let xml = r#"<toast launch="x"><visual><binding template="ToastGeneric"><text>GeForce &amp; Co</text><text hint-maxLines="2">Update available</text><image src="C:\a.png"/></binding></visual></toast>"#;
         assert_eq!(toast_texts(xml), ("GeForce & Co".to_string(), "Update available".to_string()));
+    }
+
+    #[test]
+    fn a_toast_opens_its_app_by_path_or_aumid() {
+        let exe = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+        assert_eq!(open_target(&exe), exe);
+        assert!(open_target(r"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe").to_lowercase().ends_with(r"v1.0\powershell.exe"));
+        assert_eq!(open_target(r"{not-a-guid}\x.exe"), r"shell:AppsFolder\{not-a-guid}\x.exe");
+        assert_eq!(open_target("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"), r"shell:AppsFolder\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App");
     }
 
     #[test]
