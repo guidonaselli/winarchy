@@ -577,13 +577,12 @@ pub fn translate_accelerator(message: &MSG) -> bool {
     accelerator_consumed(result)
 }
 
-// La ventana del escritorio no se activa sola (NOACTIVATE): sin esto Suprimir, F2 y Ctrl+C van a la app que tenía el foco.
+// Suprimir, F2 y Ctrl+C van a la vista solo si la ventana del escritorio es la activa.
 unsafe fn take_focus(hwnd: HWND, view: &IShellView) {
     if GetForegroundWindow() == hwnd {
         return;
     }
     let _ = SetForegroundWindow(hwnd);
-    let _ = SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     let _ = view.UIActivate(SVUIA_ACTIVATE_FOCUS.0 as u32);
 }
 

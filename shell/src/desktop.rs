@@ -822,6 +822,13 @@ unsafe fn draw_frame(
 unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match message {
         WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
+        // Activable para recibir el teclado (Supr, F2), pero activarse no debe subirla sobre las ventanas.
+        WM_WINDOWPOSCHANGING => {
+            let pos = &mut *(lp.0 as *mut WINDOWPOS);
+            pos.hwndInsertAfter = HWND_BOTTOM;
+            pos.flags &= !SWP_NOZORDER;
+            LRESULT(0)
+        }
         desktop_view::WM_FILES_OPEN_FAILED => {
             desktop_view::report_files_open_failure(hwnd, wp);
             LRESULT(0)
@@ -983,7 +990,7 @@ pub fn init(fallback: &str, root: &std::path::Path, com_initialized: bool) {
     }
     let Ok(hwnd) = (unsafe {
         CreateWindowExW(
-            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            WS_EX_TOOLWINDOW,
             class.lpszClassName,
             w!(""),
             WS_POPUP | WS_CLIPCHILDREN,
