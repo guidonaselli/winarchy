@@ -750,8 +750,7 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
             if let (Some(d), Some(u)) = (down, hit_at(x, y)) {
                 if d == u {
                     if u == Part::Status && crate::session_shell_active() {
-                        let status = with(|c| status_part(&c.shape, c.scale, x)).unwrap_or(StatusPart::Volume);
-                        context_menu(h, &context_entries(u, status));
+                        crate::expand_island();
                     } else {
                         activate(u);
                     }

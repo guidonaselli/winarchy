@@ -188,6 +188,12 @@ pub(crate) unsafe fn toggle_clock() {
     tick(with(|s| s.strip));
 }
 
+// Los deslizadores de volumen y brillo viven en el panel de la isla: se abre desde el estado del cluster.
+pub(crate) fn expand_island() {
+    let pill = with(|s| s.pill);
+    unsafe { let _ = PostMessageW(pill, WM_EXPAND, WPARAM(0), LPARAM(0)); }
+}
+
 pub(crate) fn session_shell_active() -> bool {
     with(|s| s.session_shell)
 }
