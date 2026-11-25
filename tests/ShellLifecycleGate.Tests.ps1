@@ -790,3 +790,15 @@ Describe 'AHK shell watchdog lifecycle contract' {
         [regex]::IsMatch($script:LifecycleWatch, '(?s)finally.*ReleaseMutex') | Should -BeTrue
     }
 }
+
+Describe 'AHK Start key without Explorer' {
+    BeforeAll { $script:StartAhk = Get-Content (Join-Path $PSScriptRoot '..\config\ahk\winarchy.ahk') -Raw }
+
+    It 'opens the launcher on a lone Win press only while the session shell is active' {
+        $script:StartAhk | Should -Match '(?s)#HotIf SessionShellActive\(\)\s+~LWin up::\s*\{\s+if A_PriorKey = ''LWin''\s+ToggleFlow\(\)'
+    }
+
+    It 'routes the dock Start request to the launcher instead of a Win key Explorer would handle' {
+        $script:StartAhk | Should -Match '(?s)if SessionShellActive\(\)\s+ToggleFlow\(\)\s+else\s+Send\(''\{LWin\}''\)'
+    }
+}

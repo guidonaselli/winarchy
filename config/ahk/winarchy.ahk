@@ -103,6 +103,20 @@ WinAloneOpensStart := true
 ~LWin::Send('{Blind}{vkE8}')    ; traga el key-up de Win sola sin afectar combos
 #HotIf
 
+; Sin Explorer no existe el menú Inicio de Windows: Win sola abre el launcher (Flow).
+SessionShellActive() {
+    global ShellSessionMarker, ShellLogonIdentity
+    try return ShellSessionMarker && FileExist(ShellSessionMarker) && Trim(FileRead(ShellSessionMarker)) = ShellLogonIdentity
+    catch
+        return false
+}
+#HotIf SessionShellActive()
+~LWin up:: {
+    if A_PriorKey = 'LWin'
+        ToggleFlow()
+}
+#HotIf
+
 ; --- Helpers -----------------------------------------------------------------
 ; Ruta completa: no depender del PATH heredado (puede ser anterior a la instalación)
 KomorebicExe := FileExist(A_ProgramFiles "\komorebi\bin\komorebic.exe")
@@ -630,7 +644,10 @@ MenuWatch() {
         try FileDelete(StartFlag)
         catch
             return
-        Send('{LWin}')
+        if SessionShellActive()
+            ToggleFlow()
+        else
+            Send('{LWin}')
     }
     if FileExist(MenuFlag) {
         try FileDelete(MenuFlag)
