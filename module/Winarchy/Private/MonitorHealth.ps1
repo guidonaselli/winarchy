@@ -69,8 +69,8 @@ function Repair-WinarchyKomorebiMonitors {
     if (Test-WinarchyProcess 'komorebi') { throw 'komorebi lost track of a monitor and did not stop when asked; run: komorebic stop, then winarchy reload' }
     # el que llama puede venir de un entorno anterior a la instalación (AHK arrancado antes)
     $env:KOMOREBI_CONFIG_HOME = Join-Path (Get-WinarchyRoot) 'config\komorebi'
-    Start-WinarchyKomorebi
-    $deadline = (Get-Date).AddSeconds(20)
+    Start-WinarchyKomorebi -Resilient
+    $deadline = (Get-Date).AddSeconds(30)
     $answered = $false
     while (-not $answered -and (Get-Date) -lt $deadline) {
         try { $answered = [bool](Invoke-WinarchyKomorebic state).Trim() } catch { }

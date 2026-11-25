@@ -23,6 +23,7 @@ $ErrorActionPreference = 'Stop'
 $Root = $PSScriptRoot
 
 Import-Module (Join-Path $Root 'module\Winarchy\Winarchy.psd1') -Force
+Assert-WinarchyCustomShellPolicySafeForMaintenance
 
 Write-Host "`n== Winarchy install ==" -ForegroundColor Cyan
 
@@ -210,9 +211,10 @@ if ($Activate) {
     catch { Write-WinarchyWarn "Could not remove the Startup delay: $($_.Exception.Message)" }
 
     Write-WinarchyInfo 'Starting the stack...'
+    $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
     if ($komorebic) { Start-WinarchyKomorebi }
     if ($yasb -and (Get-WinarchyActiveBar) -eq 'yasb') { & $yasb start }
-    elseif ((Get-WinarchyActiveBar) -eq 'native' -and -not (Get-Process winarchy-shell -ErrorAction SilentlyContinue) -and ($shellExe = Get-WinarchyShellExe)) { Start-Process $shellExe -WindowStyle Hidden }
+    elseif ((Get-WinarchyActiveBar) -eq 'native' -and -not (Get-Process winarchy-shell -ErrorAction SilentlyContinue | Where-Object SessionId -eq $sessionId) -and ($shellExe = Get-WinarchyShellExe)) { Start-Process $shellExe -ArgumentList (Get-WinarchyShellArguments) -WindowStyle Hidden }
     if ($ahkExe) {
         Remove-Item Env:CLAUDE_CODE_CHILD_SESSION, Env:CLAUDECODE -ErrorAction SilentlyContinue
         Start-Process $ahkExe -ArgumentList "`"$Root\config\ahk\winarchy.ahk`""

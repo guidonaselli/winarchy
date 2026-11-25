@@ -167,3 +167,120 @@ fn tray_dismiss_messages_respect_window_classes_generation_and_destroyed_handles
     isolated_probe(concat!(module_path!(), "::tray_dismiss_messages_respect_window_classes_generation_and_destroyed_handles"),
         run_tray_probe, &["dock-pins.json"]);
 }
+
+const NOTIFYICON_PROBE_CALLBACK: u32 = WM_APP + 173;
+
+thread_local! {
+    static NOTIFYICON_PROBE_EVENTS: std::cell::RefCell<Vec<(usize, isize)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+unsafe extern "system" fn notifyicon_probe_proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    if message == NOTIFYICON_PROBE_CALLBACK {
+        NOTIFYICON_PROBE_EVENTS.with(|events| events.borrow_mut().push((wp.0, lp.0)));
+        return LRESULT(0);
+    }
+    DefWindowProcW(hwnd, message, wp, lp)
+}
+
+unsafe fn wait_for_notifyicon_probe(mut ready: impl FnMut() -> bool, reason: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let mut message = MSG::default();
+        while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+            assert_ne!(message.message, WM_QUIT);
+            DispatchMessageW(&message);
+        }
+        if ready() { return; }
+        assert!(std::time::Instant::now() < deadline, "{reason}");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+struct ProbeNotificationState;
+
+impl Drop for ProbeNotificationState {
+    fn drop(&mut self) {
+        crate::tray_notifications::set_notification_state_for_test(None);
+    }
+}
+
+unsafe fn run_shell_notifyicon_probe(expected: &str) {
+    use windows::Win32::UI::Shell::{
+        Shell_NotifyIconW, NOTIFYICONDATAW, NIF_MESSAGE, NIF_ICON, NIF_TIP, NIF_INFO,
+        NIM_ADD, NIM_SETVERSION, NIM_MODIFY, NIM_DELETE, NOTIFYICON_VERSION_4, NIIF_INFO, NIIF_NOSOUND,
+    };
+
+    probe_directory(expected);
+    let _notification_state = ProbeNotificationState;
+    crate::tray_notifications::set_notification_state_for_test(Some(5));
+    assert!(FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null()).is_err(),
+        "The isolated desktop must start without Explorer's tray");
+    assert!(crate::tray_host::spawn(Theme::default(), 1.0), "Create the production notification-area host");
+    let host = FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null()).unwrap();
+    assert_eq!(crate::tray_host::owns_window(host), true);
+    assert_eq!(crate::tray::active(), true);
+    let notification = FindWindowW(w!("WinarchyShellNotification"), PCWSTR::null()).unwrap();
+    assert_eq!(IsWindowVisible(notification).as_bool(), false);
+
+    let instance = GetModuleHandleW(PCWSTR::null()).unwrap();
+    let class = WNDCLASSW { lpfnWndProc: Some(notifyicon_probe_proc), hInstance: instance.into(),
+        lpszClassName: w!("WinarchyNotifyIconProbeOwner"), ..Default::default() };
+    assert_ne!(RegisterClassW(&class), 0);
+    let owner = TrayProbeWindow(CreateWindowExW(WINDOW_EX_STYLE(0), class.lpszClassName, w!(""), WS_POPUP,
+        0, 0, 1, 1, None, None, instance, None).unwrap());
+    let mut icon = NOTIFYICONDATAW {
+        cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+        hWnd: owner.0, uID: 37, uFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP,
+        uCallbackMessage: NOTIFYICON_PROBE_CALLBACK,
+        hIcon: LoadIconW(None, IDI_APPLICATION).unwrap(),
+        ..Default::default()
+    };
+    for (slot, unit) in icon.szTip.iter_mut().zip("Explorer-free probe".encode_utf16()) { *slot = unit; }
+    assert_eq!(Shell_NotifyIconW(NIM_ADD, &icon).as_bool(), true);
+    let registered = crate::tray::with_visible(|icons| icons.iter()
+        .find(|i| i.hwnd == owner.0.0 as usize as u32 && i.uid == 37).map(|i| (**i).clone()))
+        .expect("Shell_NotifyIconW must register the real icon in production state");
+    assert_eq!(registered.tip, "Explorer-free probe");
+    assert_eq!(registered.callback, NOTIFYICON_PROBE_CALLBACK);
+    assert_eq!(registered.bgra.is_empty(), false);
+
+    icon.Anonymous.uVersion = NOTIFYICON_VERSION_4;
+    assert_eq!(Shell_NotifyIconW(NIM_SETVERSION, &icon).as_bool(), true);
+    assert_eq!(crate::tray::with_visible(|icons| icons.iter()
+        .find(|i| i.uid == 37).map(|i| i.version)), Some(4));
+
+    icon.uFlags = NIF_INFO;
+    icon.Anonymous.uTimeout = 10_000;
+    icon.dwInfoFlags = NIIF_INFO | NIIF_NOSOUND;
+    for (slot, unit) in icon.szInfoTitle.iter_mut().zip("Probe title".encode_utf16()) { *slot = unit; }
+    for (slot, unit) in icon.szInfo.iter_mut().zip("Probe notification body".encode_utf16()) { *slot = unit; }
+    assert_eq!(Shell_NotifyIconW(NIM_MODIFY, &icon).as_bool(), true);
+    let balloon = crate::tray::current_balloon().expect("NIF_INFO must enter the production balloon queue");
+    assert_eq!((balloon.hwnd, balloon.uid, balloon.version),
+        (owner.0.0 as usize as u32, 37, 4));
+    assert_eq!((balloon.title.as_str(), balloon.text.as_str()), ("Probe title", "Probe notification body"));
+    wait_for_notifyicon_probe(|| IsWindowVisible(notification).as_bool(),
+        "The custom notification HWND must become visible");
+    wait_for_notifyicon_probe(|| NOTIFYICON_PROBE_EVENTS.with(|events|
+        events.borrow().contains(&(0, 0x0025_0402))),
+        "The owner must receive NIN_BALLOONSHOW encoded as a v4 callback");
+
+    icon.szInfo.fill(0);
+    assert_eq!(Shell_NotifyIconW(NIM_MODIFY, &icon).as_bool(), true);
+    assert_eq!(crate::tray::current_balloon(), None);
+    wait_for_notifyicon_probe(|| !IsWindowVisible(notification).as_bool(),
+        "Empty NIF_INFO must hide the custom notification");
+    wait_for_notifyicon_probe(|| NOTIFYICON_PROBE_EVENTS.with(|events|
+        events.borrow().contains(&(0, 0x0025_0403))),
+        "The owner must receive NIN_BALLOONHIDE encoded as a v4 callback");
+
+    assert_eq!(Shell_NotifyIconW(NIM_DELETE, &icon).as_bool(), true);
+    assert_eq!(crate::tray::with_visible(|icons| icons.len()), 0);
+}
+
+#[test]
+#[ignore = "creates an isolated desktop; review the harness before explicitly running"]
+fn shell_notifyicon_registers_shows_cancels_and_deletes_without_explorer() {
+    isolated_probe(concat!(module_path!(), "::shell_notifyicon_registers_shows_cancels_and_deletes_without_explorer"),
+        run_shell_notifyicon_probe, &[]);
+}

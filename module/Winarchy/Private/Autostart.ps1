@@ -59,7 +59,7 @@ function Get-WinarchyAutostartComponents {
         $items.Add([pscustomobject]@{
             Key = 'shell'; TaskName = 'shell'; LnkName = 'Winarchy shell.lnk'
             Exe = $shellExe
-            Arguments = ''
+            Arguments = "--root `"$root`""
             Delay = 'PT0S'
         })
     }

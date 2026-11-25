@@ -84,26 +84,28 @@ const TRAY_INDEX: usize = usize::MAX - 1;
 
 // El dock vive en el borde opuesto al de la isla: `bottom` es el borde del dock. `bar` va en coordenadas de pantalla, `cells` relativas a `bar`.
 pub fn layout(n: usize, scale: f32, mon: MonRect, bottom: bool, gap_dip: i32) -> Layout {
-    layout_for(n, scale, mon, bottom, gap_dip, true)
+    layout_for(n, scale, mon, bottom, gap_dip, false)
 }
 
 // `reserve` deja a cada lado el ancho del cluster; solo el dock que lo dibuja lo necesita.
-fn layout_for(n: usize, scale: f32, mon: MonRect, bottom: bool, gap_dip: i32, reserve: bool) -> Layout {
+pub fn layout_for(n: usize, scale: f32, mon: MonRect, bottom: bool, gap_dip: i32, reserve: bool) -> Layout {
     let (cell, gap, pad) = (px(CELL_DIP, scale), px(gap_dip, scale), px(PAD_DIP, scale));
     // El dock va centrado: deja a cada lado el ancho del cluster para que la píldora entre en cualquier monitor.
     let side = if reserve { px(crate::cluster::RESERVE_DIP, scale) } else { 0 };
     let max_w = ((mon.2 - mon.0) * 4 / 5).min(mon.2 - mon.0 - 2 * side);
     let cap = (((max_w - 2 * pad + gap) / (cell + gap)).max(1)) as usize;
-    let app_cap = cap.saturating_sub(2);
+    // El botón de bandeja vive en el cluster de la derecha cuando este dock lo dibuja.
+    let tail = usize::from(!reserve);
+    let app_cap = cap.saturating_sub(1 + tail);
     let (shown, overflow) = if n <= app_cap { (n, 0) } else { (app_cap.saturating_sub(1), n - app_cap.saturating_sub(1)) };
-    let slots = shown + usize::from(overflow > 0) + 2;
+    let slots = shown + usize::from(overflow > 0) + 1 + tail;
     let w = 2 * pad + slots as i32 * cell + (slots as i32 - 1) * gap;
     let h = px(BAR_DIP, scale);
     let x = mon.0 + (mon.2 - mon.0 - w) / 2;
     let y = if bottom { mon.3 - px(MARGIN_DIP, scale) - h } else { mon.1 + px(MARGIN_DIP, scale) };
     let brand = R { x: pad, y: (h - cell) / 2, w: cell, h: cell };
-    let cells = (0..slots - 2).map(|i| R { x: pad + (i as i32 + 1) * (cell + gap), y: (h - cell) / 2, w: cell, h: cell }).collect();
-    let tray = R { x: pad + (slots as i32 - 1) * (cell + gap), y: (h - cell) / 2, w: cell, h: cell };
+    let cells = (0..slots - 1 - tail).map(|i| R { x: pad + (i as i32 + 1) * (cell + gap), y: (h - cell) / 2, w: cell, h: cell }).collect();
+    let tray = if reserve { R::default() } else { R { x: pad + (slots as i32 - 1) * (cell + gap), y: (h - cell) / 2, w: cell, h: cell } };
     Layout { bar: R { x, y, w, h }, brand, tray, cells, overflow }
 }
 
@@ -124,6 +126,16 @@ fn display_layout(layout: &Layout, xs: &[i32], bar: R) -> Layout {
 }
 
 // Ventana a enfocar al hacer clic: con el grupo ya activo, la siguiente; si no, la última activa del grupo.
+// La rueda sobre un grupo con varias ventanas recorre cuál se previsualiza: hacia abajo la siguiente, hacia arriba la anterior.
+pub fn step_preview(wins: &[isize], current: Option<isize>, delta: i32) -> Option<isize> {
+    if wins.len() < 2 || delta == 0 {
+        return None;
+    }
+    let at = current.and_then(|c| wins.iter().position(|w| *w == c)).unwrap_or(0) as i32;
+    let n = wins.len() as i32;
+    Some(wins[(at + if delta < 0 { 1 } else { -1 }).rem_euclid(n) as usize])
+}
+
 pub fn pick_target(wins: &[isize], foreground: isize, last_active: Option<isize>) -> Option<isize> {
     if let Some(i) = wins.iter().position(|w| *w == foreground) {
         return (wins.len() > 1).then(|| wins[(i + 1) % wins.len()]).or(Some(wins[i]));
@@ -257,6 +269,7 @@ struct Dock {
     asked: HashSet<(String, i32)>,
     layout: Layout,
     hover: Option<usize>,
+    preview_pick: Option<(String, isize)>,
     key_target: Option<KeyTarget>,
     key_witness: Option<(isize, u32)>,
     accessible_titles: HashMap<String, String>,
@@ -362,6 +375,11 @@ static READY: Mutex<Vec<(String, i32, Icon)>> = Mutex::new(Vec::new());
 type Ask = (String, i32, Vec<String>);
 static ASKS: Mutex<Option<std::sync::mpsc::Sender<Ask>>> = Mutex::new(None);
 
+#[link(name = "wtsapi32")]
+unsafe extern "system" {
+    fn WTSUnRegisterSessionNotification(hwnd: HWND) -> BOOL;
+}
+
 pub fn init(theme: &Theme, state_dir: &std::path::Path) -> Option<HWND> {
     unsafe {
         let inst = GetModuleHandleW(PCWSTR::null()).ok()?;
@@ -407,6 +425,7 @@ unsafe fn create_dock(r: &RECT, theme: &Theme, pins_path: &std::path::Path) -> O
         asked: HashSet::new(),
         layout: layout(0, scale, mon, theme.position != "bottom", style(theme).gap),
         hover: None,
+        preview_pick: None,
         key_target: None,
         key_witness: None,
         accessible_titles: HashMap::new(),
@@ -610,6 +629,31 @@ pub fn set_theme(theme: &Theme) {
     });
 }
 
+pub fn shutdown() {
+    dismiss_tray();
+    crate::tray_flyout::close();
+    crate::dock_menu::dismiss();
+    crate::dock_thumb::hide();
+    if KEY_SESSION.get().is_some() { end_keyboard(false); }
+    crate::cluster::destroy();
+    restore_native_taskbar();
+    let docks = DOCKS.with(|d| std::mem::take(&mut *d.borrow_mut()));
+    for d in docks {
+        unsafe {
+            crate::accessibility::destroy(d.hwnd);
+            crate::dock_drop::revoke(d.hwnd);
+            let _ = DeregisterShellHookWindow(d.hwnd);
+            let _ = WTSUnRegisterSessionNotification(d.hwnd);
+            let _ = DestroyWindow(d.tip);
+            let _ = DestroyWindow(d.hwnd);
+        }
+    }
+    komorebi::NOTIFY.store(0, std::sync::atomic::Ordering::Relaxed);
+    drop(ASKS.lock().unwrap().take());
+    READY.lock().unwrap().clear();
+    CUR.set(0);
+}
+
 // El ajuste de Windows "efectos de animación" apagado manda sobre el theme.
 pub(crate) fn motion_enabled(t: &Theme) -> bool {
     let mut on = windows::Win32::Foundation::BOOL(1);
@@ -625,7 +669,9 @@ unsafe fn for_native_taskbars(f: impl Fn(HWND)) {
     for class in [w!("Shell_TrayWnd"), w!("Shell_SecondaryTrayWnd")] {
         let mut prev = HWND::default();
         while let Ok(h) = FindWindowExW(None, prev, class, PCWSTR::null()) {
-            f(h);
+            if !crate::tray_host::owns_window(h) {
+                f(h);
+            }
             prev = h;
         }
     }
@@ -655,6 +701,9 @@ pub fn restore_native_taskbar_at_start() {
 
 // Con el host de bandeja activo abre el flyout propio sobre el botón; sin él, la bandeja nativa.
 fn open_tray() {
+    if with(|d| d.layout.tray.w == 0) {
+        return crate::cluster::open_tray();
+    }
     let (button, mon, bottom, scale, theme) = with(|d| (R { x: d.layout.bar.x + d.layout.tray.x, y: d.layout.bar.y + d.layout.tray.y, w: d.layout.tray.w, h: d.layout.tray.h }, d.mon, d.theme.position != "bottom", d.scale, d.theme.clone()));
     if !crate::tray_flyout::toggle(button, mon, bottom, scale, &theme) {
         show_tray();
@@ -1125,6 +1174,58 @@ pub(crate) unsafe fn exe_of(h: HWND) -> String {
     if ok { String::from_utf16_lossy(&buf[..n as usize]) } else { String::new() }
 }
 
+fn wait_for_explorer_shell(timeout: std::time::Duration, mut is_ready: impl FnMut() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if is_ready() {
+            return true;
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return false;
+        }
+        std::thread::sleep(remaining.min(std::time::Duration::from_millis(100)));
+    }
+}
+
+fn system_explorer_shell_responsive() -> bool {
+    unsafe {
+        let mut previous = HWND::default();
+        while let Ok(hwnd) = FindWindowExW(None, previous, w!("Shell_TrayWnd"), PCWSTR::null()) {
+            previous = hwnd;
+            if !exe_of(hwnd).eq_ignore_ascii_case(system_explorer()) {
+                continue;
+            }
+            let mut result = 0usize;
+            if SendMessageTimeoutW(hwnd, WM_NULL, WPARAM(0), LPARAM(0), SMTO_ABORTIFHUNG | SMTO_ERRORONEXIT, 500, Some(&mut result)).0 != 0
+                && exe_of(hwnd).eq_ignore_ascii_case(system_explorer())
+            {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+pub fn start_system_explorer() -> bool {
+    if system_explorer_shell_responsive() {
+        return true;
+    }
+    let path = system_explorer();
+    if path.is_empty() || std::process::Command::new(path).spawn().is_err() {
+        return false;
+    }
+    let mut ready_samples = 0;
+    wait_for_explorer_shell(std::time::Duration::from_secs(20), || {
+        if system_explorer_shell_responsive() {
+            ready_samples += 1;
+        } else {
+            ready_samples = 0;
+        }
+        ready_samples >= 2
+    })
+}
+
 fn system_explorer() -> &'static str {
     static PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     PATH.get_or_init(|| unsafe {
@@ -1491,6 +1592,10 @@ fn render() {
         }
         (d.hwnd, d.theme.clone(), d.items.clone(), Layout { bar: d.layout.bar, brand: d.layout.brand, tray: d.layout.tray, cells: d.layout.cells.clone(), overflow: d.layout.overflow }, d.hover, d.scale, d.want_visible(), d.motion, d.pressed)
     });
+    if layout_.tray.w == 0 {
+        // el botón de bandeja vive en el cluster: el foco de teclado se dibuja sobre su chevron
+        crate::cluster::set_key_focus(with(|d| d.key_target == Some(KeyTarget::Tray)));
+    }
     let (xs, bar_disp, glide_busy) = with(|d| glide_view(d));
     if glide_busy && !with(|d| d.anim_on) {
         unsafe { start_anim(hwnd) };
@@ -1559,11 +1664,13 @@ fn render() {
         }
         draw_brand_mark(buf, w, h, layout_.brand, scale, fg, accent);
         let tray = R { x: w - (layout_.bar.w - layout_.tray.x), ..layout_.tray };
-        let tray_alpha = if key_target == Some(KeyTarget::Tray) { 0.50 } else if pressed == Some(TRAY_INDEX) { 0.28 } else if hover == Some(TRAY_INDEX) { 0.16 } else { 0.0 };
+        let tray_alpha = if layout_.tray.w == 0 { 0.0 } else if key_target == Some(KeyTarget::Tray) { 0.50 } else if pressed == Some(TRAY_INDEX) { 0.28 } else if hover == Some(TRAY_INDEX) { 0.16 } else { 0.0 };
         if tray_alpha > 0.0 { fill_round_a(buf, w, h, tray, px(10, scale), accent, tray_alpha); }
-        let (cx, cy, s) = (tray.x + tray.w / 2, tray.y + tray.h / 2, px(1, scale).max(1));
-        fill_quad_a(buf, w, h, [(cx - 6*s, cy + 2*s), (cx, cy - 4*s), (cx + s, cy - 2*s), (cx - 5*s, cy + 4*s)], fg, 1.0);
-        fill_quad_a(buf, w, h, [(cx, cy - 4*s), (cx + 6*s, cy + 2*s), (cx + 5*s, cy + 4*s), (cx - s, cy - 2*s)], fg, 1.0);
+        if tray.w > 0 {
+            let (cx, cy, s) = (tray.x + tray.w / 2, tray.y + tray.h / 2, px(1, scale).max(1));
+            fill_quad_a(buf, w, h, [(cx - 6*s, cy + 2*s), (cx, cy - 4*s), (cx + s, cy - 2*s), (cx - 5*s, cy + 4*s)], fg, 1.0);
+            fill_quad_a(buf, w, h, [(cx, cy - 4*s), (cx + 6*s, cy + 2*s), (cx + 5*s, cy + 4*s), (cx - s, cy - 2*s)], fg, 1.0);
+        }
         DOCKS.with(|v| {
             let v = v.borrow();
             let d = &v[CUR.get().min(v.len() - 1)];
@@ -1780,7 +1887,7 @@ unsafe fn dock_foreground(mon: MonRect) -> Option<Foreground> {
         caption: style & WS_CAPTION.0 == WS_CAPTION.0,
         thickframe: style & WS_THICKFRAME.0 != 0,
         zoomed: IsZoomed(fg).as_bool(),
-        shell_like: fg == GetShellWindow() || matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd"),
+        shell_like: fg == GetShellWindow() || matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "WinarchyDesktopWallpaper"),
         on_dock_monitor: (mi.rcMonitor.left, mi.rcMonitor.top) == (mon.0, mon.1),
     })
 }
@@ -1802,6 +1909,8 @@ unsafe fn tick() {
     let reconciled = sync_docks();
     CUR.set(cur);
     if !reconciled { return }
+    // shortcut: sin Explorer no llegan los mensajes del shell hook; este sondeo de 1 s mantiene la lista al día
+    queue_refresh(with(|d| d.hwnd));
     let rects = crate::monitor_rects();
     let Some(r0) = rects.get(cur).copied() else { return };
     let (hwnd, hidden) = with(|d| (d.hwnd, d.hidden));
@@ -1999,7 +2108,7 @@ fn publish_accessibility(hwnd: HWND, items: &[Item], layout: &Layout, titles: &H
                 nodes.push((key, accessible_node(name, *cell)));
             }
         }
-        nodes.push(("tray".into(), accessible_node(t(K::SystemTray).into(), layout.tray)));
+        if layout.tray.w > 0 { nodes.push(("tray".into(), accessible_node(t(K::SystemTray).into(), layout.tray))); }
     }
     let focus = focused.and_then(|target| match target {
         KeyTarget::Brand => Some("start".into()),
@@ -2386,7 +2495,7 @@ unsafe fn tip_text(idx: usize) -> Option<String> {
     if let Some(n) = with(|d| (d.layout.overflow > 0 && idx + 1 == d.layout.cells.len()).then_some(d.layout.overflow)) {
         return Some(format!("+{n}"));
     }
-    let (wins, last, pin) = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), d.last_active.get(&i.key).copied(), launch_of(&d.pins, i).map(|(o, _)| o))))?;
+    let (wins, last, pin) = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), previewed(d, i), launch_of(&d.pins, i).map(|(o, _)| o))))?;
     let target = pick_target(&wins, 0, last);
     if let Some(t) = target {
         let h = HWND(t as *mut _);
@@ -2410,11 +2519,16 @@ unsafe fn hide_tip() {
 }
 
 // Ventana que enfocaría el clic en la celda, para su miniatura; ni el hub, ni la bandeja ni el desborde la tienen.
+// Ventana que se previsualiza: la elegida con la rueda mientras siga abierta, si no la última activa.
+fn previewed(d: &Dock, item: &Item) -> Option<isize> {
+    d.preview_pick.as_ref().filter(|(k, w)| *k == item.key && item.wins.contains(w)).map(|(_, w)| *w).or_else(|| d.last_active.get(&item.key).copied())
+}
+
 unsafe fn thumb_target(idx: usize) -> Option<isize> {
     if idx == HUB_INDEX || idx == TRAY_INDEX || with(|d| d.layout.overflow > 0 && idx + 1 == d.layout.cells.len()) {
         return None;
     }
-    let (wins, last) = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), d.last_active.get(&i.key).copied())))?;
+    let (wins, last) = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), previewed(d, i))))?;
     pick_target(&wins, 0, last)
 }
 
@@ -2654,7 +2768,7 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     let visible = d.layout.cells.len().saturating_sub(usize::from(d.layout.overflow > 0));
                     let targets = keyboard_targets(&d.items, visible, d.layout.overflow);
                     let current = d.key_target.as_ref().unwrap_or(&KeyTarget::Brand);
-                    d.key_target = Some(if key == VK_HOME.0 { KeyTarget::Brand } else if key == VK_END.0 { KeyTarget::Tray } else {
+                    d.key_target = Some(if key == VK_HOME.0 { KeyTarget::Brand } else if key == VK_END.0 { targets.last().cloned().unwrap_or(KeyTarget::Brand) } else {
                         let backwards = key == VK_LEFT.0 || (key == VK_TAB.0 && GetAsyncKeyState(VK_SHIFT.0 as i32) < 0);
                         keyboard_step(&targets, current, if backwards { -1 } else { 1 })
                     });
@@ -2706,6 +2820,9 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     None => None,
                 };
                 let changed = idx != d.hover;
+                if changed {
+                    d.preview_pick = None;
+                }
                 d.hover = idx;
                 let need = !d.tracking;
                 d.tracking = true;
@@ -2726,8 +2843,22 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
             LRESULT(0)
         }
+        WM_MOUSEWHEEL => {
+            let delta = ((wp.0 >> 16) & 0xFFFF) as i16 as i32;
+            let next = with(|d| {
+                let item = d.items.get(d.hover?)?;
+                let next = step_preview(&item.wins, previewed(d, item), delta)?;
+                d.preview_pick = Some((item.key.clone(), next));
+                d.hover
+            });
+            if let Some(idx) = next {
+                show_tip(idx);
+            }
+            LRESULT(0)
+        }
         0x02A3 => {
             with(|d| {
+                d.preview_pick = None;
                 d.hover = None;
                 d.pressed = None;
                 d.tracking = false;
@@ -2915,6 +3046,17 @@ mod tests {
     }
 
     #[test]
+    fn the_wheel_cycles_the_previewed_window_and_wraps() {
+        let wins = [10, 20, 30];
+        assert_eq!(step_preview(&wins, Some(10), -120), Some(20));
+        assert_eq!(step_preview(&wins, Some(30), -120), Some(10));
+        assert_eq!(step_preview(&wins, Some(10), 120), Some(30));
+        assert_eq!(step_preview(&wins, None, -120), Some(20));
+        assert_eq!(step_preview(&[10], Some(10), -120), None);
+        assert_eq!(step_preview(&wins, Some(10), 0), None);
+    }
+
+    #[test]
     fn moving_an_item_shifts_the_ones_in_between() {
         let mut v = vec![1, 2, 3, 4];
         move_item(&mut v, 0, 2);
@@ -3009,6 +3151,16 @@ mod tests {
         assert_eq!(hit_test(&l, l.bar.x + c.x + 5, l.bar.y + c.y + 5), Some(Hit::Item(1)));
         assert_eq!(hit_test(&l, l.bar.x + c.x - 1, l.bar.y + c.y + 5), None);
         assert_eq!(hit_test(&l, 0, 0), None);
+    }
+
+    #[test]
+    fn the_dock_that_hosts_the_cluster_has_no_tray_button_of_its_own() {
+        for n in [0, 3, 200] {
+            let l = layout_for(n, 1.0, MON, true, 4, true);
+            assert_eq!(l.tray.w, 0);
+            assert_eq!(hit_test(&l, l.bar.x + l.bar.w - 2, l.bar.y + l.bar.h / 2), None);
+            assert!(l.bar.x >= MON.0 && l.bar.x + l.bar.w <= MON.2);
+        }
     }
 
     #[test]

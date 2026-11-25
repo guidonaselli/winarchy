@@ -10,8 +10,15 @@ use windows::Win32::Storage::FileSystem::{FILE_FLAGS_AND_ATTRIBUTES, PIPE_ACCESS
 use windows::Win32::System::Pipes::*;
 use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 
-const PIPE: &str = r"\\.\pipe\winarchy-shell-komorebi";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+fn pipe_name(session_id: u32) -> String {
+    format!(r"\\.\pipe\winarchy-shell-komorebi-{session_id}")
+}
+
+fn subscription_name(session_id: u32) -> String {
+    format!("winarchy-shell-komorebi-{session_id}")
+}
 
 #[derive(Clone, Default, PartialEq, Debug)]
 pub struct Workspaces {
@@ -179,9 +186,9 @@ pub fn focus_workspace(index: usize) {
 }
 
 // Hilo propio: un suscriptor que no lee degrada a komorebi (probe 1.4), así que nunca se lee desde la UI.
-pub fn spawn(on_change: impl Fn() + Send + 'static) {
+pub fn spawn(session_id: u32, on_change: impl Fn() + Send + 'static) {
     std::thread::spawn(move || loop {
-        run_once(&on_change);
+        run_once(session_id, &on_change);
         std::thread::sleep(std::time::Duration::from_secs(2));
     });
 }
@@ -205,14 +212,15 @@ fn notify_windows() {
     }
 }
 
-fn run_once(on_change: &impl Fn()) {
-    let name: Vec<u16> = PIPE.encode_utf16().chain(std::iter::once(0)).collect();
+fn run_once(session_id: u32, on_change: &impl Fn()) {
+    let name: Vec<u16> = pipe_name(session_id).encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
         let h = CreateNamedPipeW(PCWSTR(name.as_ptr()), FILE_FLAGS_AND_ATTRIBUTES(PIPE_ACCESS_INBOUND.0), PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1, 0, 1 << 20, 0, None);
         if h.is_invalid() {
             return;
         }
-        let sub = std::process::Command::new("komorebic.exe").args(["subscribe-pipe", "winarchy-shell-komorebi"]).creation_flags(CREATE_NO_WINDOW).status();
+        let subscriber = subscription_name(session_id);
+        let sub = std::process::Command::new("komorebic.exe").args(["subscribe-pipe", &subscriber]).creation_flags(CREATE_NO_WINDOW).status();
         if sub.is_ok_and(|s| s.success()) && (ConnectNamedPipe(h, None).is_ok() || GetLastError() == ERROR_PIPE_CONNECTED) {
             std::thread::spawn(seed_windows);
             read_events(h, on_change);
@@ -263,6 +271,16 @@ unsafe fn read_events(h: HANDLE, on_change: &impl Fn()) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pipe_names_are_scoped_to_the_windows_session() {
+        assert_eq!(pipe_name(1), r"\\.\pipe\winarchy-shell-komorebi-1");
+        assert_eq!(pipe_name(42), r"\\.\pipe\winarchy-shell-komorebi-42");
+        assert_ne!(pipe_name(1), pipe_name(42));
+        assert_eq!(subscription_name(1), "winarchy-shell-komorebi-1");
+        assert_eq!(subscription_name(42), "winarchy-shell-komorebi-42");
+        assert_ne!(subscription_name(1), subscription_name(42));
+    }
 
     #[test]
     fn picks_primary_monitor_occupancy_and_focus() {

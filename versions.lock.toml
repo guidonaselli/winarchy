@@ -43,6 +43,9 @@ sha256 = "c4680fda08b7e188017ceabed65d2d7252e6a0c0a3e0933a00aa54638a3e4f50"
 # Windows Terminal se conserva: Winarchy no lo abre, pero le sigue aplicando el scheme.
 "Microsoft.WindowsTerminal" = true
 "Microsoft.PowerShell" = true
+# Winarchy Files (winarchy-files.exe) necesita el runtime de VC++ y Windows App Runtime >= 2.4.
+"Microsoft.VCRedist.2015+.x64" = true
+"Microsoft.WindowsAppRuntime.2" = true
 "DEVCOM.JetBrainsMonoNerdFont" = true
 # Herramientas del terminal profile (no core, sin pin: siguen su último release).
 # Algunas pueden venir de scoop en vez de winget; en ese caso las actualiza el paso de

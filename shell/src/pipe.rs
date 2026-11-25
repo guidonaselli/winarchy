@@ -8,8 +8,11 @@ use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile, FILE_FLAGS_AND_ATTRIBUTES, PIPE_ACCESS_DUPLEX};
 use windows::Win32::System::Pipes::*;
 
-pub const PIPE_NAME: PCWSTR = w!("\\\\.\\pipe\\winarchy-shell");
 const VERSION: u32 = 1;
+
+pub fn pipe_name(session_id: u32) -> String {
+    format!(r"\\.\pipe\winarchy-shell-{session_id}")
+}
 
 #[derive(Deserialize)]
 struct Request {
@@ -51,6 +54,8 @@ fn island_from(params: &Value) -> Result<Island, &'static str> {
 pub enum Command {
     Reload,
     Quit,
+    Restart,
+    ReturnToExplorer,
     Redraw,
     Expand,
     Tray,
@@ -60,8 +65,9 @@ pub enum Command {
 }
 
 // Un cliente por vez; el hilo de UI recibe Reload/Quit por `dispatch`, nunca bloquea acá.
-pub fn serve(dispatch: impl Fn(Command) + Send + 'static) {
+pub fn serve(session_id: u32, dispatch: impl Fn(Command) + Send + 'static) {
     std::thread::spawn(move || unsafe {
+        let name = pipe_name(session_id).encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
         // Solo el dueño del proceso (el usuario) puede abrir la tubería.
         let mut sd = PSECURITY_DESCRIPTOR::default();
         let ok = ConvertStringSecurityDescriptorToSecurityDescriptorW(w!("D:P(A;;GA;;;OW)"), SDDL_REVISION_1, &mut sd, None);
@@ -71,7 +77,7 @@ pub fn serve(dispatch: impl Fn(Command) + Send + 'static) {
         let sa = SECURITY_ATTRIBUTES { nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: sd.0, bInheritHandle: false.into() };
         loop {
             let h = CreateNamedPipeW(
-                PIPE_NAME,
+                PCWSTR(name.as_ptr()),
                 FILE_FLAGS_AND_ATTRIBUTES(PIPE_ACCESS_DUPLEX.0),
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                 1,
@@ -189,6 +195,14 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
             dispatch(Command::Quit);
             ok(json!({}))
         }
+        "restart" => {
+            dispatch(Command::Restart);
+            ok(json!({}))
+        }
+        "return" => {
+            dispatch(Command::ReturnToExplorer);
+            ok(json!({}))
+        }
         other => json!({"v": VERSION, "id": req.id, "ok": false, "error": format!("unknown command {other}")}),
     }
 }
@@ -196,6 +210,13 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pipe_names_are_scoped_to_the_windows_session() {
+        assert_eq!(pipe_name(1), r"\\.\pipe\winarchy-shell-1");
+        assert_eq!(pipe_name(42), r"\\.\pipe\winarchy-shell-42");
+        assert_ne!(pipe_name(1), pipe_name(42));
+    }
 
     #[test]
     fn dock_focus_dispatches_and_acknowledges_request() {
@@ -206,6 +227,21 @@ mod tests {
         });
         assert_eq!(called.get(), 1);
         assert_eq!(response, json!({"v": 1, "id": 7, "ok": true}));
+    }
+
+    #[test]
+    fn restart_dispatches_without_changing_quit_semantics() {
+        let commands = std::cell::RefCell::new(Vec::new());
+        let dispatch = |command| commands.borrow_mut().push(match command {
+            Command::Restart => "restart",
+            Command::Quit => "quit",
+            Command::ReturnToExplorer => "return",
+            _ => "other",
+        });
+        handle(br#"{"v":1,"id":1,"cmd":"restart"}"#, &dispatch);
+        handle(br#"{"v":1,"id":2,"cmd":"quit"}"#, &dispatch);
+        handle(br#"{"v":1,"id":3,"cmd":"return"}"#, &dispatch);
+        assert_eq!(*commands.borrow(), ["restart", "quit", "return"]);
     }
 
     #[test]

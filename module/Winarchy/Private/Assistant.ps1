@@ -68,21 +68,85 @@ function Install-WinarchyAssistantRuntime {
     }
 }
 
-function Test-WinarchyAssistantRunning { [bool](Get-Process winarchy-assistant -ErrorAction SilentlyContinue) }
+function Get-WinarchyAssistantCommandKind {
+    param([string]$Path, [AllowNull()][string]$CommandLine)
+    if ([string]::IsNullOrWhiteSpace($CommandLine)) { return 'unknown' }
+    $executable = [IO.Path]::GetFullPath($Path)
+    $quoted = '"' + $executable + '"'
+    if ($CommandLine.StartsWith($quoted, [StringComparison]::OrdinalIgnoreCase)) {
+        $offset = $quoted.Length
+    } elseif ($CommandLine.StartsWith($executable, [StringComparison]::OrdinalIgnoreCase)) {
+        $offset = $executable.Length
+    } else { return 'unknown' }
+    if ($CommandLine.Length -gt $offset -and -not [char]::IsWhiteSpace($CommandLine[$offset])) { return 'unknown' }
+    $argument = [regex]::Match($CommandLine.Substring($offset).TrimStart(), '^\S+').Value.ToLowerInvariant()
+    if ($argument -eq 'serve') { return 'serve' }
+    if ($argument -in 'ask', 'login', 'logout', 'status', 'levels', 'listen') { return 'cli' }
+    return 'unknown'
+}
+
+function Get-WinarchyAssistantProcess {
+    $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+    $path = Join-Path (Get-WinarchyStateDir) "assistant-session-$sessionId"
+    if (Test-Path $path) {
+        try { $assistantPid = [uint32]::Parse(([IO.File]::ReadAllText($path)).Trim(), [Globalization.CultureInfo]::InvariantCulture) }
+        catch { $assistantPid = 0 }
+        if ($assistantPid) {
+            $process = Get-Process -Id $assistantPid -ErrorAction SilentlyContinue
+            if ($process -and $process.ProcessName -eq 'winarchy-assistant' -and $process.SessionId -eq $sessionId) { return $process }
+        }
+        return
+    }
+    $root = Get-WinarchyRoot
+    $paths = @((Join-Path $root 'state\bin\winarchy-assistant.exe'), (Join-Path $root 'assistant\target\release\winarchy-assistant.exe'))
+    Get-Process -Name winarchy-assistant -ErrorAction SilentlyContinue | Where-Object {
+        if ($_.SessionId -ne $sessionId) { return $false }
+        try {
+            if ([IO.Path]::GetFullPath($_.Path) -notin $paths) { return $false }
+            $commandLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($_.Id)" -ErrorAction Stop).CommandLine
+            (Get-WinarchyAssistantCommandKind -Path $_.Path -CommandLine $commandLine) -eq 'serve'
+        } catch { $false }
+    } | Select-Object -First 1
+}
+
+function Test-WinarchyAssistantRunning { [bool](Get-WinarchyAssistantProcess) }
+
+function Test-WinarchyAssistantMigrationUncertain {
+    $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+    if (Test-Path (Join-Path (Get-WinarchyStateDir) "assistant-session-$sessionId")) { return $false }
+    $root = Get-WinarchyRoot
+    $paths = @((Join-Path $root 'state\bin\winarchy-assistant.exe'), (Join-Path $root 'assistant\target\release\winarchy-assistant.exe'))
+    foreach ($process in (Get-Process -Name winarchy-assistant -ErrorAction SilentlyContinue)) {
+        if ($process.SessionId -ne $sessionId) { continue }
+        try {
+            $path = [IO.Path]::GetFullPath($process.Path)
+            if ($path -notin $paths) { continue }
+            $commandLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($process.Id)" -ErrorAction Stop).CommandLine
+            if ((Get-WinarchyAssistantCommandKind -Path $path -CommandLine $commandLine) -ne 'cli') { return $true }
+        } catch { return $true }
+    }
+    return $false
+}
 
 function Start-WinarchyAssistant {
     $exe = Get-WinarchyAssistantExe
     if (-not $exe) { throw 'winarchy-assistant.exe not found: build it with `cargo build --release` in assistant\ (release asset pending).' }
     if (Test-WinarchyAssistantRunning) { return }
+    if (Test-WinarchyAssistantMigrationUncertain) { throw 'Cannot safely start the assistant while a same-session process cannot be classified; retry after Windows process query access is restored.' }
     $env:WINARCHY_ROOT = Get-WinarchyRoot
     Start-Process -FilePath $exe -ArgumentList 'serve' -WindowStyle Hidden
 }
 
 function Stop-WinarchyAssistant {
-    $p = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'winarchy-assistant', 'Out')
-    try { $p.Connect(1000); $b = [Text.Encoding]::UTF8.GetBytes("quit`n"); $p.Write($b, 0, $b.Length) } catch { } finally { $p.Dispose() }
-    Start-Sleep -Milliseconds 500
-    Get-Process winarchy-assistant -ErrorAction SilentlyContinue | Stop-Process -Force
+    $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+    $process = Get-WinarchyAssistantProcess
+    if (-not $process) { return }
+    $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', "winarchy-assistant-$sessionId", 'Out')
+    try { $pipe.Connect(1000); $bytes = [Text.Encoding]::UTF8.GetBytes("quit`n"); $pipe.Write($bytes, 0, $bytes.Length) } catch { } finally { $pipe.Dispose() }
+    if (-not $process.WaitForExit(1000)) {
+        try { $process.Kill() } catch { }
+        $null = $process.WaitForExit(1000)
+    }
 }
 
 function Get-WinarchyAssistantStatus {

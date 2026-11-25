@@ -6,13 +6,43 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use windows::core::PCWSTR;
+use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE};
 use windows::Win32::Globalization::GetUserDefaultLocaleName;
+use windows::Win32::System::Threading::CreateMutexW;
 
 enum Ev {
     Pipe(pipe::Msg),
     ReplyReady(u64),
     Done(u64),
     Failed(u64, String),
+}
+
+struct SessionPidFile {
+    path: PathBuf,
+    pid: u32,
+}
+
+impl SessionPidFile {
+    fn create(root: &std::path::Path, session_id: u32, pid: u32) -> Result<Self, String> {
+        let path = root.join("state").join(format!("assistant-session-{session_id}"));
+        std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+        let temp = path.with_extension(format!("tmp-{pid}"));
+        std::fs::write(&temp, pid.to_string()).map_err(|e| e.to_string())?;
+        if let Err(e) = std::fs::rename(&temp, &path) {
+            let _ = std::fs::remove_file(temp);
+            return Err(e.to_string());
+        }
+        Ok(Self { path, pid })
+    }
+}
+
+impl Drop for SessionPidFile {
+    fn drop(&mut self) {
+        if std::fs::read_to_string(&self.path).is_ok_and(|value| value.trim() == self.pid.to_string()) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
 }
 
 struct Config {
@@ -74,15 +104,40 @@ fn log(msg: &str) {
     }
 }
 
-/// Avisa a la isla; la shell puede no estar corriendo, así que cualquier fallo se ignora.
-fn publish(s: State) {
-    if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open(r"\\.\pipe\winarchy-shell") {
+/// Avisa a la isla de esta sesión; la shell puede no estar corriendo, así que cualquier fallo se ignora.
+fn publish(s: State, session_id: u32) {
+    let path = format!(r"\\.\pipe\winarchy-shell-{session_id}");
+    if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open(path) {
         let _ = writeln!(f, r#"{{"v":1,"id":1,"cmd":"assistant.state","params":{{"state":"{}"}}}}"#, s.name());
     }
 }
 
+fn current_session_id() -> Option<u32> {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn ProcessIdToSessionId(process_id: u32, session_id: *mut u32) -> i32;
+    }
+    let mut session_id = 0;
+    let ok = unsafe { ProcessIdToSessionId(std::process::id(), &mut session_id) };
+    (ok != 0).then_some(session_id)
+}
+
+fn acquire_instance(name: &str) -> Result<Option<HANDLE>, String> {
+    let name: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+    let handle = unsafe { CreateMutexW(None, true, PCWSTR(name.as_ptr())) }.map_err(|e| e.to_string())?;
+    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        unsafe { let _ = CloseHandle(handle); }
+        return Ok(None);
+    }
+    Ok(Some(handle))
+}
+
 pub fn run() -> Result<(), String> {
+    let session_id = current_session_id().ok_or_else(|| "could not determine the Windows session".to_string())?;
+    let instance = format!("Local\\WinarchyAssistant-{session_id}");
+    let Some(_instance) = acquire_instance(&instance)? else { return Ok(()); };
     let env = tools::env();
+    let _pid_file = SessionPidFile::create(&env.root, session_id, std::process::id())?;
     let cfg = config(&env.root);
     let defs = tools::definitions(&env.themes);
     let stt = Arc::new(Mutex::new(stt::Stt::spawn(&cfg.python, &cfg.stt_script)?));
@@ -93,7 +148,7 @@ pub fn run() -> Result<(), String> {
 
     let (tx, rx) = channel::<Ev>();
     let (ptx, prx) = channel();
-    pipe::serve(ptx);
+    pipe::serve(session_id, ptx);
     let fwd = tx.clone();
     std::thread::spawn(move || {
         for m in prx {
@@ -146,7 +201,7 @@ pub fn run() -> Result<(), String> {
     let mut m = Machine::new(Instant::now());
     let mut rec: Option<mic::Recording> = None;
     let mut published = State::Idle;
-    publish(published);
+    publish(published, session_id);
     loop {
         let now = Instant::now();
         let (effect, quit) = match rx.recv_timeout(Duration::from_millis(250)) {
@@ -189,7 +244,7 @@ pub fn run() -> Result<(), String> {
         }
         if m.state() != published {
             published = m.state();
-            publish(published);
+            publish(published, session_id);
         }
     }
 }
@@ -273,7 +328,41 @@ pub fn ask(text: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::lang_of;
+    use super::{acquire_instance, lang_of, SessionPidFile};
+
+    #[test]
+    fn instance_mutex_rejects_a_second_process_before_pid_registration() {
+        let name = format!("Local\\WinarchyAssistantTest-{}", std::process::id());
+        let first = acquire_instance(&name).expect("first mutex").expect("first owner");
+        assert!(acquire_instance(&name).expect("second mutex").is_none());
+        unsafe { let _ = super::CloseHandle(first); }
+    }
+
+    #[test]
+    fn pid_file_is_removed_on_scope_exit() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("winarchy-assistant-pid-test-{}-{unique}", std::process::id()));
+        let pid = std::process::id();
+        let file = SessionPidFile::create(&root, 42, pid).expect("PID file");
+        let path = root.join("state/assistant-session-42");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), pid.to_string());
+        drop(file);
+        assert!(!path.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn pid_file_cleanup_preserves_a_replacement_process_registration() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("winarchy-assistant-pid-replaced-{}-{unique}", std::process::id()));
+        let file = SessionPidFile::create(&root, 42, 4242).expect("PID file");
+        let path = root.join("state/assistant-session-42");
+        std::fs::write(&path, "4343").unwrap();
+        drop(file);
+        let content = std::fs::read_to_string(&path);
+        std::fs::remove_dir_all(root).unwrap();
+        assert_eq!(content.unwrap(), "4343");
+    }
 
     #[test]
     fn only_spanish_locales_are_spanish() {

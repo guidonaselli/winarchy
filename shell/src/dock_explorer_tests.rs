@@ -123,3 +123,31 @@ fn other_apps_with_the_same_executable_keep_distinct_aumid_groups() {
         vec!["aumid:editor.work", "aumid:editor.personal"],
     );
 }
+
+#[test]
+fn explorer_shell_ready_immediately_is_probed_once_even_with_no_timeout() {
+    let mut probes = 0;
+    let ready = wait_for_explorer_shell(std::time::Duration::ZERO, || {
+        probes += 1;
+        true
+    });
+    assert_eq!(ready, true);
+    assert_eq!(probes, 1);
+}
+
+#[test]
+fn explorer_shell_wait_stops_at_the_first_ready_probe() {
+    let mut probes = 0;
+    let ready = wait_for_explorer_shell(std::time::Duration::from_secs(5), || {
+        probes += 1;
+        probes == 3
+    });
+    assert_eq!(ready, true);
+    assert_eq!(probes, 3);
+}
+
+#[test]
+fn explorer_shell_wait_returns_false_when_readiness_never_appears() {
+    let ready = wait_for_explorer_shell(std::time::Duration::from_millis(10), || false);
+    assert_eq!(ready, false);
+}

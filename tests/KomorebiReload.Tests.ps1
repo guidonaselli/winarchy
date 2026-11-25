@@ -11,6 +11,7 @@ BeforeAll {
     Set-Content "$script:FixtureRoot/state/bar" 'native'
     $script:EnvBefore = @{ K = $env:KOMOREBI_CONFIG_HOME; Y = $env:YASB_CONFIG_HOME; Local = $env:LOCALAPPDATA }
     $env:LOCALAPPDATA = $script:FixtureRoot
+    Remove-Module Winarchy -Force -ErrorAction SilentlyContinue   # otros archivos de test dejan su copia cargada
     Import-Module "$script:FixtureRoot/module/Winarchy/Winarchy.psd1" -Force
 }
 
@@ -29,7 +30,7 @@ Describe 'Komorebi configuration replacement' {
             Mock komorebic { }
             Mock Get-Process { [pscustomobject]@{ ProcessName = 'komorebi' } } -ParameterFilter { $Name -eq 'komorebi' }
             Mock Stop-Process { }
-            Mock Stop-WinarchyShell { }
+            Mock Stop-WinarchyShell { $true }
             Mock Start-Process { }
         }
     }

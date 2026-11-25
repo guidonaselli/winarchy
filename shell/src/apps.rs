@@ -78,7 +78,7 @@ pub fn covers_monitor(fg: &Foreground, monitor: Rect) -> bool {
 // `quns_busy` viene de SHQueryUserNotificationState, que no distingue monitor: solo cuenta si el foreground está en el del dock.
 // Una maximizada con marco (Steam, fuera de komorebi) cubre el monitor con el dock en `hide` y Windows la da por fullscreen: no cuenta.
 pub fn should_hide(fg: Option<&Foreground>, monitor: Rect, quns_busy: bool) -> bool {
-    fg.is_some_and(|f| covers_monitor(f, monitor) || (quns_busy && f.on_dock_monitor && !(f.zoomed && (f.caption || f.thickframe))))
+    fg.is_some_and(|f| covers_monitor(f, monitor) || (quns_busy && f.on_dock_monitor && !f.shell_like && !(f.zoomed && (f.caption || f.thickframe))))
 }
 
 #[cfg(test)]
@@ -286,6 +286,11 @@ mod tests {
         assert!(!should_hide(Some(&Foreground { shell_like: true, ..fg() }), MON, false));
         assert!(!should_hide(Some(&Foreground { zoomed: true, ..fg() }), MON, false));
         assert!(!should_hide(Some(&Foreground { caption: true, thickframe: true, ..fg() }), MON, false));
+    }
+
+    #[test]
+    fn desktop_reported_as_busy_does_not_hide_the_dock() {
+        assert!(!should_hide(Some(&Foreground { shell_like: true, ..fg() }), MON, true));
     }
 
     #[test]

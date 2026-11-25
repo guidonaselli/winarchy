@@ -32,10 +32,10 @@
         'Set-WinarchyDefenderExclusions', 'Remove-WinarchyDefenderExclusions',
         # helpers usados por install.ps1 y scripts\*.ps1
         'Sync-WinarchyPalette', 'Remove-WinarchyPalette',
-        'Get-WinarchyPriorState', 'Save-WinarchyPriorState', 'Remove-WinarchyWeztermContextMenu', 'Backup-WinarchyRegistryKey', 'Start-WinarchyKomorebi', 'Get-WinarchyActiveBar', 'Set-WinarchyBar', 'Initialize-WinarchyBar', 'Get-WinarchyShellExe', 'Set-WinarchyFileAtomic',
+        'Get-WinarchyPriorState', 'Save-WinarchyPriorState', 'Remove-WinarchyWeztermContextMenu', 'Backup-WinarchyRegistryKey', 'Start-WinarchyKomorebi', 'Get-WinarchyActiveBar', 'Set-WinarchyBar', 'Initialize-WinarchyBar', 'Get-WinarchyShellExe', 'Get-WinarchyShellArguments', 'Set-WinarchyFileAtomic',
         'Install-WinarchySkill', 'Uninstall-WinarchySkill',
         'New-WinarchySnapshot', 'Import-WinarchyToml', 'Get-WinarchyCoreVersions', 'Get-WinarchyInstalledVersion', 'Test-WinarchyVersionBelow', 'Get-WinarchyAhkExe', 'Get-WinarchyKomorebiExe', 'Get-WinarchyStateDir',
-        'Disable-WinarchyXMouse', 'Set-WinarchyTaskbarAutoHide', 'Set-WinarchyWindowsHardening', 'Stop-WinarchyWindowSlots', 'Stop-WinarchyShell',
+        'Disable-WinarchyXMouse', 'Set-WinarchyTaskbarAutoHide', 'Set-WinarchyWindowsHardening', 'Stop-WinarchyWindowSlots', 'Stop-WinarchyShell', 'Assert-WinarchyCustomShellPolicySafeForMaintenance',
         'Register-WinarchyAutostart', 'Unregister-WinarchyAutostart', 'Get-WinarchyAutostartStatus',
         'Write-WinarchyInfo', 'Write-WinarchyOk', 'Write-WinarchyWarn', 'Write-WinarchyErr'
     )
