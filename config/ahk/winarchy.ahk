@@ -117,7 +117,37 @@ SessionShellActive() {
     if A_PriorKey = 'LWin'
         ToggleFlow()
 }
+; Sin Explorer no hay conmutador de Alt+Tab: un toque vuelve a la ventana anterior y Tab con Alt sostenido sigue por z-order.
+!Tab::AltTabStep(1)
+!+Tab::AltTabStep(-1)
+~LAlt up::AltTabStep(0)
 #HotIf
+
+AltTabStep(dir) {
+    static list := [], idx := 0
+    if !dir {
+        idx := 0
+        return
+    }
+    if !idx {
+        list := []
+        for hwnd in WinGetList() {
+            if AltTabCandidate(hwnd) || hwnd = WinExist('A')
+                list.Push(hwnd)
+        }
+    }
+    if list.Length < 2
+        return
+    idx := Mod(idx + dir + list.Length, list.Length)
+    try WinActivate(list[idx + 1])
+}
+
+AltTabCandidate(hwnd) {
+    if WinGetTitle(hwnd) = '' || (WinGetExStyle(hwnd) & 0x80) && !(WinGetExStyle(hwnd) & 0x40000)
+        return false
+    DllCall('dwmapi\DwmGetWindowAttribute', 'ptr', hwnd, 'uint', 14, 'int*', &cloaked := 0, 'uint', 4)
+    return !cloaked && WinGetProcessName(hwnd) != 'winarchy-shell.exe'
+}
 
 ; --- Helpers -----------------------------------------------------------------
 ; Ruta completa: no depender del PATH heredado (puede ser anterior a la instalación)
