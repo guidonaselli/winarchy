@@ -96,6 +96,28 @@ fn d_gap() -> i32 {
 
 impl Default for Theme {
     fn default() -> Self {
+        let mut theme = Self::dark();
+        if system_prefers_light() {
+            theme.background = "#eff1f5".into();
+            theme.foreground = "#4c4f69".into();
+            theme.accent = "#1e66f5".into();
+            theme.muted = "#8c8fa1".into();
+        }
+        theme
+    }
+}
+
+// Sin theme.json válido la shell sigue el modo de apps de Windows; los colores se cambian con un theme o con user.json.
+fn system_prefers_light() -> bool {
+    use windows::{core::w, Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD}};
+    let (mut value, mut len) = (0u32, 4u32);
+    // SAFETY: lectura de un DWORD en un buffer de 4 bytes propio
+    let rc = unsafe { RegGetValueW(HKEY_CURRENT_USER, w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"), w!("AppsUseLightTheme"), RRF_RT_REG_DWORD, None, Some(&mut value as *mut u32 as *mut _), Some(&mut len)) };
+    rc.is_ok() && value == 1
+}
+
+impl Theme {
+    fn dark() -> Self {
         Theme {
             background: "#1a1b26".into(),
             opacity: 1.0,
