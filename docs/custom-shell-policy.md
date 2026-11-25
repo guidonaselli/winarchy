@@ -18,4 +18,19 @@ Sources: [Microsoft CustomShell policy](https://learn.microsoft.com/en-us/window
 
 The installed Windows `WinLogon.admx` on the benchmark host maps `CustomShell` to the `Shell` string under the user policy key. This confirms the registry mapping for this Windows build. Microsoft does not document CustomShell crash recovery or safe-mode behavior; those are Winarchy responsibilities and require isolated sign-in, failure, recovery, and next-logon tests before shipping.
 
-The current code's `install -Activate` configures normal Winarchy autostart; it does not persist CustomShell policy. Session markers and the return bridge handle the current logon, but do not by themselves restore a next-logon policy. See `docs/rust-session-shell-parity.md` and task 3.3 in `lmd/rust-session-shell/tasks.md`.
+## Activation
+
+`winarchy shell status|activate --yes|deactivate`. Activation is explicit and takes effect at the next sign-in.
+
+- `activate` refuses without `winarchy-shell.exe` or `config\shell	heme.json`, writes `state\custom-shell-recovery.json` (prior value, written value, command) and a copy under `backups\`, then writes the policy with a compare-and-write so a concurrent change aborts it.
+- `deactivate` restores the prior value only if the current one is still what Winarchy wrote; otherwise it stops and leaves the value alone.
+- While the record is valid, update, rollback and uninstall are allowed; without it they still refuse.
+- The rest of the stack (komorebi, AutoHotkey) starts from a scheduled task at logon, not from Explorer, so it does not depend on the shell.
+
+### Escape path if the session comes up without a usable shell
+
+1. Ctrl+Alt+Del, Task Manager, Run new task, `<repo>\scripts\Restore-Explorer.cmd`. It needs neither the module nor the shell; it restores the recorded value (or removes the policy) and starts Explorer.
+2. Even simpler when the prior value was absent: Run new task, `reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\System" /v Shell /f`, then `explorer.exe`.
+3. From another account, or from safe mode with the same user: delete that same value.
+
+`install -Activate` only configures normal autostart and never touches this policy.

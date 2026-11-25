@@ -230,6 +230,8 @@ function Assert-WinarchyCustomShellPolicySafeForMaintenance {
         $command -match '(?i)[\\/]winarchy-shell\.exe(?:\s|$)') {
         $targetsWinarchy = $true
     }
+    # con un registro de recuperación válido (`winarchy shell activate`) el valor previo se puede restaurar: el mantenimiento sigue
+    if ($targetsWinarchy -and (Get-WinarchyCustomShellStatus).State -eq 'Installed') { return }
     if ($targetsWinarchy) {
         throw 'The CustomShell policy launches winarchy-shell.exe, but this version has no validated policy recovery record. Restore or disable that policy before uninstalling, rolling back, or updating Winarchy.'
     }

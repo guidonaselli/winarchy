@@ -73,6 +73,7 @@ function Show-WinarchyHelp {
     rules collisions          ASC rules dropped because a higher layer decided otherwise
     rules sync [--apply]      Refresh the vendored community ASC (shows the diff first;
                               never touches your config/komorebi/rules.toml)
+    shell <status|activate|deactivate>   Replace Explorer with the Winarchy shell at next sign-in (opt-in, reversible; activate needs --yes)
     taskbar <hide|autohide|show>   Native Windows taskbar mode (hide: gone, dock only)
     harden [--revert]         Turn off Bing search, ads, suggestions, widgets and tips (HKCU)
     reload                    Reload komorebi, YASB, AHK and Flow
@@ -304,6 +305,31 @@ function Invoke-Winarchy {
                 'remove' { Remove-WinarchyWeztermContextMenu }
                 'status' { Get-WinarchyWeztermContextMenuStatus }
                 default { throw "Unknown subcommand: wezterm context-menu $action (install|remove|status)" }
+            }
+        }
+        'shell' {
+            $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'status' }
+            switch ($sub) {
+                'status' {
+                    $status = Get-WinarchyCustomShellStatus
+                    Write-WinarchyInfo "CustomShell policy: $($status.State) (Installed = Winarchy replaces Explorer at next sign-in; Inactive = Explorer)"
+                    if ($status.Record) { Write-WinarchyInfo "command: $($status.Record.Command)" }
+                }
+                'activate' {
+                    if ($rest -notcontains '--yes') {
+                        Write-WinarchyWarn 'This replaces Explorer with the Winarchy shell at your NEXT sign-in (per-user policy, no admin, no reboot).'
+                        Write-WinarchyInfo 'Undo: `winarchy shell deactivate`, or without Winarchy: Ctrl+Alt+Del > Task Manager > Run new task > scripts\Restore-Explorer.cmd'
+                        Write-WinarchyInfo 'Run `winarchy shell activate --yes` to proceed.'
+                        break
+                    }
+                    $status = Enable-WinarchyCustomShell
+                    Write-WinarchyOk "CustomShell policy $($status.State). Sign out and back in to use the Winarchy shell."
+                }
+                'deactivate' {
+                    $status = Disable-WinarchyCustomShell
+                    Write-WinarchyOk "CustomShell policy $($status.State): Explorer returns at next sign-in."
+                }
+                default { throw "Unknown subcommand: shell $sub (status|activate|deactivate)" }
             }
         }
         'taskbar' {

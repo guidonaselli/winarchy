@@ -215,9 +215,7 @@ Describe 'Session shell lifecycle coordination' {
 }
 
 Describe 'Session shell pipe recovery deadline' {
-    # the test binds the real per-session pipe: with the live shell running it cannot, so it is skipped there
-    BeforeDiscovery { $script:livePipe = Test-Path "\\.\pipe\winarchy-shell-$([Diagnostics.Process]::GetCurrentProcess().SessionId)" }
-    It 'returns from a non-reading shell pipe and releases recovery state on failure' -Skip:$script:livePipe {
+    It 'returns from a non-reading shell pipe and releases recovery state on failure' {
         $probeRoot = Join-Path $TestDrive 'blocked-shell-pipe'
         $moduleRoot = Join-Path $probeRoot 'module/Winarchy'
         $stateRoot = Join-Path $probeRoot 'state'
@@ -247,10 +245,14 @@ Describe 'Session shell pipe recovery deadline' {
             Set-Content $marker $identity -NoNewline
             $expectedStatus = "$($shell.Id)|1|$identity"
             Set-Content $status $expectedStatus -NoNewline
-            $server = [IO.Pipes.NamedPipeServerStream]::new(
-                "winarchy-shell-$sessionId", [IO.Pipes.PipeDirection]::In, 1,
-                [IO.Pipes.PipeTransmissionMode]::Byte,
-                ([IO.Pipes.PipeOptions]::Asynchronous -bor [IO.Pipes.PipeOptions]::FirstPipeInstance), 1, 1)
+            # the test binds the real per-session pipe: with the live shell running it cannot, so it is skipped there
+            try {
+                $server = [IO.Pipes.NamedPipeServerStream]::new(
+                    "winarchy-shell-$sessionId", [IO.Pipes.PipeDirection]::In, 1,
+                    [IO.Pipes.PipeTransmissionMode]::Byte,
+                    ([IO.Pipes.PipeOptions]::Asynchronous -bor [IO.Pipes.PipeOptions]::FirstPipeInstance), 1, 1)
+            }
+            catch [System.IO.IOException] { Set-ItResult -Skipped -Because 'the live shell owns the session pipe'; return }
             $connection = $server.WaitForConnectionAsync()
             $probePath = Join-Path $probeRoot 'recover.ps1'
             Set-Content $probePath @'
