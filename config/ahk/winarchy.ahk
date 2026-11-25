@@ -1368,7 +1368,7 @@ WinarchySysItems() {
         {text:'Sign out',        action:(*)=>SignOutSystem()},
         {text:'Restart',         action:(*)=>RestartSystem()},
         {text:'Shut down',       action:(*)=>ShutdownSystem()},
-        {text:'Settings',        action:(*)=>Run('explorer.exe ms-settings:')} ]
+        {text:'Settings',        action:(*)=>Run('ms-settings:')} ]
 }
 
 ShowMainMenu(*) {
@@ -2021,7 +2021,7 @@ AccentWatch() {
 #s::ToggleFlowScoped('f ')                       ; search files (Everything)
 #+Enter::Run(DefaultBrowser())                   ; browser
 #+b::Run(DefaultBrowser())
-#+f::Run('explorer.exe')                         ; file explorer
+#+f::OpenFiles()                                 ; file explorer
 #e::OpenFiles()                                   ; Files if installed, else Explorer
 ; Win+N stays with Windows (notification center; the YASB bell mirrors it)
 #+m::LaunchMusic()                               ; music (Spotify / YT Music)
@@ -2232,11 +2232,11 @@ $#v::Send(InTerminal() ? '^+v' : '^v')           ; paste ($: SUPER+Ctrl+V sends 
 #^w::Winarchy('background next')
 
 ; --- System settings -------------------------------------------------------------
-#^a::Run('explorer.exe ms-settings:sound')       ; sound
-#^b::Run('explorer.exe ms-settings:bluetooth')   ; bluetooth
-#^n::Run('explorer.exe ms-settings:network')     ; network
-#^d::Run('explorer.exe ms-settings:display')     ; display
-#^p::Run('explorer.exe ms-settings:powersleep')  ; power & sleep
+#^a::Run('ms-settings:sound')       ; sound
+#^b::Run('ms-settings:bluetooth')   ; bluetooth
+#^n::Run('ms-settings:network')     ; network
+#^d::Run('ms-settings:display')     ; display
+#^p::Run('ms-settings:powersleep')  ; power & sleep
 
 ; User overrides: config\ahk\user.ahk (untracked). Its hotkeys show in SUPER+K under
 ; "User", or under their own "; --- Title ---" headers.
