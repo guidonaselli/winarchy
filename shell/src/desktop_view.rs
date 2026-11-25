@@ -458,6 +458,10 @@ impl DesktopView {
             hwnd: child,
             created: true,
         };
+        // La vista no registra su destino de arrastre sin Explorer: sin esto soltar (mover íconos, papelera) no hace nada.
+        if let Ok(target) = desktop_view.view.cast::<windows::Win32::System::Ole::IDropTarget>() {
+            let _ = windows::Win32::System::Ole::RegisterDragDrop(desktop_view.hwnd, &target);
+        }
         desktop_view
             .view
             .UIActivate(SVUIA_ACTIVATE_NOFOCUS.0 as u32)?;
@@ -508,6 +512,7 @@ impl DesktopView {
     unsafe fn shutdown(&mut self) {
         self.active.borrow_mut().take();
         if self.created {
+            let _ = windows::Win32::System::Ole::RevokeDragDrop(self.hwnd);
             let _ = self.view.UIActivate(SVUIA_DEACTIVATE.0 as u32);
             let _ = self.view.DestroyViewWindow();
             self.created = false;
@@ -572,6 +577,10 @@ pub fn translate_accelerator(message: &MSG) -> bool {
     }
     if matches!(message.message, WM_LBUTTONDOWN | WM_RBUTTONDOWN) {
         unsafe { take_focus(hwnd, &view) };
+    }
+    // Un mouse que la vista "traduce" nunca llega al listview y no arranca el arrastre.
+    if !(WM_KEYFIRST..=WM_KEYLAST).contains(&message.message) {
+        return false;
     }
     let result = unsafe { (view.vtable().TranslateAccelerator)(view.as_raw(), message) };
     accelerator_consumed(result)
