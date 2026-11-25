@@ -1565,6 +1565,10 @@ pub(crate) unsafe fn draw_label(buf: &mut [u32], stride: i32, rows: i32, cell: R
 }
 
 pub(crate) unsafe fn draw_text(buf: &mut [u32], stride: i32, rows: i32, cell: R, text: &str, family: &str, scale: f32, fg: (u8, u8, u8), font_size: i32, align: DRAW_TEXT_FORMAT) {
+    // DrawTextW con un slice vacío recibe un puntero colgante y termina la shell
+    if text.is_empty() {
+        return;
+    }
     let (w, h) = (cell.w, cell.h);
     let wide: Vec<u16> = text.encode_utf16().collect();
     let family: Vec<u16> = family.encode_utf16().chain(std::iter::once(0)).collect();
@@ -3004,6 +3008,13 @@ mod pointer_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drawing_an_empty_string_leaves_the_buffer_alone() {
+        let mut buf = vec![0u32; 64 * 32];
+        unsafe { draw_text(&mut buf, 64, 32, R { x: 0, y: 0, w: 64, h: 32 }, "", "Segoe UI", 1.0, (255, 255, 255), 12, DT_LEFT) };
+        assert!(buf.iter().all(|p| *p == 0));
+    }
 
     const MON: MonRect = (0, 0, 1920, 1080);
 
