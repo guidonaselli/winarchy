@@ -60,7 +60,7 @@ struct Menu {
     opened_at: std::time::Instant,
     vis: f32,
     all: bool,
-    query: String,
+    search: model::Search,
     sel: Option<usize>,
     scroll: usize,
     hover: Option<Hit>,
@@ -97,8 +97,8 @@ fn view(m: &Menu) -> View {
     let apps = APPS.lock().unwrap().clone();
     let saved = saved_list(&m.pins_path, &apps);
     let cat = model::catalog(&apps, &saved);
-    let (items, grid_len) = if !m.query.trim().is_empty() {
-        let found = model::filter(&cat, &m.query);
+    let (items, grid_len) = if !m.search.text.trim().is_empty() {
+        let found = model::filter(&cat, &m.search.text);
         let n = found.len();
         (found, n)
     } else if m.all {
@@ -113,7 +113,7 @@ fn view(m: &Menu) -> View {
 }
 
 fn list_mode(m: &Menu) -> bool {
-    m.all || !m.query.trim().is_empty()
+    m.all || !m.search.text.trim().is_empty()
 }
 
 // Se crea oculto al arrancar la shell; `root` es la raíz de Winarchy (de ahí sale `state/`).
@@ -128,7 +128,7 @@ pub fn init(root: &std::path::Path, theme: &Theme) {
         crate::accessibility::create(hwnd, "Winarchy start", accesskit::Role::Menu);
         HWND_ATOMIC.store(hwnd.0 as isize, Ordering::Relaxed);
         let m = Menu {
-            hwnd, theme: theme.clone(), scale: 1.0, pos: (0, 0), mon: (0, 0, 0, 0), bottom: true, open: false, opened_at: std::time::Instant::now(), vis: 0.0, all: false, query: String::new(),
+            hwnd, theme: theme.clone(), scale: 1.0, pos: (0, 0), mon: (0, 0, 0, 0), bottom: true, open: false, opened_at: std::time::Instant::now(), vis: 0.0, all: false, search: Default::default(),
             sel: None, scroll: 0, hover: None, hover_t: 0.0, last: None, anim_on: false, in_menu: false, pins_path: root.join("state").join("start-pins.json"),
         };
         MENU.with(|c| *c.borrow_mut() = Some(m));
@@ -291,7 +291,7 @@ pub fn toggle(anchor: R, mon: (i32, i32, i32, i32), bottom: bool, scale: f32, th
         m.open = true;
         m.opened_at = std::time::Instant::now();
         m.all = false;
-        m.query.clear();
+        m.search = Default::default();
         m.scroll = 0;
         m.sel = None;
         m.hover = None;
@@ -386,7 +386,7 @@ fn user_name() -> String {
 }
 
 fn paint() {
-    let Some((hwnd, theme, scale, vis, pos, hover, hover_t, query, all, sel, scroll, is_list)) = with(|m| (m.hwnd, m.theme.clone(), m.scale, m.vis, m.pos, m.hover, m.hover_t, m.query.clone(), m.all, m.sel, m.scroll, list_mode(m))) else { return };
+    let Some((hwnd, theme, scale, vis, pos, hover, hover_t, query, all, sel, scroll, is_list)) = with(|m| (m.hwnd, m.theme.clone(), m.scale, m.vis, m.pos, m.hover, m.hover_t, m.search.text.clone(), m.all, m.sel, m.scroll, list_mode(m))) else { return };
     unsafe {
         if vis <= 0.0 && !is_open() {
             let _ = ShowWindow(hwnd, SW_HIDE);
@@ -412,7 +412,7 @@ fn paint() {
             let shade = |buf: &mut [u32], r: R, alpha: f32| fill_round_a(buf, w, h, r, px(8, scale), fg, alpha);
 
             shade(buf, l.search, 0.08);
-            let (text, color) = if query.is_empty() { (t(K::StartSearch).to_string(), muted) } else { (format!("{query}|"), fg) };
+            let (text, color) = if query.is_empty() { (t(K::StartSearch).to_string(), muted) } else if with(|m| m.search.selected) == Some(true) { (query.clone(), rgb(&theme.accent)) } else { (format!("{query}|"), fg) };
             draw_text(buf, w, h, R { x: l.search.x + pad_text, ..l.search }, &text, &theme.font_family, scale, color, font, DT_LEFT);
 
             let heading = if !query.is_empty() { "" } else if all { t(K::StartAllApps).trim_end_matches(['>', ' ']) } else { t(K::StartPinned) };
@@ -565,7 +565,7 @@ fn hit_at(x: i32, y: i32) -> Option<Hit> {
     if inside(&l.search) {
         return Some(Hit::Search);
     }
-    if inside(&l.all_button) && with(|m| m.query.trim().is_empty()).unwrap_or(false) {
+    if inside(&l.all_button) && with(|m| m.search.text.trim().is_empty()).unwrap_or(false) {
         return Some(Hit::All);
     }
     if list {
@@ -656,11 +656,11 @@ fn move_selection(dx: i32, dy: i32) {
     paint();
 }
 
-fn edit_query(f: impl FnOnce(&mut String)) {
+fn edit_query(edit: model::Edit) {
     with(|m| {
-        f(&mut m.query);
+        m.search.apply(edit);
         m.scroll = 0;
-        m.sel = (!m.query.trim().is_empty()).then_some(0);
+        m.sel = (!m.search.text.trim().is_empty()).then_some(0);
     });
     paint();
 }
@@ -770,22 +770,20 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
         WM_KEYDOWN => {
             match VIRTUAL_KEY(wp.0 as u16) {
                 VK_ESCAPE => {
-                    if with(|s| s.query.is_empty()).unwrap_or(true) {
+                    if with(|s| s.search.text.is_empty()).unwrap_or(true) {
                         close();
                     } else {
-                        edit_query(String::clear);
+                        edit_query(model::Edit::Clear);
                     }
                 }
                 VK_RETURN => {
                     let sel = with(|s| s.sel).flatten();
-                    let empty = with(|s| s.query.trim().is_empty()).unwrap_or(true);
+                    let empty = with(|s| s.search.text.trim().is_empty()).unwrap_or(true);
                     if let Some(n) = sel.or(if empty { None } else { Some(0) }) {
                         launch_at(n);
                     }
                 }
-                VK_BACK => edit_query(|q| {
-                    q.pop();
-                }),
+                VK_BACK => edit_query(if GetKeyState(VK_CONTROL.0 as i32) < 0 { model::Edit::BackWord } else { model::Edit::Backspace }),
                 VK_UP => move_selection(0, -1),
                 VK_DOWN => move_selection(0, 1),
                 VK_LEFT => move_selection(-1, 0),
@@ -801,8 +799,26 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
             return LRESULT(0);
         }
         WM_CHAR => {
-            if let Some(c) = char::from_u32(wp.0 as u32).filter(|c| !c.is_control()) {
-                edit_query(|q| q.push(c));
+            let query = || with(|s| s.search.text.clone()).unwrap_or_default();
+            // con Ctrl, WM_CHAR entrega el código de control de la letra
+            match wp.0 {
+                0x01 => edit_query(model::Edit::SelectAll),
+                0x03 => crate::clipboard::set(h, &query()),
+                0x18 => {
+                    crate::clipboard::set(h, &query());
+                    edit_query(model::Edit::Clear);
+                }
+                0x16 => {
+                    if let Some(text) = crate::clipboard::get(h) {
+                        edit_query(model::Edit::Insert(&text));
+                    }
+                }
+                0x1A => edit_query(model::Edit::Undo),
+                code => {
+                    if let Some(c) = char::from_u32(code as u32).filter(|c| !c.is_control()) {
+                        edit_query(model::Edit::Insert(c.encode_utf8(&mut [0; 4])));
+                    }
+                }
             }
             return LRESULT(0);
         }

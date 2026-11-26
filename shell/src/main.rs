@@ -13,6 +13,7 @@ mod dock_recent;
 mod dock_thumb;
 mod brightness;
 mod calendar;
+mod clipboard;
 mod cluster;
 mod world;
 mod wpn;

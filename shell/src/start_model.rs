@@ -41,6 +41,58 @@ pub fn default_pins(apps: &[App]) -> Vec<String> {
     out
 }
 
+#[derive(Default)]
+pub struct Search {
+    pub text: String,
+    // Ctrl+A: la próxima edición reemplaza todo.
+    pub selected: bool,
+    undo: Vec<String>,
+}
+
+pub enum Edit<'a> {
+    Insert(&'a str),
+    Backspace,
+    BackWord,
+    Clear,
+    SelectAll,
+    Undo,
+}
+
+impl Search {
+    pub fn apply(&mut self, edit: Edit) {
+        let selected = std::mem::take(&mut self.selected);
+        match edit {
+            Edit::SelectAll => self.selected = !self.text.is_empty(),
+            Edit::Undo => {
+                if let Some(previous) = self.undo.pop() {
+                    self.text = previous;
+                }
+            }
+            edit => {
+                let before = self.text.clone();
+                if selected || matches!(edit, Edit::Clear) {
+                    self.text.clear();
+                }
+                match edit {
+                    // un pegado de varias líneas queda en una: el buscador es de una línea
+                    Edit::Insert(s) => self.text.extend(s.trim_end_matches(['\r', '\n']).chars().map(|c| if c.is_control() { ' ' } else { c }).take(200)),
+                    Edit::Backspace if !selected => {
+                        self.text.pop();
+                    }
+                    Edit::BackWord if !selected => {
+                        let kept = self.text.trim_end().trim_end_matches(|c: char| !c.is_whitespace()).len();
+                        self.text.truncate(kept);
+                    }
+                    _ => {}
+                }
+                if self.text != before {
+                    self.undo.push(before);
+                }
+            }
+        }
+    }
+}
+
 // Índices de `apps` que cumplen la consulta: primero los que empiezan por ella o por una palabra, después los que la contienen.
 pub fn filter(apps: &[App], query: &str) -> Vec<usize> {
     let q = query.trim().to_lowercase();
@@ -232,6 +284,31 @@ pub fn layout(scale: f32) -> Layout {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn search_box_edits_like_a_standard_text_field() {
+        use super::{Edit, Search};
+        let mut s = Search::default();
+        s.apply(Edit::Insert("visual studio\r\n"));
+        assert_eq!(s.text, "visual studio");
+        s.apply(Edit::BackWord);
+        assert_eq!(s.text, "visual ");
+        s.apply(Edit::Backspace);
+        assert_eq!(s.text, "visual");
+        s.apply(Edit::SelectAll);
+        assert!(s.selected);
+        s.apply(Edit::Insert("x"));
+        assert_eq!((s.text.as_str(), s.selected), ("x", false));
+        s.apply(Edit::Undo);
+        assert_eq!(s.text, "visual");
+        s.apply(Edit::SelectAll);
+        s.apply(Edit::Backspace);
+        assert_eq!(s.text, "");
+        s.apply(Edit::Undo);
+        s.apply(Edit::Clear);
+        s.apply(Edit::Undo);
+        assert_eq!(s.text, "visual");
+    }
+
     use super::*;
 
     fn app(name: &str, open: &str) -> App {
