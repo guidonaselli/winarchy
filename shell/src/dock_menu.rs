@@ -231,7 +231,14 @@ pub fn launch(path: &str, args: &str) {
         });
         return;
     }
-    shell_execute(path, args);
+    // un destino de red caído puede bloquear ShellExecute minutos: nunca en el hilo de UI
+    let (path, args) = (path.to_owned(), args.to_owned());
+    std::thread::spawn(move || unsafe {
+        use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        shell_execute(&path, &args);
+        CoUninitialize();
+    });
 }
 
 fn shell_execute(path: &str, args: &str) {

@@ -1,5 +1,5 @@
 # Runs in the sandbox (Windows PowerShell 5.1). `elevated` runs as SYSTEM, the rest as the non-elevated user.
-param([Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'elevated', 'barswitch', 'interrupted')][string]$Scenario)
+param([Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'elevated', 'barswitch', 'interrupted', 'uninstall-interrupted', 'hungpipe')][string]$Scenario)
 $ProgressPreference = 'SilentlyContinue'
 $out = 'C:\sandbox'
 $bare = Join-Path $out 'winarchy.git'
@@ -127,6 +127,38 @@ switch ($Scenario) {
         "installers drained after $([int]$drain.Elapsed.TotalSeconds) s"
         Invoke-WinarchyScript install.ps1 -Arguments '-Activate'
         Invoke-WinarchyScript install.ps1
+    }
+    'uninstall-interrupted' {
+        Install-Prerequisites
+        Invoke-WinarchyScript install.ps1 -Arguments '-Activate'
+        $run = Start-Process pwsh -PassThru -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'C:\winarchy\uninstall.ps1'
+        # se corta apenas desaparece la tarea de logon (paso 3 de 12): faltan env vars, PATH y pins
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        while (-not $run.HasExited -and $watch.Elapsed.TotalSeconds -lt 120) {
+            schtasks /Query /TN '\Winarchy\komorebi' 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) { break }
+            Start-Sleep -Milliseconds 100
+        }
+        if ($run.HasExited) { $failed = $true; "uninstall finished (exit $($run.ExitCode)) before it could be interrupted" }
+        else { taskkill /F /T /PID $run.Id 2>&1 | Out-Host; 'uninstall interrupted after its autostart was removed' }
+        Invoke-WinarchyScript uninstall.ps1
+        Test-Uninstalled
+        Invoke-WinarchyScript install.ps1
+    }
+    'hungpipe' {
+        Install-Prerequisites
+        # el test enlaza el pipe real de la sesión: solo corre donde no hay una shell viva, por eso va en el Sandbox
+        $probe = @'
+Install-Module Pester -MinimumVersion 5.0 -Force -Scope CurrentUser -SkipPublisherCheck
+Import-Module Pester -MinimumVersion 5.0
+$r = Invoke-Pester -Path C:\winarchy\tests\ShellLifecycleGate.Tests.ps1 -FullNameFilter '*pipe recovery deadline*' -PassThru -Output Detailed
+"passed=$($r.PassedCount) failed=$($r.FailedCount) skipped=$($r.SkippedCount)"
+exit $(if ($r.PassedCount -ge 1 -and $r.FailedCount -eq 0 -and $r.SkippedCount -eq 0) { 0 } else { 1 })
+'@
+        $path = Join-Path $out 'hungpipe-pester.ps1'
+        $probe | Set-Content $path -Encoding UTF8
+        pwsh -NoProfile -ExecutionPolicy Bypass -File $path 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { $failed = $true; "hung-pipe recovery test exited $LASTEXITCODE" }
     }
     'barswitch' {
         Install-Prerequisites

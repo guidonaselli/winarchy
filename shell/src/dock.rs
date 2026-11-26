@@ -2381,6 +2381,17 @@ pub(crate) fn drop_launch(owner: isize, sx: i32, sy: i32) -> Option<(String, Str
     out
 }
 
+// Si el punto de pantalla (sx, sy) cae sobre el logo de este dock: soltar ahí ancla al Inicio.
+pub(crate) fn brand_at(owner: isize, sx: i32, sy: i32) -> bool {
+    let mut hit = false;
+    on_dock(owner, || unsafe {
+        let mut p = POINT { x: sx, y: sy };
+        let _ = ScreenToClient(HWND(owner as *mut _), &mut p);
+        hit = with(|d| matches!(display_hit(d, p.x, p.y), Some(Hit::Brand)));
+    });
+    hit
+}
+
 pub(crate) fn on_dock(owner: isize, f: impl FnOnce()) {
     let index = DOCKS.with(|d| d.borrow().iter().position(|d| d.hwnd.0 as isize == owner));
     if let Some(index) = index {

@@ -12,7 +12,7 @@
                 Assert-Install -Mode active
     interrupted install.ps1 -Activate killed (process tree) after 60 s, then install.ps1 -Activate and install.ps1
                 again: the re-run must finish and Assert-Install must pass
-    ahkv1       AutoHotkey 1.1 already installed, then install.ps1: it must end on the pinned v2
+    uninstall-interrupted install -Activate, uninstall.ps1 killed (process tree) once its autostart task is gone, uninstall.ps1 again, reinstall\n                 (the re-run must leave nothing behind and Assert-Install must pass)\n    ahkv1       AutoHotkey 1.1 already installed, then install.ps1: it must end on the pinned v2
                 (the AutoHotkey 1.1 installer can hang in the sandbox; it is stopped after 10 min)
     published   the real one-liner against GitHub (irm .../release/boot.ps1 | iex), Assert-Install
     selfupdate  install.ps1 twice, then roll the checkout back to v1.6.0 (AHK/Flow unpinned, as
@@ -28,7 +28,7 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'barswitch', 'interrupted')][string]$Scenario,
+    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'barswitch', 'interrupted', 'uninstall-interrupted', 'hungpipe')][string]$Scenario,
     [switch]$Keep,
     [switch]$WorkingTree,
     [string]$Out = (Join-Path $env:TEMP 'winarchy-sandbox')
@@ -100,10 +100,13 @@ try {
         if ($code -ne 0) { throw "elevated check exited with $code; see $run" }
     }
     Invoke-GuestScript ExistingLogin 'Invoke-SandboxScenario.ps1' "-Scenario $Scenario"
-    $mode = if ($Scenario -in 'boot', 'paths') { 'active' } else { 'coexistence' }
-    $code = Invoke-Guest ExistingLogin "pwsh.exe -NoProfile -ExecutionPolicy Bypass -File C:\sandbox\scripts\Assert-Install.ps1 -Mode $mode"
-    Get-Content (Join-Path $run 'assert.txt')
-    if ($code -ne 0) { throw "Assert-Install failed; see $run" }
+    # hungpipe solo corre un test de Pester: no instala nada que verificar
+    if ($Scenario -ne 'hungpipe') {
+        $mode = if ($Scenario -in 'boot', 'paths') { 'active' } else { 'coexistence' }
+        $code = Invoke-Guest ExistingLogin "pwsh.exe -NoProfile -ExecutionPolicy Bypass -File C:\sandbox\scripts\Assert-Install.ps1 -Mode $mode"
+        Get-Content (Join-Path $run 'assert.txt')
+        if ($code -ne 0) { throw "Assert-Install failed; see $run" }
+    }
     Write-Host "PASS: $Scenario" -ForegroundColor Green
 }
 finally {

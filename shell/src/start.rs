@@ -1,10 +1,11 @@
 // Menú Inicio propio: pineados, todas las apps (AppsFolder), búsqueda por teclado y energía.
 // Sin Explorer no existe el Inicio de Windows; esta ventana lo reemplaza y se cierra al perder el foco.
-// shortcut: sin recomendados ni (des)anclar desde la UI (los pines se editan en state/start-pins.json), sumar si hace falta.
+// Pineados: apps en la grilla y carpetas, archivos o .url en la franja de lugares; se anclan soltándolos sobre el logo del dock y se quitan con el menú contextual.
+// shortcut: sin recomendados ni recientes (Recent está vacío sin Explorer), sin renombrar ni reordenar, y agregar un lugar solo por arrastre; sumar si hace falta.
 use crate::dock::{approach, blend, draw_label, draw_text, ease, fill_round_a, style, HOVER_MS};
 use crate::i18n::{t, K};
 use crate::layout::{px, R};
-use crate::start_model::{self as model, App, LIST_ROWS, PIN_COLS};
+use crate::start_model::{self as model, App, LIST_ROWS};
 use crate::theme::{rgb, Theme};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -43,6 +44,7 @@ enum Hit {
     Search,
     All,
     Cell(usize),
+    Chip(usize),
     Row(usize),
     Power,
 }
@@ -77,15 +79,37 @@ fn with<R>(f: impl FnOnce(&mut Menu) -> R) -> Option<R> {
     MENU.with(|c| c.try_borrow_mut().ok().and_then(|mut c| c.as_mut().map(f)))
 }
 
-// Índices (en APPS) de lo que muestra hoy el menú, en el orden en que se ven.
-fn visible(m: &Menu, apps: &[App]) -> Vec<usize> {
-    if !m.query.trim().is_empty() {
-        model::filter(apps, &m.query)
-    } else if m.all {
-        (0..apps.len()).collect()
-    } else {
-        model::pinned_indices(apps, model::load_pins(&m.pins_path))
+struct View {
+    cat: Vec<App>,
+    items: Vec<usize>,
+    grid_len: usize,
+}
+
+fn saved_list(path: &std::path::Path, apps: &[App]) -> Vec<String> {
+    match model::read_pins(path) {
+        model::Saved::Ok(v) => v,
+        _ => model::default_pins(apps),
     }
+}
+
+// Lo que muestra hoy el menú: catálogo (apps y lugares anclados) e índices en el orden visible; los primeros `grid_len` van en la grilla y el resto en la franja.
+fn view(m: &Menu) -> View {
+    let apps = APPS.lock().unwrap().clone();
+    let saved = saved_list(&m.pins_path, &apps);
+    let cat = model::catalog(&apps, &saved);
+    let (items, grid_len) = if !m.query.trim().is_empty() {
+        let found = model::filter(&cat, &m.query);
+        let n = found.len();
+        (found, n)
+    } else if m.all {
+        ((0..apps.len()).collect(), apps.len())
+    } else {
+        let (mut grid, places) = model::pinned(&cat, &saved);
+        let n = grid.len();
+        grid.extend(places);
+        (grid, n)
+    };
+    View { cat, items, grid_len }
 }
 
 fn list_mode(m: &Menu) -> bool {
@@ -126,16 +150,12 @@ fn refresh() {
                 *APPS.lock().unwrap() = apps.clone();
                 *LOADED_AT.lock().unwrap() = Some(std::time::Instant::now());
                 notify();
-                let pins = with_pins(&apps);
-                let order = pins.iter().copied().chain((0..apps.len()).filter(|i| !pins.contains(i)));
+                let saved = PINS_PATH.get().map_or_else(Vec::new, |p| saved_list(p, &apps));
+                let cat = model::catalog(&apps, &saved);
+                let (grid, places) = model::pinned(&cat, &saved);
+                let order = places.iter().chain(&grid).copied().chain((0..apps.len()).filter(|i| !grid.contains(i)));
                 for (n, i) in order.enumerate() {
-                    let open = &apps[i].open;
-                    if ICONS.lock().unwrap().as_ref().is_some_and(|c| c.contains_key(open)) {
-                        continue;
-                    }
-                    if let Some(icon) = crate::dock::fetch_icon(open, 64) {
-                        ICONS.lock().unwrap().get_or_insert_with(HashMap::new).insert(open.clone(), icon);
-                    }
+                    cache_icon(&cat[i].open);
                     if n % 12 == 11 {
                         notify();
                     }
@@ -148,8 +168,60 @@ fn refresh() {
     });
 }
 
-fn with_pins(apps: &[App]) -> Vec<usize> {
-    model::pinned_indices(apps, PINS_PATH.get().and_then(|p| model::load_pins(p)))
+// Un recurso de red puede tardar minutos en responder: su ícono es el glifo, nunca una consulta al shell.
+fn is_remote(open: &str) -> bool {
+    use windows::Win32::Storage::FileSystem::GetDriveTypeW;
+    const DRIVE_REMOTE: u32 = 4;
+    if open.starts_with(r"\\") || open.contains("://") {
+        return true;
+    }
+    let b = open.as_bytes();
+    if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+        let root: Vec<u16> = format!("{}:\\", b[0] as char).encode_utf16().chain(std::iter::once(0)).collect();
+        return unsafe { GetDriveTypeW(PCWSTR(root.as_ptr())) } == DRIVE_REMOTE;
+    }
+    false
+}
+
+fn cache_icon(open: &str) {
+    if ICONS.lock().unwrap().as_ref().is_some_and(|c| c.contains_key(open)) || (!model::is_app(open) && is_remote(open)) {
+        return;
+    }
+    if let Some(icon) = unsafe { crate::dock::fetch_icon(open, 64) } {
+        ICONS.lock().unwrap().get_or_insert_with(HashMap::new).insert(open.to_string(), icon);
+    }
+}
+
+// Íconos de los lugares recién anclados, en un hilo propio: consultar el shell no debe frenar al llamador.
+fn fetch_place_icons() {
+    std::thread::spawn(|| unsafe {
+        use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        if let Some(model::Saved::Ok(saved)) = PINS_PATH.get().map(|p| model::read_pins(p)) {
+            saved.iter().filter(|o| !model::is_app(o)).for_each(|o| cache_icon(o));
+        }
+        notify();
+        CoUninitialize();
+    });
+}
+
+// Edita la lista guardada sin perder pines: no escribe sobre un JSON roto ni antes de conocer las apps.
+fn edit_pins(f: impl FnOnce(Vec<String>) -> Vec<String>) -> bool {
+    let Some(path) = PINS_PATH.get() else { return false };
+    let apps = APPS.lock().unwrap().clone();
+    let Some(base) = model::base_for_write(model::read_pins(path), &apps) else { return false };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let ok = model::save_pins(path, &f(base)).is_ok();
+    notify();
+    fetch_place_icons();
+    ok
+}
+
+// Ancla carpetas, archivos o accesos .url soltados sobre el logo del dock.
+pub fn pin_paths(paths: Vec<String>) -> bool {
+    edit_pins(|base| paths.iter().fold(base, |b, p| model::pin(b, p)))
 }
 
 unsafe fn enumerate() -> Option<Vec<App>> {
@@ -321,8 +393,8 @@ fn paint() {
             return;
         }
         let l = model::layout(scale);
-        let apps = APPS.lock().unwrap().clone();
-        let items = with(|m| visible(m, &apps)).unwrap_or_default();
+        let Some(v) = with(|m| view(m)) else { return };
+        let (apps, items) = (&v.cat, &v.items);
         let (w, h) = l.size;
         let (bg, fg, muted, accent) = (rgb(&theme.background), rgb(&theme.foreground), rgb(&theme.muted), rgb(&theme.accent));
         let st = style(&theme);
@@ -371,7 +443,7 @@ fn paint() {
                     draw_text(buf, w, h, R { x: row.x + pad_text * 2 + row_side, w: row.w - pad_text * 3 - row_side, ..*row }, &app.name, &theme.font_family, scale, fg, font, DT_LEFT);
                 }
             } else {
-                for (n, cell) in l.cells.iter().enumerate() {
+                for (n, cell) in l.cells.iter().enumerate().take(v.grid_len) {
                     let Some(app) = items.get(n).and_then(|i| apps.get(*i)) else { break };
                     if on(Hit::Cell(n), n) {
                         shade(buf, *cell, if sel == Some(n) { 0.16 } else { 0.10 * ease(hover_t) });
@@ -381,6 +453,25 @@ fn paint() {
                     }
                     let label = R { x: cell.x + px(2, scale), y: cell.y + px(10, scale) + side + px(4, scale), w: cell.w - px(4, scale), h: px(22, scale) };
                     draw_label(buf, w, h, label, &app.name, &theme.font_family, scale, fg, font - 2);
+                }
+                fill_round_a(buf, w, h, l.divider, 0, fg, 0.10);
+                if items.len() == v.grid_len {
+                    let hint = R { w: l.divider.w, ..l.places[0] };
+                    draw_text(buf, w, h, R { x: hint.x + pad_text, ..hint }, t(K::StartPlacesHint), &theme.font_family, scale, muted, font - 2, DT_LEFT);
+                }
+                let chip_side = px(20, scale);
+                for (k, chip) in l.places.iter().enumerate() {
+                    let Some(place) = items.get(v.grid_len + k).and_then(|i| apps.get(*i)) else { break };
+                    if on(Hit::Chip(k), v.grid_len + k) {
+                        shade(buf, *chip, if sel == Some(v.grid_len + k) { 0.16 } else { 0.10 * ease(hover_t) });
+                    }
+                    let icon_at = R { x: chip.x + pad_text, y: chip.y + (chip.h - chip_side) / 2, w: chip_side, h: chip_side };
+                    match icon_pixels(&place.open, chip_side) {
+                        Some(p) => blit(buf, (w, h), icon_at.x, icon_at.y, chip_side, &p),
+                        None => draw_label(buf, w, h, icon_at, place_glyph(&place.open), ICONS_FONT, scale, muted, 16),
+                    }
+                    let text = R { x: icon_at.x + chip_side + px(8, scale), w: chip.x + chip.w - icon_at.x - chip_side - px(14, scale), ..*chip };
+                    draw_text(buf, w, h, text, &crate::dock::clip_title(&place.name, 16), &theme.font_family, scale, fg, font - 1, DT_LEFT);
                 }
             }
 
@@ -410,18 +501,32 @@ fn paint() {
         if !IsWindowVisible(hwnd).as_bool() {
             let _ = ShowWindow(hwnd, SW_SHOWNA);
         }
-        publish(hwnd, &l, &apps, &items, is_list, scroll, &query, all);
+        publish(hwnd, &l, &v, is_list, scroll, &query, all);
     }
 }
 
-fn publish(hwnd: HWND, l: &model::Layout, apps: &[App], items: &[usize], is_list: bool, scroll: usize, query: &str, all: bool) {
-    let rects = if is_list { &l.rows } else { &l.cells };
-    let first = if is_list { scroll } else { 0 };
-    let mut nodes: Vec<(String, accesskit::Node)> = rects
+// Glifo de respaldo cuando el shell no entrega ícono (recursos de red, URLs): carpeta, archivo o enlace.
+fn place_glyph(open: &str) -> &'static str {
+    let leaf = open.trim_end_matches(['\\', '/']).rsplit(['\\', '/']).next().unwrap_or(open);
+    if open.contains("://") || open.to_ascii_lowercase().ends_with(".url") {
+        "\u{E774}"
+    } else if leaf.contains('.') {
+        "\u{E8A5}"
+    } else {
+        "\u{E8B7}"
+    }
+}
+
+fn publish(hwnd: HWND, l: &model::Layout, v: &View, is_list: bool, scroll: usize, query: &str, all: bool) {
+    let slots: Vec<(R, usize)> = if is_list {
+        l.rows.iter().enumerate().map(|(n, r)| (*r, scroll + n)).collect()
+    } else {
+        l.cells.iter().take(v.grid_len).enumerate().map(|(n, r)| (*r, n)).chain(l.places.iter().enumerate().map(|(k, r)| (*r, v.grid_len + k))).collect()
+    };
+    let mut nodes: Vec<(String, accesskit::Node)> = slots
         .iter()
-        .enumerate()
-        .filter_map(|(n, r)| {
-            let app = items.get(first + n).and_then(|i| apps.get(*i))?;
+        .filter_map(|(r, pos)| {
+            let app = v.items.get(*pos).and_then(|i| v.cat.get(*i))?;
             let mut node = accesskit::Node::new(accesskit::Role::MenuItem);
             node.set_label(app.name.clone());
             node.set_bounds(accesskit::Rect::new(r.x as f64, r.y as f64, (r.x + r.w) as f64, (r.y + r.h) as f64));
@@ -466,17 +571,69 @@ fn hit_at(x: i32, y: i32) -> Option<Hit> {
     if list {
         l.rows.iter().position(inside).map(|n| Hit::Row(scroll + n))
     } else {
-        l.cells.iter().position(inside).map(Hit::Cell)
+        l.cells.iter().position(inside).map(Hit::Cell).or_else(|| l.places.iter().position(inside).map(Hit::Chip))
     }
 }
 
+// Posición en `View::items` de lo que hay bajo un golpe del mouse; las fichas van después de la grilla.
+fn position_of(hit: Hit) -> Option<usize> {
+    match hit {
+        Hit::Cell(n) | Hit::Row(n) => Some(n),
+        Hit::Chip(k) => with(|m| view(m).grid_len + k),
+        _ => None,
+    }
+}
+
+fn open_at(position: usize) -> Option<String> {
+    with(|m| {
+        let v = view(m);
+        v.items.get(position).and_then(|i| v.cat.get(*i)).map(|a| a.open.clone())
+    })
+    .flatten()
+}
+
 fn launch_at(position: usize) {
-    let apps = APPS.lock().unwrap().clone();
-    let open = with(|m| visible(m, &apps).get(position).and_then(|i| apps.get(*i)).map(|a| a.open.clone())).flatten();
-    if let Some(open) = open {
+    if let Some(open) = open_at(position) {
         close();
         crate::dock_menu::launch(&open, "");
     }
+}
+
+// Menú contextual de un elemento: quita un pin del Inicio o ancla una app de la lista; usa el mismo guardia `in_menu` que el de energía.
+unsafe fn item_menu(h: HWND, position: usize, at: (i32, i32)) {
+    let Some(open) = open_at(position) else { return };
+    let pinned = PINS_PATH.get().is_some_and(|p| matches!(model::read_pins(p), model::Saved::Ok(v) if v.iter().any(|o| o.eq_ignore_ascii_case(&open))));
+    let places_only = !model::is_app(&open);
+    if !pinned && places_only {
+        return;
+    }
+    with(|m| m.in_menu = true);
+    let Ok(menu) = CreatePopupMenu() else { return };
+    let label: Vec<u16> = (if pinned { t(K::StartUnpin) } else { t(K::StartPin) }).encode_utf16().chain(std::iter::once(0)).collect();
+    let _ = AppendMenuW(menu, MF_STRING, 1, PCWSTR(label.as_ptr()));
+    let picked = TrackPopupMenu(menu, TPM_RETURNCMD, at.0, at.1, 0, h, None);
+    let _ = DestroyMenu(menu);
+    with(|m| {
+        m.in_menu = false;
+        m.opened_at = std::time::Instant::now();
+    });
+    if picked.0 == 1 {
+        edit_pins(|base| if pinned { model::unpin(base, &open) } else { model::pin(base, &open) });
+        with(|m| m.sel = None);
+        paint();
+    }
+}
+
+// Esquina superior izquierda en pantalla de lo seleccionado, para abrir el menú desde el teclado.
+fn selection_origin() -> Option<(usize, (i32, i32))> {
+    with(|m| {
+        let pos = m.sel?;
+        let l = model::layout(m.scale);
+        let grid_len = view(m).grid_len;
+        let r = if list_mode(m) { *l.rows.get(pos.checked_sub(m.scroll)?)? } else if pos < grid_len { *l.cells.get(pos)? } else { *l.places.get(pos - grid_len)? };
+        Some((pos, (m.pos.0 + r.x + r.w / 2, m.pos.1 + r.y + r.h / 2)))
+    })
+    .flatten()
 }
 
 fn set_all(all: bool) {
@@ -489,11 +646,9 @@ fn set_all(all: bool) {
 }
 
 fn move_selection(dx: i32, dy: i32) {
-    let apps = APPS.lock().unwrap().clone();
     with(|m| {
-        let len = visible(m, &apps).len();
-        let cols = if list_mode(m) { 1 } else { PIN_COLS };
-        m.sel = model::step(m.sel, len, dx, dy, cols);
+        let v = view(m);
+        m.sel = if list_mode(m) { model::step(m.sel, v.items.len(), dx, dy, 1) } else { model::step_sections(m.sel, v.grid_len, v.items.len() - v.grid_len, dx, dy) };
         if let Some(s) = m.sel {
             m.scroll = if list_mode(m) { model::scroll_to(m.scroll, s) } else { 0 };
         }
@@ -581,10 +736,9 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
         }
         WM_MOUSEWHEEL => {
             let delta = ((wp.0 >> 16) & 0xFFFF) as i16 as i32;
-            let apps = APPS.lock().unwrap().clone();
             with(|s| {
                 if list_mode(s) {
-                    let max = visible(s, &apps).len().saturating_sub(LIST_ROWS);
+                    let max = view(s).items.len().saturating_sub(LIST_ROWS);
                     s.scroll = (s.scroll as i32 - delta.signum() * 3).clamp(0, max as i32) as usize;
                 }
             });
@@ -596,8 +750,22 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
             match hit_at(x, y) {
                 Some(Hit::All) => set_all(!with(|s| s.all).unwrap_or(false)),
                 Some(Hit::Power) => power_menu(h),
-                Some(Hit::Cell(n)) | Some(Hit::Row(n)) => launch_at(n),
+                Some(hit @ (Hit::Cell(_) | Hit::Row(_) | Hit::Chip(_))) => position_of(hit).map_or((), launch_at),
                 _ => {}
+            }
+            return LRESULT(0);
+        }
+        WM_RBUTTONUP => {
+            let (x, y) = client(lp);
+            if let Some(position) = hit_at(x, y).and_then(position_of) {
+                let pos = with(|s| s.pos).unwrap_or_default();
+                item_menu(h, position, (pos.0 + x, pos.1 + y));
+            }
+            return LRESULT(0);
+        }
+        WM_SYSKEYDOWN if VIRTUAL_KEY(wp.0 as u16) == VK_F10 && GetKeyState(VK_SHIFT.0 as i32) < 0 => {
+            if let Some((position, at)) = selection_origin() {
+                item_menu(h, position, at);
             }
             return LRESULT(0);
         }
@@ -625,6 +793,11 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
                 VK_LEFT => move_selection(-1, 0),
                 VK_RIGHT => move_selection(1, 0),
                 VK_TAB => set_all(!with(|s| s.all).unwrap_or(false)),
+                VK_APPS => {
+                    if let Some((position, at)) = selection_origin() {
+                        item_menu(h, position, at);
+                    }
+                }
                 _ => {}
             }
             return LRESULT(0);
