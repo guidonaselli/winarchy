@@ -180,6 +180,40 @@ fn progress(s: &St) -> f32 {
     if s.animate { (s.born.elapsed().as_secs_f32() * 1000.0 / OPEN_MS).min(1.0) } else { 1.0 }
 }
 
+unsafe fn compose(buf: &mut [u32], w: i32, h: i32, header: &Header, labels: &[String], hover: Option<usize>, theme: &Theme, scale: f32) {
+    buf.fill(0);
+    let (bg, fg, accent) = (rgb(&theme.background), rgb(&theme.foreground), rgb(&theme.accent));
+    fill_round_a(buf, w, h, R { x: 0, y: 0, w, h }, px(12, scale), bg, 0.97);
+    let (row, pad, padx) = (row_h(scale), pad(scale), px(14, scale));
+    let top = pad + header_h(header, scale);
+    let muted = rgb(&theme.muted);
+    match header {
+        Header::None => {}
+        Header::Text(t) => draw_text(buf, w, h, R { x: padx, y: pad, w: w - 2 * padx, h: px(24, scale) }, t, &theme.font_family, scale, muted, font_px(theme), DT_LEFT),
+        Header::Slider(label, v) => {
+            let line = R { x: padx, y: pad, w: w - 2 * padx, h: px(28, scale) };
+            draw_text(buf, w, h, line, label, &theme.font_family, scale, fg, font_px(theme), DT_LEFT);
+            draw_text(buf, w, h, line, &format!("{}%", (v * 100.0).round() as i32), &theme.font_family, scale, muted, font_px(theme), DT_RIGHT);
+            let (track_h, knob) = (px(6, scale), px(16, scale));
+            let cy = pad + px(28, scale) + px(16, scale);
+            let rail = R { x: padx, y: cy - track_h / 2, w: w - 2 * padx, h: track_h };
+            fill_round_a(buf, w, h, rail, track_h / 2, fg, 0.18);
+            let fill_w = ((rail.w as f32) * v).round() as i32;
+            if fill_w > 0 {
+                fill_round_a(buf, w, h, R { w: fill_w.max(track_h), ..rail }, track_h / 2, accent, 1.0);
+            }
+            fill_round_a(buf, w, h, R { x: padx + fill_w - knob / 2, y: cy - knob / 2, w: knob, h: knob }, knob / 2, fg, 1.0);
+        }
+    }
+    if let Some(i) = hover {
+        let inset = px(5, scale);
+        fill_round_a(buf, w, h, R { x: inset, y: top + i as i32 * row, w: w - 2 * inset, h: row }, px(8, scale), accent, 0.30);
+    }
+    for (i, l) in labels.iter().enumerate() {
+        draw_text(buf, w, h, R { x: padx, y: top + i as i32 * row, w: w - 2 * padx, h: row }, l, &theme.font_family, scale, fg, font_px(theme), DT_LEFT);
+    }
+}
+
 unsafe fn paint() {
     let Some((hwnd, labels, header, hover, (w, h), pos, theme, scale, e)) = ST.with(|s| s.borrow().as_ref().map(|s| (s.hwnd, s.labels.clone(), s.header.clone(), s.hover, s.size, s.pos, s.theme.clone(), s.scale, ease(progress(s))))) else { return };
     let bmi = BITMAPINFO { bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: w, biHeight: -h, biPlanes: 1, biBitCount: 32, biCompression: 0, ..Default::default() }, ..Default::default() };
@@ -189,37 +223,7 @@ unsafe fn paint() {
     if let Ok(dib) = CreateDIBSection(mem, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) {
         let old = SelectObject(mem, dib);
         let buf = std::slice::from_raw_parts_mut(bits as *mut u32, (w * h) as usize);
-        buf.fill(0);
-        let (bg, fg, accent) = (rgb(&theme.background), rgb(&theme.foreground), rgb(&theme.accent));
-        fill_round_a(buf, w, h, R { x: 0, y: 0, w, h }, px(12, scale), bg, 0.97);
-        let (row, pad, padx) = (row_h(scale), pad(scale), px(14, scale));
-        let top = pad + header_h(&header, scale);
-        let muted = rgb(&theme.muted);
-        match &header {
-            Header::None => {}
-            Header::Text(t) => draw_text(buf, w, h, R { x: padx, y: pad, w: w - 2 * padx, h: px(24, scale) }, t, &theme.font_family, scale, muted, font_px(&theme), DT_LEFT),
-            Header::Slider(label, v) => {
-                let line = R { x: padx, y: pad, w: w - 2 * padx, h: px(28, scale) };
-                draw_text(buf, w, h, line, label, &theme.font_family, scale, fg, font_px(&theme), DT_LEFT);
-                draw_text(buf, w, h, line, &format!("{}%", (v * 100.0).round() as i32), &theme.font_family, scale, muted, font_px(&theme), DT_RIGHT);
-                let (track_h, knob) = (px(6, scale), px(16, scale));
-                let cy = pad + px(28, scale) + px(16, scale);
-                let rail = R { x: padx, y: cy - track_h / 2, w: w - 2 * padx, h: track_h };
-                fill_round_a(buf, w, h, rail, track_h / 2, fg, 0.18);
-                let fill_w = ((rail.w as f32) * v).round() as i32;
-                if fill_w > 0 {
-                    fill_round_a(buf, w, h, R { w: fill_w.max(track_h), ..rail }, track_h / 2, accent, 1.0);
-                }
-                fill_round_a(buf, w, h, R { x: padx + fill_w - knob / 2, y: cy - knob / 2, w: knob, h: knob }, knob / 2, fg, 1.0);
-            }
-        }
-        if let Some(i) = hover {
-            let inset = px(5, scale);
-            fill_round_a(buf, w, h, R { x: inset, y: top + i as i32 * row, w: w - 2 * inset, h: row }, px(8, scale), accent, 0.30);
-        }
-        for (i, l) in labels.iter().enumerate() {
-            draw_text(buf, w, h, R { x: padx, y: top + i as i32 * row, w: w - 2 * padx, h: row }, l, &theme.font_family, scale, fg, font_px(&theme), DT_LEFT);
-        }
+        compose(buf, w, h, &header, &labels, hover, &theme, scale);
         let (sz, src) = (SIZE { cx: w, cy: h }, POINT::default());
         let bf = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: (e * 255.0).round() as u8, AlphaFormat: 1 };
         let off = ((1.0 - e) * px(8, scale) as f32) as i32;
@@ -356,6 +360,36 @@ mod tests {
         assert_eq!(row_at(6, 6, 30, 3), Some(0));
         assert_eq!(row_at(6 + 59, 6, 30, 3), Some(1));
         assert_eq!(row_at(6 + 90, 6, 30, 3), None);
+    }
+
+    // Vista previa a disco del panel de volumen con el theme real: `cargo test render_preview -- --ignored`.
+    #[test]
+    #[ignore]
+    fn render_preview() {
+        let theme = Theme::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../config/shell/theme.json")).unwrap_or_default();
+        let labels: Vec<String> = ["Sound settings", "Volume mixer", "Mute", "Display settings"].map(String::from).to_vec();
+        let header = Header::Slider("Volume".into(), 0.42);
+        let scale = 2.0;
+        let (w, h) = (px(240, scale), header_h(&header, scale) + row_h(scale) * labels.len() as i32 + 2 * pad(scale));
+        let mut buf = vec![0u32; (w * h) as usize];
+        unsafe { compose(&mut buf, w, h, &header, &labels, Some(1), &theme, scale) };
+        let mut bmp = Vec::new();
+        bmp.extend_from_slice(b"BM");
+        bmp.extend_from_slice(&((54 + w * h * 4) as u32).to_le_bytes());
+        bmp.extend_from_slice(&[0; 4]);
+        bmp.extend_from_slice(&54u32.to_le_bytes());
+        bmp.extend_from_slice(&40u32.to_le_bytes());
+        bmp.extend_from_slice(&w.to_le_bytes());
+        bmp.extend_from_slice(&(-h).to_le_bytes());
+        bmp.extend_from_slice(&1u16.to_le_bytes());
+        bmp.extend_from_slice(&32u16.to_le_bytes());
+        bmp.extend_from_slice(&[0; 24]);
+        for p in &buf {
+            let a = (p >> 24) & 255;
+            let over = |c: u32| ((c & 255) + (40 * (255 - a)) / 255).min(255);
+            bmp.extend_from_slice(&[over(*p) as u8, over(*p >> 8) as u8, over(*p >> 16) as u8, 255]);
+        }
+        std::fs::write(std::env::temp_dir().join("winarchy-menu.bmp"), bmp).unwrap();
     }
 
     #[test]
