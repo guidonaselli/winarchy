@@ -1,5 +1,5 @@
 # Runs in the sandbox (Windows PowerShell 5.1). `elevated` runs as SYSTEM, the rest as the non-elevated user.
-param([Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'elevated', 'barswitch')][string]$Scenario)
+param([Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'elevated', 'barswitch', 'interrupted')][string]$Scenario)
 $ProgressPreference = 'SilentlyContinue'
 $out = 'C:\sandbox'
 $bare = Join-Path $out 'winarchy.git'
@@ -111,6 +111,21 @@ switch ($Scenario) {
         Test-Uninstalled
         Invoke-WinarchyScript uninstall.ps1
         Test-Uninstalled
+        Invoke-WinarchyScript install.ps1
+    }
+    'interrupted' {
+        Install-Prerequisites
+        $install = Start-Process pwsh -PassThru -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'C:\winarchy\install.ps1', '-Activate'
+        Start-Sleep 60
+        if ($install.HasExited) { $failed = $true; "install finished (exit $($install.ExitCode)) before the interruption; raise the delay" }
+        else { taskkill /F /T /PID $install.Id 2>&1 | Out-Host; 'install interrupted after 60 s' }
+        # el instalador que quedó en vuelo conserva el mutex de Windows Installer (1618); se espera a que termine
+        Start-Sleep 90
+        $drain = [Diagnostics.Stopwatch]::StartNew()
+        $busy = { @(Get-CimInstance Win32_Process | Where-Object { $_.Name -in 'winget.exe', 'setup.exe', 'AppInstallerCLI.exe' -or ($_.Name -eq 'msiexec.exe' -and $_.CommandLine -notmatch '/V') }).Count }
+        while ((& $busy) -gt 0 -and $drain.Elapsed.TotalMinutes -lt 8) { Start-Sleep 10 }
+        "installers drained after $([int]$drain.Elapsed.TotalSeconds) s"
+        Invoke-WinarchyScript install.ps1 -Arguments '-Activate'
         Invoke-WinarchyScript install.ps1
     }
     'barswitch' {

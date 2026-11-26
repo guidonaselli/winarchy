@@ -10,6 +10,8 @@
                 running stack, profile hook or Start menu command left), reinstall, Assert-Install
     paths       boot.ps1 into a folder with a space, an accent and an apostrophe, activated,
                 Assert-Install -Mode active
+    interrupted install.ps1 -Activate killed (process tree) after 60 s, then install.ps1 -Activate and install.ps1
+                again: the re-run must finish and Assert-Install must pass
     ahkv1       AutoHotkey 1.1 already installed, then install.ps1: it must end on the pinned v2
                 (the AutoHotkey 1.1 installer can hang in the sandbox; it is stopped after 10 min)
     published   the real one-liner against GitHub (irm .../release/boot.ps1 | iex), Assert-Install
@@ -26,7 +28,7 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'barswitch')][string]$Scenario,
+    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'barswitch', 'interrupted')][string]$Scenario,
     [switch]$Keep,
     [switch]$WorkingTree,
     [string]$Out = (Join-Path $env:TEMP 'winarchy-sandbox')
