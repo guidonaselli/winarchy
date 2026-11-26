@@ -14,7 +14,8 @@ pub struct Bar<'a> {
 fn node(layout: &Layout, role: Role, label: String, r: R) -> Node {
     let r = layout.place(r);
     let mut node = Node::new(role);
-    node.set_label(label);
+    // Un texto fijo toma su nombre del valor, no de la etiqueta.
+    if role == Role::Label { node.set_value(label) } else { node.set_label(label) }
     node.set_bounds(accesskit::Rect::new(r.x as f64, r.y as f64, (r.x + r.w) as f64, (r.y + r.h) as f64));
     node
 }
@@ -56,7 +57,9 @@ pub fn nodes(layout: &Layout, bar: &Bar, panel: Option<&Panel>) -> Vec<(String, 
     }
     for (i, (m, (name, _, value))) in pr.meters.iter().zip(&p.meters).enumerate() {
         let row = R { w: m.value.x + m.value.w - m.label.x, ..m.label };
-        add(format!("meter{i}"), Role::Label, format!("{} {value}", name.name()), row, false);
+        if !matches!(name, crate::Meter::Vol | crate::Meter::Bri) {
+            add(format!("meter{i}"), Role::Label, format!("{} {value}", name.name()), row, false);
+        }
     }
     if let Some(cv) = &p.cal {
         add("title".into(), Role::Label, cv.title.clone(), pr.cal_title, false);
@@ -86,6 +89,20 @@ pub fn nodes(layout: &Layout, bar: &Bar, panel: Option<&Panel>) -> Vec<(String, 
     let mode = crate::komorebi::CURRENT.lock().unwrap().as_ref().map(|w| w.mode).unwrap_or_default();
     add("mode".into(), Role::Button, crate::mode_label(mode).into(), pr.mode, false);
     add("notes".into(), Role::Label, p.notes.clone(), pr.notes, false);
+    for (m, (name, pct, value)) in pr.meters.iter().zip(&p.meters) {
+        let key = match name {
+            crate::Meter::Vol => "vol",
+            crate::Meter::Bri => "bri",
+            _ => continue,
+        };
+        let mut slider = node(layout, Role::Slider, format!("{} {value}", name.name()), R { w: m.value.x + m.value.w - m.label.x, ..m.label });
+        slider.set_numeric_value(f64::from(*pct));
+        slider.set_min_numeric_value(0.0);
+        slider.set_max_numeric_value(100.0);
+        slider.add_action(Action::Increment);
+        slider.add_action(Action::Decrement);
+        out.push((key.into(), slider));
+    }
     out
 }
 
@@ -123,6 +140,7 @@ mod tests {
             assert_eq!(hit("notifs"), Some(Hit::NotifPage));
             assert_eq!(hit("notif1"), Some(Hit::Notif(1)));
             assert_eq!(click_point(&nodes, "title"), None);
+            assert!(nodes.iter().any(|(k, n)| k == "title" && n.value() == Some("mayo 2026")));
             assert!(nodes.iter().all(|(k, _)| k != "day31"));
         }
     }

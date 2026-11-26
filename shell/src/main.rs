@@ -1147,7 +1147,19 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
             // solo importan la clave y los bordes: las etiquetas de la barra no cambian dónde se hace clic
             let nodes = pill_access::nodes(&layout, &pill_access::Bar { clock: "-", temp: "-", island: "", pinned: false }, panel.as_ref());
             for (key, action) in actions {
-                if action != accesskit::Action::Click {
+                let step = match action {
+                    accesskit::Action::Increment => 1,
+                    accesskit::Action::Decrement => -1,
+                    accesskit::Action::Click => 0,
+                    _ => continue,
+                };
+                if step != 0 {
+                    if key == "bri" {
+                        brightness::adjust(step);
+                    } else {
+                        let _ = metrics::adjust_volume(step);
+                        tick(with(|s| s.strip));
+                    }
                     continue;
                 }
                 if let Some((x, y)) = pill_access::click_point(&nodes, &key) {
