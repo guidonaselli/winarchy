@@ -600,7 +600,7 @@ fn launch_at(position: usize) {
 }
 
 // Menú contextual de un elemento: quita un pin del Inicio o ancla una app de la lista; usa el mismo guardia `in_menu` que el de energía.
-unsafe fn item_menu(h: HWND, position: usize, at: (i32, i32)) {
+unsafe fn item_menu(position: usize, at: (i32, i32)) {
     let Some(open) = open_at(position) else { return };
     let pinned = PINS_PATH.get().is_some_and(|p| matches!(model::read_pins(p), model::Saved::Ok(v) if v.iter().any(|o| o.eq_ignore_ascii_case(&open))));
     let places_only = !model::is_app(&open);
@@ -608,16 +608,13 @@ unsafe fn item_menu(h: HWND, position: usize, at: (i32, i32)) {
         return;
     }
     with(|m| m.in_menu = true);
-    let Ok(menu) = CreatePopupMenu() else { return };
-    let label: Vec<u16> = (if pinned { t(K::StartUnpin) } else { t(K::StartPin) }).encode_utf16().chain(std::iter::once(0)).collect();
-    let _ = AppendMenuW(menu, MF_STRING, 1, PCWSTR(label.as_ptr()));
-    let picked = TrackPopupMenu(menu, TPM_RETURNCMD, at.0, at.1, 0, h, None);
-    let _ = DestroyMenu(menu);
+    let (theme, scale) = with(|m| (m.theme.clone(), m.scale)).unwrap_or_default();
+    let picked = crate::menu::pick(&[(if pinned { t(K::StartUnpin) } else { t(K::StartPin) }).to_string()], at, crate::menu::Anchor::TopLeft, &theme, scale).map_or(0, |i| i as i32 + 1);
     with(|m| {
         m.in_menu = false;
         m.opened_at = std::time::Instant::now();
     });
-    if picked.0 == 1 {
+    if picked == 1 {
         edit_pins(|base| if pinned { model::unpin(base, &open) } else { model::pin(base, &open) });
         with(|m| m.sel = None);
         paint();
@@ -665,7 +662,7 @@ fn edit_query(f: impl FnOnce(&mut String)) {
     paint();
 }
 
-unsafe fn power_menu(h: HWND) {
+unsafe fn power_menu() {
     let Some((scale, pos)) = with(|m| {
         m.in_menu = true;
         (m.scale, m.pos)
@@ -673,19 +670,14 @@ unsafe fn power_menu(h: HWND) {
         return;
     };
     let l = model::layout(scale);
-    let Ok(menu) = CreatePopupMenu() else { return };
-    let items = [(1usize, t(K::PowerLock)), (2, t(K::PowerSleep)), (3, t(K::PowerShutdown)), (4, t(K::PowerRestart)), (5, t(K::PowerSignOut))];
-    for (id, label) in items {
-        let wide: Vec<u16> = label.encode_utf16().chain(std::iter::once(0)).collect();
-        let _ = AppendMenuW(menu, MF_STRING, id, PCWSTR(wide.as_ptr()));
-    }
-    let picked = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_BOTTOMALIGN | TPM_RIGHTALIGN, pos.0 + l.power.x + l.power.w, pos.1 + l.power.y, 0, h, None);
-    let _ = DestroyMenu(menu);
+    let labels = [K::PowerLock, K::PowerSleep, K::PowerShutdown, K::PowerRestart, K::PowerSignOut].map(|k| t(k).to_string());
+    let theme = with(|m| m.theme.clone()).unwrap_or_default();
+    let picked = crate::menu::pick(&labels, (pos.0 + l.power.x + l.power.w, pos.1 + l.power.y), crate::menu::Anchor::BottomRight, &theme, scale).map_or(0, |i| i + 1);
     with(|m| {
         m.in_menu = false;
         m.opened_at = std::time::Instant::now();
     });
-    let args: Option<(&str, &[&str])> = match picked.0 {
+    let args: Option<(&str, &[&str])> = match picked {
         1 => Some(("rundll32.exe", &["user32.dll,LockWorkStation"])),
         2 => Some(("rundll32.exe", &["powrprof.dll,SetSuspendState", "0,1,0"])),
         3 => Some(("shutdown.exe", &["/s", "/t", "0"])),
@@ -749,7 +741,7 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
             let (x, y) = client(lp);
             match hit_at(x, y) {
                 Some(Hit::All) => set_all(!with(|s| s.all).unwrap_or(false)),
-                Some(Hit::Power) => power_menu(h),
+                Some(Hit::Power) => power_menu(),
                 Some(hit @ (Hit::Cell(_) | Hit::Row(_) | Hit::Chip(_))) => position_of(hit).map_or((), launch_at),
                 _ => {}
             }
@@ -759,13 +751,13 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
             let (x, y) = client(lp);
             if let Some(position) = hit_at(x, y).and_then(position_of) {
                 let pos = with(|s| s.pos).unwrap_or_default();
-                item_menu(h, position, (pos.0 + x, pos.1 + y));
+                item_menu(position, (pos.0 + x, pos.1 + y));
             }
             return LRESULT(0);
         }
         WM_SYSKEYDOWN if VIRTUAL_KEY(wp.0 as u16) == VK_F10 && GetKeyState(VK_SHIFT.0 as i32) < 0 => {
             if let Some((position, at)) = selection_origin() {
-                item_menu(h, position, at);
+                item_menu(position, at);
             }
             return LRESULT(0);
         }
@@ -795,7 +787,7 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
                 VK_TAB => set_all(!with(|s| s.all).unwrap_or(false)),
                 VK_APPS => {
                     if let Some((position, at)) = selection_origin() {
-                        item_menu(h, position, at);
+                        item_menu(position, at);
                     }
                 }
                 _ => {}
@@ -814,7 +806,7 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
                     continue;
                 }
                 if key == "power" {
-                    power_menu(h);
+                    power_menu();
                 } else if key == "all" {
                     set_all(!with(|s| s.all).unwrap_or(false));
                 } else if key == "search" {

@@ -499,21 +499,36 @@ fn publish(snap: &Snapshot, shape: &Shape, height: i32) {
 
 // Menú contextual nativo, como el de la taskbar de Windows: los ajustes del glifo bajo el cursor.
 unsafe fn context_menu(h: HWND, entries: &[(K, MenuEntry)]) {
-    if entries.is_empty() {
+    menu_with(h, entries, crate::menu::Header::None, None)
+}
+
+// Clic izquierdo en el estado: un panel con el estado y el control del glifo (deslizador de volumen) sobre sus ajustes.
+unsafe fn status_panel(h: HWND, x: i32) {
+    use crate::menu::Header;
+    let status = with(|c| status_part(&c.shape, c.scale, x)).unwrap_or(StatusPart::Volume);
+    let (header, on_slide): (Header, Option<fn(f32)>) = match status {
+        StatusPart::Volume => {
+            let v = crate::metrics::volume().map_or(0.0, |(p, muted)| if muted { 0.0 } else { p as f32 / 100.0 });
+            (Header::Slider(t(K::VolumeTitle).to_string(), v), Some(|v| {
+                let _ = crate::metrics::set_volume((v * 100.0).round() as u32);
+            }))
+        }
+        StatusPart::Network => (Header::Text(if crate::metrics::online().unwrap_or(false) { t(K::Online) } else { t(K::Offline) }.to_string()), None),
+        StatusPart::Battery => (Header::Text(crate::metrics::battery().map_or(String::new(), |(p, charging)| format!("{p}%{}", if charging { format!(" · {}", t(K::Charging)) } else { String::new() }))), None),
+    };
+    menu_with(h, &context_entries(Part::Status, status), header, on_slide)
+}
+
+unsafe fn menu_with(h: HWND, entries: &[(K, MenuEntry)], header: crate::menu::Header, on_slide: Option<fn(f32)>) {
+    if entries.is_empty() && matches!(header, crate::menu::Header::None) {
         return;
     }
-    let Ok(menu) = CreatePopupMenu() else { return };
-    for (i, (key, _)) in entries.iter().enumerate() {
-        let text: Vec<u16> = t(*key).encode_utf16().chain(std::iter::once(0)).collect();
-        let _ = AppendMenuW(menu, MF_STRING, i + 1, PCWSTR(text.as_ptr()));
-    }
+    let labels: Vec<String> = entries.iter().map(|(key, _)| t(*key).to_string()).collect();
     let mut p = POINT::default();
     let _ = GetCursorPos(&mut p);
     let previous = GetForegroundWindow();
-    let _ = SetForegroundWindow(h);
-    let chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN, p.x, p.y, 0, h, None).0;
-    let _ = DestroyMenu(menu);
-    let _ = PostMessageW(h, WM_NULL, WPARAM(0), LPARAM(0));
+    let Some((theme, scale)) = with(|c| (c.theme.clone(), c.scale)) else { return };
+    let chosen = crate::menu::pick_with(header, on_slide, &labels, (p.x, p.y), crate::menu::Anchor::BottomLeft, &theme, scale).map_or(0, |i| i as i32 + 1);
     // sin esto la app del usuario queda desactivada y el teclado no llega a ningún lado hasta el próximo clic
     if GetForegroundWindow() == h && IsWindow(previous).as_bool() {
         let _ = SetForegroundWindow(previous);
@@ -750,7 +765,7 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
             if let (Some(d), Some(u)) = (down, hit_at(x, y)) {
                 if d == u {
                     if u == Part::Status && crate::session_shell_active() {
-                        crate::expand_island();
+                        status_panel(h, x);
                     } else {
                         activate(u);
                     }
