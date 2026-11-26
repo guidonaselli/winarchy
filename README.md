@@ -109,7 +109,8 @@ That means Winarchy optimizes for:
   - the voice assistant (`winarchy assistant on`) speaks Spanish or English, taken from your Windows regional
     format or `WINARCHY_LANG=es|en`; it can run PowerShell and look at your screen when you ask. Speech uses
     Microsoft's Edge neural voices (the text is sent to Microsoft) with a local Piper voice as fallback;
-    `WINARCHY_TTS=piper` keeps it fully local and `WINARCHY_EDGE_VOICE` picks another voice
+    `WINARCHY_TTS=piper` keeps it fully local and `WINARCHY_EDGE_VOICE` picks another voice. The speech models load
+    while you hold the key and are released after 10 idle minutes, so an idle assistant holds no VRAM
   - source in `shell/` (Rust + Win32); `install.ps1` downloads the binary from the GitHub Release
     and installs it only if its SHA256 matches `versions.lock.toml`
   - YASB is optional: `install.ps1 -WithYasb`, or `winarchy bar use yasb` (installs it if missing).

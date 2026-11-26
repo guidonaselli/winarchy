@@ -18,6 +18,66 @@ enum Ev {
     Failed(u64, String),
 }
 
+/// Los sidecars retienen VRAM y varios GB: se cargan al pedir un turno y se sueltan tras este tiempo sin uso.
+const IDLE_UNLOAD: Duration = Duration::from_secs(600);
+
+struct Lazy<T> {
+    value: Option<T>,
+    used: Instant,
+}
+
+impl<T> Lazy<T> {
+    fn shared() -> Arc<Mutex<Self>> {
+        Arc::new(Mutex::new(Self { value: None, used: Instant::now() }))
+    }
+
+    /// Corre `f` sobre el valor, cargándolo si hace falta; si falla se descarta para recargarlo en el próximo turno.
+    fn with<R>(&mut self, load: impl FnOnce() -> Result<T, String>, f: impl FnOnce(&mut T) -> Result<R, String>) -> Result<R, String> {
+        if self.value.is_none() {
+            self.value = Some(load()?);
+        }
+        let result = f(self.value.as_mut().expect("loaded above"));
+        self.used = Instant::now();
+        if result.is_err() {
+            self.value = None;
+        }
+        result
+    }
+
+    fn unload_if_idle(&mut self, now: Instant) {
+        if now.saturating_duration_since(self.used) >= IDLE_UNLOAD {
+            self.value = None;
+        }
+    }
+}
+
+type SharedStt = Arc<Mutex<Lazy<stt::Stt>>>;
+type SharedTts = Arc<Mutex<Lazy<tts::Tts>>>;
+
+fn with_stt<R>(stt: &SharedStt, cfg: &Config, f: impl FnOnce(&mut stt::Stt) -> Result<R, String>) -> Result<R, String> {
+    stt.lock().unwrap().with(|| stt::Stt::spawn(&cfg.python, &cfg.stt_script), f)
+}
+
+fn with_tts<R>(tts: &SharedTts, cfg: &Config, f: impl FnOnce(&mut tts::Tts) -> Result<R, String>) -> Result<R, String> {
+    tts.lock().unwrap().with(|| tts::Tts::spawn(&cfg.python, &cfg.tts_script, &cfg.voice), f)
+}
+
+/// Carga ambos en paralelo mientras todavía se está hablando.
+fn warm(stt: &SharedStt, tts: &SharedTts, cfg: &Arc<Config>) {
+    let (stt, c) = (stt.clone(), cfg.clone());
+    std::thread::spawn(move || {
+        if let Err(e) = with_stt(&stt, &c, |_| Ok(())) {
+            log(&format!("stt: {e}"));
+        }
+    });
+    let (tts, c) = (tts.clone(), cfg.clone());
+    std::thread::spawn(move || {
+        if let Err(e) = with_tts(&tts, &c, |_| Ok(())) {
+            log(&format!("tts: {e}"));
+        }
+    });
+}
+
 struct SessionPidFile {
     path: PathBuf,
     pid: u32,
@@ -138,10 +198,10 @@ pub fn run() -> Result<(), String> {
     let Some(_instance) = acquire_instance(&instance)? else { return Ok(()); };
     let env = tools::env();
     let _pid_file = SessionPidFile::create(&env.root, session_id, std::process::id())?;
-    let cfg = config(&env.root);
+    let cfg = Arc::new(config(&env.root));
     let defs = tools::definitions(&env.themes);
-    let stt = Arc::new(Mutex::new(stt::Stt::spawn(&cfg.python, &cfg.stt_script)?));
-    let mut tts = tts::Tts::spawn(&cfg.python, &cfg.tts_script, &cfg.voice)?;
+    let stt: SharedStt = Lazy::shared();
+    let tts: SharedTts = Lazy::shared();
     let llm = Arc::new(Mutex::new(llm::Llm::new(&cfg.model, &cfg.effort, llm::instructions(cfg.lang))));
     let env = Arc::new(env);
     let generation = Arc::new(AtomicU64::new(0));
@@ -161,14 +221,14 @@ pub fn run() -> Result<(), String> {
     let (stx, srx) = channel::<(u64, Option<String>)>();
     let (wtx, wrx) = channel::<(u64, Option<std::path::PathBuf>)>();
     {
-        let generation = generation.clone();
+        let (generation, tts, cfg) = (generation.clone(), tts.clone(), cfg.clone());
         std::thread::spawn(move || {
             for (g, sentence) in srx {
                 if g != generation.load(Ordering::SeqCst) {
                     continue;
                 }
                 match sentence {
-                    Some(text) => match tts.synth(&text) {
+                    Some(text) => match with_tts(&tts, &cfg, |t| t.synth(&text)) {
                         Ok(wav) => {
                             let _ = wtx.send((g, Some(wav)));
                         }
@@ -225,6 +285,7 @@ pub fn run() -> Result<(), String> {
             Effect::StartCapture | Effect::CancelAndCapture => {
                 generation.fetch_add(1, Ordering::SeqCst);
                 tts::stop();
+                warm(&stt, &tts, &cfg);
                 rec = mic::start().map_err(|e| log(&format!("mic: {e}"))).ok();
                 if rec.is_none() {
                     m.on(Event::Failed, now);
@@ -233,14 +294,23 @@ pub fn run() -> Result<(), String> {
             Effect::StopCapture => {
                 let pcm = rec.take().map(mic::Recording::stop).unwrap_or_default();
                 let g = generation.load(Ordering::SeqCst);
-                let (tx, stx, stt, llm, env, defs) = (tx.clone(), stx.clone(), stt.clone(), llm.clone(), env.clone(), defs.clone());
+                let (tx, stx, stt, cfg, llm, env, defs) = (tx.clone(), stx.clone(), stt.clone(), cfg.clone(), llm.clone(), env.clone(), defs.clone());
                 std::thread::spawn(move || {
-                    if let Err(e) = turn(g, &pcm, &tx, &stx, &stt, &llm, &env, &defs) {
+                    if let Err(e) = turn(g, &pcm, &tx, &stx, &stt, &cfg, &llm, &env, &defs) {
                         let _ = tx.send(Ev::Failed(g, e));
                     }
                 });
             }
             Effect::None => {}
+        }
+        if m.state() == State::Idle {
+            // try_lock: una carga en curso no debe frenar el bucle de eventos
+            if let Ok(mut s) = stt.try_lock() {
+                s.unload_if_idle(now);
+            }
+            if let Ok(mut t) = tts.try_lock() {
+                t.unload_if_idle(now);
+            }
         }
         if m.state() != published {
             published = m.state();
@@ -250,7 +320,7 @@ pub fn run() -> Result<(), String> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn turn(g: u64, pcm: &[f32], tx: &Sender<Ev>, stx: &Sender<(u64, Option<String>)>, stt: &Mutex<stt::Stt>, llm: &Mutex<llm::Llm>, env: &tools::Env, defs: &[serde_json::Value]) -> Result<(), String> {
+fn turn(g: u64, pcm: &[f32], tx: &Sender<Ev>, stx: &Sender<(u64, Option<String>)>, stt: &SharedStt, cfg: &Config, llm: &Mutex<llm::Llm>, env: &tools::Env, defs: &[serde_json::Value]) -> Result<(), String> {
     let t0 = Instant::now();
     debug(&format!("turn {g}: {} samples", pcm.len()));
     if mic::is_silent(pcm) {
@@ -260,7 +330,7 @@ fn turn(g: u64, pcm: &[f32], tx: &Sender<Ev>, stx: &Sender<(u64, Option<String>)
     }
     let wav = std::env::temp_dir().join(format!("winarchy-turn-{g}.wav"));
     mic::write_wav(&wav, pcm).map_err(|e| e.to_string())?;
-    let text = stt.lock().unwrap().transcribe(&wav);
+    let text = with_stt(stt, cfg, |s| s.transcribe(&wav));
     let _ = std::fs::remove_file(&wav);
     let text = text?;
     debug(&format!("stt: {} chars at {:.2}s", text.len(), t0.elapsed().as_secs_f32()));
@@ -328,7 +398,26 @@ pub fn ask(text: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{acquire_instance, lang_of, SessionPidFile};
+    use super::{acquire_instance, lang_of, Lazy, SessionPidFile, IDLE_UNLOAD};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn sidecar_loads_once_is_dropped_after_idle_or_failure() {
+        let mut loads = 0;
+        let mut lazy: Lazy<u8> = Lazy { value: None, used: Instant::now() };
+        for _ in 0..2 {
+            lazy.with(|| { loads += 1; Ok(1) }, |_| Ok(())).unwrap();
+        }
+        assert_eq!(loads, 1);
+        lazy.unload_if_idle(lazy.used + IDLE_UNLOAD - Duration::from_secs(1));
+        assert_eq!(lazy.value, Some(1));
+        lazy.unload_if_idle(lazy.used + IDLE_UNLOAD);
+        assert_eq!(lazy.value, None);
+        assert!(lazy.with(|| Ok(2), |_| Err::<(), _>("dead".into())).is_err());
+        assert_eq!(lazy.value, None);
+        assert!(lazy.with(|| Err("no python".into()), |_| Ok(())).is_err());
+        assert_eq!(lazy.value, None);
+    }
 
     #[test]
     fn instance_mutex_rejects_a_second_process_before_pid_registration() {
