@@ -996,17 +996,7 @@ function Set-WinarchyTheme {
             if (-not (Test-Path $btopThemes)) { New-Item -ItemType Directory -Path $btopThemes -Force | Out-Null }
             Copy-Item (Join-Path $root 'config\btop\winarchy.theme') (Join-Path $btopThemes 'winarchy.theme') -Force
         }
-        if (-not $LightRefresh) {
-            Sync-WinarchyJetBrains -ThemeDir $themeDir
-            Sync-WinarchyVSCode -ThemeDir $themeDir
-            Sync-WinarchyObsidian -CssPath (Join-Path $root 'config\obsidian\winarchy-theme.css')
-            Sync-WinarchyClaudeCode -Mode $theme['mode']
-            Set-WinarchyWindowsAppearance -Mode $theme['mode'] -AccentHex $theme['colors']['accent'] -SkipAccent:$dynamicAccent
-            if (-not $dynamicAccent) { Set-WinarchyWallpaper -ThemeDir $themeDir }
-        }
-        if (-not $LightRefresh -or $dynamicAccent) {
-            Update-WinarchyLockScreen -ThemeDir $themeDir -Colors $theme['colors'] -Dynamic:$dynamicAccent
-        }
+        if (-not $LightRefresh -and -not $dynamicAccent) { Set-WinarchyWallpaper -ThemeDir $themeDir }
 
         # 6. Persistencia + recarga de servicios
         Set-Content -Path $currentFile -Value $Name -Encoding UTF8 -NoNewline
@@ -1016,6 +1006,18 @@ function Set-WinarchyTheme {
         }
         elseif (-not $dynamicAccent -and (Test-Path $marker)) { Remove-Item $marker -Force }
         Invoke-WinarchyReload -Light:$LightRefresh
+
+        # Lo lento (Windows, editores, pantalla de bloqueo) va después: la barra y los bordes no lo esperan.
+        if (-not $LightRefresh) {
+            Set-WinarchyWindowsAppearance -Mode $theme['mode'] -AccentHex $theme['colors']['accent'] -SkipAccent:$dynamicAccent
+            Sync-WinarchyJetBrains -ThemeDir $themeDir
+            Sync-WinarchyVSCode -ThemeDir $themeDir
+            Sync-WinarchyObsidian -CssPath (Join-Path $root 'config\obsidian\winarchy-theme.css')
+            Sync-WinarchyClaudeCode -Mode $theme['mode']
+        }
+        if (-not $LightRefresh -or $dynamicAccent) {
+            Update-WinarchyLockScreen -ThemeDir $themeDir -Colors $theme['colors'] -Dynamic:$dynamicAccent
+        }
 
         if ($LightRefresh) { Write-WinarchyOk "Accent synced: $($theme['colors']['accent'])." }
         else { Write-WinarchyOk "Theme '$($theme['name'])' applied across all surfaces." }
