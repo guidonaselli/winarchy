@@ -24,6 +24,7 @@ mod layout;
 mod menu;
 mod metrics;
 mod komorebi;
+mod pill_access;
 mod pipe;
 mod spirit;
 mod system;
@@ -667,6 +668,12 @@ unsafe fn render_pill(pill: HWND) {
         }
     }
 
+    if !animating {
+        let clock = String::from_utf16_lossy(&text);
+        let island = String::from_utf16_lossy(&label);
+        let bar = pill_access::Bar { clock: &clock, temp: &temp, island: &island, pinned: with(|s| s.pinned) };
+        accessibility::publish(pill, tr(K::BarName), (width, height), pill_access::nodes(&lay, &bar, panel.as_ref()), None);
+    }
     with(|s| {
         s.pill_mon = mon;
         s.layout = lay;
@@ -1127,7 +1134,28 @@ fn request_explorer_return(hwnd: HWND) {
 
 unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let hit = || with(|s| s.layout.hit((lp.0 & 0xFFFF) as i16 as i32, ((lp.0 >> 16) & 0xFFFF) as i16 as i32));
+    if m == WM_GETOBJECT {
+        if let Some(r) = accessibility::get_object(h, wp, lp) {
+            return r;
+        }
+    }
     match m {
+        WM_NCDESTROY => accessibility::destroy(h),
+        accessibility::WM_ACTION => {
+            let actions = accessibility::actions(h, wp.0);
+            let (layout, panel) = with(|s| (s.layout.clone(), s.panel_shown.clone()));
+            // solo importan la clave y los bordes: las etiquetas de la barra no cambian dónde se hace clic
+            let nodes = pill_access::nodes(&layout, &pill_access::Bar { clock: "-", temp: "-", island: "", pinned: false }, panel.as_ref());
+            for (key, action) in actions {
+                if action != accesskit::Action::Click {
+                    continue;
+                }
+                if let Some((x, y)) = pill_access::click_point(&nodes, &key) {
+                    let _ = PostMessageW(h, WM_LBUTTONUP, WPARAM(0), LPARAM(((y as isize) << 16) | (x as isize & 0xFFFF)));
+                }
+            }
+            return LRESULT(0);
+        }
         WM_MOUSEMOVE => {
             let (strip, expanded, track) = with(|s| {
                 let expanded = s.expand_until.is_some();
@@ -1487,6 +1515,7 @@ fn main() {
         }
         ics::spawn_feed(theme_path.clone());
         extras::spawn_weather(theme_path);
+        accessibility::create(pill, tr(K::BarName), accesskit::Role::Toolbar);
         render_pill(pill);
         let _ = ShowWindow(pill, SW_SHOWNOACTIVATE);
         let dock_on = with(|s| s.theme.dock);
