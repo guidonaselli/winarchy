@@ -1476,6 +1476,11 @@ ShowSystemMenu(*) {
         PalOpen('system', WinarchyLocalize(WinarchySysItems()), WinarchyText('System'))
 }
 
+RunDialog() {
+    ; shell32 ordinal 61 = RunFileDlg: no depende de Explorer
+    DllCall(DllCall('GetProcAddress', 'ptr', DllCall('GetModuleHandle', 'str', 'shell32', 'ptr'), 'ptr', 61, 'ptr'), 'ptr', 0, 'ptr', 0, 'ptr', 0, 'ptr', 0, 'ptr', 0, 'uint', 0)
+}
+
 ShellIsland(cmd, extra := '') {
     global sessionId
     pipeName := '\\.\pipe\winarchy-shell-' sessionId
@@ -2131,6 +2136,7 @@ AccentWatch() {
 ; Win+N stays with Windows (notification center; the YASB bell mirrors it)
 #+m::LaunchMusic()                               ; music (Spotify / YT Music)
 #+o::LaunchObsidian()                            ; Obsidian
+#!r::RunDialog()                                 ; Run dialog (Win+R is retile)
 #+q::Run('calc.exe')                             ; calculator
 #^+a::Winarchy('agent launch')                   ; coding agent
 

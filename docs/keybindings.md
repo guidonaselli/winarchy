@@ -25,6 +25,7 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 ## Menu (popup, Omarchy-style)
 | Keybinding | Action |
 |---|---|
+| `SUPER+Alt+R` | Run dialog (Win+R is retile; works without Explorer) |
 | `SUPER+Alt+Space` | Winarchy menu (Apps/Appearance/Reload/Game mode/Doctor/Update/System/Quit) — same content as right-clicking the tray icon, or the rightmost button on the YASB bar |
 | `SUPER+Esc` | System / power submenu directly (Screensaver/Lock/Sleep/Hibernate/Switch user/Sign out/Restart/Shut down/Project) |
 
