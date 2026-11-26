@@ -84,7 +84,7 @@ function Get-WinarchyAutostartComponents {
     # Watcher del ícono de red: escribe state\net-icon.flag en loop para que YASB lea con
     # `cmd /c type` en vez de relanzar powershell.exe cada 15s (ver Start-NetIcon.ps1).
     $netIconScript = Join-Path $root 'scripts\Start-NetIcon.ps1'
-    if (Test-Path $netIconScript) {
+    if ((Test-Path $netIconScript) -and (Get-WinarchyActiveBar) -eq 'yasb') {
         $ps = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $items.Add([pscustomobject]@{
             Key = 'net-icon'; TaskName = 'net-icon'; LnkName = 'Winarchy net icon.lnk'
@@ -222,6 +222,9 @@ function Register-WinarchyAutostart {
         return
     }
 
+    # El glifo de red solo lo lee YASB: con la barra nativa no queda ni la tarea ni el proceso.
+    if ($components.TaskName -notcontains 'net-icon') { Remove-WinarchyNetIcon }
+
     foreach ($c in $components) {
         $xmlPath = Join-Path ([System.IO.Path]::GetTempPath()) "winarchy-task-$($c.TaskName).xml"
         try {
@@ -243,7 +246,14 @@ function Register-WinarchyAutostart {
             Remove-Item $xmlPath -Force -ErrorAction SilentlyContinue
         }
     }
-    Write-WinarchyOk 'Autostart registered (scheduled tasks at logon): komorebi, YASB, net-icon, ShareX, AHK'
+    Write-WinarchyOk "Autostart registered (scheduled tasks at logon): $($components.Key -join ', ')"
+}
+
+function Remove-WinarchyNetIcon {
+    & schtasks.exe /Delete /TN (Get-WinarchyTaskFullName -TaskName 'net-icon') /F *> $null
+    Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*Start-NetIcon.ps1*' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 
 function Unregister-WinarchyAutostart {

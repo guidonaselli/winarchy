@@ -1357,6 +1357,8 @@ Describe 'games.toml (shipped)' {
 }
 
 Describe 'Game registration round-trip' {
+    BeforeEach { Mock -ModuleName Winarchy Test-WinarchyProcess { $false } }   # nunca tocar el komorebi real
+
     It 'add writes games.user.toml, never the shipped games.toml, and remove undoes it' {
         InModuleScope Winarchy {
             $toml = Join-Path $TestDrive 'games.toml'
@@ -1655,6 +1657,8 @@ Describe 'versions.lock.toml' {
 }
 
 Describe 'App rules (community ASC + user layer)' {
+    BeforeEach { Mock -ModuleName Winarchy Test-WinarchyProcess { $false } }   # nunca tocar el komorebi real
+
     BeforeAll {
         # Capas sinteticas: el merge se prueba solo, sin depender de las 226 entradas reales.
         $script:MakeLayer = {
@@ -2287,6 +2291,16 @@ Describe 'Autostart' {
             $errors | Should -BeNullOrEmpty
             $ast.FindAll({ $args[0] -is [Management.Automation.Language.StringConstantExpressionAst] }, $true).Value |
                 Should -Contain "\`"C:\Users\O'Brien\winarchy\scripts\Start-WindowSlots.ps1\`""   # entre \" para que un path con espacios llegue entero a -File
+        }
+    }
+
+    It 'only autostarts the network glyph watcher for the YASB bar' {
+        InModuleScope Winarchy {
+            Mock Get-Command { [pscustomobject]@{ Source = $null } }
+            Mock Get-WinarchyActiveBar { 'native' }
+            Get-WinarchyAutostartComponents | Where-Object Key -eq 'net-icon' | Should -BeNullOrEmpty
+            Mock Get-WinarchyActiveBar { 'yasb' }
+            Get-WinarchyAutostartComponents | Where-Object Key -eq 'net-icon' | Should -Not -BeNullOrEmpty
         }
     }
 

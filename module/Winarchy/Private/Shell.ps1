@@ -510,6 +510,7 @@ function Set-WinarchyBar {
         Register-WinarchyAutostart
         $inactive = if ($Name -eq 'native') { 'yasb' } else { 'shell' }
         & schtasks.exe /Delete /TN (Get-WinarchyTaskFullName -TaskName $inactive) /F *> $null
+        if ($Name -eq 'yasb') { & schtasks.exe /Run /TN (Get-WinarchyTaskFullName -TaskName 'net-icon') *> $null }
     }
     Invoke-WinarchyReload -Light
     Write-WinarchyOk "Bar: $Name"
