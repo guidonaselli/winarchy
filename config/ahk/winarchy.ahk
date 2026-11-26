@@ -130,6 +130,8 @@ AltTabStep(dir) {
     if !dir {
         if shown
             ShellIsland('switcher.hide')
+        if idx
+            try WinActivate(list[idx + 1])
         shown := false
         idx := 0
         return
@@ -144,7 +146,6 @@ AltTabStep(dir) {
     if list.Length < 2
         return
     idx := Mod(idx + dir + list.Length, list.Length)
-    try WinActivate(list[idx + 1])
     ids := ''
     for hwnd in list
         ids .= (ids ? ',' : '') hwnd
