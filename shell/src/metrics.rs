@@ -88,7 +88,7 @@ pub fn battery() -> Option<(u8, bool)> {
     (p.BatteryFlag & 128 == 0 && p.BatteryLifePercent <= 100).then_some((p.BatteryLifePercent, p.ACLineStatus == 1))
 }
 
-fn endpoint() -> Option<IAudioEndpointVolume> {
+pub fn endpoint() -> Option<IAudioEndpointVolume> {
     unsafe {
         let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
         let dev = en.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
@@ -98,7 +98,10 @@ fn endpoint() -> Option<IAudioEndpointVolume> {
 
 // Requiere COM inicializado en el hilo que llama (igual que `adjust_volume` y `toggle_mute`).
 pub fn volume() -> Option<(u32, bool)> {
-    let vol = endpoint()?;
+    read_volume(&endpoint()?)
+}
+
+pub fn read_volume(vol: &IAudioEndpointVolume) -> Option<(u32, bool)> {
     unsafe { Some(((vol.GetMasterVolumeLevelScalar().ok()? * 100.0).round() as u32, vol.GetMute().ok()?.as_bool())) }
 }
 

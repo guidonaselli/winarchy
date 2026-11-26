@@ -103,6 +103,12 @@ fn now_filetime() -> Option<u64> {
     Some(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() * 10_000_000 + UNIX_TO_FILETIME)
 }
 
+// Marca de escritura de la base y su WAL: cambia cuando llega o se descarta una notificación.
+pub fn stamp() -> [Option<(std::time::SystemTime, u64)>; 2] {
+    let dir = std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap_or_default()).join(r"Microsoft\Windows\Notifications");
+    ["wpndatabase.db", "wpndatabase.db-wal"].map(|file| std::fs::metadata(dir.join(file)).ok().and_then(|m| Some((m.modified().ok()?, m.len()))))
+}
+
 pub fn toast_count() -> Option<usize> {
     count_toasts(&database_uri()?, now_filetime()?)
 }
