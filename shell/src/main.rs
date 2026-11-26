@@ -626,6 +626,7 @@ unsafe fn render_pill(pill: HWND) {
                 for (n, r) in cv.notifs.iter().zip(rows) {
                     let (hh, mm) = wpn::arrival_clock(n.arrival, calendar::utc_offset_min());
                     let body = if n.text.is_empty() { n.title.clone() } else { format!("{}  {}", n.title, n.text.replace(char::from(10), " ")) };
+                    let body = n.app.as_deref().map_or(body.clone(), |a| format!("{} · {body}", wpn::app_label(a)));
                     draw_text(mem, &short(&format!("{hh:02}:{mm:02}  {body}"), 44), lay.place(*r), fg_c, DT_VCENTER);
                 }
             }

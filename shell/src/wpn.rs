@@ -132,6 +132,13 @@ fn toasts_after(uri: &str, arrival: i64) -> Option<Vec<Toast>> {
 }
 
 // PrimaryId es una ruta de exe, un id de carpeta conocida ({GUID}\resto) o un AUMID; este último se abre con shell:AppsFolder.
+pub fn app_label(app: &str) -> String {
+    let id = app.split('!').next().unwrap_or(app);
+    let last = id.rsplit(['\\', '/']).next().unwrap_or(id);
+    let name = last.strip_suffix(".exe").or_else(|| last.strip_suffix(".EXE")).unwrap_or(last);
+    name.rsplit('.').next().unwrap_or(name).to_string()
+}
+
 fn open_target(app: &str) -> String {
     let resolved = app.strip_prefix('{').and_then(|r| r.split_once("}\\")).and_then(|(guid, rest)| {
         // try_from entra en pánico con una cadena inválida
@@ -213,6 +220,12 @@ mod tests {
     fn toast_title_and_body_come_from_the_generic_binding() {
         let xml = r#"<toast launch="x"><visual><binding template="ToastGeneric"><text>GeForce &amp; Co</text><text hint-maxLines="2">Update available</text><image src="C:\a.png"/></binding></visual></toast>"#;
         assert_eq!(toast_texts(xml), ("GeForce & Co".to_string(), "Update available".to_string()));
+    }
+
+    #[test]
+    fn app_label_is_the_readable_tail_of_the_app_id() {
+        assert_eq!(app_label("Microsoft.WindowsStore_8wekyb3d8bbwe!App"), "WindowsStore_8wekyb3d8bbwe");
+        assert_eq!(app_label(r"C:\Program Files\Slack\slack.exe"), "slack");
     }
 
     #[test]
