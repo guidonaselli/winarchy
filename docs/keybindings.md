@@ -9,7 +9,7 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 |---|---|
 | `SUPER+Return` | WezTerm (the default terminal) |
 | `SUPER+D` | Show/restore the desktop (only when Winarchy is the session shell; Explorer handles it otherwise) |
-| `Win` (tap) | Start menu (session shell only): pinned apps, all apps, search by typing, power menu. Clicking the dock logo opens the same menu. Outside the session shell it opens Flow Launcher |
+| `Win` (tap) | Start menu (session shell only): pinned apps and pinned folders/files (drop them on the dock logo; right-click or Shift+F10 to unpin), all apps, search by typing, power menu. Clicking the dock logo opens the same menu. Outside the session shell it opens Flow Launcher |
 | `SUPER+Space` | Flow Launcher — applications and Winarchy's own commands in one search |
 | `SUPER+S` | File search — Flow scoped to Everything (`f ` prefix), replaces Windows Search |
 | `SUPER+Shift+Return` or `SUPER+Shift+B` | Default browser |
