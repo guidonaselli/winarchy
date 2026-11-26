@@ -1584,6 +1584,15 @@ Describe 'WezTerm terminal' {
         $tpl | Should -Match ([regex]::Escape('[==[{{computed.root}}/config/wezterm/user.lua]==]'))
     }
 
+    It 'prefers a WezTerm dropped in state\bin over the installed one' {
+        InModuleScope Winarchy {
+            $state = Join-Path $TestDrive 'state'
+            New-Item -ItemType File -Path (Join-Path $state 'bin\wezterm\wezterm-gui.exe') -Force | Out-Null
+            Mock Get-WinarchyStateDir { $state }
+            Get-WinarchyWeztermExe | Should -Be (Join-Path $state 'bin\wezterm\wezterm-gui.exe')
+        }
+    }
+
     # wezterm#7705: recorrer el árbol de procesos se desborda al reusarse un PID y cierra la terminal.
     It 'never walks the process tree from the terminal config' {
         $code = Get-Content (Join-Path $script:Root 'templates\wezterm.lua.tpl') | Where-Object { $_ -notmatch '^\s*--' }
