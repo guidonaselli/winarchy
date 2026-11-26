@@ -12,6 +12,7 @@ const UNIX_TO_FILETIME: u64 = 116_444_736_000_000_000;
 const POLL: std::time::Duration = std::time::Duration::from_secs(2);
 const TOAST_TIMEOUT_MS: u32 = 7000;
 const RECENT: usize = 5;
+pub const LISTED: usize = 9;
 
 static LATEST: std::sync::Mutex<Vec<Toast>> = std::sync::Mutex::new(Vec::new());
 
@@ -184,7 +185,7 @@ pub fn start_relay() {
         loop {
             std::thread::sleep(POLL);
             if let Some(all) = toasts_after(&uri, 0) {
-                *LATEST.lock().unwrap() = all.into_iter().rev().take(RECENT).collect();
+                *LATEST.lock().unwrap() = all.into_iter().rev().take(LISTED).collect();
             }
             let Some(new) = toasts_after(&uri, last) else { continue };
             for toast in new {

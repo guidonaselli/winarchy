@@ -154,6 +154,7 @@ struct CalView {
     agenda: Vec<String>,
     world: String,
     notifs: Vec<wpn::Toast>,
+    notif_pages: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -175,6 +176,12 @@ fn dock_change(previous: bool, current: bool) -> DockChange {
 
 const AGENDA_LINES: usize = 3;
 const NOTIF_LINES: usize = 3;
+static NOTIF_PAGE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn notif_page() -> usize {
+    let pages = wpn::latest().len().div_ceil(NOTIF_LINES).max(1);
+    NOTIF_PAGE.load(std::sync::atomic::Ordering::Relaxed) % pages
+}
 
 fn day_in_month(days: i64, (y, m): (i64, u32)) -> Option<u32> {
     let (dy, dm, dd) = calendar::civil_from_days(days);
@@ -248,7 +255,8 @@ fn calendar_view(ym: (i64, u32), sel: i64, configured: bool, world: String) -> C
         marks,
         agenda,
         world,
-        notifs: wpn::latest().into_iter().take(NOTIF_LINES).collect(),
+        notifs: wpn::latest().into_iter().skip(notif_page() * NOTIF_LINES).take(NOTIF_LINES).collect(),
+        notif_pages: wpn::latest().len().div_ceil(NOTIF_LINES),
     }
 }
 
@@ -622,7 +630,8 @@ unsafe fn render_pill(pill: HWND) {
             }
             draw_text(mem, &cv.world, lay.place(pr.world), muted_c, DT_VCENTER);
             if let Some((head, rows)) = pr.notifs.split_first() {
-                draw_text(mem, tr(K::RecentNotifications), lay.place(*head), muted_c, DT_VCENTER);
+                let title = if cv.notif_pages > 1 { format!("{}  {}/{} ›", tr(K::RecentNotifications), notif_page() + 1, cv.notif_pages) } else { tr(K::RecentNotifications).to_string() };
+                draw_text(mem, &title, lay.place(*head), muted_c, DT_VCENTER);
                 for (n, r) in cv.notifs.iter().zip(rows) {
                     let (hh, mm) = wpn::arrival_clock(n.arrival, calendar::utc_offset_min());
                     let body = if n.text.is_empty() { n.title.clone() } else { format!("{}  {}", n.title, n.text.replace(char::from(10), " ")) };
@@ -1183,6 +1192,10 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                         with(|s| s.cal_sel = calendar::days_from_civil(s.cal_ym.0, s.cal_ym.1, d));
                         tick(with(|s| s.strip));
                     }
+                }
+                Some(Hit::NotifPage) => {
+                    NOTIF_PAGE.store(notif_page() + 1, std::sync::atomic::Ordering::Relaxed);
+                    tick(with(|s| s.strip));
                 }
                 Some(Hit::Notif(n)) => {
                     let target = with(|s| s.panel.as_ref().and_then(|p| p.cal.as_ref()).and_then(|c| c.notifs.get(n)).and_then(wpn::open_toast));

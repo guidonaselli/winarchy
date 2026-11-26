@@ -69,6 +69,8 @@ pub enum Hit {
     CalCell(usize),
     // Línea de notificación reciente del panel del reloj, por índice.
     Notif(usize),
+    // Título de la sección de notificaciones: pasa a la página siguiente.
+    NotifPage,
     Surface,
 }
 
@@ -376,6 +378,9 @@ impl Layout {
             }
             if let Some(n) = p.cal_cells.iter().position(|c| c.contains(x, y)) {
                 return Some(Hit::CalCell(n));
+            }
+            if p.notifs.first().is_some_and(|c| c.contains(x, y)) {
+                return Some(Hit::NotifPage);
             }
             if let Some(n) = p.notifs.iter().skip(1).position(|c| c.contains(x, y)) {
                 return Some(Hit::Notif(n));
