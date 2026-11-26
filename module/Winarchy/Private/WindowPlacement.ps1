@@ -33,7 +33,7 @@ function Add-WinarchyWindowRulesToKomorebiJson {
       device_id). Sin komorebi corriendo no hay a qué resolver: se devuelve el JSON tal
       cual y las reglas entran en la próxima regeneración.
     #>
-    param([Parameter(Mandatory)][string]$Json)
+    param([Parameter(Mandatory)][string]$Json, [switch]$SkipLiveView)
     if (-not (Test-WinarchyProcess 'komorebi')) { return $Json }
     try {
         $state = Get-WinarchyKomorebiState
@@ -82,7 +82,51 @@ function Add-WinarchyWindowRulesToKomorebiJson {
             }
         }
     }
+    if (-not $SkipLiveView) { Set-WinarchyConfigLiveView -Config $config -State $state -Map $map }
     $config | ConvertTo-Json -Depth 50
+}
+
+function Set-WinarchyConfigLiveView {
+    <# La recarga estática de komorebi pisa layout, flip, paddings y tiling con lo que diga el archivo:
+       se escribe lo vivo antes de publicarlo. #>
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$State, [Parameter(Mandatory)][hashtable]$Map)
+    foreach ($monitor in $State.monitors.elements) {
+        if (-not $monitor.device_id -or -not $Map.ContainsKey($monitor.device_id)) { continue }
+        $target = $Config.monitors[$Map[$monitor.device_id]]
+        $index = -1
+        foreach ($live in $monitor.workspaces.elements) {
+            $index++
+            if (-not $target -or $index -ge @($target.workspaces).Count) { continue }
+            $workspace = $target.workspaces[$index]
+            $layout = $live.layout.PSObject.Properties['Default']?.Value
+            if ($layout) { $workspace | Add-Member -NotePropertyName layout -NotePropertyValue $layout -Force }
+            if ($live.tile -eq $false) { $workspace | Add-Member -NotePropertyName tile -NotePropertyValue $false -Force }
+            else { $workspace.PSObject.Properties.Remove('tile') }
+            foreach ($key in 'layout_flip', 'container_padding', 'workspace_padding') {
+                $value = $live.PSObject.Properties[$key]?.Value
+                if ($null -ne $value) { $workspace | Add-Member -NotePropertyName $key -NotePropertyValue $value -Force }
+                else { $workspace.PSObject.Properties.Remove($key) }
+            }
+        }
+    }
+}
+
+function Invoke-WinarchyKomorebiStaticReload {
+    <# Reescribe komorebi.json con la vista viva: el watcher de komorebi lo recarga sin reconstruir el WM. #>
+    param([Parameter(Mandatory)][string]$ConfigPath)
+    try {
+        $state = Get-WinarchyKomorebiState
+        $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+        Set-WinarchyConfigLiveView -Config $config -State $state -Map (Get-WinarchyMonitorIndexMap -State $state)
+        Set-WinarchyFileAtomic -Path $ConfigPath -Value ($config | ConvertTo-Json -Depth 50)
+    }
+    catch {
+        # sin vista viva no se escribe: la recarga pisaría los layouts; el resto del reload sigue
+        Write-WinarchyWarn "komorebi config not reloaded: $($_.Exception.Message)"
+        return
+    }
+    Restore-WinarchyFloatingApps -ConfigPath $ConfigPath
+    Write-WinarchyStaleIgnoreWarning -ConfigPath $ConfigPath
 }
 
 function Get-WinarchyWindowPlacements {
@@ -377,7 +421,7 @@ function Invoke-WinarchyLayoutApply {
     foreach ($pref in @($prefs | Where-Object { -not $map.ContainsKey($_.Monitor) })) {
         Write-WinarchyWarn "'$($pref.Exe)': monitor '$($pref.Monitor)' not connected; rule skipped."
     }
-    Update-WinarchyKomorebiRules
+    Update-WinarchyKomorebiRules -SkipLiveView
     if (-not $Quiet) {
         $applied = @($prefs | Where-Object { $map.ContainsKey($_.Monitor) }).Count
         Write-WinarchyOk "$applied window placement rule(s) written to komorebi.json and reloaded."

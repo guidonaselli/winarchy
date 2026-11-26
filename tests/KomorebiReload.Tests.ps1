@@ -23,42 +23,50 @@ AfterAll {
     Import-Module "$script:SourceRoot/module/Winarchy/Winarchy.psd1" -Force
 }
 
-Describe 'Komorebi configuration replacement' {
+Describe 'Komorebi configuration reload' {
     BeforeEach {
         InModuleScope Winarchy {
             if (-not (Get-Command komorebic -ErrorAction SilentlyContinue)) { function komorebic { } }
             Mock komorebic { }
             Mock Get-Process { [pscustomobject]@{ ProcessName = 'komorebi' } } -ParameterFilter { $Name -eq 'komorebi' }
+            Mock Get-WinarchyKomorebiState { '{"monitors":{"elements":[{"device_id":"AAA1","workspaces":{"elements":[{"layout":{"Default":"Columns"},"tile":true}]}}]}}' | ConvertFrom-Json }
+            Mock Restore-WinarchyFloatingApps { }
             Mock Stop-Process { }
             Mock Stop-WinarchyShell { $true }
             Mock Start-Process { }
         }
     }
 
-    It 'light reload replaces the running configuration with the generated JSON path' {
+    It 'light reload rewrites the watched file with the live view and never rebuilds the window manager' {
         InModuleScope Winarchy {
+            $path = Join-Path $TestDrive 'Winarchy with spaces/config/komorebi/komorebi.json'
+            Set-Content $path '{"monitors":[{"workspaces":[{"name":"1","layout":"BSP"}]}]}'
             Invoke-WinarchyReload -Light
-            Should -Invoke komorebic -Times 1 -Exactly -ParameterFilter {
-                $args[0] -eq 'replace-configuration' -and
-                $args[1] -eq (Join-Path $TestDrive 'Winarchy with spaces/config/komorebi/komorebi.json') -and
-                $args.Count -eq 2
-            }
-            Should -Invoke komorebic -Times 0 -ParameterFilter { $args[0] -eq 'reload-configuration' }
+            (Get-Content $path -Raw | ConvertFrom-Json).monitors[0].workspaces[0].layout | Should -Be 'Columns'
+            Should -Invoke komorebic -Times 0 -ParameterFilter { $args[0] -in 'reload-configuration', 'replace-configuration' }
         }
     }
 
-    It 'registering a game replaces komorebi configuration after generating its exclusion' {
+    It 'leaves the config untouched and does not throw when komorebi gives no state' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyKomorebiState { throw 'no state' }
+            Mock Write-WinarchyWarn { }
+            $path = Join-Path $TestDrive 'unreadable.json'
+            Set-Content $path '{"monitors":[]}' -NoNewline
+            { Invoke-WinarchyKomorebiStaticReload -ConfigPath $path } | Should -Not -Throw
+            Get-Content $path -Raw | Should -Be '{"monitors":[]}'
+            Should -Invoke Write-WinarchyWarn -Times 1
+        }
+    }
+
+    It 'registering a game publishes its exclusion without rebuilding the window manager' {
         InModuleScope Winarchy {
             Add-WinarchyGame -Exe 'Reload Test Game.exe'
             $path = Join-Path $TestDrive 'Winarchy with spaces/config/komorebi/komorebi.json'
             $json = Get-Content $path -Raw | ConvertFrom-Json
             @($json.ignore_rules | Where-Object { $_.id -eq 'Reload Test Game.exe' }).Count | Should -Be 1
-            Should -Invoke komorebic -Times 1 -Exactly -ParameterFilter {
-                $args[0] -eq 'replace-configuration' -and
-                $args[1] -eq (Join-Path $TestDrive 'Winarchy with spaces/config/komorebi/komorebi.json') -and
-                $args.Count -eq 2
-            }
-            Should -Invoke komorebic -Times 0 -ParameterFilter { $args[0] -eq 'reload-configuration' }
+            $json.monitors[0].workspaces[0].layout | Should -Be 'Columns'
+            Should -Invoke komorebic -Times 0 -ParameterFilter { $args[0] -in 'reload-configuration', 'replace-configuration' }
         }
     }
 }

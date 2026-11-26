@@ -137,19 +137,6 @@ Describe 'Get-WinarchyMonitorIndexMap' {
     }
 }
 
-Describe 'Get-WinarchyKomorebiHwnds' {
-    It 'lists every managed window, or only the floating ones' {
-        InModuleScope Winarchy {
-            $state = '{"monitors":{"elements":[{"workspaces":{"elements":[
-                {"containers":{"elements":[{"windows":{"elements":[{"hwnd":10},{"hwnd":11}]}}]},"floating_windows":{"elements":[{"hwnd":12}]},"monocle_container":null},
-                {"containers":{"elements":[]},"floating_windows":{"elements":[]},"monocle_container":{"windows":{"elements":[{"hwnd":13}]}}}]}},
-                {"workspaces":{"elements":[{"containers":{"elements":[]},"floating_windows":{"elements":[{"hwnd":20}]},"monocle_container":null}]}}]}}' | ConvertFrom-Json
-            @(Get-WinarchyKomorebiHwnds -State $state) | Sort-Object | Should -Be @(10, 11, 12, 13, 20)
-            @(Get-WinarchyKomorebiHwnds -State $state -Floating) | Should -Be @(12, 20)
-        }
-    }
-}
-
 Describe 'Test-WinarchyThemeData' {
     It 'reports every missing required key' {
         InModuleScope Winarchy {
@@ -1136,6 +1123,7 @@ Describe 'Window placement' {
 
     It 'writes floating as tile=false and scrolling as the Scrolling layout into komorebi.json' {
         InModuleScope Winarchy {
+            Mock Set-WinarchyConfigLiveView { }
             Mock Test-WinarchyProcess { $true }
             Mock Get-WinarchyKomorebiState { [pscustomobject]@{ monitors = [pscustomobject]@{ elements = @([pscustomobject]@{ device_id = 'AAA1' }) } } }
             Mock Import-WinarchyWindowPrefs { }
@@ -1156,6 +1144,7 @@ Describe 'Window placement' {
 
     It 'applies default_mode only to workspaces without a saved mode' {
         InModuleScope Winarchy {
+            Mock Set-WinarchyConfigLiveView { }
             Mock Test-WinarchyProcess { $true }
             Mock Get-WinarchyKomorebiState { [pscustomobject]@{ monitors = [pscustomobject]@{ elements = @([pscustomobject]@{ device_id = 'AAA1' }) } } }
             Mock Import-WinarchyWindowPrefs { }
@@ -1170,6 +1159,7 @@ Describe 'Window placement' {
 
     It 'writes saved layouts into the generated komorebi.json only for connected monitors' {
         InModuleScope Winarchy {
+            Mock Set-WinarchyConfigLiveView { }
             Mock Test-WinarchyProcess { $true }
             Mock Get-WinarchyKomorebiState { [pscustomobject]@{ monitors = [pscustomobject]@{ elements = @([pscustomobject]@{ device_id = 'AAA1' }) } } }
             Mock Import-WinarchyWindowPrefs { }
@@ -1181,6 +1171,44 @@ Describe 'Window placement' {
             $out = Add-WinarchyWindowRulesToKomorebiJson -Json $json | ConvertFrom-Json
             $out.monitors[0].workspaces[0].layout | Should -Be 'BSP'
             $out.monitors[0].workspaces[1].layout | Should -Be 'Columns'
+        }
+    }
+
+    It 'lets the live view win over saved modes unless the live view is skipped' {
+        InModuleScope Winarchy {
+            Mock Test-WinarchyProcess { $true }
+            Mock Get-WinarchyKomorebiState { '{"monitors":{"elements":[{"device_id":"AAA1","workspaces":{"elements":[
+                {"layout":{"Default":"Columns"},"tile":true,"layout_flip":"Horizontal","container_padding":17,"workspace_padding":31},
+                {"layout":{"Default":"BSP"},"tile":false,"layout_flip":null,"container_padding":null,"workspace_padding":null}]}}]}}' | ConvertFrom-Json }
+            Mock Import-WinarchyWindowPrefs { }
+            Mock Import-WinarchyDefaultMode { 'tiling' }
+            Mock Import-WinarchyWorkspaceLayouts { [pscustomobject]@{ Monitor = 'AAA1'; Workspace = 0; Layout = 'BSP'; Mode = 'floating' } }
+            $json = '{"monitors":[{"workspaces":[{"name":"1","layout":"BSP"},{"name":"2","layout":"BSP","layout_flip":"Vertical"}]}]}'
+
+            $live = (Add-WinarchyWindowRulesToKomorebiJson -Json $json | ConvertFrom-Json).monitors[0].workspaces
+            $live[0].layout | Should -Be 'Columns'
+            $live[0].layout_flip | Should -Be 'Horizontal'
+            $live[0].container_padding | Should -Be 17
+            $live[0].workspace_padding | Should -Be 31
+            $live[0].PSObject.Properties['tile'] | Should -BeNullOrEmpty
+            $live[1].tile | Should -BeFalse
+            foreach ($key in 'layout_flip', 'container_padding', 'workspace_padding') { $live[1].PSObject.Properties[$key] | Should -BeNullOrEmpty }
+
+            $saved = (Add-WinarchyWindowRulesToKomorebiJson -Json $json -SkipLiveView | ConvertFrom-Json).monitors[0].workspaces
+            $saved[0].tile | Should -BeFalse
+            $saved[0].layout | Should -Be 'BSP'
+        }
+    }
+
+    It 'layout apply renders without the live view' {
+        InModuleScope Winarchy {
+            Mock Test-WinarchyProcess { $true }
+            Mock Import-WinarchyWindowPrefs { }
+            Mock Import-WinarchyWorkspaceLayouts { [pscustomobject]@{ Monitor = 'AAA1'; Workspace = 0; Layout = 'BSP'; Mode = 'floating' } }
+            Mock Get-WinarchyKomorebiState { [pscustomobject]@{ monitors = [pscustomobject]@{ elements = @() } } }
+            Mock Update-WinarchyKomorebiRules { }
+            Invoke-WinarchyLayoutApply -Quiet
+            Should -Invoke Update-WinarchyKomorebiRules -Times 1 -ParameterFilter { $SkipLiveView }
         }
     }
 
@@ -1233,6 +1261,7 @@ Describe 'Window placement' {
             Mock Get-WinarchyRoot { $TestDrive }
             Mock Test-WinarchyProcess { $true }
             Mock Get-WinarchyKomorebiState { $State }
+            Mock Set-WinarchyConfigLiveView { }
             New-Item -ItemType Directory -Path (Join-Path $TestDrive 'config') -Force | Out-Null
             Export-WinarchyWindowPrefs -Pref @(
                 [pscustomobject]@{ Exe = 'Discord.exe'; Monitor = 'BBB2222-5&bbbbbbb&1&UID4353'; Workspace = 0; WorkspaceName = 'A'; Slot = 0;     Pin = $false }
@@ -3759,26 +3788,23 @@ Describe 'Monitor health' {
                 Mock Stop-WinarchyShell { $true }
                 Mock Start-WinarchyWindowSlots { }
                 Mock Get-WinarchyAhkExe { $null }
-                if (-not (Get-Command komorebic -ErrorAction SilentlyContinue)) { function komorebic { } }
-                Mock komorebic { }
+                Mock Invoke-WinarchyKomorebiStaticReload { }
             }
         }
 
-        It 'skips configuration replacement when komorebi was just restarted' {
+        It 'skips the configuration reload when komorebi was just restarted' {
             InModuleScope Winarchy {
                 Mock Repair-WinarchyKomorebiMonitors { $true }
                 Invoke-WinarchyReload
-                Should -Invoke komorebic -Times 0 -ParameterFilter { $args[0] -in 'reload-configuration', 'replace-configuration' }
+                Should -Invoke Invoke-WinarchyKomorebiStaticReload -Times 0
             }
         }
 
-        It 'replaces the generated configuration when komorebi was not restarted' {
+        It 'reloads the generated configuration when komorebi was not restarted' {
             InModuleScope Winarchy {
                 Mock Repair-WinarchyKomorebiMonitors { $false }
                 Invoke-WinarchyReload
-                Should -Invoke komorebic -Times 1 -ParameterFilter {
-                    $args[0] -eq 'replace-configuration' -and $args[1] -eq (Join-Path $TestDrive 'config\komorebi\komorebi.json')
-                }
+                Should -Invoke Invoke-WinarchyKomorebiStaticReload -Times 1 -ParameterFilter { $ConfigPath -eq (Join-Path $TestDrive 'config\komorebi\komorebi.json') }
             }
         }
 
@@ -3787,9 +3813,7 @@ Describe 'Monitor health' {
                 Mock Repair-WinarchyKomorebiMonitors { $true }
                 Invoke-WinarchyReload -Light
                 Should -Invoke Repair-WinarchyKomorebiMonitors -Times 0
-                Should -Invoke komorebic -Times 1 -ParameterFilter {
-                    $args[0] -eq 'replace-configuration' -and $args[1] -eq (Join-Path $TestDrive 'config\komorebi\komorebi.json')
-                }
+                Should -Invoke Invoke-WinarchyKomorebiStaticReload -Times 1
             }
         }
     }
@@ -4403,6 +4427,7 @@ Describe 'Stop-WinarchyShell' {
                 Mock Start-Process { }
                 if (-not (Get-Command komorebic -ErrorAction SilentlyContinue)) { function komorebic { } }
                 Mock komorebic { }
+                Mock Invoke-WinarchyKomorebiStaticReload { }
                 Mock komorebic { throw 'monitor information unavailable' } -ParameterFilter { $args[0] -eq 'monitor-information' }
                 $script:ShellQuitWaitMs = 0
                 $inhibitPath = Join-Path $state "shell-relaunch-inhibit-$sessionId"
@@ -4454,6 +4479,7 @@ Describe 'Stop-WinarchyShell' {
                 Mock Start-Process { }
                 if (-not (Get-Command komorebic -ErrorAction SilentlyContinue)) { function komorebic { } }
                 Mock komorebic { }
+                Mock Invoke-WinarchyKomorebiStaticReload { }
                 Mock komorebic { throw 'monitor information unavailable' } -ParameterFilter { $args[0] -eq 'monitor-information' }
 
                 { Invoke-WinarchyReload } | Should -Throw '*shell could not reload*'

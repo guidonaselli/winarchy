@@ -822,7 +822,7 @@ function Invoke-WinarchyReload {
     }
     # -Light corre solo (sync de accent, cambio de barra): ahí nunca se reinicia komorebi
     elseif ($Light -or -not (Repair-WinarchyKomorebiMonitors)) {
-        Invoke-WinarchyKomorebiReplace -ConfigPath (Join-Path $env:KOMOREBI_CONFIG_HOME 'komorebi.json')
+        Invoke-WinarchyKomorebiStaticReload -ConfigPath (Join-Path $env:KOMOREBI_CONFIG_HOME 'komorebi.json')
     }
     # YASB: reinicio limpio (kill + start) en vez de `yasbc reload`. El hot-reload de
     # YASB re-suscribe su widget de komorebi al named pipe pero deja viva la suscripción
