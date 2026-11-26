@@ -699,7 +699,7 @@ Describe 'Coding agent' {
             Mock Start-Process {}
             Start-WinarchyCodingAgent
             Should -Invoke Start-Process -Times 1 -ParameterFilter {
-                $FilePath -eq 'wezterm-gui.exe' -and $ArgumentList -contains 'codex'
+                $FilePath -like '*wezterm-gui.exe' -and $ArgumentList -contains 'codex'
             }
         }
     }

@@ -64,7 +64,9 @@ function Get-WinarchyAhkExe {
 
 function Get-WinarchyWeztermExe {
     <# wezterm-gui.exe (la GUI; wezterm.exe es el CLI y no abre ventana); $null si falta. #>
+    # state\bin\wezterm es un override de esta máquina (p. ej. una nightly): gana al instalado.
     $found = @(
+        (Join-Path (Get-WinarchyStateDir) 'bin\wezterm\wezterm-gui.exe'),
         "$env:ProgramFiles\WezTerm\wezterm-gui.exe",
         "$env:LOCALAPPDATA\Programs\WezTerm\wezterm-gui.exe"
     ) | Where-Object { Test-Path $_ } | Select-Object -First 1

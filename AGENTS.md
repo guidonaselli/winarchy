@@ -41,7 +41,7 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
   se unen. `rules.toml` es del usuario y gitignored: ningun update lo toca.
 - WezTerm es el terminal por defecto (SUPER+Return, agentes, `winarchy menu`). Su config
   se genera ENTERA en `config/wezterm/wezterm.lua`; la personalización del usuario va en
-  `config/wezterm/user.lua` (gitignored), que ningún theme set ni update toca. Windows
+  `config/wezterm/user.lua` (gitignored), que ningún theme set ni update toca. Un WezTerm en `state\bin\wezterm` (override de la máquina) gana al instalado. Windows
   Terminal se conserva y se sigue tematizando, pero Winarchy no lo abre.
 - `settings.json` de Windows Terminal se modifica solo por merge quirúrgico del scheme "Winarchy".
 - Componentes core (komorebi, YASB, WezTerm) fijados en `versions.lock.toml`; solo `winarchy update --core` los toca.

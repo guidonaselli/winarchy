@@ -253,6 +253,10 @@ function Invoke-WinarchyDoctor {
         # Flow reporta 4 componentes (2.1.3.0) contra el 2.1.3 del lockfile
         $pin = $lock['core'][$pinned.Key]
         $matchesLock = $installed -and ($installed -eq $pin -or $installed.StartsWith("$pin."))
+        if ($pinned.Key -eq 'wezterm' -and $found -and $pinned.Path.StartsWith((Get-WinarchyStateDir), [StringComparison]::OrdinalIgnoreCase)) {
+            Add-Check 'WezTerm local override' $true "$($pinned.Path) wins over the pinned $pin; delete that folder to go back"
+            continue
+        }
         Add-Check "$($pinned.Name) at lockfile version" ([bool]$matchesLock) `
             $(if ($installed) { "installed=$installed lockfile=$($lock['core'][$pinned.Key])" } else { 'not found on disk' }) `
             'winarchy update --core  (or reinstall the pinned version)'

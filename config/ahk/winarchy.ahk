@@ -169,7 +169,9 @@ KomorebicExe := FileExist(A_ProgramFiles "\komorebi\bin\komorebic.exe")
     ? A_ProgramFiles "\komorebi\bin\komorebic.exe"
     : "komorebic.exe"
 
-WeztermExe := FileExist(A_ProgramFiles "\WezTerm\wezterm-gui.exe")
+WeztermExe := FileExist(StateDir "\bin\wezterm\wezterm-gui.exe")
+    ? StateDir "\bin\wezterm\wezterm-gui.exe"
+    : FileExist(A_ProgramFiles "\WezTerm\wezterm-gui.exe")
     ? A_ProgramFiles "\WezTerm\wezterm-gui.exe"
     : "wezterm-gui.exe"
 ; --config-file explicito: WEZTERM_CONFIG_FILE puede faltar en el entorno heredado (AHK
