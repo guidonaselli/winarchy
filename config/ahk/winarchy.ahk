@@ -141,8 +141,9 @@ AltTabStep(dir) {
     }
     if !idx {
         list := []
+        active := DllCall('user32\GetAncestor', 'ptr', WinExist('A'), 'uint', 3, 'ptr')
         for hwnd in WinGetList() {
-            if AltTabCandidate(hwnd) || hwnd = WinExist('A')
+            if hwnd = active || (AltTabCandidate(hwnd) && !DllCall('user32\GetWindow', 'ptr', hwnd, 'uint', 4, 'ptr'))
                 list.Push(hwnd)
         }
     }
