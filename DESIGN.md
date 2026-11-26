@@ -50,8 +50,8 @@ Winarchy tiene que sentirse **otra cosa** que Windows de fábrica: una sola supe
 - Al asentarse una animación, matar su temporizador.
 
 ## Deuda de diseño conocida
-- Menú propio sin árbol de accesibilidad.
+- Menú propio sin árbol de accesibilidad, sin filas deshabilitadas ni separadores, sin estado de pulsado y sin estado silenciado en el deslizador.
 - OSD, toast y switcher sin movimiento.
 - Inicio y flyout de bandeja no respetan «efectos de animación» de Windows.
 - Panel de red sin lista de redes ni Wi-Fi propio: muestra estado y abre los ajustes de Windows.
-- Brillo sin control en el panel de estado (existe en la isla).
+- Brillo sin control en el panel de estado: el clic en el cluster ya no expande la isla, así que solo se alcanza con el mouse sobre la isla.

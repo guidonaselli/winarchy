@@ -514,7 +514,7 @@ unsafe fn status_panel(h: HWND, x: i32) {
             }))
         }
         StatusPart::Network => (Header::Text(if crate::metrics::online().unwrap_or(false) { t(K::Online) } else { t(K::Offline) }.to_string()), None),
-        StatusPart::Battery => (Header::Text(crate::metrics::battery().map_or(String::new(), |(p, charging)| format!("{p}%{}", if charging { format!(" · {}", t(K::Charging)) } else { String::new() }))), None),
+        StatusPart::Battery => (crate::metrics::battery().map_or(Header::None, |(p, charging)| Header::Text(format!("{p}%{}", if charging { format!(" · {}", t(K::Charging)) } else { String::new() }))), None),
     };
     menu_with(h, &context_entries(Part::Status, status), header, on_slide)
 }
@@ -530,7 +530,7 @@ unsafe fn menu_with(h: HWND, entries: &[(K, MenuEntry)], header: crate::menu::He
     let Some((theme, scale)) = with(|c| (c.theme.clone(), c.scale)) else { return };
     let chosen = crate::menu::pick_with(header, on_slide, &labels, (p.x, p.y), crate::menu::Anchor::BottomLeft, &theme, scale).map_or(0, |i| i as i32 + 1);
     // sin esto la app del usuario queda desactivada y el teclado no llega a ningún lado hasta el próximo clic
-    if GetForegroundWindow() == h && IsWindow(previous).as_bool() {
+    if previous != h && IsWindow(previous).as_bool() {
         let _ = SetForegroundWindow(previous);
     }
     match chosen.checked_sub(1).and_then(|i| entries.get(i as usize)) {

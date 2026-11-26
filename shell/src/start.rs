@@ -610,6 +610,9 @@ unsafe fn item_menu(position: usize, at: (i32, i32)) {
     with(|m| m.in_menu = true);
     let (theme, scale) = with(|m| (m.theme.clone(), m.scale)).unwrap_or_default();
     let picked = crate::menu::pick(&[(if pinned { t(K::StartUnpin) } else { t(K::StartPin) }).to_string()], at, crate::menu::Anchor::TopLeft, &theme, scale).map_or(0, |i| i as i32 + 1);
+    if let Some(hw) = with(|m| m.hwnd) {
+        let _ = SetForegroundWindow(hw);
+    }
     with(|m| {
         m.in_menu = false;
         m.opened_at = std::time::Instant::now();
@@ -673,6 +676,9 @@ unsafe fn power_menu() {
     let labels = [K::PowerLock, K::PowerSleep, K::PowerShutdown, K::PowerRestart, K::PowerSignOut].map(|k| t(k).to_string());
     let theme = with(|m| m.theme.clone()).unwrap_or_default();
     let picked = crate::menu::pick(&labels, (pos.0 + l.power.x + l.power.w, pos.1 + l.power.y), crate::menu::Anchor::BottomRight, &theme, scale).map_or(0, |i| i + 1);
+    if let Some(hw) = with(|m| m.hwnd) {
+        let _ = SetForegroundWindow(hw);
+    }
     with(|m| {
         m.in_menu = false;
         m.opened_at = std::time::Instant::now();

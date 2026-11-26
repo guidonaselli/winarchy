@@ -7,7 +7,7 @@ use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, SetFocus, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_SHIFT, ReleaseCapture, SetCapture, SetFocus, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_RETURN, VK_RIGHT, VK_UP};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -27,6 +27,7 @@ pub enum Header {
 
 const OPEN_MS: f32 = 140.0;
 const T_OPEN: usize = 1;
+static LAST_PCT: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 const WM_MOUSELEAVE_MSG: u32 = 0x02A3;
 
 struct St {
@@ -62,7 +63,7 @@ fn header_h(h: &Header, scale: f32) -> i32 {
     match h {
         Header::None => 0,
         Header::Text(_) => px(30, scale),
-        Header::Slider(..) => px(62, scale),
+        Header::Slider(..) => px(58, scale),
     }
 }
 
@@ -117,12 +118,12 @@ pub unsafe fn pick(labels: &[String], at: (i32, i32), anchor: Anchor, theme: &Th
 }
 
 pub unsafe fn pick_with(header: Header, on_slide: Option<fn(f32)>, labels: &[String], at: (i32, i32), anchor: Anchor, theme: &Theme, scale: f32) -> Option<usize> {
-    if labels.is_empty() && matches!(header, Header::None) {
+    if (labels.is_empty() && matches!(header, Header::None)) || ST.with(|s| s.borrow().is_some()) {
         return None;
     }
     let (row, pad) = (row_h(scale), pad(scale));
     let width = if matches!(header, Header::Slider(..)) { measure(labels, theme, scale).max(px(240, scale)) } else { measure(labels, theme, scale) };
-    let size = (width, header_h(&header, scale) + row * labels.len() as i32 + 2 * pad);
+    let size = (width.min(px(360, scale)), header_h(&header, scale) + row * labels.len() as i32 + 2 * pad);
     let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
     let hmon = MonitorFromPoint(POINT { x: at.0, y: at.1 }, MONITOR_DEFAULTTONEAREST);
     let _ = GetMonitorInfoW(hmon, &mut mi);
@@ -141,6 +142,8 @@ pub unsafe fn pick_with(header: Header, on_slide: Option<fn(f32)>, labels: &[Str
     let _ = ShowWindow(hwnd, SW_SHOW);
     let _ = SetForegroundWindow(hwnd);
     let _ = SetFocus(hwnd);
+    SetCapture(hwnd);
+    LAST_PCT.store(-1, std::sync::atomic::Ordering::Relaxed);
     let mut msg = MSG::default();
     while ST.with(|s| s.borrow().as_ref().is_some_and(|s| s.done.is_none())) {
         match GetMessageW(&mut msg, None, 0, 0).0 {
@@ -157,6 +160,7 @@ pub unsafe fn pick_with(header: Header, on_slide: Option<fn(f32)>, labels: &[Str
         }
     }
     let chosen = ST.with(|s| s.borrow_mut().take()).and_then(|s| s.done.flatten());
+    let _ = ReleaseCapture();
     let _ = DestroyWindow(hwnd);
     chosen
 }
@@ -192,12 +196,12 @@ unsafe fn compose(buf: &mut [u32], w: i32, h: i32, header: &Header, labels: &[St
         Header::Text(t) => draw_text(buf, w, h, R { x: padx, y: pad, w: w - 2 * padx, h: px(24, scale) }, t, &theme.font_family, scale, muted, font_px(theme), DT_LEFT),
         Header::Slider(label, v) => {
             let line = R { x: padx, y: pad, w: w - 2 * padx, h: px(28, scale) };
-            draw_text(buf, w, h, line, label, &theme.font_family, scale, fg, font_px(theme), DT_LEFT);
-            draw_text(buf, w, h, line, &format!("{}%", (v * 100.0).round() as i32), &theme.font_family, scale, accent, font_px(theme), DT_RIGHT);
-            let (track_h, knob) = (px(6, scale), px(16, scale));
-            let cy = pad + px(28, scale) + px(16, scale);
+            draw_text(buf, w, h, R { w: line.w - px(48, scale), ..line }, label, &theme.font_family, scale, fg, font_px(theme), DT_LEFT);
+            draw_text(buf, w, h, line, &format!("{}%", (v * 100.0).round() as i32), &theme.font_family, scale, fg, font_px(theme), DT_RIGHT);
+            let (track_h, knob) = (px(6, scale), px(18, scale));
+            let cy = pad + px(28, scale) + px(14, scale);
             let rail = R { x: padx, y: cy - track_h / 2, w: w - 2 * padx, h: track_h };
-            fill_round_a(buf, w, h, rail, track_h / 2, fg, 0.18);
+            fill_round_a(buf, w, h, rail, track_h / 2, fg, 0.30);
             let fill_w = ((rail.w as f32) * v).round() as i32;
             if fill_w > 0 {
                 fill_round_a(buf, w, h, R { w: fill_w.max(track_h), ..rail }, track_h / 2, accent, 1.0);
@@ -207,7 +211,7 @@ unsafe fn compose(buf: &mut [u32], w: i32, h: i32, header: &Header, labels: &[St
     }
     if let Some(i) = hover {
         let inset = px(5, scale);
-        fill_round_a(buf, w, h, R { x: inset, y: top + i as i32 * row, w: w - 2 * inset, h: row }, px(8, scale), accent, 0.30);
+        fill_round_a(buf, w, h, R { x: inset, y: top + i as i32 * row, w: w - 2 * inset, h: row }, px(8, scale), accent, 0.34);
     }
     for (i, l) in labels.iter().enumerate() {
         draw_text(buf, w, h, R { x: padx, y: top + i as i32 * row, w: w - 2 * padx, h: row }, l, &theme.font_family, scale, fg, font_px(theme), DT_LEFT);
@@ -240,6 +244,26 @@ fn row_from_y(y: i32) -> Option<usize> {
     ST.with(|s| s.borrow().as_ref().and_then(|s| row_at(y - header_h(&s.header, s.scale), pad(s.scale), row_h(s.scale), s.labels.len())))
 }
 
+// ←/→ mueven 2 puntos (10 con Mayús), Inicio/Fin van a los extremos.
+fn key_slide(k: u16) {
+    let cur = ST.with(|s| s.borrow().as_ref().and_then(|s| if let Header::Slider(_, v) = s.header { Some(v) } else { None }));
+    let Some(v) = cur else { return };
+    let step = if unsafe { GetKeyState(VK_SHIFT.0 as i32) } < 0 { 0.10 } else { 0.02 };
+    let next = match k {
+        k if k == VK_LEFT.0 => v - step,
+        k if k == VK_RIGHT.0 => v + step,
+        k if k == VK_HOME.0 => 0.0,
+        _ => 1.0,
+    };
+    apply_slide(next.clamp(0.0, 1.0));
+}
+
+// Con el mouse capturado, un clic fuera del menú llega acá con coordenadas negativas o mayores que el tamaño.
+fn outside(lp: LPARAM, size: (i32, i32)) -> bool {
+    let (x, y) = ((lp.0 & 0xFFFF) as i16 as i32, (lp.0 >> 16) as i16 as i32);
+    x < 0 || y < 0 || x >= size.0 || y >= size.1
+}
+
 fn slide(x: i32) {
     let v = ST.with(|s| s.borrow().as_ref().map(|s| slider_value(x, s.size.0, px(14, s.scale))));
     if let Some(v) = v {
@@ -256,8 +280,11 @@ fn apply_slide(v: f32) {
         }
         s.on_slide
     });
+    let pct = (v * 100.0).round() as i32;
     if let Some(f) = cb {
-        f(v);
+        if LAST_PCT.swap(pct, std::sync::atomic::Ordering::Relaxed) != pct {
+            f(v);
+        }
     }
     unsafe { paint() };
 }
@@ -296,8 +323,12 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
             set_hover(None);
             LRESULT(0)
         }
+        WM_LBUTTONDOWN | WM_RBUTTONDOWN if ST.with(|s| s.borrow().as_ref().is_some_and(|s| outside(lp, s.size))) => {
+            finish(None);
+            LRESULT(0)
+        }
         WM_LBUTTONDOWN => {
-            let on_slider = ST.with(|s| s.borrow().as_ref().is_some_and(|s| matches!(s.header, Header::Slider(..)) && y >= pad(s.scale) + px(28, s.scale) && y < header_h(&s.header, s.scale) + pad(s.scale)));
+            let on_slider = ST.with(|s| s.borrow().as_ref().is_some_and(|s| matches!(s.header, Header::Slider(..)) && y >= pad(s.scale) + px(20, s.scale) && y < header_h(&s.header, s.scale) + pad(s.scale)));
             if on_slider {
                 ST.with(|s| s.borrow_mut().as_mut().map(|s| s.dragging = true));
                 SetCapture(h);
@@ -306,10 +337,10 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
             LRESULT(0)
         }
         WM_LBUTTONUP | WM_RBUTTONUP => {
-            if ST.with(|s| s.borrow_mut().as_mut().is_some_and(|s| std::mem::replace(&mut s.dragging, false))) {
-                let _ = ReleaseCapture();
-            } else {
-                finish(row_from_y(y));
+            if !ST.with(|s| s.borrow_mut().as_mut().is_some_and(|s| std::mem::replace(&mut s.dragging, false))) {
+                if let Some(row) = row_from_y(y) {
+                    finish(Some(row));
+                }
             }
             LRESULT(0)
         }
@@ -326,6 +357,7 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
                 k if k == VK_ESCAPE.0 => finish(None),
                 k if k == VK_DOWN.0 => step(1),
                 k if k == VK_UP.0 => step(-1),
+                k if k == VK_LEFT.0 || k == VK_RIGHT.0 || k == VK_HOME.0 || k == VK_END.0 => key_slide(k),
                 k if k == VK_RETURN.0 => finish(ST.with(|s| s.borrow().as_ref().and_then(|s| s.hover))),
                 _ => {}
             }
@@ -390,6 +422,15 @@ mod tests {
             bmp.extend_from_slice(&[over(*p) as u8, over(*p >> 8) as u8, over(*p >> 16) as u8, 255]);
         }
         std::fs::write(std::env::temp_dir().join("winarchy-menu.bmp"), bmp).unwrap();
+    }
+
+    #[test]
+    fn a_click_outside_the_captured_menu_is_detected() {
+        let at = |x: i32, y: i32| LPARAM(((y as i16 as u16 as isize) << 16) | (x as i16 as u16 as isize));
+        assert!(!outside(at(10, 10), (200, 100)));
+        assert!(outside(at(-1, 10), (200, 100)));
+        assert!(outside(at(10, 100), (200, 100)));
+        assert!(outside(at(300, 10), (200, 100)));
     }
 
     #[test]
