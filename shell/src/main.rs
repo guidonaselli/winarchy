@@ -28,6 +28,7 @@ mod system;
 mod theme;
 mod tray;
 mod start;
+mod switcher;
 mod start_model;
 mod tray_flyout;
 mod tray_host;
@@ -68,6 +69,8 @@ const WM_CMD_TOGGLE_DESKTOP: u32 = WM_APP + 174;
 const WM_CMD_TOGGLE_CLOCK: u32 = WM_APP + 175;
 const WM_CMD_DOCK_FOCUS: u32 = WM_APP + 10;
 const WM_CMD_START: u32 = WM_APP + 13;
+const WM_CMD_SWITCHER_SHOW: u32 = WM_APP + 100;
+const WM_CMD_SWITCHER_HIDE: u32 = WM_APP + 101;
 const WM_CMD_DOCK_PIN: u32 = WM_APP + 43;
 const WM_EXPAND: u32 = WM_APP + 5;
 const WM_COLLAPSE: u32 = WM_APP + 6;
@@ -950,6 +953,14 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             dock::open_start();
             LRESULT(0)
         }
+        WM_CMD_SWITCHER_SHOW => {
+            dock::show_switcher();
+            LRESULT(0)
+        }
+        WM_CMD_SWITCHER_HIDE => {
+            switcher::hide();
+            LRESULT(0)
+        }
         WM_CMD_TRAY => {
             dock::show_tray();
             LRESULT(0)
@@ -1422,6 +1433,7 @@ fn main() {
             desktop::init(&theme.background, &root, com_initialized);
             wpn::start_relay();
             start::init(&root, &theme);
+            switcher::init();
             komorebi::spawn_ahk_watch(root.clone());
             komorebi::spawn_komorebi_watch(root.clone());
         }
@@ -1454,6 +1466,8 @@ fn main() {
                 pipe::Command::Tray => WM_CMD_TRAY,
                 pipe::Command::Start => WM_CMD_START,
                 pipe::Command::TrayDismiss => WM_CMD_TRAY_DISMISS,
+                pipe::Command::SwitcherShow => WM_CMD_SWITCHER_SHOW,
+                pipe::Command::SwitcherHide => WM_CMD_SWITCHER_HIDE,
                 pipe::Command::ToggleDesktop => WM_CMD_TOGGLE_DESKTOP,
                 pipe::Command::ToggleClock => WM_CMD_TOGGLE_CLOCK,
                 pipe::Command::DockFocus => WM_CMD_DOCK_FOCUS,

@@ -119,15 +119,18 @@ SessionShellActive() {
 }
 ; Al apretar Win se suelta el confinamiento del mouse que fija un juego, para pasar el cursor a otro monitor antes de que el launcher tome el foco.
 ~LWin::DllCall('ClipCursor', 'ptr', 0)
-; Sin Explorer no hay conmutador de Alt+Tab: un toque vuelve a la ventana anterior y Tab con Alt sostenido sigue por z-order.
+; Sin Explorer no hay conmutador de Alt+Tab: un toque vuelve a la ventana anterior y Tab con Alt sostenido sigue por z-order; la shell dibuja el conmutador.
 !Tab::AltTabStep(1)
 !+Tab::AltTabStep(-1)
 ~LAlt up::AltTabStep(0)
 #HotIf
 
 AltTabStep(dir) {
-    static list := [], idx := 0
+    static list := [], idx := 0, shown := false
     if !dir {
+        if shown
+            ShellIsland('switcher.hide')
+        shown := false
         idx := 0
         return
     }
@@ -142,6 +145,10 @@ AltTabStep(dir) {
         return
     idx := Mod(idx + dir + list.Length, list.Length)
     try WinActivate(list[idx + 1])
+    ids := ''
+    for hwnd in list
+        ids .= (ids ? ',' : '') hwnd
+    shown := ShellIsland('switcher.show', ',"params":{"windows":[' ids '],"index":' idx '}')
 }
 
 AltTabCandidate(hwnd) {

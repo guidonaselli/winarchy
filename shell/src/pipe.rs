@@ -32,6 +32,21 @@ pub struct Island {
 
 pub static ISLAND: std::sync::Mutex<Option<Island>> = std::sync::Mutex::new(None);
 
+// Ventanas del conmutador de Alt+Tab (hwnd) y la seleccionada; las ordena AHK, la shell solo las dibuja.
+pub static SWITCHER: std::sync::Mutex<(Vec<isize>, usize)> = std::sync::Mutex::new((Vec::new(), 0));
+
+const MAX_SWITCHER: usize = 64;
+
+fn switcher_from(params: &Value) -> Option<(Vec<isize>, usize)> {
+    let wins = params.get("windows")?.as_array()?;
+    if wins.is_empty() || wins.len() > MAX_SWITCHER {
+        return None;
+    }
+    let wins = wins.iter().map(|v| v.as_i64().filter(|h| *h > 0).map(|h| h as isize)).collect::<Option<Vec<_>>>()?;
+    let index = usize::try_from(params.get("index")?.as_u64()?).ok().filter(|i| *i < wins.len())?;
+    Some((wins, index))
+}
+
 const MAX_TEXT: usize = 120;
 
 // Solo campos estructurados y acotados: el cliente nunca dibuja UI arbitraria.
@@ -65,6 +80,8 @@ pub enum Command {
     ToggleClock,
     DockFocus,
     DockPin(usize),
+    SwitcherShow,
+    SwitcherHide,
 }
 
 // Un cliente por vez; el hilo de UI recibe Reload/Quit por `dispatch`, nunca bloquea acá.
@@ -179,6 +196,18 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
             dispatch(Command::Start);
             ok(json!({}))
         }
+        "switcher.show" => match switcher_from(&req.params) {
+            Some(state) => {
+                *SWITCHER.lock().unwrap() = state;
+                dispatch(Command::SwitcherShow);
+                ok(json!({}))
+            }
+            None => json!({"v": VERSION, "id": req.id, "ok": false, "error": "bad switcher"}),
+        },
+        "switcher.hide" => {
+            dispatch(Command::SwitcherHide);
+            ok(json!({}))
+        }
         "dock.tray" => {
             dispatch(Command::Tray);
             ok(json!({}))
@@ -285,6 +314,12 @@ mod tests {
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"confirm.request"}"#, &|_| {})["result"], "denied");
         let called = std::cell::Cell::new(false);
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"dock.tray"}"#, &|c| { assert!(matches!(c, Command::Tray)); called.set(true); })["ok"], true);
+        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"switcher.show","params":{"windows":[10,20,30],"index":2}}"#, &|c| assert!(matches!(c, Command::SwitcherShow)))["ok"], true);
+        assert_eq!(*SWITCHER.lock().unwrap(), (vec![10, 20, 30], 2));
+        for bad in [r#"{"windows":[],"index":0}"#, r#"{"windows":[1,2],"index":2}"#, r#"{"windows":[1,"x"],"index":0}"#, r#"{"windows":[-5],"index":0}"#, r#"{"index":0}"#] {
+            let req = format!(r#"{{"v":1,"id":1,"cmd":"switcher.show","params":{bad}}}"#);
+            assert_eq!(handle(req.as_bytes(), &|_| panic!("dispatched"))["ok"], false);
+        }
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"start.toggle"}"#, &|c| assert!(matches!(c, Command::Start)))["ok"], true);
         assert!(called.get());
         called.set(false);

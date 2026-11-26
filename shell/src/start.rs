@@ -286,7 +286,10 @@ unsafe fn watch(h: HWND) {
 
 fn icon_pixels(open: &str, side: i32) -> Option<Vec<u32>> {
     let guard = ICONS.lock().unwrap();
-    let icon = guard.as_ref()?.get(open)?;
+    Some(scale_icon(guard.as_ref()?.get(open)?, side))
+}
+
+pub(crate) fn scale_icon(icon: &crate::dock::Icon, side: i32) -> Vec<u32> {
     let mut bgra = Vec::with_capacity(icon.px.len() * 4);
     for p in &icon.px {
         // `Icon` guarda alfa premultiplicado; `scaled` espera alfa recto.
@@ -294,10 +297,10 @@ fn icon_pixels(open: &str, side: i32) -> Option<Vec<u32>> {
         let un = |c: u32| if a == 0 { 0 } else { ((c * 255 + a / 2) / a).min(255) as u8 };
         bgra.extend_from_slice(&[un(p & 255), un((p >> 8) & 255), un((p >> 16) & 255), a as u8]);
     }
-    Some(crate::tray_flyout::scaled(&bgra, (icon.w as u32, icon.h as u32), side))
+    crate::tray_flyout::scaled(&bgra, (icon.w as u32, icon.h as u32), side)
 }
 
-fn blit(buf: &mut [u32], (w, h): (i32, i32), x: i32, y: i32, side: i32, pixels: &[u32]) {
+pub(crate) fn blit(buf: &mut [u32], (w, h): (i32, i32), x: i32, y: i32, side: i32, pixels: &[u32]) {
     for (k, p) in pixels.iter().enumerate() {
         let (dx, dy) = (x + k as i32 % side, y + k as i32 / side);
         if dx >= 0 && dx < w && dy >= 0 && dy < h {

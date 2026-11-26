@@ -90,7 +90,7 @@ so `Ctrl+C` still interrupts.
 | `SUPER+Alt+u` or `SUPER+Alt+G` | Unstack the focused window |
 | `SUPER+Ctrl+S` / `SUPER+Ctrl+U` | Stack every window in the workspace / unstack the whole container |
 | `SUPER+Alt+,` / `SUPER+Alt+.` | Previous / next tab in the stack |
-| `Alt+Tab` / `Alt+Shift+Tab` | Sin Explorer: un toque vuelve a la ventana anterior; con Alt sostenido, cada Tab sigue por z-order |
+| `Alt+Tab` / `Alt+Shift+Tab` | Sin Explorer: un toque vuelve a la ventana anterior; con Alt sostenido, cada Tab sigue por z-order y la shell muestra un conmutador con los íconos de las ventanas, la elegida resaltada y su título |
 | `SUPER+Alt+Shift+Tab` / `SUPER+Alt+Tab`, `SUPER+Ctrl+←` / `SUPER+Ctrl+→`, `SUPER+Alt+WheelUp` / `SUPER+Alt+WheelDown` | Previous / next tab in the stack (Omarchy's group keys) |
 | `SUPER+Alt+1..5` | Go to tab N of the stack |
 

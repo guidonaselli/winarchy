@@ -833,7 +833,13 @@ fn request_control_center() {
 // Win y el logo abren el Inicio propio sobre el dock del monitor del cursor; sin docks queda el lanzador de siempre.
 pub fn open_start() {
     if dock_count() == 0 || !crate::start::available() { return request_start(); }
-    let found = unsafe {
+    let Some((anchor, mon, bottom, scale, theme)) = dock_at_cursor() else { return request_start() };
+    crate::start::toggle(anchor, mon, bottom, scale, &theme);
+}
+
+// Dock del monitor del cursor (el primero si ninguno coincide): ancla del logo, monitor, posición, escala y tema.
+fn dock_at_cursor() -> Option<(R, (i32, i32, i32, i32), bool, f32, Theme)> {
+    unsafe {
         let mut p = POINT::default();
         let _ = GetCursorPos(&mut p);
         let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
@@ -844,9 +850,13 @@ pub fn open_start() {
             let d = v.iter().find(|d| d.mon == at).or_else(|| v.first())?;
             Some((R { x: d.layout.bar.x + d.layout.brand.x, y: d.layout.bar.y + d.layout.brand.y, w: d.layout.brand.w, h: d.layout.brand.h }, d.mon, d.theme.position != "bottom", d.scale, d.theme.clone()))
         })
-    };
-    let Some((anchor, mon, bottom, scale, theme)) = found else { return request_start() };
-    crate::start::toggle(anchor, mon, bottom, scale, &theme);
+    }
+}
+
+pub fn show_switcher() {
+    if let Some((_, mon, _, scale, theme)) = dock_at_cursor() {
+        crate::switcher::show(mon, scale, &theme);
+    }
 }
 
 fn request_start() {
@@ -1838,6 +1848,9 @@ unsafe fn fetch_window_icon(source: &str) -> Option<Icon> {
     let hwnd: isize = source[7..].parse().ok()?;
     let mut handle = 0usize;
     let _ = SendMessageTimeoutW(HWND(hwnd as *mut _), WM_GETICON, WPARAM(ICON_BIG as usize), LPARAM(0), SMTO_ABORTIFHUNG, 200, Some(&mut handle));
+    if handle == 0 {
+        handle = GetClassLongPtrW(HWND(hwnd as *mut _), GCLP_HICON);
+    }
     if handle == 0 {
         return None;
     }
