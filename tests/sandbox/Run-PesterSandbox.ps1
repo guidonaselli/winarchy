@@ -14,6 +14,7 @@ if (-not (Test-Path $wsb)) { throw 'wsb.exe not found: enable Windows Sandbox.' 
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $pester = (Get-Module -ListAvailable Pester | Sort-Object Version | Select-Object -Last 1).ModuleBase
 $ahk = Join-Path $env:ProgramFiles 'AutoHotkey'
+if (-not (Test-Path $ahk)) { $ahk = Join-Path $env:LOCALAPPDATA 'Programs\AutoHotkey' }   # instalacion por usuario: sin esto los tests de AHK se saltean
 $run = Join-Path $Out "$(Get-Date -Format 'yyyyMMdd-HHmmss')-pester"
 New-Item -ItemType Directory -Path $run -Force | Out-Null
 

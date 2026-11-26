@@ -514,7 +514,7 @@ Sleep(11000)
     It 'recovers a missing session shell once and restores watchdog guards when its bridge fails' {
         if (-not $script:BridgeAhkExe) { Set-ItResult -Skipped -Because 'AutoHotkey v2 is not installed.'; return }
         $source = Get-Content (Join-Path $script:LifecycleSourceRoot 'config/ahk/winarchy.ahk') -Raw
-        $functions = foreach ($name in 'ShellWatch', 'ReapShellRecoveryBridge', 'ShellRelaunchInhibited', 'GetShellPid', 'FindSessionProcessPid', 'GetAssistantCommandKind', 'ShellResponsive', 'RunShellRecoveryBridge') {
+        $functions = foreach ($name in 'ShellWatch', 'ReapShellRecoveryBridge', 'ShellRelaunchInhibited', 'GetShellPid', 'FindSessionProcessPid', 'GetAssistantCommandKind', 'ShellResponsive', 'RunShellRecoveryBridge', 'RetryShellRecovery') {
             $function = [regex]::Match($source, "(?ms)^${name}\([^\r\n]*\) \{.*?^\}").Value
             $function | Should -Not -BeNullOrEmpty
             if ($name -eq 'ShellWatch') {
@@ -565,7 +565,7 @@ Report('state:' FileRead(ShellSessionMarker) ':' FileRead(ShellStatusFile))
         $actual = Invoke-AhkRecoveryProbe -Bridge $bridge -Functions ($functions -join "`n") -Body $body.Replace('__LOGON_IDENTITY__', $identity)
 
         $actual | Should -Be @(
-            'notice:Winarchy:Automatic Explorer recovery did not finish; Winarchy services remain running.'
+            'notice:Winarchy:Automatic Explorer recovery did not finish; retrying in 5 minutes.'
             'returned:0:0:1'
             'launches:1'
             "state:${identity}:0|1|${identity}"
@@ -578,7 +578,7 @@ Report('state:' FileRead(ShellSessionMarker) ':' FileRead(ShellStatusFile))
     ) {
         if (-not $script:BridgeAhkExe) { Set-ItResult -Skipped -Because 'AutoHotkey v2 is not installed.'; return }
         $source = Get-Content (Join-Path $script:LifecycleSourceRoot 'config/ahk/winarchy.ahk') -Raw
-        $functions = foreach ($name in 'ShellWatch', 'ReapShellRecoveryBridge', 'ShellRelaunchInhibited', 'GetShellPid', 'FindSessionProcessPid', 'GetAssistantCommandKind', 'ShellResponsive', 'RunShellRecoveryBridge') {
+        $functions = foreach ($name in 'ShellWatch', 'ReapShellRecoveryBridge', 'ShellRelaunchInhibited', 'GetShellPid', 'FindSessionProcessPid', 'GetAssistantCommandKind', 'ShellResponsive', 'RunShellRecoveryBridge', 'RetryShellRecovery') {
             $function = [regex]::Match($source, "(?ms)^${name}\([^\r\n]*\) \{.*?^\}").Value
             $function | Should -Not -BeNullOrEmpty
             if ($name -eq 'ShellWatch') {
@@ -648,7 +648,7 @@ ShowTaskbars() {
 
         $actual | Should -Be @(
             'responsive:0'
-            'notice:Winarchy:Automatic Explorer recovery did not finish; Winarchy services remain running.'
+            'notice:Winarchy:Automatic Explorer recovery did not finish; retrying in 5 minutes.'
             'returned:0:0:1'
             'launches:1'
             'alive:1'
@@ -723,10 +723,11 @@ Describe 'AHK shell watchdog lifecycle contract' {
         $quit | Should -Match '(?s)result := RunShellRecoveryBridge\(\).*if !result.*return.*Komorebic\(''stop''\)'
     }
 
-    It 'schedules budget or executable failure recovery only once per AHK lifetime' {
+    It 'schedules budget or executable failure recovery once, retrying only after a delay' {
         $script:LifecycleWatch | Should -Match '(?s)recoverSessionShell := false.*if sessionShell && \(pid \|\| !exe \|\| ShellRelaunches.Length >= 3\) \{\s+if !ShellRecoveryAttempted\s+recoverSessionShell := true\s+\} else if !exe \|\| ShellRelaunches.Length >= 3'
         $script:LifecycleWatch | Should -Match '(?s)if recoverSessionShell \{\s+ShellRecoveryAttempted := true.*RunShellRecoveryBridge\(\)'
-        ([regex]::Matches($script:LifecycleAhk, '(?m)^\s*ShellRecoveryAttempted := false')).Count | Should -Be 3
+        ([regex]::Matches($script:LifecycleAhk, '(?m)^\s*ShellRecoveryAttempted := false')).Count | Should -Be 4
+        $script:LifecycleWatch | Should -Match 'SetTimer\(RetryShellRecovery, -300000\)'
         ([regex]::Matches($script:LifecycleWatch, 'RunShellRecoveryBridge\(')).Count | Should -Be 1
     }
 

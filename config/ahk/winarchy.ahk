@@ -1140,7 +1140,7 @@ ShellWatch() {
 
 RetryShellRecovery() {
     global ShellRecoveryAttempted
-    ShellRecoveryAttempted := 0
+    ShellRecoveryAttempted := false
 }
 
 FindSessionProcessPid(exeName, paths, commandArg := '') {
