@@ -130,7 +130,7 @@ fn terminate_owner(h: HWND) -> bool {
 pub fn spawn_ui_watch(window: HWND, root: std::path::PathBuf) {
     let window = window.0 as isize;
     std::thread::spawn(move || {
-        wait_until_hung(HWND(window as *mut _), std::time::Duration::from_secs(5), 12);
+        wait_until_hung(HWND(window as *mut _), std::time::Duration::from_secs(5), 6);
         crate::boot_log(&root, "exit: ui thread hung, abort");
         crate::dock::restore_native_taskbar();
         std::process::abort();

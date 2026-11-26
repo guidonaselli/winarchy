@@ -3276,7 +3276,7 @@ Describe 'native shell guardrails' {
         $watchdog | Should -Match "(?s)SendMessageTimeoutW[^\r\n]*'UInt',\s*(?:0x0+|0)\s*,"
         $watchdog | Should -Match "(?s)SendMessageTimeoutW.*?'UInt',\s*[1-9][0-9]{0,3}\s*,\s*'(?:U?Ptr)\*'"
         $watchdog | Should -Match 'ShellResponsive\(pid\)'
-        $watchdog | Should -Match '\+\+ShellMisses < 2'
+        $watchdog | Should -Match '\? 12 : 2\s+if \(\+\+ShellMisses < limit\)'
         $watchdog | Should -Match "(?s)(?:ProcessClose\(|taskkill[^\r\n]*/F).*?ShowTaskbars\(\).*?Run\("
     }
 

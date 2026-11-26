@@ -1022,6 +1022,11 @@ ShellWatch() {
         return
     }
     modeMismatch := sessionShell ? (!statusValid || !reportedSessionShell) : statusValid && reportedSessionShell != sessionShell
+    static watchedPid := 0
+    if pid != watchedPid {
+        watchedPid := pid
+        ShellMisses := 0
+    }
     if pid {
         if ShellBootUntil = 0
             ShellBootUntil := A_TickCount + 20000
@@ -1034,7 +1039,9 @@ ShellWatch() {
         if !modeMismatch && !WinGetList('ahk_class WinarchyShellPill ahk_pid ' pid).Length && A_TickCount < ShellBootUntil
             return
     }
-    if (++ShellMisses < 2) || ShellWatchBusy
+    ; la shell de sesión colgada se aborta sola en ~40 s y Windows la relanza; Explorer es solo el respaldo
+    limit := pid && reportedSessionShell ? 12 : 2
+    if (++ShellMisses < limit) || ShellWatchBusy
         return
     ShellWatchBusy := true
     handle := DllCall('CreateMutexW', 'ptr', 0, 'int', 0, 'str', 'Local\WinarchyShellLifecycle-' sessionId, 'ptr')

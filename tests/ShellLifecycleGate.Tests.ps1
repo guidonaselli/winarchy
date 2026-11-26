@@ -619,12 +619,14 @@ try {
     ShellLifecycleStopping := false
     ShellRecoveryAttempted := false
     Report('responsive:' ShellResponsive(shellPid))
-    ShellWatch()
+    Loop 11
+        ShellWatch()
+    Report('early:' (FileExist(RepoRoot '\launches.txt') != ''))
     ShellWatch()
     Report('returned:' ShellLifecycleStopping ':' ShellWatchBusy ':' ShellRecoveryAttempted)
     ShellBootUntil := 1
-    ShellWatch()
-    ShellWatch()
+    Loop 12
+        ShellWatch()
     SetTimer(ShellWatch, 0)
     launches := FileExist(RepoRoot '\launches.txt') ? StrSplit(Trim(FileRead(RepoRoot '\launches.txt'), Chr(13) Chr(10)), "`n").Length : 0
     Report('launches:' launches)
@@ -648,6 +650,7 @@ ShowTaskbars() {
 
         $actual | Should -Be @(
             'responsive:0'
+            'early:0'
             'notice:Winarchy:Automatic Explorer recovery did not finish; retrying in 5 minutes.'
             'returned:0:0:1'
             'launches:1'
