@@ -1106,7 +1106,24 @@ pub fn refresh() {
     }
 }
 
+// Un explorer.exe que convive con la shell registrada deja su Progman como ventana común: sube sobre las apps y se come los clics.
+// shortcut: si la shell muere a la fuerza queda oculto hasta que otra shell cierre en orden o se reinicie Explorer.
+fn show_foreign_desktops(show: bool) {
+    unsafe {
+        let mut previous = HWND::default();
+        while let Ok(progman) = FindWindowExW(None, previous, w!("Progman"), PCWSTR::null()) {
+            previous = progman;
+            if IsWindowVisible(progman).as_bool() != show {
+                let _ = ShowWindow(progman, if show { SW_SHOWNA } else { SW_HIDE });
+            }
+        }
+    }
+}
+
 pub fn tick() {
+    if STATE.with(|state| state.borrow().as_ref().is_some_and(|state| unsafe { GetShellWindow() } == state.hwnd)) {
+        show_foreign_desktops(false);
+    }
     refresh();
 }
 
@@ -1114,6 +1131,7 @@ pub fn shutdown() {
     desktop_view::shutdown();
     let state = STATE.with(|state| state.borrow_mut().take());
     if let Some(state) = state {
+        show_foreign_desktops(true);
         state.requests.close();
         let hwnd = state.hwnd;
         unsafe {
