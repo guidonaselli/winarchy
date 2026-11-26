@@ -164,6 +164,8 @@ if ($initialTheme) {
     Write-WinarchyInfo 'Generating configs with the initial theme (tokyo-night)...'
 }
 Set-WinarchyTheme -Name $initialTheme
+# la recarga del config deja vivas las ventanas de borde anteriores; solo este comando las destruye
+if (Get-Process komorebi -ErrorAction SilentlyContinue) { komorebic border-implementation windows }
 
 # --- 4b. Identidad unificada: tray único + auto-updates de terceros off ---------------
 # Idempotente: se reaplica en cada install/repair, así un update de Flow/ShareX/Everything
