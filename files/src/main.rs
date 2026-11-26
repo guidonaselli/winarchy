@@ -1036,9 +1036,11 @@ impl Component for Explorer {
                 }
             }
             Message::OpenTerminal => {
+                use std::os::windows::process::CommandExt;
                 let mut custom = self.terminal.split_whitespace();
                 let opened = match custom.next() {
                     Some(program) => std::process::Command::new(program)
+                        .creation_flags(0x0800_0000)
                         .args(custom.map(|arg| arg.replace("{path}", &self.path.to_string_lossy())))
                         .current_dir(&self.path)
                         .spawn(),

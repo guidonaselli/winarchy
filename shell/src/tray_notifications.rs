@@ -213,7 +213,27 @@ fn play_sound(flags: u32) {
     unsafe { let _ = PlaySoundW(alias, None, SND_ALIAS | SND_ASYNC | SND_NODEFAULT); }
 }
 
+// Entrada y salida del aviso: fundido con un deslizamiento corto, sin repintar el contenido.
+fn glide(hwnd: HWND, at: (i32, i32), off: i32, entering: bool) {
+    const FRAMES: i32 = 8;
+    for i in 1..=FRAMES {
+        let e = crate::dock::ease(i as f32 / FRAMES as f32);
+        let (alpha, dy) = if entering { (e, off as f32 * (1.0 - e)) } else { (1.0 - e, off as f32 * e) };
+        let pos = POINT { x: at.0, y: at.1 + dy.round() as i32 };
+        let blend = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: (alpha * 255.0).round() as u8, AlphaFormat: 1 };
+        unsafe { let _ = UpdateLayeredWindow(hwnd, None, Some(&pos), None, None, None, COLORREF(0), Some(&blend), ULW_ALPHA); }
+        std::thread::sleep(Duration::from_millis(16));
+    }
+}
+
 fn hide(hwnd: HWND) {
+    if let Some((theme, scale, true)) = with(|s| (s.theme.clone(), s.scale, s.visible)) {
+        if crate::dock::motion_enabled(&theme) {
+            let mut r = RECT::default();
+            unsafe { let _ = GetWindowRect(hwnd, &mut r); }
+            glide(hwnd, (r.left, r.top), px(8, scale), false);
+        }
+    }
     unsafe { let _ = ShowWindow(hwnd, SW_HIDE); }
     with(|s| { s.visible = false; s.last_tick = None; });
     publish();
@@ -241,13 +261,16 @@ fn show(hwnd: HWND) -> bool {
         s.rect = R { x: 0, y: 0, w: size.0, h: size.1 };
         Some((x, y, size.0, size.1, s.theme.clone(), s.scale))
     }).flatten() else { return false };
-    if !render(hwnd, x, y, w, h, &theme, scale) { return false; }
+    let motion = crate::dock::motion_enabled(&theme);
+    let off = if motion { px(12, scale) } else { 0 };
+    if !render(hwnd, x, y + off, w, h, &theme, scale, if motion { 0 } else { 255 }) { return false; }
+    if motion { glide(hwnd, (x, y), off, true); }
     with(|s| s.visible = true);
     publish();
     true
 }
 
-fn render(hwnd: HWND, x: i32, y: i32, w: i32, h: i32, theme: &Theme, scale: f32) -> bool {
+fn render(hwnd: HWND, x: i32, y: i32, w: i32, h: i32, theme: &Theme, scale: f32, alpha: u8) -> bool {
     let Some(request) = with(|s| s.request.clone()).flatten() else { return false };
     unsafe {
         let screen = GetDC(None);
@@ -287,7 +310,7 @@ fn render(hwnd: HWND, x: i32, y: i32, w: i32, h: i32, theme: &Theme, scale: f32)
         let size = SIZE { cx: w, cy: h };
         let pos = POINT { x, y };
         let src = POINT::default();
-        let blend = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: 1 };
+        let blend = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: alpha, AlphaFormat: 1 };
         let updated = UpdateLayeredWindow(hwnd, None, Some(&pos), Some(&size), mem, Some(&src), COLORREF(0), Some(&blend), ULW_ALPHA).is_ok();
         if updated {
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
