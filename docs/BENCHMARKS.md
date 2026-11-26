@@ -67,3 +67,19 @@ tick, new window), never on an idle frame.
   average over the window, so it moves with what the user is doing.
 - Startup time, frame time through GDI/DWM and behavior under mixed-DPI hotplug were not
   measured. They need a harness that drives a clean session; `tests/sandbox/` is the place for it.
+
+## Windows Sandbox: before and after installing (coexistence mode)
+
+`tests/sandbox/Start-WinarchySandbox.ps1 -Scenario benchmark -WorkingTree`: clean sandbox (4 GB), Git and PowerShell installed, 60 s settle, 30 s idle sample as baseline; then `install.ps1` without activating the custom shell, 90 s settle, same sample. Explorer keeps running in both, so this measures what Winarchy adds, not the Explorer-less session.
+
+| | Before | After |
+|---|---|---|
+| Memory in use | 1742 MB | 2015 MB (+273 MB, of which about 133 MB is the installer's own `pwsh` still alive) |
+| Processes | 86 | 91 |
+| Handles | 39 188 | 42 742 |
+| CPU, whole machine, idle | 0.01 % | 0.12 % |
+| `install.ps1` wall time | n/a | 956 s (includes downloading and installing the pinned components with winget) |
+
+Resident Winarchy processes after the settle: `winarchy-shell` 14 MB, `komorebi` 33 MB, `AutoHotkey64` 16 MB (63 MB together).
+
+Caveats: one run, one sandbox, no GPU (vGPU disabled), so the numbers show order of magnitude, not variance. The sandbox cannot run the shell as the session shell, so logon time and the Explorer-less saving above are only measured on the real machine.
