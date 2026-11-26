@@ -1497,6 +1497,7 @@ fn main() {
             dock::restore_native_taskbar_at_start();
         }
         SetTimer(strip, TIMER_TICK, 1000, None);
+        komorebi::spawn_ui_watch(pill, root.clone());
 
         let target = strip.0 as isize;
         brightness::init(move || {

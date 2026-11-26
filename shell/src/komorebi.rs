@@ -125,6 +125,66 @@ fn terminate_owner(h: HWND) -> bool {
     }
 }
 
+// Un hilo de UI colgado no se recupera solo y AHK no mata la shell de sesión: la shell se aborta y
+// la relanzan Windows o AHK. Cuenta chequeos seguidos, no reloj, para no disparar al volver de suspensión.
+pub fn spawn_ui_watch(window: HWND, root: std::path::PathBuf) {
+    let window = window.0 as isize;
+    std::thread::spawn(move || {
+        wait_until_hung(HWND(window as *mut _), std::time::Duration::from_secs(5), 12);
+        crate::boot_log(&root, "exit: ui thread hung, abort");
+        crate::dock::restore_native_taskbar();
+        std::process::abort();
+    });
+}
+
+fn wait_until_hung(window: HWND, poll: std::time::Duration, limit: u32) {
+    let mut misses = 0;
+    while misses < limit {
+        std::thread::sleep(poll);
+        misses = if responds(window) { 0 } else { misses + 1 };
+    }
+}
+
+#[cfg(test)]
+mod ui_watch_tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::Duration;
+    use windows::core::w;
+    use windows::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, DispatchMessageW, PeekMessageW, HWND_MESSAGE, MSG, PM_REMOVE, WINDOW_EX_STYLE, WINDOW_STYLE};
+
+    #[test]
+    fn only_a_thread_that_stops_pumping_counts_as_hung() {
+        let (window_tx, window_rx) = mpsc::channel();
+        let (stop_pumping_tx, stop_pumping_rx) = mpsc::channel::<()>();
+        let (quit_tx, quit_rx) = mpsc::channel::<()>();
+        let ui = std::thread::spawn(move || unsafe {
+            let window = CreateWindowExW(WINDOW_EX_STYLE(0), w!("STATIC"), w!(""), WINDOW_STYLE(0), 0, 0, 0, 0, HWND_MESSAGE, None, None, None).unwrap();
+            window_tx.send(window.0 as isize).unwrap();
+            let mut msg = MSG::default();
+            while stop_pumping_rx.try_recv().is_err() {
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    DispatchMessageW(&msg);
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            quit_rx.recv().unwrap();
+            let _ = DestroyWindow(window);
+        });
+        let window = window_rx.recv().unwrap();
+        let (hung_tx, hung_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            wait_until_hung(HWND(window as *mut _), Duration::from_millis(20), 2);
+            let _ = hung_tx.send(());
+        });
+        assert!(hung_rx.recv_timeout(Duration::from_millis(500)).is_err(), "a pumping thread was reported hung");
+        stop_pumping_tx.send(()).unwrap();
+        assert!(hung_rx.recv_timeout(Duration::from_secs(20)).is_ok(), "a stuck thread was not detected");
+        quit_tx.send(()).unwrap();
+        ui.join().unwrap();
+    }
+}
+
 const STOP_MARKER_TTL: std::time::Duration = std::time::Duration::from_secs(120);
 
 // komorebi ausente y nadie lo paró a propósito (marcador fresco) ni hay un juego en primer plano: es una muerte.
