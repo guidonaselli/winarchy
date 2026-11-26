@@ -20,6 +20,13 @@ pub fn latest() -> Vec<Toast> {
     LATEST.lock().unwrap().clone()
 }
 
+// Hora local (hh, mm) de la llegada: ArrivalTime viene en FILETIME.
+pub fn arrival_clock(arrival: i64, utc_offset_min: i64) -> (i64, i64) {
+    let minutes = (arrival as u64).saturating_sub(UNIX_TO_FILETIME) as i64 / 600_000_000 + utc_offset_min;
+    let m = minutes.rem_euclid(1440);
+    (m / 60, m % 60)
+}
+
 pub fn open_toast(toast: &Toast) -> Option<String> {
     toast.app.as_deref().map(open_target)
 }
@@ -215,6 +222,13 @@ mod tests {
         assert!(open_target(r"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe").to_lowercase().ends_with(r"v1.0\powershell.exe"));
         assert_eq!(open_target(r"{not-a-guid}\x.exe"), r"shell:AppsFolder\{not-a-guid}\x.exe");
         assert_eq!(open_target("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"), r"shell:AppsFolder\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App");
+    }
+
+    #[test]
+    fn arrival_is_shown_in_local_time() {
+        let noon_utc = (UNIX_TO_FILETIME + 12 * 3600 * 10_000_000) as i64;
+        assert_eq!(arrival_clock(noon_utc, -180), (9, 0));
+        assert_eq!(arrival_clock(noon_utc, 90), (13, 30));
     }
 
     #[test]
