@@ -34,7 +34,8 @@ It is a pragmatic, Windows-native translation of the ideas that made Omarchy fee
 Winarchy is an opinionated integration layer for Windows 11:
 
 - **tiling window management**
-- **Waybar-style status bar**
+- **a native Rust shell**: the Island bar, a per-monitor dock, a Start menu and an Alt+Tab switcher
+- **an optional session shell that replaces Explorer** (explicit opt-in, reversible)
 - **SUPER-based keybindings**
 - **coordinated cross-app themes**
 - **single CLI for setup, updates, themes, and recovery**
@@ -48,13 +49,13 @@ All built on top of native Windows-compatible tools instead of pretending Window
 | Omarchy / Linux idea | Winarchy equivalent |
 |---|---|
 | Hyprland | **komorebi** |
-| Waybar | **YASB** |
+| Waybar | **Winarchy shell** (Island + dock + cluster), **YASB** optional |
 | Walker | **Flow Launcher** |
 | compositor-driven keybinds | **AutoHotkey v2** |
 | `omarchy-theme-set` | **`winarchy theme set`** |
 | `omarchy-update` | **`winarchy update`** |
 | launcher / menu glue | **`winarchy menu`** |
-| lightweight notification stack | native Windows toasts |
+| lightweight notification stack | Windows toasts, relayed by the shell's own popup |
 
 ---
 
@@ -147,12 +148,48 @@ That means Winarchy optimizes for:
 
 ---
 
+## The session shell (optional, no Explorer)
+
+By default Winarchy runs next to Explorer (coexistence mode). `winarchy shell activate --yes` makes
+`winarchy-shell.exe` the Windows shell at the next sign-in through the per-user Custom User Interface
+policy, so `explorer.exe` never starts. It is opt-in, records the exact prior value, and
+`winarchy shell deactivate` or the SYSTEM recovery task put Explorer back
+(see [docs/custom-shell-policy.md](docs/custom-shell-policy.md)). Do not activate it on a machine you
+cannot recover.
+
+What the shell draws and owns when Explorer is gone:
+
+- **Start menu** (`Win` tap or the dock logo): pinned apps, all apps from `shell:AppsFolder`, type to search,
+  power menu. Drop folders or files on the logo to pin them as *places*; right-click or `Shift+F10` unpins.
+- **Dock** per monitor with live DWM thumbnails, drag-and-drop to open files with an app, jump-list recents,
+  a tray flyout with the real tray icons and a system cluster (Quick Settings, clock, show desktop).
+- **Alt+Tab** with a thumbnail of every window; holding `Alt` and stepping only previews, the window changes when you release.
+- **Desktop** with icons, wallpaper and the context menu; Windows notifications as toasts, and `Win+N` or the bell
+  replays the last five (there is no persistent notification list yet).
+- **Volume keys** (`Volume_Up/Down/Mute`) through AutoHotkey, with the volume OSD in the island.
+- **Run dialog** on `Win+Alt+R`.
+- **Files**, a native file manager in Rust (`files/`), is what `Win+E` opens when it is installed.
+
+Known gaps without Explorer, from an audit of what Explorer normally does: no Focus assist,
+no USB-connected notice, no input-language indicator, no task view or virtual desktops, no `Win+X` menu,
+no on-screen keyboard or magnifier shortcut. The parity table, with the evidence level of every row, is
+[docs/rust-session-shell-parity.md](docs/rust-session-shell-parity.md). The boot sequence, the single-instance
+rule and the logon race between the autostart task and the policy are covered by tests and the Sandbox scenarios
+under `tests/sandbox/`.
+
+---
+
 ## Performance
 
 The native shell is a 1.5 MB Rust binary. In a live session (30 s sample, dock and cluster on) it used
 **53 MB** of working set and **0.38 %** of one core, while `explorer.exe` on the same machine used
 294 MB and 2.58 %. Hot paths take nanoseconds (`hit_test` 16 ns, dock layout 88 ns). Method, commands
 and caveats are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+
+Without Explorer the stack holds about 160 MB against about 360 MB with it. In a clean Windows Sandbox,
+installing Winarchy in coexistence mode added 5 processes and about 63 MB of resident Winarchy processes
+(`winarchy-shell` 14 MB, `komorebi` 33 MB, `AutoHotkey64` 16 MB), with idle CPU of the whole machine going from
+0.01 % to 0.12 %. Those Sandbox figures come from a single run.
 
 ## Installation
 
@@ -625,7 +662,7 @@ Winarchy is **not**:
 
 - a Linux compatibility layer
 - a fake Hyprland port
-- a complete Windows shell replacement
+- a Windows shell replacement by default: the session shell is an explicit opt-in and Explorer stays unless you activate it
 - a promise that Windows will behave exactly like Linux
 
 It is a **best-effort, highly practical translation** of a workflow I genuinely enjoy.
@@ -640,7 +677,7 @@ Some things map beautifully from Omarchy to Windows. Some do not.
 
 Accepted limitations include:
 
-- native Windows notification behavior instead of a Linux-style notification daemon
+- notifications are Windows toasts: there is no Linux-style daemon, and without Explorer no persistent notification list
 - Windows foreground/focus rules that sometimes require small workarounds
 - app-specific theming limits when upstream software does not expose enough control
 
