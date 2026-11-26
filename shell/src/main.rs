@@ -1450,9 +1450,7 @@ fn main() {
     let panic_root = root.clone();
     std::panic::set_hook(Box::new(move |i| {
         boot_log(&panic_root, &format!("panic in {:?}: {i}", std::thread::current().name()));
-        if std::thread::current().name() == Some("main") {
-            dock::restore_native_taskbar();
-        }
+        dock::restore_native_taskbar();
         prev_hook(i);
     }));
     unsafe {

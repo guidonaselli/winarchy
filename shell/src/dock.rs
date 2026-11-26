@@ -2596,7 +2596,7 @@ unsafe fn show_tip(idx: usize) {
     let text = if idx == HUB_INDEX { Some(crate::i18n::t(crate::i18n::K::StartMenu).to_string()) } else if idx == TRAY_INDEX { Some(crate::i18n::t(crate::i18n::K::SystemTray).to_string()) } else { tip_text(idx) };
     let Some(text) = text else { return hide_tip() };
     let (tip, theme, scale, bar, cell, bottom) = with(|d| (d.tip, d.theme.clone(), d.scale, d.layout.bar, if idx == HUB_INDEX { Some(d.layout.brand) } else if idx == TRAY_INDEX { Some(d.layout.tray) } else { d.layout.cells.get(idx).copied() }, d.theme.position != "bottom"));
-    let Some(cell) = cell else { return hide_tip() };
+    let Some(cell) = cell.filter(|_| !text.is_empty()) else { return hide_tip() };
     let wide: Vec<u16> = text.encode_utf16().collect();
     let family: Vec<u16> = theme.font_family.encode_utf16().chain(std::iter::once(0)).collect();
     let screen = GetDC(None);

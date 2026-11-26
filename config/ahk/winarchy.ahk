@@ -1095,8 +1095,11 @@ ShellWatch() {
             if !ShellRecoveryAttempted
                 recoverSessionShell := true
         } else if !exe || ShellRelaunches.Length >= 3 {
-            if ShellRelaunches.Length >= 3
+            static pauseTip := -300000
+            if ShellRelaunches.Length >= 3 && A_TickCount - pauseTip >= 300000 {
+                pauseTip := A_TickCount
                 TrayTip('The shell keeps crashing; relaunch paused. Run: winarchy doctor', 'Winarchy')
+            }
         } else {
             if pid {
                 try ProcessClose(pid)
@@ -1128,9 +1131,16 @@ ShellWatch() {
         ShellLifecycleStopping := false
         ShellWatchBusy := false
         SetTimer(ShellWatch, 5000)
-        if !result
-            TrayTip('Automatic Explorer recovery did not finish; Winarchy services remain running.', 'Winarchy')
+        if !result {
+            SetTimer(RetryShellRecovery, -300000)
+            TrayTip('Automatic Explorer recovery did not finish; retrying in 5 minutes.', 'Winarchy')
+        }
     }
+}
+
+RetryShellRecovery() {
+    global ShellRecoveryAttempted
+    ShellRecoveryAttempted := 0
 }
 
 FindSessionProcessPid(exeName, paths, commandArg := '') {
@@ -1236,7 +1246,7 @@ ShellResponsive(pid) {
     try {
         for hwnd in WinGetList('ahk_class WinarchyShellPill ahk_pid ' pid) {
             result := 0
-            if DllCall('user32\SendMessageTimeoutW', 'ptr', hwnd, 'uint', 0, 'uptr', 0, 'ptr', 0, 'uint', 2, 'uint', 500, 'ptr*', &result, 'uptr')
+            if DllCall('user32\SendMessageTimeoutW', 'ptr', hwnd, 'uint', 0, 'uptr', 0, 'ptr', 0, 'uint', 2, 'uint', 2000, 'ptr*', &result, 'uptr')
                 return true
         }
     } finally {

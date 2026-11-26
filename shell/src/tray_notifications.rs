@@ -325,6 +325,9 @@ fn render(hwnd: HWND, x: i32, y: i32, w: i32, h: i32, theme: &Theme, scale: f32,
 }
 
 unsafe fn draw_paragraph(buf: &mut [u32], stride: i32, rows: i32, rect: R, text: &str, family: &str, scale: f32, fg: (u8, u8, u8), font_size: i32) {
+    if text.is_empty() {
+        return;
+    }
     let wide: Vec<u16> = text.encode_utf16().collect();
     let family: Vec<u16> = family.encode_utf16().chain(Some(0)).collect();
     let screen = GetDC(None);

@@ -79,13 +79,24 @@ pub fn spawn_ahk_watch(root: std::path::PathBuf) {
         let mut relaunches: Vec<std::time::Instant> = Vec::new();
         loop {
             std::thread::sleep(POLL);
-            if ahk_window().is_some() {
+            let window = ahk_window();
+            if window.is_some_and(responds) {
                 misses = 0;
                 continue;
             }
             misses += 1;
             relaunches.retain(|t| t.elapsed() < WINDOW);
-            if misses < 2 || relaunches.len() >= MAX_RELAUNCHES {
+            if relaunches.len() >= MAX_RELAUNCHES {
+                continue;
+            }
+            // RunWait y Sleep de AHK bombean mensajes: 3 chequeos mudo es un cuelgue, y #SingleInstance no reemplaza a un colgado.
+            if let Some(h) = window {
+                if misses >= 3 {
+                    crate::boot_log(&root, &format!("ahk hung, terminate: {}", terminate_owner(h)));
+                }
+                continue;
+            }
+            if misses < 2 {
                 continue;
             }
             misses = 0;
@@ -94,6 +105,24 @@ pub fn spawn_ahk_watch(root: std::path::PathBuf) {
             crate::boot_log(&root, &format!("ahk missing, relaunch via task: {started:?}"));
         }
     });
+}
+
+fn responds(h: HWND) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{SendMessageTimeoutW, SMTO_ABORTIFHUNG, SMTO_ERRORONEXIT, WM_NULL};
+    unsafe { SendMessageTimeoutW(h, WM_NULL, WPARAM(0), LPARAM(0), SMTO_ABORTIFHUNG | SMTO_ERRORONEXIT, 2000, None).0 != 0 }
+}
+
+fn terminate_owner(h: HWND) -> bool {
+    use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+    let mut pid = 0;
+    unsafe {
+        GetWindowThreadProcessId(h, Some(&mut pid));
+        let Ok(process) = OpenProcess(PROCESS_TERMINATE, false, pid) else { return false };
+        let done = TerminateProcess(process, 1).is_ok();
+        let _ = CloseHandle(process);
+        done
+    }
 }
 
 const STOP_MARKER_TTL: std::time::Duration = std::time::Duration::from_secs(120);
@@ -376,6 +405,25 @@ unsafe fn read_events(h: HANDLE, on_change: &impl Fn()) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_window_whose_thread_does_not_pump_is_reported_as_hung() {
+        use windows::core::w;
+        use windows::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, HWND_MESSAGE, WINDOW_EX_STYLE, WINDOW_STYLE};
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (done, wait) = std::sync::mpsc::channel::<()>();
+        let owner = std::thread::spawn(move || unsafe {
+            let h = CreateWindowExW(WINDOW_EX_STYLE(0), w!("Static"), w!(""), WINDOW_STYLE(0), 0, 0, 0, 0, HWND_MESSAGE, None, None, None).unwrap();
+            assert!(super::responds(h), "same thread dispatches directly");
+            tx.send(h.0 as isize).unwrap();
+            let _ = wait.recv();
+            let _ = DestroyWindow(h);
+        });
+        let h = super::HWND(rx.recv().unwrap() as *mut _);
+        assert!(!super::responds(h));
+        done.send(()).unwrap();
+        owner.join().unwrap();
+    }
+
     #[test]
     fn revive_waits_for_two_misses_and_respects_stops_games_and_the_cap() {
         use std::time::Duration;

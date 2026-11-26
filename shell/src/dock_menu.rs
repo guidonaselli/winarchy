@@ -456,7 +456,9 @@ unsafe fn paint(m: &Menu) {
         let can_close = matches!(m.acts.get(i), Some(Act::Focus(id)) if m.closeable_wins.contains(id));
         let local = (i - m.first) as i32;
         let mut rc = RECT { left: padx, top: m.pad + local * m.row, right: if can_close { m.close_x - px(4, s) } else { w - padx }, bottom: m.pad + (local + 1) * m.row };
-        DrawTextW(mem, &mut wide, &mut rc, DT_LEFT | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS);
+        if !wide.is_empty() {
+            DrawTextW(mem, &mut wide, &mut rc, DT_LEFT | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS);
+        }
         if can_close {
             let mut close: Vec<u16> = "×".encode_utf16().collect();
             let mut rc = RECT { left: m.close_x, top: rc.top, right: w - padx, bottom: rc.bottom };
