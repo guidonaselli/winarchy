@@ -9,6 +9,7 @@
   "alt_focus_hack": false,
   "global_work_area_offset": { "left": 0, "top": {{computed.work_top}}, "right": 0, "bottom": {{computed.work_bottom}} },
   "border": true,
+  "border_implementation": "Windows",
   "border_style": "Rounded",
   "border_width": 1,
   "border_offset": -1,
