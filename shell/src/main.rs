@@ -153,6 +153,7 @@ struct CalView {
     marks: Vec<bool>,
     agenda: Vec<String>,
     world: String,
+    notifs: Vec<wpn::Toast>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -173,6 +174,7 @@ fn dock_change(previous: bool, current: bool) -> DockChange {
 }
 
 const AGENDA_LINES: usize = 3;
+const NOTIF_LINES: usize = 3;
 
 fn day_in_month(days: i64, (y, m): (i64, u32)) -> Option<u32> {
     let (dy, dm, dd) = calendar::civil_from_days(days);
@@ -246,6 +248,7 @@ fn calendar_view(ym: (i64, u32), sel: i64, configured: bool, world: String) -> C
         marks,
         agenda,
         world,
+        notifs: wpn::latest().into_iter().take(NOTIF_LINES).collect(),
     }
 }
 
@@ -286,7 +289,7 @@ impl Meter {
 
 impl Panel {
     fn shape(&self) -> PanelShape {
-        PanelShape { media: self.media.is_some(), weather: self.weather.is_some(), meters: self.meters.len(), cal_rows: self.cal.as_ref().map_or(0, |c| c.rows), agenda: if self.cal.is_some() { AGENDA_LINES } else { 0 }, world: self.cal.as_ref().is_some_and(|c| !c.world.is_empty()) }
+        PanelShape { media: self.media.is_some(), weather: self.weather.is_some(), meters: self.meters.len(), cal_rows: self.cal.as_ref().map_or(0, |c| c.rows), agenda: if self.cal.is_some() { AGENDA_LINES } else { 0 }, world: self.cal.as_ref().is_some_and(|c| !c.world.is_empty()), notifs: self.cal.as_ref().map_or(0, |c| c.notifs.len()) }
     }
 }
 
@@ -618,6 +621,13 @@ unsafe fn render_pill(pill: HWND) {
                 draw_text(mem, line, lay.place(*r), fg_c, DT_VCENTER);
             }
             draw_text(mem, &cv.world, lay.place(pr.world), muted_c, DT_VCENTER);
+            if let Some((head, rows)) = pr.notifs.split_first() {
+                draw_text(mem, tr(K::RecentNotifications), lay.place(*head), muted_c, DT_VCENTER);
+                for (n, r) in cv.notifs.iter().zip(rows) {
+                    let line = if n.text.is_empty() { n.title.clone() } else { format!("{}  {}", n.title, n.text.replace(char::from(10), " ")) };
+                    draw_text(mem, &short(&line, 44), lay.place(*r), fg_c, DT_VCENTER);
+                }
+            }
         }
         let chip_bg = tint(bg, fg, 0.07);
         for c in &pr.chips {
@@ -1170,6 +1180,12 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                     if let Some(d) = day {
                         with(|s| s.cal_sel = calendar::days_from_civil(s.cal_ym.0, s.cal_ym.1, d));
                         tick(with(|s| s.strip));
+                    }
+                }
+                Some(Hit::Notif(n)) => {
+                    let target = with(|s| s.panel.as_ref().and_then(|p| p.cal.as_ref()).and_then(|c| c.notifs.get(n)).and_then(wpn::open_toast));
+                    if let Some(t) = target {
+                        shell_open(&t);
                     }
                 }
                 Some(Hit::Weather) => {

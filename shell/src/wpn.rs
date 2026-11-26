@@ -13,6 +13,17 @@ const POLL: std::time::Duration = std::time::Duration::from_secs(2);
 const TOAST_TIMEOUT_MS: u32 = 7000;
 const RECENT: usize = 5;
 
+static LATEST: std::sync::Mutex<Vec<Toast>> = std::sync::Mutex::new(Vec::new());
+
+// Últimas notificaciones que el servicio todavía conserva, de la más nueva a la más vieja; las refresca el hilo del relay.
+pub fn latest() -> Vec<Toast> {
+    LATEST.lock().unwrap().clone()
+}
+
+pub fn open_toast(toast: &Toast) -> Option<String> {
+    toast.app.as_deref().map(open_target)
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Toast {
     pub arrival: i64,
@@ -158,6 +169,9 @@ pub fn start_relay() {
         let mut last = toasts_after(&uri, 0).and_then(|t| t.last().map(|t| t.arrival)).unwrap_or(0);
         loop {
             std::thread::sleep(POLL);
+            if let Some(all) = toasts_after(&uri, 0) {
+                *LATEST.lock().unwrap() = all.into_iter().rev().take(RECENT).collect();
+            }
             let Some(new) = toasts_after(&uri, last) else { continue };
             for toast in new {
                 last = last.max(toast.arrival);

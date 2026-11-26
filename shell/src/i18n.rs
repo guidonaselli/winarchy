@@ -106,6 +106,7 @@ messages! {
     CondSnowShowers => ("Snow showers", "Chubascos de nieve"),
     CondThunderstorm => ("Thunderstorm", "Tormenta"),
     NoEvents => ("No events", "Sin eventos"),
+    RecentNotifications => ("Notifications", "Notificaciones"),
     AllDay => ("All day", "Todo el día"),
     NoCalendar => ("Add a calendar URL in user.json", "Agregá la URL del calendario en user.json"),
     More => ("more", "más"),
