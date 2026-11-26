@@ -11,6 +11,7 @@ const OPEN_READONLY_URI: c_int = 0x01 | 0x40;
 const UNIX_TO_FILETIME: u64 = 116_444_736_000_000_000;
 const POLL: std::time::Duration = std::time::Duration::from_secs(2);
 const TOAST_TIMEOUT_MS: u32 = 7000;
+const RECENT: usize = 5;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Toast {
@@ -162,6 +163,17 @@ pub fn start_relay() {
                 last = last.max(toast.arrival);
                 crate::tray::submit_toast(toast.title, toast.text, TOAST_TIMEOUT_MS, toast.app.map(|a| open_target(&a)));
             }
+        }
+    });
+}
+
+// Vuelve a mostrar las últimas notificaciones que el servicio todavía conserva, para quien se perdió el toast.
+pub fn replay_recent() {
+    let Some(uri) = database_uri() else { return };
+    std::thread::spawn(move || {
+        let Some(all) = toasts_after(&uri, 0) else { return };
+        for toast in all.into_iter().rev().take(RECENT).rev() {
+            crate::tray::submit_toast(toast.title, toast.text, TOAST_TIMEOUT_MS, toast.app.map(|a| open_target(&a)));
         }
     });
 }

@@ -78,6 +78,7 @@ pub enum Command {
     TrayDismiss,
     ToggleDesktop,
     ToggleClock,
+    Notifications,
     DockFocus,
     DockPin(usize),
     SwitcherShow,
@@ -192,6 +193,10 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
             }
             None => json!({"v": VERSION, "id": req.id, "ok": false, "error": "bad n"}),
         },
+        "notifications.recent" => {
+            dispatch(Command::Notifications);
+            ok(json!({}))
+        }
         "start.toggle" => {
             dispatch(Command::Start);
             ok(json!({}))
@@ -324,6 +329,7 @@ mod tests {
         assert!(called.get());
         called.set(false);
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"dock.tray.dismiss"}"#, &|c| { assert!(matches!(c, Command::TrayDismiss)); called.set(true); })["ok"], true);
+        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"notifications.recent"}"#, &|c| assert!(matches!(c, Command::Notifications)))["ok"], true);
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"clock.toggle"}"#, &|c| assert!(matches!(c, Command::ToggleClock)))["ok"], true);
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"desktop.toggle"}"#, &|c| assert!(matches!(c, Command::ToggleDesktop)))["ok"], true);
         assert!(called.get());

@@ -69,6 +69,7 @@ const WM_CMD_TOGGLE_DESKTOP: u32 = WM_APP + 174;
 const WM_CMD_TOGGLE_CLOCK: u32 = WM_APP + 175;
 const WM_CMD_DOCK_FOCUS: u32 = WM_APP + 10;
 const WM_CMD_START: u32 = WM_APP + 13;
+const WM_CMD_NOTIFICATIONS: u32 = WM_APP + 176;
 const WM_CMD_SWITCHER_SHOW: u32 = WM_APP + 100;
 const WM_CMD_SWITCHER_HIDE: u32 = WM_APP + 101;
 const WM_CMD_DOCK_PIN: u32 = WM_APP + 43;
@@ -949,6 +950,10 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             dock::focus_keyboard();
             LRESULT(0)
         }
+        WM_CMD_NOTIFICATIONS => {
+            wpn::replay_recent();
+            LRESULT(0)
+        }
         WM_CMD_START => {
             dock::open_start();
             LRESULT(0)
@@ -1483,6 +1488,7 @@ fn main() {
                 pipe::Command::Expand => WM_EXPAND,
                 pipe::Command::Tray => WM_CMD_TRAY,
                 pipe::Command::Start => WM_CMD_START,
+                pipe::Command::Notifications => WM_CMD_NOTIFICATIONS,
                 pipe::Command::TrayDismiss => WM_CMD_TRAY_DISMISS,
                 pipe::Command::SwitcherShow => WM_CMD_SWITCHER_SHOW,
                 pipe::Command::SwitcherHide => WM_CMD_SWITCHER_HIDE,
