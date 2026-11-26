@@ -410,11 +410,11 @@ fn paint() {
         if !IsWindowVisible(hwnd).as_bool() {
             let _ = ShowWindow(hwnd, SW_SHOWNA);
         }
-        publish(hwnd, &l, &apps, &items, is_list, scroll);
+        publish(hwnd, &l, &apps, &items, is_list, scroll, &query, all);
     }
 }
 
-fn publish(hwnd: HWND, l: &model::Layout, apps: &[App], items: &[usize], is_list: bool, scroll: usize) {
+fn publish(hwnd: HWND, l: &model::Layout, apps: &[App], items: &[usize], is_list: bool, scroll: usize, query: &str, all: bool) {
     let rects = if is_list { &l.rows } else { &l.cells };
     let first = if is_list { scroll } else { 0 };
     let mut nodes: Vec<(String, accesskit::Node)> = rects
@@ -429,6 +429,19 @@ fn publish(hwnd: HWND, l: &model::Layout, apps: &[App], items: &[usize], is_list
             Some((app.open.clone(), node))
         })
         .collect();
+    let bounds = |r: &R| accesskit::Rect::new(r.x as f64, r.y as f64, (r.x + r.w) as f64, (r.y + r.h) as f64);
+    let mut search = accesskit::Node::new(accesskit::Role::SearchInput);
+    search.set_label(t(K::StartSearch).to_string());
+    search.set_value(query.to_string());
+    search.set_bounds(bounds(&l.search));
+    nodes.push(("search".to_string(), search));
+    if query.trim().is_empty() {
+        let mut toggle = accesskit::Node::new(accesskit::Role::Button);
+        toggle.set_label(if all { t(K::StartPinned) } else { t(K::StartAllApps) }.trim_end_matches(['>', ' ']).to_string());
+        toggle.set_bounds(bounds(&l.all_button));
+        toggle.add_action(accesskit::Action::Click);
+        nodes.push(("all".to_string(), toggle));
+    }
     let mut power = accesskit::Node::new(accesskit::Role::Button);
     power.set_label(t(K::PowerShutdown).to_string());
     power.set_bounds(accesskit::Rect::new(l.power.x as f64, l.power.y as f64, (l.power.x + l.power.w) as f64, (l.power.y + l.power.h) as f64));
@@ -629,6 +642,10 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
                 }
                 if key == "power" {
                     power_menu(h);
+                } else if key == "all" {
+                    set_all(!with(|s| s.all).unwrap_or(false));
+                } else if key == "search" {
+                    continue;
                 } else {
                     close();
                     crate::dock_menu::launch(&key, "");
