@@ -1114,7 +1114,7 @@ fn show_foreign_desktops(show: bool) {
         while let Ok(progman) = FindWindowExW(None, previous, w!("Progman"), PCWSTR::null()) {
             previous = progman;
             if IsWindowVisible(progman).as_bool() != show {
-                let _ = ShowWindow(progman, if show { SW_SHOWNA } else { SW_HIDE });
+                let _ = ShowWindowAsync(progman, if show { SW_SHOWNA } else { SW_HIDE });
             }
         }
     }

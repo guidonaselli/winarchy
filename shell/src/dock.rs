@@ -728,7 +728,7 @@ pub fn show_tray() {
         TRAY_PENDING.set(true);
         TRAY_FALLBACK.set(false);
         set_native_taskbar(false);
-        for_native_taskbars(|h| { let _ = SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW); });
+        for_native_taskbars(|h| { let _ = SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS); });
         SetTimer(DOCKS.with(|d| d.borrow()[0].hwnd), T_TRAY_ACTIVATE, 50, None);
     }
 }
@@ -2003,10 +2003,12 @@ unsafe fn tick() {
 
 // Windows niega SetForegroundWindow a quien no es el foreground: se comparte la cola de entrada con él un instante.
 pub(crate) unsafe fn raise(hwnd: HWND) {
-    if SetForegroundWindow(hwnd).as_bool() {
+    // reordenar una ventana colgada, o compartir la cola de entrada con una, congela la shell
+    if SetForegroundWindow(hwnd).as_bool() || IsHungAppWindow(hwnd).as_bool() {
         return;
     }
-    let fg_thread = GetWindowThreadProcessId(GetForegroundWindow(), None);
+    let foreground = GetForegroundWindow();
+    let fg_thread = if IsHungAppWindow(foreground).as_bool() { 0 } else { GetWindowThreadProcessId(foreground, None) };
     let me = GetCurrentThreadId();
     let attached = fg_thread != 0 && fg_thread != me && AttachThreadInput(me, fg_thread, true).as_bool();
     let _ = BringWindowToTop(hwnd);
@@ -2041,7 +2043,7 @@ pub(crate) unsafe fn focus_window(hwnd: HWND) {
         _ => (hwnd, hwnd.0 as isize),
     };
     if IsIconic(hwnd).as_bool() {
-        let _ = ShowWindow(hwnd, SW_RESTORE);
+        let _ = ShowWindowAsync(hwnd, SW_RESTORE);
     }
     if is_cloaked(hwnd) {
         komorebi::bring_to_front(id);

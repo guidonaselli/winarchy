@@ -130,11 +130,27 @@ fn terminate_owner(h: HWND) -> bool {
 pub fn spawn_ui_watch(window: HWND, root: std::path::PathBuf) {
     let window = window.0 as isize;
     std::thread::spawn(move || {
-        wait_until_hung(HWND(window as *mut _), std::time::Duration::from_secs(5), 6);
+        loop {
+            wait_until_hung(HWND(window as *mut _), std::time::Duration::from_secs(5), 6);
+            let log = std::fs::read_to_string(root.join("state").join("shell-boot.log")).unwrap_or_default();
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            // Colgada en cada arranque: dejar de abortar deja el pid quieto y AHK recupera Explorer.
+            if recent_hang_aborts(&log, now) < 2 {
+                break;
+            }
+        }
         crate::boot_log(&root, "exit: ui thread hung, abort");
         crate::dock::restore_native_taskbar();
         std::process::abort();
     });
+}
+
+fn recent_hang_aborts(log: &str, now: u64) -> usize {
+    log.lines()
+        .filter(|line| line.ends_with("exit: ui thread hung, abort"))
+        .filter_map(|line| line.strip_prefix("t=")?.split(' ').next()?.parse::<u64>().ok())
+        .filter(|at| now.saturating_sub(*at) < 300)
+        .count()
 }
 
 fn wait_until_hung(window: HWND, poll: std::time::Duration, limit: u32) {
@@ -152,6 +168,13 @@ mod ui_watch_tests {
     use std::time::Duration;
     use windows::core::w;
     use windows::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, DispatchMessageW, PeekMessageW, HWND_MESSAGE, MSG, PM_REMOVE, WINDOW_EX_STYLE, WINDOW_STYLE};
+
+    #[test]
+    fn only_recent_hang_aborts_count_against_the_relaunch_loop() {
+        let log = "t=100 pid=1 exit: ui thread hung, abort\nt=800 pid=2 exit: ui thread hung, abort\nt=900 pid=3 start session_shell=true\nt=950 pid=3 exit: ui thread hung, abort\n";
+        assert_eq!(recent_hang_aborts(log, 1000), 2);
+        assert_eq!(recent_hang_aborts(log, 2000), 0);
+    }
 
     #[test]
     fn only_a_thread_that_stops_pumping_counts_as_hung() {
@@ -214,14 +237,14 @@ fn komorebi_running() -> bool {
 
 // Con `Hide`, las ventanas de otros workspaces quedan SW_HIDE y un komorebi nuevo no las conoce: se muestran antes de reiniciarlo.
 fn reveal_known_windows() -> usize {
-    use windows::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindow, IsWindowVisible, ShowWindow, SW_SHOWNOACTIVATE};
+    use windows::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindow, IsWindowVisible, ShowWindowAsync, SW_SHOWNOACTIVATE};
     let hwnds: Vec<isize> = WINDOWS.lock().unwrap().as_ref().map(|m| m.keys().copied().collect()).unwrap_or_default();
     let mut shown = 0;
     for h in hwnds {
         let hwnd = HWND(h as *mut _);
         unsafe {
             if IsWindow(hwnd).as_bool() && !IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() {
-                let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                let _ = ShowWindowAsync(hwnd, SW_SHOWNOACTIVATE);
                 shown += 1;
             }
         }
