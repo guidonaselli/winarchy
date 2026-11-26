@@ -1,4 +1,5 @@
-use crate::dock::{blend, draw_label, fill_round_a};
+use crate::dock::{blend, draw_label, draw_text, fill_round_a};
+use windows::Win32::Graphics::Gdi::DT_LEFT;
 use crate::layout::{px, R};
 use crate::theme::{rgb, Theme};
 use crate::tray::{self, BalloonRequest};
@@ -269,18 +270,18 @@ fn render(hwnd: HWND, x: i32, y: i32, w: i32, h: i32, theme: &Theme, scale: f32)
                 }
             } else {
                 let (glyph, color) = match request.flags & NIIF_ICON_MASK {
-                    NIIF_WARNING => ("!", (255, 190, 70)),
-                    NIIF_ERROR => ("×", (255, 100, 100)),
-                    _ => ("i", rgb(&theme.accent)),
+                    NIIF_WARNING => ("\u{E7BA}", (255, 190, 70)),
+                    NIIF_ERROR => ("\u{EA39}", (255, 100, 100)),
+                    _ => ("\u{E946}", rgb(&theme.accent)),
                 };
-                draw_label(buf, w, h, icon_rect, glyph, ICON_FONT, scale, color, 22);
+                draw_label(buf, w, h, icon_rect, glyph, ICON_FONT, scale, color, 24);
             }
         }
         let text_x = if request.title.is_empty() { px(18, scale) } else { px(64, scale) };
         let close = R { x: w - px(34, scale), y: px(8, scale), w: px(26, scale), h: px(26, scale) };
         draw_label(buf, w, h, close, CLOSE_GLYPH, ICON_FONT, scale, rgb(&theme.muted), 13);
         if !request.title.is_empty() {
-            draw_label(buf, w, h, R { x: text_x, y: px(16, scale), w: w - text_x - px(44, scale), h: px(25, scale) }, &request.title, &theme.font_family, scale, rgb(&theme.foreground), (theme.font_size + 1).max(12));
+            draw_text(buf, w, h, R { x: text_x, y: px(16, scale), w: w - text_x - px(44, scale), h: px(25, scale) }, &request.title, &theme.font_family, scale, rgb(&theme.foreground), (theme.font_size + 1).max(12), DT_LEFT);
         }
         draw_paragraph(buf, w, h, R { x: text_x, y: px(if request.title.is_empty() { 18 } else { 44 }, scale), w: w - text_x - px(20, scale), h: h - px(56, scale) }, &request.text, &theme.font_family, scale, rgb(&theme.foreground), theme.font_size);
         let size = SIZE { cx: w, cy: h };

@@ -112,6 +112,9 @@ SessionShellActive() {
 }
 #HotIf SessionShellActive()
 #d::ShellIsland('desktop.toggle')   ; sin Explorer nadie atiende Win+D
+Volume_Up::SoundSetVolume('+2')           ; sin Explorer nadie atiende las teclas de volumen; el OSD sale solo al cambiar el nivel
+Volume_Down::SoundSetVolume('-2')
+Volume_Mute::SoundSetMute(-1)
 #n::ShellIsland('notifications.recent')   ; sin Explorer nadie atiende Win+N: se repiten las últimas notificaciones
 ~LWin up:: {
     if A_PriorKey = 'LWin'

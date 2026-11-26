@@ -28,7 +28,7 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'barswitch', 'interrupted', 'uninstall-interrupted', 'hungpipe')][string]$Scenario,
+    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'barswitch', 'interrupted', 'uninstall-interrupted', 'hungpipe', 'benchmark')][string]$Scenario,
     [switch]$Keep,
     [switch]$WorkingTree,
     [string]$Out = (Join-Path $env:TEMP 'winarchy-sandbox')
@@ -100,8 +100,8 @@ try {
         if ($code -ne 0) { throw "elevated check exited with $code; see $run" }
     }
     Invoke-GuestScript ExistingLogin 'Invoke-SandboxScenario.ps1' "-Scenario $Scenario"
-    # hungpipe solo corre un test de Pester: no instala nada que verificar
-    if ($Scenario -ne 'hungpipe') {
+    # hungpipe y benchmark no dejan una instalación que verificar: uno corre un test de Pester y el otro solo mide
+    if ($Scenario -notin 'hungpipe', 'benchmark') {
         $mode = if ($Scenario -in 'boot', 'paths') { 'active' } else { 'coexistence' }
         $code = Invoke-Guest ExistingLogin "pwsh.exe -NoProfile -ExecutionPolicy Bypass -File C:\sandbox\scripts\Assert-Install.ps1 -Mode $mode"
         Get-Content (Join-Path $run 'assert.txt')

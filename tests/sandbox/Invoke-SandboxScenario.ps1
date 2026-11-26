@@ -1,5 +1,5 @@
 # Runs in the sandbox (Windows PowerShell 5.1). `elevated` runs as SYSTEM, the rest as the non-elevated user.
-param([Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'elevated', 'barswitch', 'interrupted', 'uninstall-interrupted', 'hungpipe')][string]$Scenario)
+param([Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'elevated', 'barswitch', 'interrupted', 'uninstall-interrupted', 'hungpipe', 'benchmark')][string]$Scenario)
 $ProgressPreference = 'SilentlyContinue'
 $out = 'C:\sandbox'
 $bare = Join-Path $out 'winarchy.git'
@@ -66,6 +66,25 @@ function Test-Uninstalled {
 
 $boot = (Get-Content (Join-Path $out 'boot.ps1') -Raw).Replace('https://github.com/guidonaselli/winarchy.git', $bare).Replace('pwsh @installArgs', '& { $ErrorActionPreference = ''Continue''; pwsh @installArgs 2>&1 | Out-Host }')
 $failed = $false
+function Measure-Idle([int]$Seconds = 30) {
+    $cores = [Environment]::ProcessorCount
+    $cpu = { Get-Process | ForEach-Object { try { [pscustomobject]@{ Id = $_.Id; Cpu = $_.TotalProcessorTime.TotalSeconds } } catch { } } }
+    $a = & $cpu
+    Start-Sleep $Seconds
+    $b = & $cpu
+    $before = @{}; foreach ($p in $a) { $before[$p.Id] = $p.Cpu }
+    $busy = ($b | ForEach-Object { if ($before.ContainsKey($_.Id)) { $_.Cpu - $before[$_.Id] } } | Measure-Object -Sum).Sum
+    $os = Get-CimInstance Win32_OperatingSystem
+    $procs = @(Get-Process)
+    [ordered]@{
+        cpu_percent_of_machine = [math]::Round(100 * $busy / ($Seconds * $cores), 2)
+        memory_used_mb = [math]::Round(($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / 1KB)
+        processes = $procs.Count
+        handles = ($procs | Measure-Object Handles -Sum).Sum
+        top_working_set_mb = @($procs | Sort-Object WorkingSet64 -Descending | Select-Object -First 8 | ForEach-Object { "$($_.ProcessName)=$([math]::Round($_.WorkingSet64 / 1MB))" })
+    }
+}
+
 switch ($Scenario) {
     'elevated' {
         try { Invoke-Expression $boot; $failed = $true; 'boot ran in an elevated session' }
@@ -177,6 +196,20 @@ exit $(if ($r.PassedCount -ge 1 -and $r.FailedCount -eq 0 -and $r.SkippedCount -
         Start-Sleep 5
         if (@(Get-Process winarchy-shell -ErrorAction SilentlyContinue).Count -ne 1) { $failed = $true; 'expected exactly one winarchy-shell' }
         if (Get-Process yasb -ErrorAction SilentlyContinue) { $failed = $true; 'yasb still running after switching to native' }
+    }
+    'benchmark' {
+        Install-Prerequisites
+        Start-Sleep 60
+        $baseline = Measure-Idle
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        Invoke-WinarchyScript install.ps1
+        $installSeconds = [math]::Round($watch.Elapsed.TotalSeconds)
+        Start-Sleep 90
+        $after = Measure-Idle
+        $winarchy = @(Get-Process winarchy-shell, komorebi, AutoHotkey64, yasb -ErrorAction SilentlyContinue | ForEach-Object { "$($_.ProcessName)=$([math]::Round($_.WorkingSet64 / 1MB))MB" })
+        $result = [ordered]@{ install_seconds = $installSeconds; baseline = $baseline; after = $after; winarchy_processes = $winarchy }
+        $result | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'benchmark.json')
+        $result | ConvertTo-Json -Depth 5 | Out-Host
     }
     'selfupdate' {
         Install-Prerequisites
