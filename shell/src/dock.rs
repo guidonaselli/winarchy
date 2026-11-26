@@ -2143,7 +2143,8 @@ fn publish_accessibility(hwnd: HWND, items: &[Item], layout: &Layout, titles: &H
             } else if let Some(item) = items.get(i) {
                 let key = accessible_group(item);
                 let name = titles.get(&key).cloned().unwrap_or_else(|| {
-                    std::path::Path::new(&item.exe).file_stem().and_then(|s| s.to_str()).filter(|s| !s.is_empty()).unwrap_or(&item.key).to_string()
+                    let stem = |p: &str| std::path::Path::new(p).file_stem().and_then(|s| s.to_str()).filter(|s| !s.is_empty()).map(str::to_string);
+                    stem(&item.exe).or_else(|| stem(&item.key)).unwrap_or_else(|| item.key.clone())
                 });
                 nodes.push((key, accessible_node(name, *cell)));
             }
