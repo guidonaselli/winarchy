@@ -10,7 +10,8 @@ use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SPACE, VK_UP};
-use windows::Win32::UI::Shell::ShellExecuteW;
+use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_LOCAL_SERVER};
+use windows::Win32::UI::Shell::{ApplicationActivationManager, IApplicationActivationManager, ShellExecuteW, AO_NONE};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 type MonRect = (i32, i32, i32, i32);
@@ -212,6 +213,18 @@ pub fn is_open() -> bool {
 }
 
 pub fn launch(path: &str, args: &str) {
+    // sin Explorer, ShellExecute de shell:AppsFolder falla con "Class not registered"
+    if let Some(aumid) = path.strip_prefix(r"shell:AppsFolder\") {
+        let wide_id: Vec<u16> = aumid.encode_utf16().chain(std::iter::once(0)).collect();
+        let activated = unsafe {
+            CoCreateInstance::<_, IApplicationActivationManager>(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER)
+                .and_then(|m| m.ActivateApplication(PCWSTR(wide_id.as_ptr()), PCWSTR::null(), AO_NONE))
+                .is_ok()
+        };
+        if activated {
+            return;
+        }
+    }
     let wide = |t: &str| -> Vec<u16> { t.encode_utf16().chain(std::iter::once(0)).collect() };
     let (p, a) = (wide(path), wide(args));
     // como Explorer: un ancla .exe/.bat con rutas relativas corre desde su carpeta
