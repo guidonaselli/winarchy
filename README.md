@@ -258,6 +258,12 @@ winarchy agent list | set <id> | launch
 winarchy bar position [top|bottom]
 winarchy bar dock <on|float|hide|auto|off>
 winarchy bar cluster <primary|off|N>   # dock que lleva reloj, notificaciones y Quick Settings
+winarchy bar use <native|yasb>
+winarchy files [folder]                 # Rust file manager
+winarchy assistant on|off|status       # voice assistant
+winarchy shell status | activate --yes | deactivate   # Winarchy as the Windows shell (opt-in)
+winarchy taskbar hide|autohide|show
+winarchy heal-monitors
 winarchy update [--core | --self]
 winarchy menu
 winarchy webapp install <name> <url> | remove <name> | list
