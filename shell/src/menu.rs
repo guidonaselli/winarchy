@@ -133,6 +133,7 @@ pub unsafe fn pick_with(header: Header, on_slide: Option<fn(f32)>, labels: &[Str
     let class = WNDCLASSW { lpfnWndProc: Some(proc), hInstance: inst.into(), hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(), lpszClassName: w!("WinarchyShellMenu"), ..Default::default() };
     RegisterClassW(&class);
     let Ok(hwnd) = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED, class.lpszClassName, w!(""), WS_POPUP, pos.0, pos.1, size.0, size.1, None, None, inst, None) else { return None };
+    crate::accessibility::create(hwnd, A11Y_LABEL, accesskit::Role::Menu);
     let animate = motion_enabled(theme);
     ST.with(|s| *s.borrow_mut() = Some(St { hwnd, labels: labels.to_vec(), header, on_slide, dragging: false, hover: None, done: None, size, pos, theme: theme.clone(), scale, born: std::time::Instant::now(), animate, tracking: false }));
     paint();
@@ -142,6 +143,7 @@ pub unsafe fn pick_with(header: Header, on_slide: Option<fn(f32)>, labels: &[Str
     let _ = ShowWindow(hwnd, SW_SHOW);
     let _ = SetForegroundWindow(hwnd);
     let _ = SetFocus(hwnd);
+    crate::accessibility::focus(hwnd, true);
     SetCapture(hwnd);
     LAST_PCT.store(-1, std::sync::atomic::Ordering::Relaxed);
     let mut msg = MSG::default();
@@ -218,8 +220,39 @@ unsafe fn compose(buf: &mut [u32], w: i32, h: i32, header: &Header, labels: &[St
     }
 }
 
+// Árbol UIA: el deslizador como control propio y cada fila como elemento de menú con su índice por clave.
+fn accessible_nodes(header: &Header, labels: &[String], width: i32, scale: f32) -> Vec<(String, accesskit::Node)> {
+    let (row, pad) = (row_h(scale), pad(scale));
+    let rect = |y: i32, h: i32| accesskit::Rect::new(0.0, y as f64, width as f64, (y + h) as f64);
+    let mut nodes = Vec::new();
+    if let Header::Slider(label, v) = header {
+        let mut node = accesskit::Node::new(accesskit::Role::Slider);
+        node.set_label(label.clone());
+        node.set_numeric_value((*v as f64 * 100.0).round());
+        node.set_min_numeric_value(0.0);
+        node.set_max_numeric_value(100.0);
+        node.set_bounds(rect(pad, header_h(header, scale)));
+        node.add_action(accesskit::Action::Increment);
+        node.add_action(accesskit::Action::Decrement);
+        nodes.push(("slider".to_string(), node));
+    }
+    for (i, label) in labels.iter().enumerate() {
+        let mut node = accesskit::Node::new(accesskit::Role::MenuItem);
+        node.set_label(label.clone());
+        node.set_bounds(rect(pad + header_h(header, scale) + row * i as i32, row));
+        node.add_action(accesskit::Action::Click);
+        node.add_action(accesskit::Action::Focus);
+        nodes.push((i.to_string(), node));
+    }
+    nodes
+}
+
+const A11Y_LABEL: &str = "Winarchy menu";
+
 unsafe fn paint() {
     let Some((hwnd, labels, header, hover, (w, h), pos, theme, scale, e)) = ST.with(|s| s.borrow().as_ref().map(|s| (s.hwnd, s.labels.clone(), s.header.clone(), s.hover, s.size, s.pos, s.theme.clone(), s.scale, ease(progress(s))))) else { return };
+    let focus = hover.map(|i| i.to_string());
+    crate::accessibility::publish(hwnd, A11Y_LABEL, (w, h), accessible_nodes(&header, &labels, w, scale), focus.as_deref());
     let bmi = BITMAPINFO { bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: w, biHeight: -h, biPlanes: 1, biBitCount: 32, biCompression: 0, ..Default::default() }, ..Default::default() };
     let screen = GetDC(None);
     let mem = CreateCompatibleDC(screen);
@@ -305,7 +338,28 @@ fn step(delta: i32) {
 
 unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let y = (lp.0 >> 16) as i16 as i32;
+    if m == WM_GETOBJECT {
+        if let Some(r) = crate::accessibility::get_object(h, wp, lp) {
+            return r;
+        }
+    }
     match m {
+        WM_NCDESTROY => {
+            crate::accessibility::destroy(h);
+            DefWindowProcW(h, m, wp, lp)
+        }
+        crate::accessibility::WM_ACTION => {
+            for (key, action) in crate::accessibility::actions(h, wp.0) {
+                match (key.parse::<usize>(), action) {
+                    (Ok(i), accesskit::Action::Click) => finish(Some(i)),
+                    (Ok(i), accesskit::Action::Focus) => set_hover(Some(i)),
+                    (Err(_), accesskit::Action::Increment) => key_slide(VK_RIGHT.0),
+                    (Err(_), accesskit::Action::Decrement) => key_slide(VK_LEFT.0),
+                    _ => {}
+                }
+            }
+            LRESULT(0)
+        }
         WM_MOUSEMOVE if ST.with(|s| s.borrow().as_ref().is_some_and(|s| s.dragging)) => {
             slide((lp.0 & 0xFFFF) as i16 as i32);
             LRESULT(0)
@@ -422,6 +476,19 @@ mod tests {
             bmp.extend_from_slice(&[over(*p) as u8, over(*p >> 8) as u8, over(*p >> 16) as u8, 255]);
         }
         std::fs::write(std::env::temp_dir().join("winarchy-menu.bmp"), bmp).unwrap();
+    }
+
+    #[test]
+    fn screen_readers_see_the_slider_and_one_item_per_row() {
+        let labels = ["Mute".to_string(), "Mixer".to_string()];
+        let nodes = accessible_nodes(&Header::Slider("Volume".into(), 0.42), &labels, 200, 1.0);
+        assert_eq!(nodes.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["slider", "0", "1"]);
+        assert_eq!(nodes[0].1.numeric_value(), Some(42.0));
+        assert_eq!(nodes[2].1.label(), Some("Mixer"));
+        // los límites coinciden con el hit-test del mouse
+        let b = nodes[2].1.bounds().unwrap();
+        assert_eq!(row_at(b.y0 as i32 - header_h(&Header::Slider(String::new(), 0.0), 1.0), pad(1.0), row_h(1.0), 2), Some(1));
+        assert_eq!(accessible_nodes(&Header::None, &labels, 200, 1.0).len(), 2);
     }
 
     #[test]
