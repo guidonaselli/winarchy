@@ -193,7 +193,7 @@ unsafe fn compose(buf: &mut [u32], w: i32, h: i32, header: &Header, labels: &[St
         Header::Slider(label, v) => {
             let line = R { x: padx, y: pad, w: w - 2 * padx, h: px(28, scale) };
             draw_text(buf, w, h, line, label, &theme.font_family, scale, fg, font_px(theme), DT_LEFT);
-            draw_text(buf, w, h, line, &format!("{}%", (v * 100.0).round() as i32), &theme.font_family, scale, muted, font_px(theme), DT_RIGHT);
+            draw_text(buf, w, h, line, &format!("{}%", (v * 100.0).round() as i32), &theme.font_family, scale, accent, font_px(theme), DT_RIGHT);
             let (track_h, knob) = (px(6, scale), px(16, scale));
             let cy = pad + px(28, scale) + px(16, scale);
             let rail = R { x: padx, y: cy - track_h / 2, w: w - 2 * padx, h: track_h };
