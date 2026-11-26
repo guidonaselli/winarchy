@@ -1263,6 +1263,20 @@ fn write_shell_marker(path: &Path, pid: u32, identity: &str) -> std::io::Result<
     Ok(())
 }
 
+fn policy_shell_points_to(policy_value: &str, exe: &Path) -> bool {
+    let exe = exe.to_string_lossy().to_lowercase();
+    !exe.is_empty() && policy_value.to_lowercase().contains(&exe)
+}
+
+fn policy_shell_value() -> String {
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
+    let mut buf = [0u16; 1024];
+    let mut len = (buf.len() * 2) as u32;
+    let rc = unsafe { RegGetValueW(HKEY_CURRENT_USER, w!(r"Software\Microsoft\Windows\CurrentVersion\Policies\System"), w!("Shell"), RRF_RT_REG_SZ, None, Some(buf.as_mut_ptr() as *mut _), Some(&mut len)) };
+    if rc.is_err() { return String::new(); }
+    String::from_utf16_lossy(&buf[..(len as usize / 2).saturating_sub(1)])
+}
+
 fn session_shell_mode(marker: &Path, identity: &str) -> bool {
     std::fs::read_to_string(marker).is_ok_and(|value| value.trim() == identity)
 }
@@ -1382,6 +1396,10 @@ fn main() {
     if explicit_session_shell {
         let marker = shell_session_marker(&root, session_id);
         if std::fs::create_dir_all(marker.parent().unwrap_or(&root)).is_err() || write_shell_marker(&marker, pid, &identity).is_err() { boot_log(&root, "exit: cannot write session marker"); return; }
+    }
+    if !explicit_session_shell && std::env::current_exe().is_ok_and(|exe| policy_shell_points_to(&policy_shell_value(), &exe)) {
+        boot_log(&root, "exit: the session shell policy owns the launch");
+        return;
     }
     let instance = unsafe { windows::Win32::System::Threading::CreateMutexW(None, true, w!("Local\\WinarchyShellInstance")).expect("create shell instance mutex") };
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
@@ -1608,6 +1626,14 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
         result.unwrap();
         assert_eq!(content.unwrap(), "00000000000000ab-01dc000000000001");
+    }
+
+    #[test]
+    fn policy_value_matches_the_running_exe_ignoring_case() {
+        let exe = std::path::Path::new(r"C:\W\winarchy-shell.exe");
+        assert!(super::policy_shell_points_to(r#""c:\w\Winarchy-Shell.exe" --root "C:\W" --session-shell"#, exe));
+        assert!(!super::policy_shell_points_to("explorer.exe", exe));
+        assert!(!super::policy_shell_points_to("", exe));
     }
 
     #[test]
