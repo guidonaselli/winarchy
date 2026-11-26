@@ -1584,6 +1584,12 @@ Describe 'WezTerm terminal' {
         $tpl | Should -Match ([regex]::Escape('[==[{{computed.root}}/config/wezterm/user.lua]==]'))
     }
 
+    # wezterm#7705: recorrer el árbol de procesos se desborda al reusarse un PID y cierra la terminal.
+    It 'never walks the process tree from the terminal config' {
+        $code = Get-Content (Join-Path $script:Root 'templates\wezterm.lua.tpl') | Where-Object { $_ -notmatch '^\s*--' }
+        $code -join "`n" | Should -Not -Match 'foreground_process|current_working_dir|procinfo'
+    }
+
     # Sin default_prog WezTerm levanta cmd.exe y todo el terminal profile del stack
     # (starship, fzf, zoxide, eza, bat) no carga.
     It 'defaults to PowerShell 7 and keeps its own updater off' {
