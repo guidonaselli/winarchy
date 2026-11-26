@@ -682,7 +682,8 @@ unsafe fn set_native_taskbar(hide: bool) {
     NATIVE_HIDDEN.store(hide, std::sync::atomic::Ordering::Relaxed);
     for_native_taskbars(|h| {
         if hide != !IsWindowVisible(h).as_bool() {
-            let _ = ShowWindow(h, if hide { SW_HIDE } else { SW_SHOWNA });
+            // asíncrono: esperar a un Explorer colgado frenaría también al watchdog y al panic hook
+            let _ = ShowWindowAsync(h, if hide { SW_HIDE } else { SW_SHOWNA });
         }
     });
 }
