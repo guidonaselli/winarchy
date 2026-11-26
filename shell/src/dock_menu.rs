@@ -213,18 +213,28 @@ pub fn is_open() -> bool {
 }
 
 pub fn launch(path: &str, args: &str) {
-    // sin Explorer, ShellExecute de shell:AppsFolder falla con "Class not registered"
+    // sin Explorer, ShellExecute de shell:AppsFolder falla con "Class not registered";
+    // la activación va en un hilo propio porque bloquea y bombea mensajes en el de UI
     if let Some(aumid) = path.strip_prefix(r"shell:AppsFolder\") {
-        let wide_id: Vec<u16> = aumid.encode_utf16().chain(std::iter::once(0)).collect();
-        let activated = unsafe {
-            CoCreateInstance::<_, IApplicationActivationManager>(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER)
+        let (aumid, fallback) = (aumid.to_owned(), (path.to_owned(), args.to_owned()));
+        std::thread::spawn(move || unsafe {
+            use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            let wide_id: Vec<u16> = aumid.encode_utf16().chain(std::iter::once(0)).collect();
+            let activated = CoCreateInstance::<_, IApplicationActivationManager>(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER)
                 .and_then(|m| m.ActivateApplication(PCWSTR(wide_id.as_ptr()), PCWSTR::null(), AO_NONE))
-                .is_ok()
-        };
-        if activated {
-            return;
-        }
+                .is_ok();
+            CoUninitialize();
+            if !activated {
+                shell_execute(&fallback.0, &fallback.1);
+            }
+        });
+        return;
     }
+    shell_execute(path, args);
+}
+
+fn shell_execute(path: &str, args: &str) {
     let wide = |t: &str| -> Vec<u16> { t.encode_utf16().chain(std::iter::once(0)).collect() };
     let (p, a) = (wide(path), wide(args));
     // como Explorer: un ancla .exe/.bat con rutas relativas corre desde su carpeta
