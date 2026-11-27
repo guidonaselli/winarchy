@@ -83,6 +83,7 @@ pub enum Command {
     DockPin(usize),
     SwitcherShow,
     SwitcherHide,
+    FocusWindow(isize),
 }
 
 // Un cliente por vez; el hilo de UI recibe Reload/Quit por `dispatch`, nunca bloquea acá.
@@ -213,6 +214,13 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
             dispatch(Command::SwitcherHide);
             ok(json!({}))
         }
+        "window.focus" => match req.params["hwnd"].as_i64().filter(|h| *h > 0) {
+            Some(h) => {
+                dispatch(Command::FocusWindow(h as isize));
+                ok(json!({}))
+            }
+            None => json!({"v": VERSION, "id": req.id, "ok": false, "error": "bad hwnd"}),
+        },
         "dock.tray" => {
             dispatch(Command::Tray);
             ok(json!({}))
@@ -333,6 +341,15 @@ mod tests {
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"clock.toggle"}"#, &|c| assert!(matches!(c, Command::ToggleClock)))["ok"], true);
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"desktop.toggle"}"#, &|c| assert!(matches!(c, Command::ToggleDesktop)))["ok"], true);
         assert!(called.get());
+    }
+
+    #[test]
+    fn window_focus_validates_the_handle_and_dispatches_it() {
+        let got = std::cell::Cell::new(0);
+        let focus = |line: &[u8]| handle(line, &|c| if let Command::FocusWindow(h) = c { got.set(h) });
+        assert_eq!(focus(br#"{"v":1,"id":1,"cmd":"window.focus","params":{"hwnd":42}}"#)["ok"], true);
+        assert_eq!(got.get(), 42);
+        assert_eq!(focus(br#"{"v":1,"id":1,"cmd":"window.focus","params":{"hwnd":0}}"#)["ok"], false);
     }
 
     #[test]

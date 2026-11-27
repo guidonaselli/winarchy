@@ -19,6 +19,11 @@ pub fn eligible(a: &WinAttrs) -> bool {
     (a.visible || a.managed) && !a.own_process && (!a.owned || a.appwindow) && (!a.toolwindow || a.appwindow) && (!a.cloaked || a.managed)
 }
 
+// sin Explorer komorebi no puede cloakear y usa Hide: fuera de vista es cualquiera de las dos
+pub fn off_view(visible: bool, cloaked: bool, managed: bool) -> bool {
+    cloaked || (managed && !visible)
+}
+
 // Un AUMID agrupa mejor que el exe (Configuración, PWAs y Electron comparten `ApplicationFrameHost`/`msedge`).
 pub fn group_key(aumid: Option<&str>, exe: &str) -> String {
     match aumid.filter(|a| !a.is_empty()) {
@@ -117,6 +122,14 @@ mod tests {
     fn cloaked_counts_only_when_komorebi_manages_it() {
         assert!(!eligible(&WinAttrs { cloaked: true, ..win() }));
         assert!(eligible(&WinAttrs { cloaked: true, managed: true, ..win() }));
+    }
+
+    #[test]
+    fn a_managed_window_komorebi_hid_is_off_view() {
+        assert!(off_view(false, false, true));
+        assert!(off_view(true, true, true));
+        assert!(!off_view(true, false, true));
+        assert!(!off_view(false, false, false));
     }
 
     #[test]

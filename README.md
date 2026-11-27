@@ -164,7 +164,7 @@ What the shell draws and owns when Explorer is gone:
   power menu. Drop folders or files on the logo to pin them as *places*; right-click or `Shift+F10` unpins.
 - **Dock** per monitor with live DWM thumbnails, drag-and-drop to open files with an app, jump-list recents,
   a tray flyout with the real tray icons and a system cluster (Quick Settings, clock, show desktop).
-- **Alt+Tab** with a thumbnail of every window; holding `Alt` and stepping only previews, the window changes when you release.
+- **Alt+Tab** across every workspace, with live thumbnails of the visible ones; holding `Alt` and stepping only previews, the window changes when you release.
 - **Desktop** with icons, wallpaper and the context menu; Windows notifications as toasts, and `Win+N` or the bell
   replays the last five (there is no persistent notification list yet).
 - **Volume keys** (`Volume_Up/Down/Mute`) through AutoHotkey, with the volume OSD in the island.

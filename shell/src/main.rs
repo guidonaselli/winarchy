@@ -81,6 +81,7 @@ const WM_UWPHOST_DEGRADED: u32 = WM_APP + 178;
 const WM_CMD_SWITCHER_SHOW: u32 = WM_APP + 100;
 const WM_CMD_SWITCHER_HIDE: u32 = WM_APP + 101;
 const WM_CMD_DOCK_PIN: u32 = WM_APP + 43;
+const WM_CMD_FOCUS_WINDOW: u32 = WM_APP + 102;
 const WM_EXPAND: u32 = WM_APP + 5;
 const WM_COLLAPSE: u32 = WM_APP + 6;
 const WM_BRIGHTNESS: u32 = WM_APP + 7;
@@ -1054,6 +1055,10 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             tick(h);
             LRESULT(0)
         }
+        WM_CMD_FOCUS_WINDOW => {
+            komorebi::bring_to_front(wp.0 as isize);
+            LRESULT(0)
+        }
         WM_CMD_DOCK_PIN => {
             dock::launch_pin(wp.0);
             LRESULT(0)
@@ -1697,6 +1702,10 @@ fn main() {
                 pipe::Command::DockPin(n) => {
                     arg = n;
                     WM_CMD_DOCK_PIN
+                }
+                pipe::Command::FocusWindow(h) => {
+                    arg = h as usize;
+                    WM_CMD_FOCUS_WINDOW
                 }
             };
             let _ = PostMessageW(HWND(target as *mut _), m, WPARAM(arg), LPARAM(0));

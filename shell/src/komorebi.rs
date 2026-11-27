@@ -362,12 +362,11 @@ pub fn follow_foreground() {
 }
 
 unsafe extern "system" fn on_foreground(_: windows::Win32::UI::Accessibility::HWINEVENTHOOK, _: u32, hwnd: HWND, _: i32, _: i32, _: u32, _: u32) {
-    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
-    let mut cloaked = 0u32;
-    if DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut _ as *mut _, 4).is_err() || cloaked == 0 {
+    // un aviso atrasado de la ventana que komorebi acaba de ocultar no puede devolver al workspace anterior
+    if hwnd != windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() {
         return;
     }
-    if window_slot(hwnd.0 as isize).is_some() {
+    if window_slot(hwnd.0 as isize).is_some() && crate::dock::off_view(hwnd) {
         bring_to_front(hwnd.0 as isize);
     }
 }

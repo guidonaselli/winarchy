@@ -225,6 +225,11 @@ unsafe fn render_base(buf: &mut [u32], size: (i32, i32), g: &Geo, s: &Switcher, 
     fill_round_a(buf, w, h, hl, radius, fg, 0.08);
     for (i, title) in s.titles.iter().enumerate() {
         let c = cell_rect(g, i);
+        // DWM no tiene miniatura de una ventana oculta (otro workspace): va su ícono en grande
+        if let Some(ic) = s.icons[i].as_ref().filter(|_| !IsWindowVisible(HWND(s.shown[i] as *mut _)).as_bool()) {
+            let big = g.thumb_h / 2;
+            crate::start::blit(buf, (w, h), c.x + (c.w - big) / 2, c.y + g.inset + (g.thumb_h - big) / 2, big, &crate::start::scale_icon(ic, big));
+        }
         let label = R { x: c.x + g.inset, y: c.y + g.inset + g.thumb_h, w: c.w - 2 * g.inset, h: c.h - 2 * g.inset - g.thumb_h + g.inset / 2 };
         let icon = (px(ICON_DIP, scale) as f32 * g.factor).round().max(1.0) as i32;
         let lead = s.icons[i].as_ref().map_or(0, |_| icon + (px(6, scale) as f32 * g.factor).round() as i32);
@@ -279,6 +284,9 @@ unsafe fn paint(s: &mut Switcher, sel: usize, rebuild: bool) {
     if rebuild {
         for i in 0..s.shown.len() {
             let c = cell_rect(&g, i);
+            if !IsWindowVisible(HWND(s.shown[i] as *mut _)).as_bool() {
+                continue;
+            }
             let Ok(handle) = DwmRegisterThumbnail(s.hwnd, HWND(s.shown[i] as *mut _)) else { continue };
             let Ok(size) = DwmQueryThumbnailSourceSize(handle) else {
                 let _ = DwmUnregisterThumbnail(handle);

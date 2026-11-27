@@ -128,6 +128,7 @@ Volume_Mute::SoundSetMute(-1)
 !Tab::AltTabStep(1)
 !+Tab::AltTabStep(-1)
 ~LAlt up::AltTabStep(0)
+~RAlt up::AltTabStep(0)
 #HotIf
 
 AltTabStep(dir) {
@@ -136,7 +137,7 @@ AltTabStep(dir) {
         if shown
             ShellIsland('switcher.hide')
         if idx
-            try WinActivate(list[idx + 1])
+            AltTabActivate(list[idx + 1])
         shown := false
         idx := 0
         return
@@ -144,10 +145,20 @@ AltTabStep(dir) {
     if !idx {
         list := []
         active := DllCall('user32\GetAncestor', 'ptr', WinExist('A'), 'uint', 3, 'ptr')
+        managed := KomorebiWindows()
+        prev := A_DetectHiddenWindows
+        DetectHiddenWindows(true)
+        away := []
         for hwnd in WinGetList() {
-            if hwnd = active || (AltTabCandidate(hwnd) && !DllCall('user32\GetWindow', 'ptr', hwnd, 'uint', 4, 'ptr'))
-                list.Push(hwnd)
+            visible := DllCall('user32\IsWindowVisible', 'ptr', hwnd)
+            ; las ocultas solo cuentan si son de otro workspace de komorebi
+            if hwnd = active || ((visible || managed.Has(hwnd)) && AltTabCandidate(hwnd) && !DllCall('user32\GetWindow', 'ptr', hwnd, 'uint', 4, 'ptr'))
+                (visible ? list : away).Push(hwnd)
         }
+        DetectHiddenWindows(prev)
+        list.Push(away*)   ; al final: un toque sigue volviendo a la ventana anterior en pantalla
+        if list.Length > 64   ; tope que acepta la shell
+            list.Length := 64
     }
     if list.Length < 2
         return
@@ -156,6 +167,33 @@ AltTabStep(dir) {
     for hwnd in list
         ids .= (ids ? ',' : '') hwnd
     shown := ShellIsland('switcher.show', ',"params":{"windows":[' ids '],"index":' idx '}')
+}
+
+; Una ventana oculta la trae la shell: se va a su workspace y recién ahí la enfoca.
+AltTabActivate(hwnd) {
+    if !DllCall('user32\IsWindowVisible', 'ptr', hwnd) {
+        if (pid := GetShellPid())
+            DllCall('user32\AllowSetForegroundWindow', 'uint', pid)
+        ShellIsland('window.focus', ',"params":{"hwnd":' hwnd '}')
+        return
+    }
+    try WinActivate(hwnd)
+}
+
+; hwnds que komorebi gestiona en cualquier workspace; vacío si no contesta.
+KomorebiWindows() {
+    global KomorebicExe
+    found := Map()
+    try {
+        tmp := A_Temp '\winarchy-alttab.json'
+        Run(A_ComSpec ' /c ""' KomorebicExe '" state > "' tmp '""', , 'Hide', &pid)
+        if ProcessWaitClose(pid, 1)   ; acotado: un komorebi colgado no puede congelar Alt+Tab
+            return found
+        json := FileRead(tmp), pos := 1
+        while pos := RegExMatch(json, '"hwnd":\s*(\d+)', &m, pos)
+            found[Integer(m[1])] := true, pos += m.Len
+    }
+    return found
 }
 
 AltTabCandidate(hwnd) {

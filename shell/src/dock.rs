@@ -1206,6 +1206,10 @@ unsafe fn queue_refresh(hwnd: HWND) {
     SetTimer(hwnd, T_REFRESH, REFRESH_MS, None);
 }
 
+pub(crate) unsafe fn off_view(h: HWND) -> bool {
+    apps::off_view(IsWindowVisible(h).as_bool(), is_cloaked(h), komorebi::window_slot(h.0 as isize).is_some())
+}
+
 unsafe fn is_cloaked(h: HWND) -> bool {
     let mut c = 0u32;
     DwmGetWindowAttribute(h, DWMWA_CLOAKED, &mut c as *mut _ as *mut _, 4).is_ok() && c != 0
@@ -1386,14 +1390,14 @@ unsafe fn refresh() {
         let id = h.0 as isize;
         // lo que ya estaba al arrancar el dock no tiene hora de aparición: se usa la de su proceso
         opened.entry(id).or_insert_with(|| if seeded { appeared } else { process_started(h).unwrap_or(appeared) });
-        let cloaked = is_cloaked(h);
+        let away = off_view(h);
         match groups.iter_mut().find(|g| g.key == key) {
             Some(g) => {
                 g.wins.push(id);
                 g.active |= id == fg;
-                g.other_ws &= cloaked;
+                g.other_ws &= away;
             }
-            None => groups.push(Item { key, exe, aumid, wins: vec![id], active: id == fg, other_ws: cloaked, pin: None }),
+            None => groups.push(Item { key, exe, aumid, wins: vec![id], active: id == fg, other_ws: away, pin: None }),
         }
     }
     for g in &mut groups {
@@ -2142,7 +2146,7 @@ pub(crate) unsafe fn focus_window(hwnd: HWND) {
     if IsIconic(hwnd).as_bool() {
         let _ = ShowWindowAsync(hwnd, SW_RESTORE);
     }
-    if is_cloaked(hwnd) {
+    if off_view(hwnd) {
         komorebi::bring_to_front(id);
     } else {
         raise(hwnd);
