@@ -52,6 +52,9 @@ public static class Uwp {
     [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr h, int a, ref int v, int size);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int ht, uint flags);
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int command);
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+[DllImport("user32.dll")] public static extern void mouse_event(uint flags, int x, int y, uint data, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SystemParametersInfo(uint action, uint param, IntPtr value, uint flags);
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] public static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, IntPtr l, uint flags, uint ms, out IntPtr result);
@@ -463,6 +466,22 @@ function Test-AhkLink([string]$Name) {
     Test-SettingsLink $Name { Start-Process $ahk -ArgumentList '/ErrorStdOut', 'C:\Users\Public\link.ahk' }
 }
 
+# clic derecho en el volumen del cluster y "Pantalla", la cuarta entrada de su menú
+function Test-ClusterLink {
+    $screen = [Windows.Forms.SystemInformation]::VirtualScreen
+    $r = Test-SettingsLink 'link-cluster' {
+        [void][Uwp]::SetCursorPos($screen.Width - 135, $screen.Height - 31)
+        Start-Sleep 1
+        [Uwp]::mouse_event(0x8, 0, 0, 0, [UIntPtr]::Zero); [Uwp]::mouse_event(0x10, 0, 0, 0, [UIntPtr]::Zero)
+        Start-Sleep 2
+        [void][Uwp]::SetCursorPos($screen.Width - 79, $screen.Height - 53); Start-Sleep -Milliseconds 500
+        Save-Screen 'cluster-menu'
+        [Uwp]::mouse_event(0x2, 0, 0, 0, [UIntPtr]::Zero); [Uwp]::mouse_event(0x4, 0, 0, 0, [UIntPtr]::Zero)
+    }
+    Get-Process SystemSettings -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3
+    $r
+}
+
 # con Configuración abierta: el conmutador de Alt+Tab tal como lo pide AHK, y el theme oscuro y claro
 function Test-Integration {
     $app = Get-Process SystemSettings -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -489,6 +508,64 @@ function Test-Integration {
     }
     foreach ($name in 'AppsUseLightTheme', 'SystemUsesLightTheme') { if ($null -ne $before.$name) { Set-ItemProperty $key $name $before.$name -Type DWord } }
     $form.Close()
+    $r
+}
+
+function Invoke-Komorebic([string]$Arguments) {
+    $info = New-Object Diagnostics.ProcessStartInfo 'C:\probe\komorebi\komorebic.exe', $Arguments
+    $info.UseShellExecute = $false; $info.CreateNoWindow = $true; $info.RedirectStandardOutput = $true
+    $p = [Diagnostics.Process]::Start($info)
+    $out = $p.StandardOutput.ReadToEndAsync()
+    if (-not $p.WaitForExit(10000)) { $p.Kill(); return $null }
+    "$($out.Result)"
+}
+
+function Get-KomorebiPlace([IntPtr]$Hwnd) {
+    $state = Invoke-Komorebic 'state' | ConvertFrom-Json
+    $i = 0
+    foreach ($ws in $state.monitors.elements[0].workspaces.elements) {
+        foreach ($container in $ws.containers.elements) {
+            if (@($container.windows.elements.hwnd) -contains [long]$Hwnd) { return "ws$i tiled, stack of $(@($container.windows.elements).Count)" }
+        }
+        $floating = @($ws.floating_windows.elements.hwnd) + @($ws.floating_windows.hwnd)
+        if ($floating -contains [long]$Hwnd) { return "ws$i floating" }
+        $i++
+    }
+    'unmanaged'
+}
+
+function Test-Komorebi([string]$Aumid) {
+    $dir = 'C:\Users\Public\komorebi'
+    New-Item -ItemType Directory $dir -Force | Out-Null
+    Set-Content "$dir\komorebi.json" '{"window_hiding_behaviour":"Hide","monitors":[{"workspaces":[{"name":"I","layout":"BSP"},{"name":"II","layout":"BSP"}]}]}'
+    $env:KOMOREBI_CONFIG_HOME = $dir
+    $script = 'Add-Type -AssemblyName System.Windows.Forms; $f = New-Object Windows.Forms.Form; $f.Text = "otra ventana"; [Windows.Forms.Application]::Run($f)'
+    $info = New-Object Diagnostics.ProcessStartInfo 'powershell.exe', "-NoProfile -STA -EncodedCommand $([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script)))"
+    $info.UseShellExecute = $false; $info.CreateNoWindow = $true
+    $null = Start-Process C:\probe\komorebi\komorebi.exe -ArgumentList '--config', "$dir\komorebi.json" -RedirectStandardOutput C:\sandbox\komorebi.log -RedirectStandardError C:\sandbox\komorebi-error.log
+    $r = [ordered]@{ running = ($null -ne (Wait-Until { "$(Invoke-Komorebic 'state')".StartsWith('{') } 30)) }
+    if (-not $r.running) { return $r }
+    $other = [Diagnostics.Process]::Start($info)
+    Start-Sleep 4
+    $r.open = (Test-Presentation $Aumid 'komorebi-open').status
+    $app = Get-Process SystemSettings -ErrorAction SilentlyContinue | Select-Object -First 1
+    $frame = (Get-Frames $app.Id | Select-Object -First 1).Frame
+    $step = { param($name, $commands)
+        foreach ($c in $commands) { $null = Invoke-Komorebic $c; Start-Sleep 2 }
+        Start-Sleep 2
+        Save-Screen "komorebi-$name"
+        $r[$name] = [ordered]@{ place = (Get-KomorebiPlace $frame); shown = (Get-Shown $frame); colors = $(if (Get-Shown $frame) { Get-ColorCount $frame "C:\sandbox\komorebi-$name-frame.png" } else { 0 }) }
+    }
+    [Uwp]::Chord([byte[]](, 0x12)); [void][Uwp]::SetForegroundWindow($frame); Start-Sleep 2
+    . $step 'tiled' @()
+    . $step 'moved' @('move-to-workspace 1')
+    . $step 'away' @('focus-workspace 0')
+    . $step 'returned' @('focus-workspace 1')
+    . $step 'back' @('move-to-workspace 0')
+    . $step 'stacked' @('stack-all')
+    . $step 'cycled' @('cycle-stack next', 'cycle-stack previous')
+    . $step 'floating' @('unstack-all', 'toggle-float')
+    $other.Kill()
     $r
 }
 
@@ -526,13 +603,26 @@ function Test-Supervision([string]$Aumid) {
         $r.enabled.resize = Test-Resize
         Get-Process SystemSettings -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3
         $r.enabled.ahkLink = Test-AhkLink 'link-ahk'
+        Get-Process SystemSettings -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3
+        $r.enabled.clusterLink = Test-ClusterLink
+        if ($scenario.komorebi) { $r.komorebi = Test-Komorebi $Aumid }
 
         $victim = Get-HostProcess
         $null = $victim.Handle
         [void][Uwp]::NtSuspendProcess($victim.Handle)
         $watch = [Diagnostics.Stopwatch]::StartNew()
+        # komorebi tiene que seguir contestando mientras el host está colgado
+        $stateDuringHang = if ($scenario.komorebi) { "$(Invoke-Komorebic 'state')".StartsWith('{') }
+        $edge = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+        $edgeDuringHang = if (Test-Path $edge) {
+            $browser = Start-Process $edge -ArgumentList '--no-first-run', 'about:blank' -PassThru
+            [bool](Wait-Until { Get-Process msedge -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 -and [Uwp]::Responds($_.MainWindowHandle) } } 6)
+        } else { 'no Edge' }
         $terminated = $victim.WaitForExit(30000)
         $r.hang = [ordered]@{ terminated = $terminated; detectedMs = [int]$watch.Elapsed.TotalMilliseconds; shellResponds = [Uwp]::Responds([Uwp]::FindWindow('WinarchyDesktopWallpaper', $null)) }
+        $r.hang.komorebicState = $stateDuringHang
+        $r.hang.edge = $edgeDuringHang
+        Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force
         $next = Wait-ShellHost $victim.Id 30
         $r.hang.relaunchedMs = $next.ms
         # Configuración quedó viva del host anterior: el nuevo la cierra y el enlace vuelve a abrir
@@ -555,6 +645,7 @@ function Test-Supervision([string]$Aumid) {
         $r.degraded = [ordered]@{ claimedMs = $claimed; hostRunning = [bool](Get-HostProcess); blockedMarker = (Test-Path C:\uwproot\state\uwphost.blocked); zorder = (Test-BottomOfZOrder) }
         $r.degraded.shellResponds = [Uwp]::Responds([Uwp]::FindWindow('WinarchyDesktopWallpaper', $null))
     }
+    if ($scenario.komorebi) { $null = Invoke-Komorebic 'stop' }
     $shell.Kill(); [void]$shell.WaitForExit(5000); Start-Sleep 3
 
     if ($first.pid) {

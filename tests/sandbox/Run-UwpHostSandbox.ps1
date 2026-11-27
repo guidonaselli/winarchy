@@ -5,10 +5,11 @@
   Evidence lands in state\verify\uwphost\<timestamp>. Nothing on the real desktop is touched.
   -HostExe is a winarchy-uwphost.exe that only ever runs inside the guest; networking is enabled with it
   because it downloads public symbols on first use. -Supervision lets the shell launch and supervise the host
-  itself (opt-in flag, hang, four failures, job object) instead of the probe starting it.
+  itself (opt-in flag, hang, four failures, job object) instead of the probe starting it; with -Komorebi it also
+  moves, stacks and floats the hosted app under the installed komorebi and queries it during the hang.
 #>
 [CmdletBinding()]
-param([string]$HostExe, [switch]$NoShell, [switch]$HostFirst, [switch]$Extras, [switch]$Offline, [switch]$Explorer, [switch]$Supervision, [string]$Probe = 'Probe-UwpPresentation.ps1', [string]$Exe)
+param([string]$HostExe, [switch]$NoShell, [switch]$HostFirst, [switch]$Extras, [switch]$Offline, [switch]$Explorer, [switch]$Supervision, [switch]$Komorebi, [string]$Probe = 'Probe-UwpPresentation.ps1', [string]$Exe)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $wsb = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\wsb.exe'
@@ -32,7 +33,13 @@ if ($Extras -or $Supervision) {
     if (-not (Test-Path $ahk)) { $ahk = Join-Path $env:ProgramFiles 'AutoHotkey\v2\AutoHotkey64.exe' }
     if (Test-Path $ahk) { New-Item -ItemType Directory -Path (Join-Path $in 'ahk') | Out-Null; Copy-Item $ahk (Join-Path $in 'ahk') }
 }
-@{ shell = -not $NoShell; host = [bool]$HostExe; hostFirst = [bool]$HostFirst; extras = [bool]$Extras; explorer = [bool]$Explorer; offline = [bool]$Offline; supervision = [bool]$Supervision } | ConvertTo-Json | Set-Content (Join-Path $in 'scenario.json')
+if ($Komorebi) {
+    # el komorebi instalado, de solo lectura, con el runtime de C++ que el Sandbox no trae
+    $bin = Join-Path $env:ProgramFiles 'komorebi\bin'
+    New-Item -ItemType Directory -Path (Join-Path $in 'komorebi') | Out-Null
+    Copy-Item (Join-Path $bin 'komorebi.exe'), (Join-Path $bin 'komorebic.exe'), "$env:SystemRoot\System32\vcruntime140.dll", "$env:SystemRoot\System32\vcruntime140_1.dll" (Join-Path $in 'komorebi')
+}
+@{ shell = -not $NoShell; host = [bool]$HostExe; hostFirst = [bool]$HostFirst; extras = [bool]$Extras; explorer = [bool]$Explorer; offline = [bool]$Offline; supervision = [bool]$Supervision; komorebi = [bool]$Komorebi } | ConvertTo-Json | Set-Content (Join-Path $in 'scenario.json')
 @{ background = '#202020'; opacity = 1.0; foreground = '#ffffff'; accent = '#4da3ff'; muted = '#808080'; font_family = 'Segoe UI'; font_size = 13; position = 'top'; dock = [bool]$Supervision } |
     ConvertTo-Json -Compress | Set-Content (Join-Path $payload 'config\shell\theme.json')
 
