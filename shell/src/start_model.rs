@@ -55,6 +55,8 @@ pub enum Edit<'a> {
     BackWord,
     Clear,
     SelectAll,
+    // navegar suelta la selección, como en cualquier campo
+    Deselect,
     Undo,
 }
 
@@ -63,6 +65,7 @@ impl Search {
         let selected = std::mem::take(&mut self.selected);
         match edit {
             Edit::SelectAll => self.selected = !self.text.is_empty(),
+            Edit::Deselect => {}
             Edit::Undo => {
                 if let Some(previous) = self.undo.pop() {
                     self.text = previous;
@@ -307,6 +310,10 @@ mod tests {
         s.apply(Edit::Clear);
         s.apply(Edit::Undo);
         assert_eq!(s.text, "visual");
+        s.apply(Edit::SelectAll);
+        s.apply(Edit::Deselect);
+        s.apply(Edit::Insert("!"));
+        assert_eq!(s.text, "visual!");
     }
 
     use super::*;

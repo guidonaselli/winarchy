@@ -791,7 +791,11 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
             return LRESULT(0);
         }
         WM_KEYDOWN => {
+            if matches!(VIRTUAL_KEY(wp.0 as u16), VK_HOME | VK_END | VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN) {
+                with(|s| s.search.apply(model::Edit::Deselect));
+            }
             match VIRTUAL_KEY(wp.0 as u16) {
+                VK_HOME | VK_END => paint(),
                 VK_ESCAPE => {
                     if with(|s| s.search.text.is_empty()).unwrap_or(true) {
                         close();
