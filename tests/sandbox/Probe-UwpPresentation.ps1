@@ -53,6 +53,8 @@ public static class Uwp {
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int ht, uint flags);
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int command);
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+[DllImport("kernel32.dll")] public static extern IntPtr VirtualAllocEx(IntPtr process, IntPtr address, UIntPtr size, uint type, uint protect);
+[DllImport("kernel32.dll")] public static extern bool WriteProcessMemory(IntPtr process, IntPtr address, byte[] data, UIntPtr size, IntPtr written);
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
 [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int x, int y, uint data, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SystemParametersInfo(uint action, uint param, IntPtr value, uint flags);
@@ -569,6 +571,52 @@ function Test-Komorebi([string]$Aumid) {
     $r
 }
 
+# CPU de la shell mientras otra ventana se muestra y oculta mil veces: aísla el costo del hook de orden Z
+function Measure-ShellChurn($Shell) {
+    $form = New-Object Windows.Forms.Form; $form.Show(); [Windows.Forms.Application]::DoEvents()
+    Start-Sleep 5
+    $Shell.Refresh(); $cpu = $Shell.TotalProcessorTime.TotalMilliseconds
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    foreach ($i in 1..1000) {
+        [void][Uwp]::ShowWindow($form.Handle, 0); [void][Uwp]::ShowWindow($form.Handle, 8)
+        [Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 10
+    }
+    Start-Sleep 2
+    $Shell.Refresh()
+    $r = [ordered]@{ shows = 1000; seconds = [int]$watch.Elapsed.TotalSeconds; shellCpuMs = [int]($Shell.TotalProcessorTime.TotalMilliseconds - $cpu) }
+    $form.Close()
+    $r
+}
+
+# winarchy.ahk entero, como lo corre una sesión: su ShellWatch no tiene que actuar mientras el host se cuelga o cae
+function Start-FullAhk {
+    $status = Get-ChildItem C:\uwproot\state\shell-session-* | Select-Object -First 1
+    $session = $status.Name -replace '^shell-session-', ''
+    Set-Content "C:\uwproot\state\session-shell-$session" ((Get-Content $status.FullName -Raw).Trim() -split '\|')[2] -NoNewline
+    Set-Content C:\uwproot\state\bar 'native' -NoNewline
+    New-Item -ItemType Directory C:\uwproot\config\ahk -Force | Out-Null
+    Copy-Item C:\probe\winarchy.ahk C:\uwproot\config\ahk
+    Start-Process C:\probe\ahk\AutoHotkey64.exe -ArgumentList '/ErrorStdOut', 'C:\uwproot\config\ahk\winarchy.ahk' -PassThru
+}
+
+# infla el working set del host desde afuera: pasado el presupuesto y sin apps abiertas, tiene que reciclarse
+function Test-Recycle([string]$Aumid) {
+    $victim = Get-HostProcess
+    $null = $victim.Handle
+    $open = (Test-Presentation $Aumid 'recycle-open').status
+    $size = 300MB
+    $address = [Uwp]::VirtualAllocEx($victim.Handle, [IntPtr]::Zero, [UIntPtr][uint64]$size, 0x3000, 0x04)
+    $wrote = [Uwp]::WriteProcessMemory($victim.Handle, $address, [byte[]]::new($size), [UIntPtr][uint64]$size, [IntPtr]::Zero)
+    $victim.Refresh()
+    $r = [ordered]@{ open = $open; wrote = $wrote; workingSetMB = [int]($victim.WorkingSet64 / 1MB); aliveWithAppOpen = -not $victim.WaitForExit(5000) }
+    $app = Get-Process SystemSettings -ErrorAction SilentlyContinue | Select-Object -First 1
+    [void][Uwp]::PostMessage((Get-Frames $app.Id | Select-Object -First 1).Frame, 0x10, [IntPtr]::Zero, [IntPtr]::Zero)
+    $r.recycled = $victim.WaitForExit(30000)
+    $r.relaunched = [bool](Wait-ShellHost $victim.Id 30).pid
+    $r.log = @(Get-Content C:\uwproot\state\uwphost.log | Where-Object { $_ -match 'working set' } | Select-Object -Last 1)
+    $r
+}
+
 # lo que hace la shell de sesión sola: lanzar, vigilar, relanzar, rendirse y no dejar huérfanos
 function Test-Supervision([string]$Aumid) {
     New-Item -ItemType Directory C:\uwproot\state\bin -Force | Out-Null
@@ -580,7 +628,7 @@ function Test-Supervision([string]$Aumid) {
 
     $shell = & $start
     Start-Sleep 8
-    $r.withoutFlag = [ordered]@{ hostRunning = [bool](Get-HostProcess); shellWindowOwner = (Get-ShellOwner) }
+    $r.withoutFlag = [ordered]@{ hostRunning = [bool](Get-HostProcess); shellWindowOwner = (Get-ShellOwner); churn = (Measure-ShellChurn $shell) }
     $shell.Kill(); [void]$shell.WaitForExit(5000); Start-Sleep 3
 
     Set-Content C:\uwproot\state\uwphost.enabled '1'
@@ -607,6 +655,9 @@ function Test-Supervision([string]$Aumid) {
         $r.enabled.clusterLink = Test-ClusterLink
         if ($scenario.komorebi) { $r.komorebi = Test-Komorebi $Aumid }
 
+        $r.enabled.churn = Measure-ShellChurn $shell
+        $watchdog = Start-FullAhk
+        Start-Sleep 25
         $victim = Get-HostProcess
         $null = $victim.Handle
         [void][Uwp]::NtSuspendProcess($victim.Handle)
@@ -644,6 +695,15 @@ function Test-Supervision([string]$Aumid) {
         Start-Sleep 40
         $r.degraded = [ordered]@{ claimedMs = $claimed; hostRunning = [bool](Get-HostProcess); blockedMarker = (Test-Path C:\uwproot\state\uwphost.blocked); zorder = (Test-BottomOfZOrder) }
         $r.degraded.shellResponds = [Uwp]::Responds([Uwp]::FindWindow('WinarchyDesktopWallpaper', $null))
+        $r.shellWatch = [ordered]@{
+            ahkAlive = -not $watchdog.HasExited
+            sameShell = -not $shell.HasExited
+            actions = @(Get-Content C:\uwproot\state\winarchy.log -ErrorAction Ignore | Where-Object { $_ -match 'shell watch' })
+            errors = @(Get-Content C:\uwproot\state\winarchy.log -ErrorAction Ignore | Where-Object { $_ -match 'ahk ERROR' })
+        }
+        Stop-Process -Id $watchdog.Id -Force -ErrorAction SilentlyContinue
+        if (Test-Path C:\uwproot\state\winarchy.log) { Copy-Item C:\uwproot\state\winarchy.log C:\sandbox }
+        Remove-Item C:\uwproot\state\session-shell-*, C:\uwproot\state\bar -ErrorAction SilentlyContinue
     }
     if ($scenario.komorebi) { $null = Invoke-Komorebic 'stop' }
     $shell.Kill(); [void]$shell.WaitForExit(5000); Start-Sleep 3
@@ -652,6 +712,7 @@ function Test-Supervision([string]$Aumid) {
         $shell = & $start
         $again = Wait-ShellHost 0 60
         $r.newSession = [ordered]@{ relaunched = [bool]$again.pid }
+        if ($again.pid) { $r.newSession.recycle = Test-Recycle $Aumid }
         $shell.Kill(); [void]$shell.WaitForExit(5000); Start-Sleep 3
         $r.newSession.hostDiedWithShell = -not (Get-HostProcess)
     }
