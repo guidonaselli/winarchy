@@ -213,6 +213,8 @@ pub fn is_open() -> bool {
 }
 
 const ACTIVATION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
+// sin Explorer una app UWP no devuelve error: se cuelga, y el aviso no puede tardar 20 s
+const SESSION_ACTIVATION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(3);
 
 // Err(None) es plazo vencido: sin Explorer ActivateApplication puede no volver nunca
 fn activate_with_deadline(activate: impl FnOnce() -> Result<(), i32> + Send + 'static, deadline: std::time::Duration) -> Result<(), Option<i32>> {
@@ -270,9 +272,10 @@ pub fn launch(path: &str, args: &str) {
                 CoUninitialize();
                 activated.map(drop).map_err(|e| e.code().0)
             };
-            if let Err(hresult) = activate_with_deadline(activate, ACTIVATION_DEADLINE) {
+            let session = crate::HOST.get().is_some_and(|h| h.session_shell);
+            if let Err(hresult) = activate_with_deadline(activate, if session { SESSION_ACTIVATION_DEADLINE } else { ACTIVATION_DEADLINE }) {
                 report_unlaunched(&fallback.0, hresult);
-                if !crate::HOST.get().is_some_and(|h| h.session_shell) {
+                if !session {
                     shell_execute(&fallback.0, &fallback.1);
                 }
             }
