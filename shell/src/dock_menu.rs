@@ -283,6 +283,11 @@ pub fn launch(path: &str, args: &str) {
             let session = crate::HOST.get().is_some_and(|h| h.session_shell);
             let deadline = if uwp_unhosted() { SESSION_ACTIVATION_DEADLINE } else { ACTIVATION_DEADLINE };
             if let Err(hresult) = activate_with_deadline(activate, deadline) {
+                // una app Win32 también figura en AppsFolder, pero no se activa como las de la Tienda: se abre su destino
+                if let Some((target, args)) = hresult.and_then(|_| link_target(&fallback.0)) {
+                    shell_execute(&target, &args);
+                    return;
+                }
                 report_unlaunched(&fallback.0, hresult);
                 // un plazo vencido puede completar después: relanzar abriría la app dos veces
                 if !session && hresult.is_some() {
@@ -300,6 +305,31 @@ pub fn launch(path: &str, args: &str) {
         shell_execute(&path, &args);
         CoUninitialize();
     });
+}
+
+// destino y argumentos del acceso directo detrás de una entrada de AppsFolder; una app de la Tienda no tiene
+fn link_target(path: &str) -> Option<(String, String)> {
+    use windows::Win32::Storage::EnhancedStorage::{PKEY_Link_Arguments, PKEY_Link_TargetParsingPath};
+    use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, CoUninitialize, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::{IShellItem2, SHCreateItemFromParsingName};
+    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        let com = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let found = SHCreateItemFromParsingName::<_, _, IShellItem2>(PCWSTR(wide.as_ptr()), None).ok().and_then(|item| {
+            let text = |key| {
+                let value = item.GetString(key).ok()?;
+                let owned = value.to_string().ok();
+                CoTaskMemFree(Some(value.0.cast()));
+                owned
+            };
+            let target = text(&PKEY_Link_TargetParsingPath).filter(|t| std::path::Path::new(t).is_file())?;
+            Some((target, text(&PKEY_Link_Arguments).unwrap_or_default()))
+        });
+        if com.is_ok() {
+            CoUninitialize();
+        }
+        found
+    }
 }
 
 fn shell_execute(path: &str, args: &str) {
@@ -891,6 +921,17 @@ mod tests {
     #[test]
     fn close_actions_offer_the_last_window_and_all_normal_windows() {
         assert_eq!(close_actions(&[7, 8], &[8, 7], Some(8)), (Some(8), vec![7, 8]));
+    }
+
+    #[test]
+    fn an_unknown_apps_folder_entry_has_no_link_target() {
+        assert_eq!(link_target(r"shell:AppsFolder\winarchy.missing"), None);
+    }
+
+    #[test]
+    #[ignore = "depende de las apps instaladas: LINK_TARGET=shell:AppsFolder\\<id>"]
+    fn print_the_link_target_of_an_installed_app() {
+        println!("{:?}", link_target(&std::env::var("LINK_TARGET").unwrap_or_default()));
     }
 
     #[test]
