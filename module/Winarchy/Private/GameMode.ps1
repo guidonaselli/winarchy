@@ -103,11 +103,13 @@ function Get-WinarchyGames {
 
 function Update-WinarchyKomorebiRules {
     <# Re-renderiza komorebi.json (con las ignore-rules nuevas); el watcher de komorebi lo recarga solo.
-       -NoReload omite los pasos posteriores a la recarga; -SkipLiveView deja ganar a lo guardado sobre lo vivo. #>
-    param([switch]$NoReload, [switch]$SkipLiveView)
+       -NoReload omite los pasos posteriores a la recarga; -SkipLiveView deja ganar a lo guardado sobre lo vivo.
+       -PassThru dice si komorebi.json se escribió. #>
+    param([switch]$NoReload, [switch]$SkipLiveView, [switch]$PassThru)
     $current = Get-WinarchyCurrentTheme
     if (-not $current) {
         Write-WinarchyWarn 'No active theme yet; the rules will apply with the first `winarchy theme set`.'
+        if ($PassThru) { return $false }
         return
     }
     $root = Get-WinarchyRoot
@@ -118,7 +120,10 @@ function Update-WinarchyKomorebiRules {
     $rendered = Invoke-WinarchyTemplate -TemplatePath (Join-Path $root 'templates\komorebi.json.tpl') -Context $ctx
     $rendered = Add-WinarchyAppRulesToKomorebiJson -Json $rendered
     $rendered = Add-WinarchyWindowRulesToKomorebiJson -Json $rendered -SkipLiveView:$SkipLiveView
-    if (-not $rendered) { return }
+    if (-not $rendered) {
+        if ($PassThru) { return $false }
+        return
+    }
     $rendered | ConvertFrom-Json | Out-Null
     Set-WinarchyFileAtomic -Path (Join-Path $root 'config\komorebi\komorebi.json') -Value $rendered
     if (-not $NoReload -and (Test-WinarchyProcess 'komorebi')) {
@@ -126,6 +131,7 @@ function Update-WinarchyKomorebiRules {
         Restore-WinarchyFloatingApps -ConfigPath $config
         Write-WinarchyStaleIgnoreWarning -ConfigPath $config
     }
+    if ($PassThru) { return $true }
 }
 
 function Restart-WinarchyPowerToys {

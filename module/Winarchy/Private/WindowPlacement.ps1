@@ -433,8 +433,8 @@ function Invoke-WinarchyLayoutApply {
     foreach ($pref in @($prefs | Where-Object { -not $map.ContainsKey($_.Monitor) })) {
         Write-WinarchyWarn "'$($pref.Exe)': monitor '$($pref.Monitor)' not connected; rule skipped."
     }
-    Update-WinarchyKomorebiRules -SkipLiveView
-    if (-not $Quiet) {
+    $written = Update-WinarchyKomorebiRules -SkipLiveView -PassThru
+    if ($written -and -not $Quiet) {
         $applied = @($prefs | Where-Object { $map.ContainsKey($_.Monitor) }).Count
         Write-WinarchyOk "$applied window placement rule(s) written to komorebi.json and reloaded."
     }

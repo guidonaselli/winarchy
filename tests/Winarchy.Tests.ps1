@@ -4988,3 +4988,20 @@ Describe 'Super+drag in a floating workspace' {
         $move.IndexOf('DragIsFree') | Should -BeLessThan $move.IndexOf("'int', wx, 'int', wy, 'int', 0")
     }
 }
+
+Describe 'Layout apply report' {
+    It 'does not claim success when komorebi.json was not written' {
+        InModuleScope Winarchy {
+            Mock Import-WinarchyWindowPrefs { [pscustomobject]@{ Exe = 'a.exe'; Monitor = 'm' } }
+            Mock Import-WinarchyWorkspaceLayouts { }
+            Mock Test-WinarchyProcess { $true }
+            Mock Get-WinarchyKomorebiState { @{} }
+            Mock Get-WinarchyMonitorIndexMap { @{ m = 0 } }
+            Mock Update-WinarchyKomorebiRules { $false }
+            Mock Write-WinarchyOk { }
+            Invoke-WinarchyLayoutApply
+            Should -Invoke Update-WinarchyKomorebiRules -Times 1 -Exactly
+            Should -Invoke Write-WinarchyOk -Times 0 -Exactly
+        }
+    }
+}

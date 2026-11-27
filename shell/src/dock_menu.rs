@@ -230,9 +230,10 @@ fn report_unlaunched(target: &str, hresult: Option<i32>) {
     let Some(host) = crate::HOST.get() else { return };
     let why = hresult.map_or_else(|| "timeout".to_owned(), |h| format!("hr=0x{:08X}", h as u32));
     crate::boot_log(&host.root, &format!("launch failed: {target} {why}"));
-    if host.session_shell {
+    // con Explorer un error ya tuvo su fallback; un plazo vencido no, y no puede quedar en silencio
+    if host.session_shell || hresult.is_none() {
         // sin Explorer, UWP se cuelga o responde "Class not registered"
-        let uwp = hresult.map_or(true, |h| h == 0x80040900u32 as i32);
+        let uwp = host.session_shell && hresult.map_or(true, |h| h == 0x80040900u32 as i32);
         crate::notify(t(if uwp { K::UwpUnavailable } else { K::LaunchFailed }));
     }
 }
