@@ -141,6 +141,7 @@ if ($WithYasb -and -not (Test-Path (Join-Path (Get-WinarchyStateDir) 'bar'))) {
     Set-WinarchyFileAtomic -Path (Join-Path (Get-WinarchyStateDir) 'bar') -Value 'yasb'
 }
 Initialize-WinarchyBar
+Update-WinarchyUwphost
 
 # --- 3c. Skill "winarchy" en los agentes de IA detectados (estilo Omarchy) ----------
 Install-WinarchySkill

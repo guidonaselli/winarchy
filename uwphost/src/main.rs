@@ -5,6 +5,7 @@ mod controller;
 mod desktop;
 mod download;
 mod memory;
+mod orphans;
 mod present;
 mod redirect;
 mod shell_window;
@@ -99,6 +100,8 @@ fn run(args: &Args, report: &Report) -> Result<(), Failure> {
         }
     });
     let shell_window = shell_window::ShellWindow::register()?;
+    // only once this host owns the session: otherwise nothing replaces what is closed
+    orphans::close(&args.root, &log);
     // SAFETY: Balanced below, after every COM reference is dropped.
     unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.ok().map_err(|e| Failure::Layout(format!("COM: {e}")))?;
     let result = (|| {
@@ -107,7 +110,7 @@ fn run(args: &Args, report: &Report) -> Result<(), Failure> {
         report.status("ready", "");
         report.log(&format!("phase=ready ms={}", started.elapsed().as_millis()));
         drop(started_up);
-        let watched = watch::run(shell_window.0, parent.0, &symbols, preexisting, &log);
+        let watched = watch::run(shell_window.0, parent.0, &symbols, preexisting, &args.root, &log);
         drop(controller);
         drop(redirect);
         watched

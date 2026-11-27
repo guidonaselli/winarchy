@@ -1538,7 +1538,7 @@ WinarchyToolItems() {
         {text:'On-screen keyboard',                          action:(*)=>RunTool('osk.exe')} ]
 }
 
-; sin Explorer ms-settings: no abre; mismos applets que SETTINGS_FALLBACK de la shell
+; ms-settings: solo abre si la ventana de shell es de Explorer o del helper UWP; si no, mismos applets que SETTINGS_FALLBACK de la shell
 SettingsFallback := Map(
     'ms-settings:sound', 'control.exe mmsys.cpl',
     'ms-settings:network', 'control.exe ncpa.cpl',
@@ -1546,15 +1546,20 @@ SettingsFallback := Map(
 
 OpenSettings(uri) {
     global SettingsFallback
-    cls := Buffer(64, 0)
-    DllCall('GetClassName', 'ptr', DllCall('GetShellWindow', 'ptr'), 'ptr', cls, 'int', 32)
-    if StrGet(cls) = 'Progman'
+    if SettingsLinksOpen()
         return RunTool(uri)
     if SettingsFallback.Has(uri)
         return RunTool(SettingsFallback[uri])
     WLog('settings ' uri ' needs Explorer')
     ToolTip(WinarchyText('This setting needs Explorer'))
     SetTimer(() => ToolTip(), -4000)
+}
+
+SettingsLinksOpen() {
+    shell := DllCall('GetShellWindow', 'ptr')
+    ; el helper toma la ventana de shell antes de poder presentar apps: vale recién cuando informa que está listo
+    try return WinGetClass(shell) = 'Progman' || (WinGetProcessName(shell) = 'winarchy-uwphost.exe' && InStr(FileRead(StateDir '\uwphost.status'), '|ready|'))
+    return false
 }
 
 ; cancelar el UAC lanza un error: queda en el log, no en un cartel

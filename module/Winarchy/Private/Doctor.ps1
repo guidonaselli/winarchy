@@ -56,6 +56,11 @@ function Invoke-WinarchyDoctor {
             $(if ($shellCount -eq 0) { 'status bar down' } elseif ($shellCount -eq 1) { 'status bar' } else { "$shellCount winarchy-shell processes" }) `
             'winarchy reload'
     }
+    $uwp = Get-WinarchyUwphostState
+    if ($uwp.State -ne 'off') {
+        Add-Check 'UWP host (Store apps in the session shell)' ($uwp.State -in 'ready', 'starting' -or -not (Test-WinarchySessionShellMarker)) `
+            "$($uwp.State): $($uwp.Detail)" $(if ($uwp.State -eq 'blocked') { 'winarchy uwphost retry, then sign out and back in' } else { 'sign out and back in; details in state\uwphost.log' })
+    }
     if (Test-WinarchyBarDock) {
         $want = Get-WinarchyDockWorkAreaOffset
         $json = Join-Path (Get-WinarchyRoot) 'config\komorebi\komorebi.json'

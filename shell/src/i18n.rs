@@ -99,6 +99,7 @@ messages! {
     DateTime => ("Date and time", "Fecha y hora"),
     Workspace => ("WS", "ESCRITORIO"),
     BarName => ("Winarchy bar", "Barra de Winarchy"),
+    UwpDegraded => ("Store apps are unavailable until the next sign-in", "Las apps de la Store no abren hasta el próximo inicio de sesión"),
     PinPanel => ("Keep panel open", "Dejar el panel abierto"),
     MediaPrevious => ("Previous track", "Pista anterior"),
     MediaPlayPause => ("Play or pause", "Reproducir o pausar"),

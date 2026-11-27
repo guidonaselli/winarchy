@@ -5,6 +5,7 @@ use crate::layout::{px, R};
 use crate::theme::{rgb, Theme};
 use std::cell::RefCell;
 use std::sync::Mutex;
+use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Dwm::*;
@@ -122,7 +123,12 @@ pub fn show(mon: (i32, i32, i32, i32), scale: f32, theme: &Theme) {
 fn load_icons(hwnd: HWND, ids: Vec<isize>) {
     let target = hwnd.0 as isize;
     std::thread::spawn(move || {
-        let icons = ids.iter().map(|h| unsafe { crate::dock::fetch_icon(&format!("window:{h}"), 64) }).collect();
+        // el ícono por AppUserModelID sale del namespace del shell, que pide COM
+        let com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+        let icons = ids.iter().map(|h| unsafe { crate::dock::window_icon(*h, 64) }).collect();
+        if com.is_ok() {
+            unsafe { CoUninitialize() };
+        }
         *LOADED.lock().unwrap() = Some((ids, icons));
         unsafe {
             let _ = PostMessageW(HWND(target as *mut _), WM_ICONS, WPARAM(0), LPARAM(0));
@@ -221,13 +227,16 @@ unsafe fn render_base(buf: &mut [u32], size: (i32, i32), g: &Geo, s: &Switcher, 
         let c = cell_rect(g, i);
         let label = R { x: c.x + g.inset, y: c.y + g.inset + g.thumb_h, w: c.w - 2 * g.inset, h: c.h - 2 * g.inset - g.thumb_h + g.inset / 2 };
         let icon = (px(ICON_DIP, scale) as f32 * g.factor).round().max(1.0) as i32;
-        let mut text_x = label.x;
-        if let Some(ic) = &s.icons[i] {
-            crate::start::blit(buf, (w, h), label.x, label.y + (label.h - icon) / 2, icon, &crate::start::scale_icon(ic, icon));
-            text_x += icon + (px(6, scale) as f32 * g.factor).round() as i32;
-        }
+        let lead = s.icons[i].as_ref().map_or(0, |_| icon + (px(6, scale) as f32 * g.factor).round() as i32);
         let title = crate::dock::clip_title(title, MAX_TITLE);
-        draw_label(buf, w, h, R { x: text_x, y: label.y, w: label.x + label.w - text_x, h: label.h }, &title, &theme.font_family, scale * g.factor, fg, theme.font_size.max(12));
+        let (size, font) = (scale * g.factor, theme.font_size.max(12));
+        // ícono y título se centran juntos; los 2 px evitan que el antialias fuerce los puntos suspensivos
+        let text_w = (crate::dock::text_width(&title, &theme.font_family, size, font) + 2).min(label.w - lead);
+        let x = label.x + (label.w - lead - text_w) / 2;
+        if let Some(ic) = &s.icons[i] {
+            crate::start::blit(buf, (w, h), x, label.y + (label.h - icon) / 2, icon, &crate::start::scale_icon(ic, icon));
+        }
+        draw_label(buf, w, h, R { x: x + lead, y: label.y, w: text_w, h: label.h }, &title, &theme.font_family, size, fg, font);
     }
 }
 

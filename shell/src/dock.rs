@@ -1611,6 +1611,28 @@ pub(crate) unsafe fn draw_label(buf: &mut [u32], stride: i32, rows: i32, cell: R
     draw_text(buf, stride, rows, cell, text, family, scale, fg, font_size, DT_CENTER)
 }
 
+unsafe fn label_font(family: &str, scale: f32, font_size: i32) -> HFONT {
+    let family: Vec<u16> = family.encode_utf16().chain(std::iter::once(0)).collect();
+    CreateFontW(-px(font_size.max(11), scale), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, ANTIALIASED_QUALITY.0 as u32, 0, PCWSTR(family.as_ptr()))
+}
+
+/// Ancho en px con el que `draw_label` dibuja el texto.
+pub(crate) unsafe fn text_width(text: &str, family: &str, scale: f32, font_size: i32) -> i32 {
+    let wide: Vec<u16> = text.encode_utf16().collect();
+    if wide.is_empty() {
+        return 0;
+    }
+    let screen = GetDC(None);
+    let font = label_font(family, scale, font_size);
+    let old = SelectObject(screen, font);
+    let mut size = SIZE::default();
+    let _ = GetTextExtentPoint32W(screen, &wide, &mut size);
+    SelectObject(screen, old);
+    let _ = DeleteObject(font);
+    ReleaseDC(None, screen);
+    size.cx
+}
+
 pub(crate) unsafe fn draw_text(buf: &mut [u32], stride: i32, rows: i32, cell: R, text: &str, family: &str, scale: f32, fg: (u8, u8, u8), font_size: i32, align: DRAW_TEXT_FORMAT) {
     // DrawTextW con un slice vacío recibe un puntero colgante y termina la shell
     if text.is_empty() {
@@ -1618,14 +1640,13 @@ pub(crate) unsafe fn draw_text(buf: &mut [u32], stride: i32, rows: i32, cell: R,
     }
     let (w, h) = (cell.w, cell.h);
     let wide: Vec<u16> = text.encode_utf16().collect();
-    let family: Vec<u16> = family.encode_utf16().chain(std::iter::once(0)).collect();
     let screen = GetDC(None);
     let mem = CreateCompatibleDC(screen);
     let bmi = BITMAPINFO { bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: w, biHeight: -h, biPlanes: 1, biBitCount: 32, biCompression: 0, ..Default::default() }, ..Default::default() };
     let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
     if let Ok(dib) = CreateDIBSection(mem, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) {
         let old = SelectObject(mem, dib);
-        let font = CreateFontW(-px(font_size.max(11), scale), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, ANTIALIASED_QUALITY.0 as u32, 0, PCWSTR(family.as_ptr()));
+        let font = label_font(family, scale, font_size);
         let old_font = SelectObject(mem, font);
         let src = std::slice::from_raw_parts_mut(bits as *mut u32, (w * h) as usize);
         src.fill(0);
@@ -1943,6 +1964,11 @@ pub(crate) unsafe fn fetch_icon(source: &str, size: i32) -> Option<Icon> {
     let item: IShellItemImageFactory = SHCreateItemFromParsingName(PCWSTR(wide.as_ptr()), None).ok()?;
     let bmp = item.GetImage(SIZE { cx: size, cy: size }, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK).ok()?;
     icon_from_bitmap(bmp)
+}
+
+// una app empaquetada no publica ícono en su marco: sale por su AppUserModelID
+pub(crate) unsafe fn window_icon(hwnd: isize, size: i32) -> Option<Icon> {
+    fetch_icon(&format!("window:{hwnd}"), size).or_else(|| fetch_icon(&format!(r"shell:AppsFolder\{}", aumid_of(HWND(hwnd as *mut _))?), size))
 }
 
 unsafe fn icon_from_bitmap(bmp: HBITMAP) -> Option<Icon> {
@@ -2321,7 +2347,7 @@ pub fn focus_keyboard() {
     if KEY_SESSION.get().is_some() { end_keyboard(true); return; }
     unsafe {
         let previous = GetForegroundWindow();
-        let monitor = if previous.0.is_null() || previous == GetShellWindow() {
+        let monitor = if previous.0.is_null() || crate::desktop::is_desktop(previous) {
             let mut point = POINT::default();
             let _ = GetCursorPos(&mut point);
             MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST)

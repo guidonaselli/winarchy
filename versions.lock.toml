@@ -82,3 +82,6 @@ sha256 = "6233a2d6865d6193d90a5593b255406bb3c9ad6a3547aacda512ab6b76f1a66f"
 [assistant]
 # SHA256 del winarchy-assistant.exe adjunto al Release de esta versión (lo fija el release; docs/RELEASING.md).
 sha256 = "bc3a56b43c71ec41d0b0f91fa9dd8f643ed6b9d1079e302c82eef720f5904bbf"
+
+[uwphost]
+# SHA256 del winarchy-uwphost.exe adjunto al Release (lo fija el release; docs/RELEASING.md). Sin pin no se instala.

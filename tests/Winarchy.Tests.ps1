@@ -3654,6 +3654,76 @@ Describe 'Install-WinarchyShellBinary' {
     }
 }
 
+Describe 'UWP host' {
+    BeforeEach {
+        $script:repo = Join-Path $TestDrive "uwp-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path (Join-Path $script:repo 'state') -Force | Out-Null
+    }
+
+    It 'installs only a binary whose SHA256 matches the pin' {
+        InModuleScope Winarchy -Parameters @{ Repo = $script:repo } {
+            param($Repo)
+            Mock Get-WinarchyRoot { $Repo }
+            $exe = Join-Path $Repo 'winarchy-uwphost.exe'
+            Set-Content $exe 'fake binary' -NoNewline
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[core]`nkomorebi = `"1`""
+            { Install-WinarchyUwphostBinary -Source $exe } | Should -Throw '*no [[]uwphost[]] sha256*'
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[uwphost]`nsha256 = `"$('0' * 64)`""
+            { Install-WinarchyUwphostBinary -Source $exe } | Should -Throw '*mismatch*'
+            Test-Path (Join-Path $Repo 'state\bin\winarchy-uwphost.exe') | Should -BeFalse
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[uwphost]`nsha256 = `"$((Get-FileHash $exe -Algorithm SHA256).Hash)`""
+            Install-WinarchyUwphostBinary -Source $exe | Should -Be (Join-Path $Repo 'state\bin\winarchy-uwphost.exe')
+        }
+    }
+
+    It 'turns on only with a binary to run: local build, installed copy or pinned release' {
+        InModuleScope Winarchy -Parameters @{ Repo = $script:repo } {
+            param($Repo)
+            Mock Get-WinarchyRoot { $Repo }
+            Mock Install-WinarchyUwphostRelease { throw 'no network in tests' }
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[core]`nkomorebi = `"1`""
+            $flag = Join-Path (Get-WinarchyStateDir) 'uwphost.enabled'
+            { Set-WinarchyUwphost on } | Should -Throw '*No UWP host binary*'
+            Test-Path $flag | Should -BeFalse
+            Should -Invoke Install-WinarchyUwphostRelease -Times 0
+            $build = Join-Path $Repo 'uwphost\target\release'
+            New-Item -ItemType Directory -Path $build, (Join-Path $Repo 'state\bin') -Force | Out-Null
+            Set-Content (Join-Path $Repo 'state\bin\winarchy-uwphost.exe') 'installed'
+            Set-Content (Join-Path $build 'winarchy-uwphost.exe') 'built'
+            Set-WinarchyUwphost on
+            Test-Path $flag | Should -BeTrue
+            Get-WinarchyUwphostExe | Should -Be (Join-Path $build 'winarchy-uwphost.exe')
+        }
+    }
+
+    It 'reports off, ready, blocked and down from the flag and the helper status' {
+        InModuleScope Winarchy -Parameters @{ Repo = $script:repo } {
+            param($Repo)
+            Mock Get-WinarchyRoot { $Repo }
+            $state = Get-WinarchyStateDir
+            (Get-WinarchyUwphostState).State | Should -Be 'off'
+            Set-Content (Join-Path $state 'uwphost.enabled') '1'
+            (Get-WinarchyUwphostState).State | Should -Be 'down'
+            Set-Content (Join-Path $state 'uwphost.status') 'x|ready' -NoNewline
+            (Get-WinarchyUwphostState).State | Should -Be 'down'
+            Set-Content (Join-Path $state 'uwphost.status') '4242|ready|10.0.1|' -NoNewline
+            Mock Get-Process { [pscustomobject]@{ ProcessName = 'winarchy-uwphost' } } -ParameterFilter { $Id -eq 4242 }
+            $ready = Get-WinarchyUwphostState
+            $ready.State | Should -Be 'ready'
+            $ready.Detail | Should -Be 'twinui 10.0.1'
+            Set-Content (Join-Path $state 'uwphost.blocked') 'stamp'
+            Set-Content (Join-Path $state 'uwphost.status') '4242|failed|10.0.1|missing symbol' -NoNewline
+            $blocked = Get-WinarchyUwphostState
+            $blocked.State | Should -Be 'blocked'
+            $blocked.Detail | Should -Be 'twinui 10.0.1: missing symbol'
+            Set-WinarchyUwphost -Action retry
+            Test-Path (Join-Path $state 'uwphost.blocked') | Should -BeFalse
+            Set-WinarchyUwphost -Action off
+            (Get-WinarchyUwphostState).State | Should -Be 'off'
+        }
+    }
+}
+
 Describe 'Install-WinarchyAssistantBinary' {
     It 'installs only a binary whose SHA256 matches the pin' {
         $repo = Join-Path $TestDrive 'repo'

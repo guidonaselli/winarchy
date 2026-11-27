@@ -4,10 +4,11 @@
 .DESCRIPTION
   Evidence lands in state\verify\uwphost\<timestamp>. Nothing on the real desktop is touched.
   -HostExe is a winarchy-uwphost.exe that only ever runs inside the guest; networking is enabled with it
-  because it downloads public symbols on first use.
+  because it downloads public symbols on first use. -Supervision lets the shell launch and supervise the host
+  itself (opt-in flag, hang, four failures, job object) instead of the probe starting it.
 #>
 [CmdletBinding()]
-param([string]$HostExe, [switch]$NoShell, [switch]$HostFirst, [switch]$Extras, [switch]$Offline, [switch]$Explorer, [string]$Probe = 'Probe-UwpPresentation.ps1', [string]$Exe)
+param([string]$HostExe, [switch]$NoShell, [switch]$HostFirst, [switch]$Extras, [switch]$Offline, [switch]$Explorer, [switch]$Supervision, [string]$Probe = 'Probe-UwpPresentation.ps1', [string]$Exe)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $wsb = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\wsb.exe'
@@ -19,19 +20,20 @@ $in = Join-Path $run 'input'; $out = Join-Path $run 'output'; $payload = Join-Pa
 New-Item -ItemType Directory -Path (Join-Path $payload 'config\shell'), $out -Force | Out-Null
 Copy-Item $Exe (Join-Path $payload 'winarchy-shell.exe')
 Copy-Item (Join-Path $PSScriptRoot $Probe) $in
+Copy-Item (Join-Path $repo 'config\ahk\winarchy.ahk') $in
 Set-Content (Join-Path $in 'guest.marker') 'sandbox'
 if ($HostExe) {
     New-Item -ItemType Directory -Path (Join-Path $in 'host') | Out-Null
     Copy-Item $HostExe (Join-Path $in 'host\winarchy-uwphost.exe')
 }
-if ($Extras) {
+if ($Extras -or $Supervision) {
     # copia de solo lectura del AHK instalado: dentro del Sandbox mide qué hotkeys le quedan con el host vivo
     $ahk = Join-Path $env:LOCALAPPDATA 'Programs\AutoHotkey\v2\AutoHotkey64.exe'
     if (-not (Test-Path $ahk)) { $ahk = Join-Path $env:ProgramFiles 'AutoHotkey\v2\AutoHotkey64.exe' }
     if (Test-Path $ahk) { New-Item -ItemType Directory -Path (Join-Path $in 'ahk') | Out-Null; Copy-Item $ahk (Join-Path $in 'ahk') }
 }
-@{ shell = -not $NoShell; host = [bool]$HostExe; hostFirst = [bool]$HostFirst; extras = [bool]$Extras; explorer = [bool]$Explorer } | ConvertTo-Json | Set-Content (Join-Path $in 'scenario.json')
-@{ background = '#202020'; opacity = 1.0; foreground = '#ffffff'; accent = '#4da3ff'; muted = '#808080'; font_family = 'Segoe UI'; font_size = 13; position = 'top'; dock = $false } |
+@{ shell = -not $NoShell; host = [bool]$HostExe; hostFirst = [bool]$HostFirst; extras = [bool]$Extras; explorer = [bool]$Explorer; offline = [bool]$Offline; supervision = [bool]$Supervision } | ConvertTo-Json | Set-Content (Join-Path $in 'scenario.json')
+@{ background = '#202020'; opacity = 1.0; foreground = '#ffffff'; accent = '#4da3ff'; muted = '#808080'; font_family = 'Segoe UI'; font_size = 13; position = 'top'; dock = [bool]$Supervision } |
     ConvertTo-Json -Compress | Set-Content (Join-Path $payload 'config\shell\theme.json')
 
 $folders = "<MappedFolder><HostFolder>$([Security.SecurityElement]::Escape($in))</HostFolder><SandboxFolder>C:\probe</SandboxFolder><ReadOnly>true</ReadOnly></MappedFolder>" +

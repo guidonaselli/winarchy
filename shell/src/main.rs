@@ -38,6 +38,7 @@ mod taskbar;
 mod tray_host;
 mod tray_notifications;
 mod wifi;
+mod uwphost;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -76,6 +77,7 @@ const WM_CMD_DOCK_FOCUS: u32 = WM_APP + 10;
 const WM_CMD_START: u32 = WM_APP + 13;
 const WM_CMD_NOTIFICATIONS: u32 = WM_APP + 176;
 const WM_NOTICE: u32 = WM_APP + 177;
+const WM_UWPHOST_DEGRADED: u32 = WM_APP + 178;
 const WM_CMD_SWITCHER_SHOW: u32 = WM_APP + 100;
 const WM_CMD_SWITCHER_HIDE: u32 = WM_APP + 101;
 const WM_CMD_DOCK_PIN: u32 = WM_APP + 43;
@@ -1158,6 +1160,11 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             desktop_view::report_files_open_failure(h, wp);
             LRESULT(0)
         }
+        WM_UWPHOST_DEGRADED => {
+            desktop::claim_shell_window();
+            notify(tr(K::UwpDegraded));
+            LRESULT(0)
+        }
         WM_NOTICE => {
             if let Some((title, target)) = NOTICE.lock().unwrap().take() {
                 *NOTICE_TARGET.lock().unwrap() = target;
@@ -1635,8 +1642,9 @@ fn main() {
         STATE.with(|s| {
             *s.borrow_mut() = Some(State { session_shell, state_dir: state_dir.clone(), theme_mtime: Theme::stamp(&theme_path), theme: theme.clone(), theme_path: theme_path.clone(), scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), last_mode: None, layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig(), fade: 1.0, was_open: false, osd_p: None, target_p: None, clock_open: false, cal_ym: (1970, 1), cal_sel: 0, countdown: None, countdown_minute: 99 })
         });
+        let uwphost = if session_shell { uwphost::helper(&root) } else { None };
         if session_shell {
-            desktop::init(&theme.background, &root, com_initialized);
+            desktop::init(&theme.background, &root, com_initialized, uwphost.is_some());
             wpn::start_relay();
             start::init(&root, &theme);
             switcher::init();
@@ -1663,6 +1671,11 @@ fn main() {
             let _ = PostMessageW(HWND(target as *mut _), WM_BRIGHTNESS, WPARAM(0), LPARAM(0));
         });
         let _ = HOST.set(Host { hwnd: target, session_shell, root: root.clone() });
+        if let Some(exe) = uwphost {
+            uwphost::supervise(exe, root.clone(), move || {
+                let _ = PostMessageW(HWND(target as *mut _), WM_UWPHOST_DEGRADED, WPARAM(0), LPARAM(0));
+            });
+        }
         pipe::serve(session_id, move |c| {
             let mut arg = 0;
             let m = match c {

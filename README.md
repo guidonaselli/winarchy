@@ -171,11 +171,21 @@ What the shell draws and owns when Explorer is gone:
 - **Run dialog** on `Win+Alt+R`.
 - **Files**, a native file manager in Rust (`files/`), is what `Win+E` opens when it is installed.
 
-**UWP apps do not work in the session shell.** Settings (and every `ms-settings:` link), Calculator, Microsoft
-Store, Windows Security and other UWP apps fail to activate (`0x80040900`, "Class not registered") and never show
-a window, because Explorer is not there to host them. Win32 apps, including packaged ones such as Notepad, work.
-The shell and the hotkeys open the classic applet for Sound, Network and Power instead, and say so when there is
-none. If you need any UWP app, stay in coexistence mode (`winarchy shell deactivate`).
+**UWP apps need the UWP host, which is experimental and off by default.** Without it Settings (and every
+`ms-settings:` link), Calculator, Microsoft Store, Windows Security and other UWP apps fail to activate
+(`0x80040900`, "Class not registered") and never show a window, because Explorer is not there to host them. Win32
+apps, including packaged ones such as Notepad, work. The shell and the hotkeys open the classic applet for Sound,
+Network and Power instead, and say so when there is none.
+
+`winarchy uwphost on` makes the shell launch `winarchy-uwphost.exe` (`uwphost/`) from the next sign-in. It relies on
+private Windows interfaces: it downloads Microsoft's public symbols for the installed build on first use, checks them
+before calling anything and refuses to run when they do not match. The shell supervises it, restarts it after a crash
+or a hang, and after repeated failures tells you in the island and goes on without it until the next sign-in
+(`winarchy uwphost status` and `retry`). Without network on first use it retries and gives up until the next
+sign-in. So far it has only been verified in Windows Sandbox at 100 % scaling, and no release ships
+its binary yet: build it with `cargo build --release` in `uwphost/`. Apps left open across a host restart are closed by the
+new one, because Windows refuses to activate them again. If you need UWP apps you can count on, stay in coexistence mode
+(`winarchy shell deactivate`).
 
 Also covered without Explorer: a notice when a drive is connected and when the battery crosses the power plan's
 thresholds, an input-language pill with more than one layout, the main `Win+X` tools and display projection from the

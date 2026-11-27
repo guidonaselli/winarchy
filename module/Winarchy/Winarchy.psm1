@@ -78,6 +78,8 @@ function Show-WinarchyHelp {
     rules sync [--apply]      Refresh the vendored community ASC (shows the diff first;
                               never touches your config/komorebi/rules.toml)
     shell <status|activate|deactivate>   Replace Explorer with the Winarchy shell at next sign-in (opt-in, reversible; activate needs --yes)
+    uwphost [status|on|off|retry]   Open Store apps inside the Winarchy session shell (next sign-in;
+                              retry: try again after it gave up)
     taskbar <hide|autohide|show>   Native Windows taskbar mode (hide: gone, dock only)
     harden [--revert]         Turn off Bing search, ads, suggestions, widgets and tips (HKCU)
     reload                    Reload komorebi, YASB, AHK and Flow
@@ -338,6 +340,18 @@ function Invoke-Winarchy {
                 }
                 default { throw "Unknown subcommand: shell $sub (status|activate|deactivate)" }
             }
+        }
+        'uwphost' {
+            $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'status' }
+            if ($sub -eq 'status') {
+                $uwp = Get-WinarchyUwphostState
+                Write-WinarchyInfo "UWP host: $($uwp.State) ($($uwp.Detail))"
+            }
+            elseif ($sub -in 'on', 'off', 'retry') {
+                Set-WinarchyUwphost -Action $sub
+                Write-WinarchyOk "UWP host: $sub. It takes effect at your next sign-in."
+            }
+            else { throw "Unknown subcommand: uwphost $sub (status|on|off|retry)" }
         }
         'taskbar' {
             $mode = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { '' }

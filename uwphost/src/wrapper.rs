@@ -22,6 +22,9 @@ const READINESS_PROLOGUES: [[u8; 10]; 2] = [
     // build 26300
     [0x48, 0x89, 0x5c, 0x24, 0x10, 0x55, 0x56, 0x57, 0x48, 0x83],
 ];
+const BOUNDS_PROLOGUE: [u8; 10] = [0x48, 0x83, 0xec, 0x38, 0x48, 0x89, 0x54, 0x24, 0x20, 0x48];
+
+const BOUNDS_SLOT: usize = 56;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Wrapper {
@@ -166,10 +169,50 @@ pub fn advance(wrapper: &Wrapper, core: usize, attached: bool, symbols: &Symbols
     Ok(())
 }
 
+// `ViewBounds` as ChangeBounds reads it: width, height, then x and y at 0x10 and a field at 0x20 handed back
+// unchanged. x and y place the app's window inside its frame, so they stay zero.
+fn view_bounds(width: i32, height: i32, kept: u32) -> [i32; 16] {
+    let mut bounds = [0; 16];
+    (bounds[0], bounds[1], bounds[8]) = (width, height, kept as i32);
+    bounds
+}
+
+/// Tells the view its new size: a plain window resize never reaches the app's layout.
+pub fn change_bounds(wrapper: &Wrapper, width: i32, height: i32, symbols: &Symbols) -> Result<(), String> {
+    if !memory::starts_with(symbols.change_bounds, &BOUNDS_PROLOGUE) {
+        return Err("ChangeBounds is not the measured method".into());
+    }
+    let base = wrapper.interface.checked_sub(0x20).ok_or("wrapper pointer is too small")?;
+    // the subobject that declares the method: only called through it if its vtable holds the symbol where measured
+    let target = base.checked_sub(8).ok_or("wrapper pointer is too small")?;
+    let vtable = memory::read_usize(target).ok_or("bounds vtable is unreadable")?;
+    if memory::read_usize(vtable + BOUNDS_SLOT * 8) != Some(symbols.change_bounds) {
+        return Err("wrapper does not expose ChangeBounds".into());
+    }
+    let kept = memory::read_usize(base + 0x1f8).ok_or("view data is unreadable")? as u32;
+    // passed by value: the callee owns the copy and may write to it
+    let mut bounds = view_bounds(width, height, kept);
+    // SAFETY: `find` verified the wrapper; the method address comes from the module's symbols, has the
+    // expected prologue and is listed by this subobject's vtable; the reference is held across the call.
+    let result = unsafe {
+        let raw = (wrapper.interface - 0x20) as *mut c_void;
+        let _alive = IUnknown::from_raw_borrowed(&raw).ok_or("null wrapper")?.clone();
+        let change: unsafe extern "system" fn(usize, *mut i32) -> i32 = std::mem::transmute(symbols.change_bounds);
+        change(target, bounds.as_mut_ptr())
+    };
+    (result >= 0).then_some(()).ok_or_else(|| format!("ChangeBounds hr=0x{:08X}", result as u32))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn view_bounds_place_each_value_where_the_method_reads_it() {
+        let bounds = view_bounds(3, 4, 5);
+        assert_eq!([bounds[0], bounds[1], bounds[4], bounds[5], bounds[8]], [3, 4, 0, 0, 5]);
+    }
 
     fn memory_map() -> HashMap<usize, usize> {
         HashMap::from([

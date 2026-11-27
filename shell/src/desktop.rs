@@ -12,6 +12,7 @@ use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::Graphics::Imaging::*;
 use windows::Win32::System::Com::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::Shell::{
     IDesktopWallpaper, DWPOS_CENTER, DWPOS_FILL, DWPOS_FIT, DWPOS_SPAN, DWPOS_STRETCH, DWPOS_TILE,
 };
@@ -345,6 +346,8 @@ impl RequestQueue {
 
 struct State {
     hwnd: HWND,
+    delegated: bool,
+    sink_hooks: [HWINEVENTHOOK; 2],
     rect: RECT,
     color: COLORREF,
     position: WallpaperPosition,
@@ -1003,7 +1006,8 @@ unsafe fn register_shell_window(hwnd: HWND) {
     let _ = set(hwnd);
 }
 
-pub fn init(fallback: &str, root: &std::path::Path, com_initialized: bool) {
+// `delegated`: la ventana de shell la registra winarchy-uwphost y el escritorio solo la reclama si ese helper no puede.
+pub fn init(fallback: &str, root: &std::path::Path, com_initialized: bool, delegated: bool) {
     let rect = desktop_rect();
     if rect.right <= rect.left || rect.bottom <= rect.top {
         return;
@@ -1056,6 +1060,8 @@ pub fn init(fallback: &str, root: &std::path::Path, com_initialized: bool) {
             retry_at: None,
             generation: 0,
             force_refresh: true,
+            delegated,
+            sink_hooks: if delegated { watch_z_order() } else { Default::default() },
             requests,
             results: result_rx,
         });
@@ -1071,7 +1077,9 @@ pub fn init(fallback: &str, root: &std::path::Path, com_initialized: bool) {
             SWP_NOACTIVATE | SWP_SHOWWINDOW,
         );
         // Como Progman con Explorer: sin ventana de shell registrada, lo que komorebi manda al fondo queda debajo del escritorio y desaparece.
-        register_shell_window(hwnd);
+        if !delegated {
+            register_shell_window(hwnd);
+        }
     }
     if com_initialized {
         let size = RECT {
@@ -1138,8 +1146,68 @@ fn show_foreign_desktops(show: bool) {
     }
 }
 
+// Windows deja HWND_BOTTOM justo sobre la ventana de shell: si es de otro proceso, lo mandado al fondo
+// queda entre ella y el escritorio. Solo se puede bajar el escritorio otra vez. Sin ventana de shell, una
+// ventana sin derecho a primer plano nace debajo del escritorio y no hay reorden que la acompañe.
+fn watch_z_order() -> [HWINEVENTHOOK; 2] {
+    // dos hooks angostos: un rango entregaría además cada ventana que se oculta en el sistema
+    [EVENT_OBJECT_SHOW, EVENT_OBJECT_REORDER].map(|event| unsafe { SetWinEventHook(event, event, None, Some(reordered), 0, 0, WINEVENT_OUTOFCONTEXT) })
+}
+
+unsafe extern "system" fn reordered(_: HWINEVENTHOOK, event: u32, window: HWND, object: i32, _: i32, _: u32, _: u32) {
+    let relevant = match event {
+        EVENT_OBJECT_REORDER => window == GetDesktopWindow(),
+        EVENT_OBJECT_SHOW => object == OBJID_WINDOW.0 && GetAncestor(window, GA_PARENT) == GetDesktopWindow(),
+        _ => false,
+    };
+    if !relevant {
+        return;
+    }
+    let Some(desktop) = STATE.with(|state| state.try_borrow().ok().and_then(|state| state.as_ref().filter(|state| state.delegated).map(|state| state.hwnd))) else { return };
+    let shell = GetShellWindow();
+    let mut next = GetWindow(desktop, GW_HWNDNEXT);
+    // acotado: GetWindow puede ciclar si el orden Z cambia mientras se recorre
+    for _ in 0..512 {
+        let Ok(below) = next else { break };
+        if below == shell {
+            break;
+        }
+        if IsWindowVisible(below).as_bool() && !IsIconic(below).as_bool() {
+            let _ = SetWindowPos(desktop, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            break;
+        }
+        next = GetWindow(below, GW_HWNDNEXT);
+    }
+}
+
+pub fn claim_shell_window() {
+    let Some(hwnd) = STATE.with(|state| state.borrow().as_ref().map(|state| state.hwnd)) else { return };
+    unsafe { register_shell_window(hwnd) };
+    // con otro dueño de la ventana de shell el escritorio sigue necesitando que lo bajen
+    if unsafe { GetShellWindow() } != hwnd {
+        if let Some(host) = crate::HOST.get() {
+            crate::boot_log(&host.root, "desktop: could not claim the shell window");
+        }
+        return;
+    }
+    STATE.with(|state| {
+        if let Some(state) = state.borrow_mut().as_mut() {
+            state.delegated = false;
+            unsafe {
+                for hook in state.sink_hooks {
+                    let _ = UnhookWinEvent(hook);
+                }
+            }
+        }
+    });
+}
+
+pub fn is_desktop(hwnd: HWND) -> bool {
+    is_host_window(hwnd) || hwnd == unsafe { GetShellWindow() }
+}
+
 pub fn tick() {
-    if STATE.with(|state| state.borrow().as_ref().is_some_and(|state| unsafe { GetShellWindow() } == state.hwnd)) {
+    if STATE.with(|state| state.borrow().as_ref().is_some_and(|state| state.delegated || unsafe { GetShellWindow() } == state.hwnd)) {
         show_foreign_desktops(false);
     }
     refresh();

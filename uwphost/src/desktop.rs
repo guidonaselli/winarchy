@@ -10,14 +10,18 @@ use std::ffi::c_void;
 use windows::{
     core::{BOOL, PWSTR},
     Win32::{
-        Foundation::{CloseHandle, HWND, LPARAM, RECT},
-        Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED},
+        Foundation::{CloseHandle, HANDLE, HWND, LPARAM, RECT},
+        Graphics::{
+            Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED},
+            Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST},
+        },
         Storage::{EnhancedStorage::PKEY_AppUserModel_ID, Packaging::Appx::GetApplicationUserModelId},
         System::{
             Com::{CoTaskMemFree, StructuredStorage::PropVariantToStringAlloc},
             Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
         },
         UI::{
+            HiDpi::GetDpiForWindow,
             Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow},
             WindowsAndMessaging::{
                 EnumChildWindows, EnumWindows, GetAncestor, GetClassNameW, GetClientRect, GetDesktopWindow, GA_PARENT, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindow,
@@ -73,15 +77,22 @@ pub fn existing_cores() -> std::collections::HashSet<Window> {
     windows().into_iter().filter(|(_, frame)| !frame).map(|(window, _)| window).collect()
 }
 
+/// The AppUserModelID of an open process handle with query rights.
+pub fn app_id_of(process: HANDLE) -> Option<String> {
+    let mut buffer = [0u16; 1024];
+    let mut length = buffer.len() as u32;
+    // SAFETY: Windows checks the handle and the buffer length.
+    let status = unsafe { GetApplicationUserModelId(process, &mut length, Some(PWSTR(buffer.as_mut_ptr()))) };
+    (status.0 == 0 && length > 0 && length as usize <= buffer.len()).then(|| String::from_utf16_lossy(&buffer[..length as usize - 1]))
+}
+
 fn process_app_id(pid: u32) -> Option<String> {
-    // SAFETY: Windows checks the access right and the buffer length; the handle is closed here.
+    // SAFETY: Only the right to query is requested; the handle is closed here.
     unsafe {
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
-        let mut buffer = [0u16; 1024];
-        let mut length = buffer.len() as u32;
-        let status = GetApplicationUserModelId(process, &mut length, Some(PWSTR(buffer.as_mut_ptr())));
+        let app_id = app_id_of(process);
         let _ = CloseHandle(process);
-        (status.0 == 0 && length > 0 && length as usize <= buffer.len()).then(|| String::from_utf16_lossy(&buffer[..length as usize - 1]))
+        app_id
     }
 }
 
@@ -168,20 +179,67 @@ impl Platform for Native<'_> {
     }
 }
 
+// Without Explorer there is no remembered placement and a frame is born tiny in the top-left corner.
+// Both sides must be short: Calculator is narrow on purpose.
+fn roomy(frame: RECT, work: RECT, dpi: u32) -> Option<RECT> {
+    let scaled = |dips: i32| dips * dpi as i32 / 96;
+    if frame.right - frame.left >= scaled(500) || frame.bottom - frame.top >= scaled(400) {
+        return None;
+    }
+    let (width, height) = (work.right - work.left, work.bottom - work.top);
+    let (w, h) = (scaled(1100).min(width * 4 / 5), scaled(800).min(height * 17 / 20));
+    let (left, top) = (work.left + (width - w) / 2, work.top + (height - h) / 2);
+    Some(RECT { left, top, right: left + w, bottom: top + h })
+}
+
+/// Once per presented frame; a window manager that tiles it afterwards still wins.
+pub fn give_room(frame: Window) {
+    let frame = handle(frame.hwnd);
+    // SAFETY: Windows validates the handle; the move is posted, never blocking on the app.
+    unsafe {
+        let mut current = RECT::default();
+        let mut monitor = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if IsIconic(frame).as_bool() || GetWindowRect(frame, &mut current).is_err() || !GetMonitorInfoW(MonitorFromWindow(frame, MONITOR_DEFAULTTONEAREST), &mut monitor).as_bool() {
+            return;
+        }
+        if let Some(r) = roomy(current, monitor.rcWork, GetDpiForWindow(frame)) {
+            let _ = SetWindowPos(frame, None, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+        }
+    }
+}
+
 /// The private frame never resizes its child here, so the CoreWindow follows the frame's client area.
-pub fn fit(frame: Window, core: Window) {
+/// Returns that area's size, or nothing while the pair cannot be fitted.
+pub fn fit(frame: Window, core: Window) -> Option<(i32, i32)> {
     let (frame, core) = (handle(frame.hwnd), handle(core.hwnd));
     // SAFETY: Windows validates both handles; the move is posted, never blocking on the app.
     unsafe {
         if parent(core.0 as usize) != Some(frame.0 as usize) || IsIconic(frame).as_bool() {
-            return;
+            return None;
         }
         let (mut client, mut current) = (RECT::default(), RECT::default());
         if GetClientRect(frame, &mut client).is_err() || GetWindowRect(core, &mut current).is_err() {
-            return;
+            return None;
         }
         if current.right - current.left != client.right || current.bottom - current.top != client.bottom {
             let _ = SetWindowPos(core, None, 0, 0, client.right, client.bottom, SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
         }
+        Some((client.right, client.bottom))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_tiny_frame_is_centred_and_enlarged() {
+        let rect = |left, top, right, bottom| RECT { left, top, right, bottom };
+        let work = rect(0, 0, 1920, 1040);
+        assert_eq!(roomy(rect(8, 1, 354, 321), work, 96), Some(rect(410, 120, 1510, 920)));
+        assert_eq!(roomy(rect(0, 0, 322, 500), work, 96), None);
+        assert_eq!(roomy(rect(0, 0, 960, 360), work, 96), None);
+        // at 200 % the wanted size is capped by the monitor
+        assert_eq!(roomy(rect(0, 0, 692, 640), work, 192), Some(rect(192, 78, 1728, 962)));
     }
 }

@@ -226,6 +226,11 @@ fn activate_with_deadline(activate: impl FnOnce() -> Result<(), i32> + Send + 's
     }
 }
 
+// sin Explorer una app UWP solo abre mientras el helper la presenta
+fn uwp_unhosted() -> bool {
+    crate::HOST.get().is_some_and(|h| h.session_shell) && !crate::uwphost::presenting()
+}
+
 fn report_unlaunched(target: &str, hresult: Option<i32>) {
     let Some(host) = crate::HOST.get() else { return };
     let why = hresult.map_or_else(|| "timeout".to_owned(), |h| format!("hr=0x{:08X}", h as u32));
@@ -233,7 +238,7 @@ fn report_unlaunched(target: &str, hresult: Option<i32>) {
     // con Explorer un error ya tuvo su fallback; un plazo vencido no, y no puede quedar en silencio
     if host.session_shell || hresult.is_none() {
         // sin Explorer, UWP se cuelga o responde "Class not registered"
-        let uwp = host.session_shell && hresult.map_or(true, |h| h == 0x80040900u32 as i32);
+        let uwp = uwp_unhosted() && hresult.map_or(true, |h| h == 0x80040900u32 as i32);
         crate::notify(t(if uwp { K::UwpUnavailable } else { K::LaunchFailed }));
     }
 }
@@ -253,8 +258,8 @@ fn settings_fallback(uri: &str) -> Option<(&'static str, &'static str)> {
 }
 
 pub fn launch(path: &str, args: &str) {
-    // Configuración es UWP: sin Explorer no abre y ShellExecute no lo informa
-    if path.starts_with("ms-settings:") && crate::HOST.get().is_some_and(|h| h.session_shell) {
+    // Configuración es UWP: sin quien la presente no abre y ShellExecute no lo informa
+    if path.starts_with("ms-settings:") && uwp_unhosted() {
         match settings_fallback(path) {
             Some((exe, args)) => launch(exe, args),
             None => report_unlaunched(path, Some(0x80040900u32 as i32)),
@@ -276,7 +281,8 @@ pub fn launch(path: &str, args: &str) {
                 activated.map(drop).map_err(|e| e.code().0)
             };
             let session = crate::HOST.get().is_some_and(|h| h.session_shell);
-            if let Err(hresult) = activate_with_deadline(activate, if session { SESSION_ACTIVATION_DEADLINE } else { ACTIVATION_DEADLINE }) {
+            let deadline = if uwp_unhosted() { SESSION_ACTIVATION_DEADLINE } else { ACTIVATION_DEADLINE };
+            if let Err(hresult) = activate_with_deadline(activate, deadline) {
                 report_unlaunched(&fallback.0, hresult);
                 // un plazo vencido puede completar después: relanzar abriría la app dos veces
                 if !session && hresult.is_some() {

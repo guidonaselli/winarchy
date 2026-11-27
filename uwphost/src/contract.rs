@@ -11,6 +11,10 @@ pub enum Failure {
     ShellWindow(String),
     // transient: the shell relaunches after these
     Runtime(String),
+    // network or disk: retried, never a permanent block
+    Unavailable(String),
+    // not a failure: the shell relaunches at once and does not count it
+    Recycled(String),
 }
 
 pub const EXIT_OK: u8 = 0;
@@ -20,6 +24,8 @@ pub const EXIT_SYMBOLS: u8 = 3;
 pub const EXIT_LAYOUT: u8 = 4;
 pub const EXIT_SHELL_WINDOW: u8 = 5;
 pub const EXIT_WATCHDOG: u8 = 6;
+pub const EXIT_UNAVAILABLE: u8 = 7;
+pub const EXIT_RECYCLED: u8 = 8;
 
 impl Failure {
     pub fn code(&self) -> u8 {
@@ -28,12 +34,14 @@ impl Failure {
             Failure::Layout(_) => EXIT_LAYOUT,
             Failure::ShellWindow(_) => EXIT_SHELL_WINDOW,
             Failure::Runtime(_) => EXIT_WATCHDOG,
+            Failure::Unavailable(_) => EXIT_UNAVAILABLE,
+            Failure::Recycled(_) => EXIT_RECYCLED,
         }
     }
 
     pub fn reason(&self) -> &str {
         match self {
-            Failure::Symbols(reason) | Failure::Layout(reason) | Failure::ShellWindow(reason) | Failure::Runtime(reason) => reason,
+            Failure::Symbols(reason) | Failure::Layout(reason) | Failure::ShellWindow(reason) | Failure::Runtime(reason) | Failure::Unavailable(reason) | Failure::Recycled(reason) => reason,
         }
     }
 }
@@ -118,6 +126,7 @@ mod tests {
         ];
         assert_eq!(codes, [3, 4, 5]);
         assert_eq!([EXIT_OK, EXIT_USAGE, EXIT_ALREADY_RUNNING, EXIT_WATCHDOG], [0, 1, 2, 6]);
+        assert_eq!([Failure::Unavailable(String::new()).code(), Failure::Recycled(String::new()).code()], [7, 8]);
     }
 
     #[test]
