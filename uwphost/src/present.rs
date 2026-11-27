@@ -37,8 +37,7 @@ pub trait Platform {
     /// The CoreWindow the frame's private wrapper already owns, or 0.
     fn client(&mut self, frame: Window) -> Result<usize, String>;
     /// One step towards presentation; true once the view is fully presented.
-    /// `only_view` says no other frame shares the app identity.
-    fn present(&mut self, frame: &Frame, core: Window, only_view: bool) -> Result<bool, String>;
+    fn present(&mut self, frame: Window, core: Window) -> Result<bool, String>;
 }
 
 struct Pending {
@@ -155,7 +154,7 @@ impl Presenter {
                     pending.core = Some(core);
                     pending.stable_since = None;
                 }
-                platform.present(entry, core, frames.iter().filter(|f| f.app_id == *app_id).count() == 1)
+                platform.present(*frame, core)
             });
             let elapsed = now.duration_since(pending.started);
             let ready = result.unwrap_or_else(|error| {
@@ -207,7 +206,7 @@ mod tests {
         fn client(&mut self, _: Window) -> Result<usize, String> {
             Ok(self.client)
         }
-        fn present(&mut self, _: &Frame, core: Window, _: bool) -> Result<bool, String> {
+        fn present(&mut self, _: Window, core: Window) -> Result<bool, String> {
             self.attempts.push(core);
             self.result.clone()
         }

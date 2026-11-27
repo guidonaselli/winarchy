@@ -36,8 +36,8 @@ const TWINUI_NAMES: [&str; 15] = [
     "??_7UwpWindowEventDispatcher@@6BIWeakReferenceSource@@@",
     "??_7UwpWindowEventDispatcher@@6BINtUserViewWrapperCollection@@@",
     "??_7UwpWindowWrapper@@6B?$ChainInterfaces@UIUwpWindowWrapperInternal@@UIWindowWrapper@ViewManagerInterop@Shell@Internal@Windows@@VNil@Details@WRL@Microsoft@@V789Microsoft@@V789Microsoft@@V789Microsoft@@V789Microsoft@@V789Microsoft@@V789Microsoft@@V789Microsoft@@@WRL@Microsoft@@@",
-    "?GetViewForAppUserModelId@ApplicationViewCollectionBase@@UEAAJPEBGPEAPEAUIApplicationView@@@Z",
-    "?GetViewForAppUserModelId@CApplicationViewManager@@UEAAJPEBGPEAPEAUIApplicationView@@@Z",
+    "?GetViewForHwnd@ApplicationViewCollectionBase@@UEAAJPEAUHWND__@@PEAPEAUIApplicationView@@@Z",
+    "?GetViewForHwnd@CApplicationViewManager@@UEAAJPEAUHWND__@@PEAPEAUIApplicationView@@@Z",
     "?SetCloak@CApplicationViewBase@@UEAAJW4APPLICATION_VIEW_CLOAK_TYPE@@H@Z",
     "?ChangeBounds@UwpWindowWrapperBase@@UEAAJUViewBounds@ViewManagerInterop@Shell@Internal@Windows@@@Z",
 ];

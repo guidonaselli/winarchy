@@ -140,8 +140,7 @@ impl Platform for Native<'_> {
         Ok(wrapper::find(frame.hwnd, self.0)?.client)
     }
 
-    fn present(&mut self, view: &Frame, core: Window, only_view: bool) -> Result<bool, String> {
-        let frame = view.window;
+    fn present(&mut self, frame: Window, core: Window) -> Result<bool, String> {
         let found = wrapper::find(frame.hwnd, self.0)?;
         if found.client != 0 && found.client != core.hwnd {
             return Err("wrapper already owns another CoreWindow".into());
@@ -169,11 +168,7 @@ impl Platform for Native<'_> {
         }
         wrapper::advance(&found, core.hwnd, attached, self.0)?;
         if (frame_cloaked || core_cloaked) && found.wait_flags == 0 {
-            // the private lookup is by AppUserModelID: never uncloak when two frames share it
-            if !only_view {
-                return Err("cannot uncloak one of several views of the app".into());
-            }
-            views::uncloak(&view.app_id, self.0)?;
+            views::uncloak(frame.hwnd, self.0)?;
         }
         Ok(false)
     }
