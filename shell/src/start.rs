@@ -270,6 +270,15 @@ pub fn is_open() -> bool {
     with(|m| m.open).unwrap_or(false)
 }
 
+pub fn set_theme(theme: &Theme) {
+    if with(|m| {
+        m.theme = theme.clone();
+        m.open
+    }) == Some(true) {
+        paint();
+    }
+}
+
 // Abre el menú sobre el dock (centrado en el monitor) o lo cierra si ya estaba abierto.
 pub fn toggle(anchor: R, mon: (i32, i32, i32, i32), bottom: bool, scale: f32, theme: &Theme) {
     if is_open() {
@@ -301,9 +310,10 @@ pub fn toggle(anchor: R, mon: (i32, i32, i32, i32), bottom: bool, scale: f32, th
     };
     unsafe {
         SetTimer(h, T_WATCH, WATCH_MS, None);
-        start_anim(h);
+        if !start_anim(h) {
+            paint();
+        }
     }
-    paint();
     unsafe {
         let _ = SetForegroundWindow(h);
         let _ = SetFocus(h);
@@ -322,10 +332,23 @@ pub fn close() {
     }
 }
 
-unsafe fn start_anim(h: HWND) {
+unsafe fn start_anim(h: HWND) -> bool {
+    let animate = with(|m| crate::dock::motion_enabled(&m.theme)).unwrap_or(false);
+    if !animate {
+        let _ = KillTimer(h, T_ANIM);
+        with(|m| {
+            m.vis = if m.open { 1.0 } else { 0.0 };
+            m.hover_t = if m.hover.is_some() { 1.0 } else { 0.0 };
+            m.anim_on = false;
+            m.last = None;
+        });
+        paint();
+        return true;
+    }
     if with(|m| std::mem::replace(&mut m.anim_on, true)) == Some(false) {
         SetTimer(h, T_ANIM, ANIM_MS, None);
     }
+    false
 }
 
 unsafe fn anim_tick(h: HWND) {

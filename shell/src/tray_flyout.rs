@@ -206,7 +206,32 @@ pub fn notify() {
     }
 }
 
+pub fn set_theme(theme: &Theme) {
+    if with(|f| {
+        f.theme = theme.clone();
+        f.open
+    }) == Some(true) {
+        paint();
+    }
+}
+
 unsafe fn start_anim(h: HWND) {
+    let animate = with(|f| crate::dock::motion_enabled(&f.theme)).unwrap_or(false);
+    if !animate {
+        let _ = KillTimer(h, T_ANIM);
+        let n = tray::with_visible(|v| v.len());
+        with(|f| {
+            f.vis = if f.open { 1.0 } else { 0.0 };
+            f.hover_t.resize(n, 0.0);
+            for (i, t) in f.hover_t.iter_mut().enumerate() {
+                *t = if f.hover == Some(i) { 1.0 } else { 0.0 };
+            }
+            f.anim_on = false;
+            f.last = None;
+        });
+        paint();
+        return;
+    }
     if with(|f| std::mem::replace(&mut f.anim_on, true)) == Some(false) {
         SetTimer(h, T_ANIM, ANIM_MS, None);
     }
@@ -239,12 +264,20 @@ unsafe fn anim_tick(h: HWND) {
     }
 }
 
+fn theme_render_key(theme: &Theme) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let visual = style(theme);
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (&theme.background, &theme.foreground, &theme.accent, &theme.muted, &theme.font_family, theme.font_size, visual.radius, visual.opacity.to_bits()).hash(&mut h);
+    h.finish()
+}
+
 fn paint() {
     let Some((hwnd, theme, scale, vis, bottom, anchor, mon, hover, hover_pin, hover_t, revision)) = with(|f| (f.hwnd, f.theme.clone(), f.scale, f.vis, f.bottom, f.anchor, f.mon, f.hover, f.hover_pin, f.hover_t.clone(), tray::revision())) else { return };
     let sig = {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (vis.to_bits(), hover, hover_pin, hover_t.iter().map(|t| t.to_bits()).collect::<Vec<_>>(), revision, (anchor.x, anchor.y, scale.to_bits()), &theme.background, &theme.foreground).hash(&mut h);
+        (vis.to_bits(), hover, hover_pin, hover_t.iter().map(|t| t.to_bits()).collect::<Vec<_>>(), revision, (anchor.x, anchor.y, scale.to_bits()), theme_render_key(&theme)).hash(&mut h);
         h.finish()
     };
     if with(|f| std::mem::replace(&mut f.sig, sig) == sig).unwrap_or(true) {

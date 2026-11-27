@@ -38,6 +38,26 @@ fn a_tall_flyout_never_leaves_the_monitor_vertically() {
 }
 
 #[test]
+fn render_cache_key_tracks_every_theme_token_used_by_the_flyout() {
+    fn assert_theme_change(change: impl FnOnce(&mut Theme)) {
+        let mut theme = Theme::default();
+        let before = theme_render_key(&theme);
+        change(&mut theme);
+        assert_ne!(theme_render_key(&theme), before);
+    }
+
+    assert_theme_change(|t| t.background.push('x'));
+    assert_theme_change(|t| t.foreground.push('x'));
+    assert_theme_change(|t| t.accent.push('x'));
+    assert_theme_change(|t| t.muted.push('x'));
+    assert_theme_change(|t| t.font_family.push('x'));
+    assert_theme_change(|t| t.font_size += 1);
+    assert_theme_change(|t| t.dock_radius += 1);
+    assert_theme_change(|t| t.opacity = 0.5);
+    assert_theme_change(|t| t.dock_opacity = Some(0.5));
+}
+
+#[test]
 fn scaling_keeps_color_and_premultiplies_alpha() {
     let opaque = vec![10, 20, 30, 255].repeat(4);
     assert!(scaled(&opaque, (2, 2), 1).iter().all(|p| *p == 0xFF_1E_14_0A), "opaque stays exact (BGRA 10,20,30)");

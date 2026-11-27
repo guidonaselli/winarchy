@@ -33,7 +33,7 @@ Winarchy tiene que sentirse **otra cosa** que Windows de fábrica: una sola supe
 - Resorte críticamente amortiguado para la isla (`OMEGA` 30, dt ≤ 50 ms); easing cúbico para dock (160 ms), Inicio (160), flyout (180), menú (140); entrada con desplazamiento corto (8–16 px) más fundido.
 - Hover 120 ms, resaltado de fila por fundido.
 - Los temporizadores se apagan al asentarse: nada de repintar en reposo.
-- Sin animación todavía: toasts, switcher y OSD (aparecen y desaparecen en seco). Es una deuda declarada.
+- Switcher instantáneo para que Alt+Tab siga al teclado; el OSD suaviza progreso. La isla, el OSD, Inicio y la bandeja respetan «efectos de animación» de Windows (`dock::motion_enabled`).
 
 ## Menús y paneles
 - Un solo componente (`menu::pick` / `pick_with`): fila de 30, resaltado con acento al 30 %, ↑/↓/Enter/Esc, cierra al perder foco o clic afuera.
@@ -51,7 +51,5 @@ Winarchy tiene que sentirse **otra cosa** que Windows de fábrica: una sola supe
 
 ## Deuda de diseño conocida
 - Menú propio sin árbol de accesibilidad, sin filas deshabilitadas ni separadores, sin estado de pulsado y sin estado silenciado en el deslizador.
-- OSD, toast y switcher sin movimiento.
-- Inicio y flyout de bandeja no respetan «efectos de animación» de Windows.
 - Panel de red sin lista de redes ni Wi-Fi propio: muestra estado y abre los ajustes de Windows.
 - Brillo sin control en el panel de estado: el clic en el cluster ya no expande la isla, así que solo se alcanza con el mouse sobre la isla.

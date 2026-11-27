@@ -128,6 +128,8 @@ struct State {
     layout_sig: Vec<(i32, i32, i32, i32, u32)>,
     fade: f32,
     was_open: bool,
+    osd_p: Option<f32>,
+    target_p: Option<f32>,
     clock_open: bool,
     cal_ym: (i64, u32),
     cal_sel: i64,
@@ -452,11 +454,12 @@ unsafe fn render_pill(pill: HWND) {
     let widest = need_raw.max(if live_panel.is_some() { px(layout::PANEL_W_DIP, scale) } else { 0 });
     let need = widest.min(px(PILL_MAX_W, scale)).min((mon.right - mon.left) * 3 / 4);
     let base = layout::bar_width(scale, orb, temp_w, &dots, 0, ext.cx);
-    let (width, height, animating, strip, label, panel) = with(|s| {
+    let animate = dock::motion_enabled(&theme);
+    let (width, height, animating, strip, label, panel, osd_p) = with(|s| {
         if live_panel.is_some() != s.was_open {
             s.was_open = live_panel.is_some();
             if s.was_open {
-                s.fade = 0.0;
+                s.fade = if animate { 0.0 } else { 1.0 };
             }
         }
         if let Some(p) = &live_panel {
@@ -469,9 +472,22 @@ unsafe fn render_pill(pill: HWND) {
         };
         s.target_w = need as f32;
         s.target_h = (bar_h + extra) as f32;
-        if s.cur_w == 0.0 {
+        if let Some(p) = progress {
+            let p = p as f32;
+            s.target_p = Some(p);
+            if !animate || s.osd_p.is_none() {
+                s.osd_p = Some(p);
+            }
+        } else {
+            s.target_p = None;
+            s.osd_p = None;
+        }
+        if s.cur_w == 0.0 || !animate {
             s.cur_w = s.target_w;
             s.cur_h = s.target_h;
+            s.vel = 0.0;
+            s.vel_h = 0.0;
+            s.fade = 1.0;
         }
         let width = (s.cur_w.round() as i32).max(base);
         let height = (s.cur_h.round() as i32).max(bar_h);
@@ -484,7 +500,9 @@ unsafe fn render_pill(pill: HWND) {
         if live_panel.is_none() && height as f32 <= s.target_h + 1.0 {
             s.panel_shown = None;
         }
-        (width, height, (s.cur_w - s.target_w).abs() > 0.5 || (s.cur_h - s.target_h).abs() > 0.5 || s.fade < 1.0, s.strip, s.last_label.clone(), s.panel_shown.clone())
+        let p_anim = matches!((s.osd_p, s.target_p), (Some(c), Some(t)) if (c - t).abs() > 0.005);
+        let anim = animate && ((s.cur_w - s.target_w).abs() > 0.5 || (s.cur_h - s.target_h).abs() > 0.5 || s.fade < 1.0 || p_anim);
+        (width, height, anim, s.strip, s.last_label.clone(), s.panel_shown.clone(), s.osd_p)
     });
     if animating {
         SetTimer(strip, TIMER_ANIM, 8, None);
@@ -531,9 +549,11 @@ unsafe fn render_pill(pill: HWND) {
     } else {
         let _ = KillTimer(strip, TIMER_SPIRIT);
     }
-    if let Some(p) = progress {
+    if let Some(p) = osd_p {
         let r = lay.place(lay.progress);
-        fill_round(pixels, width, height, R { w: (r.w as f64 * p) as i32, ..r }, r.h / 2, accent, bg);
+        let track = tint(bg, fg, 0.12);
+        fill_round(pixels, width, height, r, r.h / 2, track, bg);
+        fill_round(pixels, width, height, R { w: (r.w as f32 * p).round() as i32, ..r }, r.h / 2, accent, track);
     }
     SetBkMode(mem, TRANSPARENT);
     let (fg_c, muted_c, bg_c) = (colorref(&theme.foreground), colorref(&theme.muted), colorref(&theme.background));
@@ -719,7 +739,14 @@ unsafe fn spring_step(strip: HWND) {
         let w = spring(&mut s.cur_w, &mut s.vel, s.target_w, dt);
         let h = spring(&mut s.cur_h, &mut s.vel_h, s.target_h, dt);
         s.fade = (s.fade + dt / FADE_SECS).min(1.0);
-        let settled = w && h && s.fade >= 1.0;
+        if let (Some(c), Some(t)) = (s.osd_p.as_mut(), s.target_p) {
+            *c = dock::approach(*c, t, dt * 1000.0, 90.0);
+        }
+        let p_done = match (s.osd_p, s.target_p) {
+            (Some(c), Some(t)) => (c - t).abs() <= 0.005,
+            _ => true,
+        };
+        let settled = w && h && s.fade >= 1.0 && p_done;
         if settled {
             s.anim_last = None;
         }
@@ -910,6 +937,9 @@ unsafe fn tick_inner() {
     let fm = focus_monitor();
     let moved = with(|s| (fm.left, fm.top) != (s.pill_mon.left, s.pill_mon.top));
     if let Some((was_dock, has_dock, theme, state_dir)) = &reloaded {
+        start::set_theme(theme);
+        tray_flyout::set_theme(theme);
+        switcher::set_theme(theme);
         desktop::set_fallback_color(&theme.background);
         if with(|s| s.session_shell) { tray_notifications::update_theme(theme.clone()); }
         match dock_change(*was_dock, *has_dock) {
@@ -1515,7 +1545,7 @@ fn main() {
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, layout::bar_h(scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { session_shell, state_dir: state_dir.clone(), theme_mtime: Theme::stamp(&theme_path), theme: theme.clone(), theme_path: theme_path.clone(), scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), last_mode: None, layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig(), fade: 1.0, was_open: false, clock_open: false, cal_ym: (1970, 1), cal_sel: 0, countdown: None, countdown_minute: 99 })
+            *s.borrow_mut() = Some(State { session_shell, state_dir: state_dir.clone(), theme_mtime: Theme::stamp(&theme_path), theme: theme.clone(), theme_path: theme_path.clone(), scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), last_mode: None, layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig(), fade: 1.0, was_open: false, osd_p: None, target_p: None, clock_open: false, cal_ym: (1970, 1), cal_sel: 0, countdown: None, countdown_minute: 99 })
         });
         if session_shell {
             desktop::init(&theme.background, &root, com_initialized);
