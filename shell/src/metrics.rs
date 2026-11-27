@@ -7,7 +7,10 @@ use windows::Win32::Networking::NetworkListManager::{INetworkListManager, Networ
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 use windows::core::{w, PCWSTR};
 use windows::Win32::System::Performance::{PdhAddEnglishCounterW, PdhCollectQueryData, PdhGetFormattedCounterArrayW, PdhOpenQueryW, PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE};
-use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+use windows::core::GUID;
+use windows::Win32::Foundation::{LocalFree, HLOCAL};
+use windows::Win32::System::Power::{GetSystemPowerStatus, PowerGetActiveScheme, PowerReadDCValueIndex, SYSTEM_POWER_STATUS};
+use windows::Win32::System::Registry::HKEY;
 
 #[derive(Default)]
 pub struct Sampler {
@@ -79,6 +82,27 @@ pub fn ram_percent() -> Option<u32> {
     let mut m = MEMORYSTATUSEX { dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32, ..Default::default() };
     unsafe { GlobalMemoryStatusEx(&mut m).ok()? };
     Some(m.dwMemoryLoad)
+}
+
+// umbrales (bajo, crítico) del plan de energía activo; los de fábrica de Windows si no se leen
+pub fn battery_levels() -> (u8, u8) {
+    const BATTERY: GUID = GUID::from_u128(0xe73a048d_bf27_4f12_9731_8b2076e8891f);
+    const LOW: GUID = GUID::from_u128(0x8183ba9a_e910_48da_8769_14ae6dc1170a);
+    const CRITICAL: GUID = GUID::from_u128(0x9a66d8d7_4ff7_4ef9_b5a2_5a326ca2a469);
+    unsafe {
+        let mut scheme = std::ptr::null_mut();
+        if PowerGetActiveScheme(HKEY::default(), &mut scheme).is_err() {
+            return (10, 5);
+        }
+        let read = |setting: &GUID, fallback: u8| {
+            let mut value = 0u32;
+            let status = PowerReadDCValueIndex(HKEY::default(), Some(scheme), Some(&BATTERY), Some(setting), &mut value);
+            if status == 0 { value.min(100) as u8 } else { fallback }
+        };
+        let levels = (read(&LOW, 10), read(&CRITICAL, 5));
+        let _ = LocalFree(HLOCAL(scheme.cast()));
+        levels
+    }
 }
 
 // None si no hay batería (escritorio).
