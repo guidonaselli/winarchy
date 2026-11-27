@@ -541,17 +541,34 @@ unsafe fn menu_with(h: HWND, entries: &[(K, MenuEntry)], header: crate::menu::He
     if entries.is_empty() && matches!(header, crate::menu::Header::None) {
         return;
     }
-    let labels: Vec<String> = entries.iter().map(|(key, _)| t(*key).to_string()).collect();
+    // sin Explorer no hay panel de Wi-Fi: las redes van arriba del menú de red
+    let (networks, denied) = match entries.first() {
+        Some((K::MenuNetworkSettings, _)) if crate::session_shell_active() => match crate::wifi::scan() {
+            crate::wifi::Scan::Networks(list) => (list, false),
+            crate::wifi::Scan::Denied => (Vec::new(), true),
+            crate::wifi::Scan::Unavailable => (Vec::new(), false),
+        },
+        _ => (Vec::new(), false),
+    };
+    let mut labels: Vec<String> = networks.iter().map(crate::wifi::Network::label).collect();
+    if denied {
+        labels.push(t(K::WifiDenied).to_string());
+    }
+    let extra = labels.len();
+    labels.extend(entries.iter().map(|(key, _)| t(*key).to_string()));
     let mut p = POINT::default();
     let _ = GetCursorPos(&mut p);
     let previous = GetForegroundWindow();
     let Some((theme, scale)) = with(|c| (c.theme.clone(), c.scale)) else { return };
-    let chosen = crate::menu::pick_with(header, on_slide, &labels, (p.x, p.y), crate::menu::Anchor::BottomLeft, &theme, scale).map_or(0, |i| i as i32 + 1);
+    let chosen = crate::menu::pick_with(header, on_slide, &labels, (p.x, p.y), crate::menu::Anchor::BottomLeft, &theme, scale).map(|i| i as usize);
     // sin esto la app del usuario queda desactivada y el teclado no llega a ningún lado hasta el próximo clic
     if previous != h && IsWindow(previous).as_bool() {
         let _ = SetForegroundWindow(previous);
     }
-    match chosen.checked_sub(1).and_then(|i| entries.get(i as usize)) {
+    if let Some(network) = chosen.and_then(|i| networks.get(i)) {
+        crate::wifi::connect(network.clone());
+    }
+    match chosen.and_then(|i| i.checked_sub(extra)).and_then(|i| entries.get(i)) {
         Some((_, MenuEntry::Open(target))) => crate::dock_menu::launch(target, ""),
         Some((_, MenuEntry::Mute)) => {
             let _ = crate::metrics::toggle_mute();

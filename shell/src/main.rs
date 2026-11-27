@@ -37,6 +37,7 @@ mod tray_flyout;
 mod taskbar;
 mod tray_host;
 mod tray_notifications;
+mod wifi;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};

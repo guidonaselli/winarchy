@@ -179,9 +179,10 @@ none. If you need any UWP app, stay in coexistence mode (`winarchy shell deactiv
 
 Also covered without Explorer: a notice when a drive is connected and when the battery crosses the power plan's
 thresholds, an input-language pill with more than one layout, the `Win+X` functions and display projection from the
-Winarchy menu, the magnifier and on-screen keyboard, and taskbar progress on the dock.
+Winarchy menu, the magnifier and on-screen keyboard, taskbar progress on the dock, and a Wi-Fi list on the network
+icon (saved, open and WPA personal networks; Windows asks for the password).
 
-Other gaps without Explorer, from an audit of what Explorer normally does: no Focus assist, no Wi-Fi network list,
+Other gaps without Explorer, from an audit of what Explorer normally does: no Focus assist, no enterprise Wi-Fi sign-in,
 no task view or virtual desktops, no `Win+X` menu, and no Bluetooth, Display or Printers panels. The parity table, with the evidence level of every row, is
 [docs/rust-session-shell-parity.md](docs/rust-session-shell-parity.md). The boot sequence, the single-instance
 rule and the logon race between the autostart task and the policy are covered by tests and the Sandbox scenarios
