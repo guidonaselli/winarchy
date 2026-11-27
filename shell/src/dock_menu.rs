@@ -212,21 +212,52 @@ pub fn is_open() -> bool {
     MENU.with(|m| m.try_borrow().map(|m| m.is_some()).unwrap_or(true))
 }
 
+const ACTIVATION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
+
+// Err(None) es plazo vencido: sin Explorer ActivateApplication puede no volver nunca
+fn activate_with_deadline(activate: impl FnOnce() -> Result<(), i32> + Send + 'static, deadline: std::time::Duration) -> Result<(), Option<i32>> {
+    let (done, result) = std::sync::mpsc::channel();
+    std::thread::spawn(move || { let _ = done.send(activate()); });
+    match result.recv_timeout(deadline) {
+        Ok(outcome) => outcome.map_err(Some),
+        Err(_) => Err(None),
+    }
+}
+
+fn report_unlaunched(target: &str, hresult: Option<i32>) {
+    let Some(host) = crate::HOST.get() else { return };
+    let why = hresult.map_or_else(|| "timeout".to_owned(), |h| format!("hr=0x{:08X}", h as u32));
+    crate::boot_log(&host.root, &format!("launch failed: {target} {why}"));
+    if host.session_shell {
+        crate::notify(t(K::UwpUnavailable));
+    }
+}
+
 pub fn launch(path: &str, args: &str) {
+    // Configuración es UWP: sin Explorer no abre y ShellExecute no lo informa
+    if path.starts_with("ms-settings:") && crate::HOST.get().is_some_and(|h| h.session_shell) {
+        report_unlaunched(path, Some(0x80040900u32 as i32));
+        return;
+    }
     // sin Explorer, ShellExecute de shell:AppsFolder falla con "Class not registered";
     // la activación va en un hilo propio porque bloquea y bombea mensajes en el de UI
     if let Some(aumid) = path.strip_prefix(r"shell:AppsFolder\") {
         let (aumid, fallback) = (aumid.to_owned(), (path.to_owned(), args.to_owned()));
-        std::thread::spawn(move || unsafe {
-            use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        std::thread::spawn(move || {
             let wide_id: Vec<u16> = aumid.encode_utf16().chain(std::iter::once(0)).collect();
-            let activated = CoCreateInstance::<_, IApplicationActivationManager>(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER)
-                .and_then(|m| m.ActivateApplication(PCWSTR(wide_id.as_ptr()), PCWSTR::null(), AO_NONE))
-                .is_ok();
-            CoUninitialize();
-            if !activated {
-                shell_execute(&fallback.0, &fallback.1);
+            let activate = move || unsafe {
+                use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+                let activated = CoCreateInstance::<_, IApplicationActivationManager>(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER)
+                    .and_then(|m| m.ActivateApplication(PCWSTR(wide_id.as_ptr()), PCWSTR::null(), AO_NONE));
+                CoUninitialize();
+                activated.map(drop).map_err(|e| e.code().0)
+            };
+            if let Err(hresult) = activate_with_deadline(activate, ACTIVATION_DEADLINE) {
+                report_unlaunched(&fallback.0, hresult);
+                if !crate::HOST.get().is_some_and(|h| h.session_shell) {
+                    shell_execute(&fallback.0, &fallback.1);
+                }
             }
         });
         return;
@@ -803,6 +834,14 @@ mod scroll_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_activation_that_never_returns_or_fails_is_reported() {
+        let wait = std::time::Duration::from_millis(200);
+        assert_eq!(activate_with_deadline(|| Ok(()), wait), Ok(()));
+        assert_eq!(activate_with_deadline(|| Err(-5), wait), Err(Some(-5)));
+        assert_eq!(activate_with_deadline(|| { std::thread::sleep(std::time::Duration::from_secs(30)); Ok(()) }, wait), Err(None));
+    }
 
     fn caps(l: bool, pinned: bool, pinnable: bool, picker: bool) -> Caps {
         Caps { launchable: l, pinned, pinnable, picker, closable: true, recents: 0 }

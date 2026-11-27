@@ -37,6 +37,7 @@ messages! {
     Bri => ("BRI", "BRI"),
     MuteOsd => ("MUTE", "SILENCIO"),
     MuteValue => ("mute", "silencio"),
+    UwpUnavailable => ("UWP apps need Explorer for now", "Las apps UWP necesitan Explorer por ahora"),
     Battery => ("BAT", "BAT"),
     Notifications => ("NOTIF", "NOTIF"),
     NotificationDismiss => ("Dismiss notification", "Descartar notificación"),

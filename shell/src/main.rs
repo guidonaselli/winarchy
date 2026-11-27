@@ -73,6 +73,7 @@ const WM_CMD_TOGGLE_CLOCK: u32 = WM_APP + 175;
 const WM_CMD_DOCK_FOCUS: u32 = WM_APP + 10;
 const WM_CMD_START: u32 = WM_APP + 13;
 const WM_CMD_NOTIFICATIONS: u32 = WM_APP + 176;
+const WM_NOTICE: u32 = WM_APP + 177;
 const WM_CMD_SWITCHER_SHOW: u32 = WM_APP + 100;
 const WM_CMD_SWITCHER_HIDE: u32 = WM_APP + 101;
 const WM_CMD_DOCK_PIN: u32 = WM_APP + 43;
@@ -87,6 +88,7 @@ const TIMER_SPIRIT: usize = 3;
 const TIMER_FLASH: usize = 4;
 const TIMER_HOVER: usize = 5;
 const FLASH_MS: u32 = 800;
+const NOTICE_MS: u32 = 6000;
 const HOVER_MS: u32 = 120;
 const PILL_MAX_W: i32 = 1400;
 const FADE_SECS: f32 = 0.18;
@@ -181,6 +183,24 @@ fn dock_change(previous: bool, current: bool) -> DockChange {
 
 const AGENDA_LINES: usize = 3;
 const NOTIF_LINES: usize = 3;
+pub(crate) struct Host {
+    hwnd: isize,
+    pub(crate) session_shell: bool,
+    pub(crate) root: std::path::PathBuf,
+}
+
+// sin inicializar (tests) no hay isla a la que avisar ni log donde escribir
+pub(crate) static HOST: std::sync::OnceLock<Host> = std::sync::OnceLock::new();
+static NOTICE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub(crate) fn notify(text: &str) {
+    let Some(host) = HOST.get() else { return };
+    *NOTICE.lock().unwrap() = Some(text.to_owned());
+    unsafe {
+        let _ = PostMessageW(HWND(host.hwnd as *mut _), WM_NOTICE, WPARAM(0), LPARAM(0));
+    }
+}
+
 static NOTIF_PAGE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 fn notif_page() -> usize {
@@ -1090,6 +1110,15 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             }
             LRESULT(0)
         }
+        WM_NOTICE => {
+            if let Some(title) = NOTICE.lock().unwrap().take() {
+                *pipe::ISLAND.lock().unwrap() = Some(pipe::Island { title: title.clone(), ..Default::default() });
+                with(|s| s.flash_title = Some(title));
+                SetTimer(h, TIMER_FLASH, NOTICE_MS, None);
+                render_pill(with(|s| s.pill));
+            }
+            LRESULT(0)
+        }
         WM_CMD_QUIT => {
             exit_log("quit command");
             if with(|s| s.session_shell) {
@@ -1574,6 +1603,7 @@ fn main() {
         brightness::init(move || {
             let _ = PostMessageW(HWND(target as *mut _), WM_BRIGHTNESS, WPARAM(0), LPARAM(0));
         });
+        let _ = HOST.set(Host { hwnd: target, session_shell, root: root.clone() });
         pipe::serve(session_id, move |c| {
             let mut arg = 0;
             let m = match c {
