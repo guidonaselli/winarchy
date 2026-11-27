@@ -2473,6 +2473,7 @@ Describe 'Runtime configuration environment' {
                 Mock Test-WinarchyProcess { $false }
                 Mock Get-WinarchyActiveBar { 'yasb' }
                 Mock Start-WinarchyKomorebi {}
+                Mock Restore-WinarchyFloatingApps {}
                 Mock Get-Command { [pscustomobject]@{ Source = 'C:\Program Files\YASB\yasbc.exe' } } -ParameterFilter { $Name -eq 'yasbc' }
                 Mock Start-Process {}
                 Mock Stop-Process {}
@@ -2503,6 +2504,7 @@ Describe 'Runtime configuration environment' {
                 Mock Get-WinarchyRoot { $Root }
                 Mock Test-WinarchyProcess { $false }
                 Mock Start-WinarchyKomorebi {}
+                Mock Restore-WinarchyFloatingApps {}
                 Mock Start-WinarchyWindowSlots {}
                 Mock Get-WinarchyAhkExe { 'AutoHotkey64.exe' }
                 Mock Get-Command { [pscustomobject]@{ Source = 'C:\Program Files\YASB\yasbc.exe' } } -ParameterFilter { $Name -eq 'yasbc' }
@@ -5002,6 +5004,36 @@ Describe 'Layout apply report' {
             Invoke-WinarchyLayoutApply
             Should -Invoke Update-WinarchyKomorebiRules -Times 1 -Exactly
             Should -Invoke Write-WinarchyOk -Times 0 -Exactly
+        }
+    }
+}
+
+Describe 'Dynamic accent marker' {
+    It 'stays pending while komorebi.json cannot be published' {
+        InModuleScope Winarchy -Parameters @{ Root = $script:Root; Work = (Join-Path $TestDrive 'accent') } {
+            param($Root, $Work)
+            New-Item -ItemType Directory -Path (Join-Path $Work 'state') -Force | Out-Null
+            foreach ($dir in 'themes', 'templates') { Copy-Item (Join-Path $Root $dir) (Join-Path $Work $dir) -Recurse }
+            $oldProfile = $env:USERPROFILE
+            try {
+                $env:USERPROFILE = $Work
+                Mock Get-WinarchyRoot { $Work }
+                Mock Get-WinarchyStateDir { Join-Path $Work 'state' }
+                Mock Get-WinarchyThemesDir { Join-Path $Work 'themes' }
+                Mock Set-WinarchyThemeLiveAccent { '#123456' }
+                Mock Add-WinarchyAppRulesToKomorebiJson { $Json }
+                Mock Add-WinarchyWindowRulesToKomorebiJson {}
+                Mock Assert-WinarchyWeztermConfig {}
+                Mock Get-WinarchyTerminalSettingsPath {}
+                Mock Merge-WinarchyTerminalScheme {}
+                Mock Set-WinarchyFlowTheme {}
+                Mock Invoke-WinarchyReload {}
+                Mock Update-WinarchyLockScreen {}
+                Set-WinarchyTheme -Name 'auto-accent' -LightRefresh
+                Get-Content (Join-Path $Work 'state\dynamic-accent') -Raw | Should -Be 'pending'
+                Should -Invoke Invoke-WinarchyReload -Times 1 -Exactly
+            }
+            finally { $env:USERPROFILE = $oldProfile }
         }
     }
 }
