@@ -107,6 +107,7 @@ pub struct Presenter {
     complete: HashMap<Window, Window>,
     pending: HashMap<Window, Pending>,
     failed: HashSet<Window>,
+    lost: HashSet<Window>,
 }
 
 impl Presenter {
@@ -128,7 +129,9 @@ impl Presenter {
     pub fn reconcile(&mut self, now: Instant, snapshot: &Snapshot, platform: &mut impl Platform, log: &dyn Fn(&str)) -> bool {
         let Snapshot { frames, cores } = snapshot;
         let live: HashSet<_> = frames.iter().map(|f| f.window).chain(cores.iter().map(|c| c.window)).collect();
+        self.lost.extend(self.complete.iter().filter(|(_, core)| !live.contains(core)).map(|(frame, _)| *frame));
         self.complete.retain(|frame, core| live.contains(frame) && live.contains(core));
+        self.lost.retain(|frame| live.contains(frame));
         self.pending.retain(|frame, _| live.contains(frame));
         self.failed.retain(|frame| live.contains(frame));
         let resolved: HashSet<_> = frames
@@ -140,6 +143,13 @@ impl Presenter {
             let Frame { window: frame, app_id } = entry;
             if self.complete.contains_key(frame) || self.failed.contains(frame) {
                 continue;
+            }
+            // a closing frame outlives its CoreWindow: nothing to do until there is another one
+            if self.lost.contains(frame) {
+                if !cores.iter().any(|c| c.app_id == *app_id && c.parent.is_none_or(|p| p == frame.hwnd)) {
+                    continue;
+                }
+                self.lost.remove(frame);
             }
             let pending = self.pending.entry(*frame).or_insert_with(|| Pending::new(now));
             if pending.core.is_some_and(|core| !live.contains(&core)) {
@@ -291,6 +301,20 @@ mod tests {
         run.tick(1000, &[core(2, Some(1))]);
         run.tick(2000, &[]);
         assert_eq!(run.presenter.presented().count(), 0);
+    }
+
+    #[test]
+    fn a_frame_that_lost_its_core_waits_for_a_new_one() {
+        let mut run = Run::new();
+        run.platform.result = Ok(true);
+        run.tick(0, &[core(2, Some(1))]);
+        run.tick(1000, &[core(2, Some(1))]);
+        let attempts = run.platform.attempts.len();
+        assert!(!run.tick(2000, &[]), "the timer stops");
+        assert!(!run.tick(2250, &[]));
+        assert_eq!(run.platform.attempts.len(), attempts);
+        assert!(run.tick(3000, &[core(3, None)]));
+        assert_eq!(run.platform.attempts.last(), Some(&window(3)));
     }
 
     #[test]
