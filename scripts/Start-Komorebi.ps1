@@ -118,7 +118,7 @@ while ((Get-Date) -lt $overallDeadline) {
     Write-Log "intento ${attempt}: lanzando komorebi.exe"
     try {
         # el redirect trunca: lo del arranque anterior (el rastro de una caida) queda en .1
-        foreach ($f in $outLog, $errLog) { if ((Get-Item $f -ErrorAction SilentlyContinue).Length) { Move-Item $f "$f.1" -Force -ErrorAction SilentlyContinue } }
+        if ($attempt -eq 1) { foreach ($f in $outLog, $errLog) { if ((Get-Item $f -ErrorAction SilentlyContinue).Length) { Move-Item $f "$f.1" -Force -ErrorAction SilentlyContinue } } }
         # en info anota cada cambio de titulo: cientos de MB por dia
         $p = Start-Process -FilePath $exe -ArgumentList '--log-level', 'warn' -WindowStyle Hidden -PassThru `
                 -RedirectStandardOutput $outLog -RedirectStandardError $errLog

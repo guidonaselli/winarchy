@@ -530,7 +530,7 @@ WLog(text) {
 
 ; devuelve 0: queda además el aviso normal de AutoHotkey
 LogAhkError(err, mode) {
-    try WLog('ERROR ' err.Message ' ' err.Extra ' @ ' err.File ':' err.Line)
+    try WLog('ERROR ' (IsObject(err) ? err.Message ' ' err.Extra ' @ ' err.File ':' err.Line : String(err)))
     return 0
 }
 
