@@ -171,7 +171,12 @@ What the shell draws and owns when Explorer is gone:
 - **Run dialog** on `Win+Alt+R`.
 - **Files**, a native file manager in Rust (`files/`), is what `Win+E` opens when it is installed.
 
-Known gaps without Explorer, from an audit of what Explorer normally does: no Focus assist,
+**UWP apps do not work in the session shell.** Settings (and every `ms-settings:` link), Calculator, Microsoft
+Store, Windows Security and other UWP apps start a process but never show a window: Windows only hosts them when
+Explorer is the shell. Win32 apps, including packaged ones such as Terminal, Notepad or Paint, work. If you need
+any UWP app, stay in coexistence mode (`winarchy shell deactivate`).
+
+Other gaps without Explorer, from an audit of what Explorer normally does: no Focus assist,
 no USB-connected notice, no input-language indicator, no task view or virtual desktops, no `Win+X` menu,
 no on-screen keyboard or magnifier shortcut. The parity table, with the evidence level of every row, is
 [docs/rust-session-shell-parity.md](docs/rust-session-shell-parity.md). The boot sequence, the single-instance
