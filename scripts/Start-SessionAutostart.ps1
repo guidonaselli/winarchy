@@ -13,6 +13,7 @@ Set-Content -LiteralPath $done -Value $Identity -Encoding ASCII
 Start-Sleep -Seconds $DelaySeconds
 
 $log = Join-Path $root 'state\session-autostart.log'
+if ((Test-Path $log) -and (Get-Item $log).Length -gt 512KB) { Move-Item $log "$log.1" -Force -ErrorAction SilentlyContinue }
 function Write-Log($text) { Add-Content -LiteralPath $log -Value ('{0} {1}' -f (Get-Date -Format s), $text) }
 Set-Content -LiteralPath $log -Value $null
 

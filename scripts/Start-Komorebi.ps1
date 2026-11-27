@@ -20,6 +20,7 @@ $env:KOMOREBI_CONFIG_HOME = Join-Path $root 'config\komorebi'
 $exe    = Join-Path $env:ProgramFiles 'komorebi\bin\komorebi.exe'
 $logDir = Join-Path $env:LOCALAPPDATA 'komorebi'
 $log    = Join-Path $logDir 'komorebi-winarchy.log'
+if ((Test-Path $log) -and (Get-Item $log).Length -gt 512KB) { Move-Item $log "$log.1" -Force -ErrorAction SilentlyContinue }
 $outLog = Join-Path $logDir 'komorebi.out.log'
 $errLog = Join-Path $logDir 'komorebi.err.log'
 
@@ -61,6 +62,10 @@ if (-not (Test-Path $exe)) { Write-Log "komorebi.exe no encontrado en $exe; abor
 if (Test-KomorebiRunning)  { Write-Log 'komorebi ya estaba corriendo; no hago nada.'; exit 0 }
 
 Write-Log '--- arranque (autostart) ---'
+
+# komorebi deja un log por dia en %TEMP% y no borra ninguno
+Get-ChildItem (Join-Path $env:TEMP 'komorebi.log.*'), (Join-Path $env:TEMP 'komorebi_plaintext.log.*') -ErrorAction SilentlyContinue |
+    Where-Object LastWriteTime -LT (Get-Date).AddDays(-3) | Remove-Item -Force -ErrorAction SilentlyContinue
 
 # Limpiar estado stale de un cierre sucio. komorebi.sock es un socket AF_UNIX; si
 # komorebi crasheó, el archivo queda y el próximo arranque puede fallar al bindear
@@ -112,7 +117,10 @@ while ((Get-Date) -lt $overallDeadline) {
 
     Write-Log "intento ${attempt}: lanzando komorebi.exe"
     try {
-        $p = Start-Process -FilePath $exe -WindowStyle Hidden -PassThru `
+        # el redirect trunca: lo del arranque anterior (el rastro de una caida) queda en .1
+        foreach ($f in $outLog, $errLog) { if ((Get-Item $f -ErrorAction SilentlyContinue).Length) { Move-Item $f "$f.1" -Force -ErrorAction SilentlyContinue } }
+        # en info anota cada cambio de titulo: cientos de MB por dia
+        $p = Start-Process -FilePath $exe -ArgumentList '--log-level', 'warn' -WindowStyle Hidden -PassThru `
                 -RedirectStandardOutput $outLog -RedirectStandardError $errLog
     }
     catch {

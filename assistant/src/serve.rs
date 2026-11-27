@@ -157,10 +157,14 @@ fn debug(msg: &str) {
     }
 }
 
-fn log(msg: &str) {
+pub(crate) fn log(msg: &str) {
     let p = PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_default()).join("Winarchy").join("assistant.log");
+    if std::fs::metadata(&p).is_ok_and(|m| m.len() > 512 * 1024) {
+        let _ = std::fs::rename(&p, p.with_extension("log.1"));
+    }
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
-        let _ = writeln!(f, "{msg}");
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let _ = writeln!(f, "t={t} {msg}");
     }
 }
 

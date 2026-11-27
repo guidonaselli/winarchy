@@ -4161,7 +4161,27 @@ fn install() -> Result<PathBuf, String> {
     Ok(folder)
 }
 
+// Sin consola, un panic no deja rastro: va a %LOCALAPPDATA%\winarchy\files.log.
+fn log_panics() {
+    let Some(base) = std::env::var_os("LOCALAPPDATA") else { return };
+    let path = PathBuf::from(base).join("winarchy").join("files.log");
+    std::panic::set_hook(Box::new(move |info| {
+        use std::io::Write;
+        if let Some(folder) = path.parent() {
+            let _ = std::fs::create_dir_all(folder);
+        }
+        if std::fs::metadata(&path).is_ok_and(|m| m.len() > 512 * 1024) {
+            let _ = std::fs::rename(&path, path.with_extension("log.1"));
+        }
+        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            let _ = writeln!(file, "t={t} panic: {info}");
+        }
+    }));
+}
+
 fn main() {
+    log_panics();
     if let Some(code) = handler_command() {
         std::process::exit(code);
     }

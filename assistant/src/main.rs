@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 const HELP: &str = "winarchy-assistant serve | ask <texto> | login | logout | status | levels [s] | listen <python> <stt/server.py> [s]";
 
 fn main() -> std::process::ExitCode {
+    std::panic::set_hook(Box::new(|info| serve::log(&format!("panic: {info}"))));
     let a: Vec<String> = std::env::args().collect();
     let code = match a.get(1).map(String::as_str) {
         Some("serve") => report(serve::run()),

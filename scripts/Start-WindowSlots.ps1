@@ -31,11 +31,11 @@ foreach ($file in Get-ChildItem -Path (Join-Path $root 'module\Winarchy\Private'
 $logDir = Join-Path $env:LOCALAPPDATA 'winarchy'
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $log = Join-Path $logDir 'window-slots.log'
-if ((Test-Path $log) -and (Get-Item $log).Length -gt 1MB) { Remove-Item $log -Force }
+if ((Test-Path $log) -and (Get-Item $log).Length -gt 1MB) { Move-Item $log "$log.1" -Force -ErrorAction SilentlyContinue }
 
 function Write-Log {
     param([string]$Message)
-    if ((Test-Path $log) -and (Get-Item $log).Length -gt 1MB) { Remove-Item $log -Force }
+    if ((Test-Path $log) -and (Get-Item $log).Length -gt 1MB) { Move-Item $log "$log.1" -Force -ErrorAction SilentlyContinue }
     "{0:yyyy-MM-dd HH:mm:ss} {1}" -f (Get-Date), $Message | Add-Content -Path $log -Encoding UTF8
 }
 

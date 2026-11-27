@@ -109,7 +109,7 @@ function Start-WinarchyKomorebi {
     }
     $exe = Get-WinarchyKomorebiExe
     if (-not $exe) { Write-WinarchyWarn 'komorebi.exe not found; tiling not started.'; return }
-    Start-Process $exe -WindowStyle Hidden
+    Start-Process $exe -ArgumentList '--log-level', 'warn' -WindowStyle Hidden
 }
 
 function Write-WinarchyInfo { param([string]$Message) Write-Host "  $Message" }
@@ -134,7 +134,7 @@ function Show-WinarchyLogs {
     $state = Get-WinarchyStateDir
     $paths = @(
         'winarchy.log', 'shell-boot.log', 'proc-exits.log', 'session-autostart.log' | ForEach-Object { Join-Path $state $_ }
-        Get-ChildItem "$env:LOCALAPPDATA\winarchy\*.log", "$env:LOCALAPPDATA\komorebi\komorebi*.log" -ErrorAction SilentlyContinue | Where-Object Name -NotLike '*.out.log' | ForEach-Object FullName
+        Get-ChildItem "$env:LOCALAPPDATA\winarchy\*.log", "$env:LOCALAPPDATA\komorebi\komorebi*.log" -ErrorAction SilentlyContinue | ForEach-Object FullName
     )
     foreach ($path in $paths | Where-Object { Test-Path $_ }) {
         Write-Host "`n== $path ($((Get-Item $path).LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')))" -ForegroundColor Cyan

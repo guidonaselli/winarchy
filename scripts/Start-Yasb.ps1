@@ -9,6 +9,7 @@ param(
 $env:YASB_CONFIG_HOME = $YasbConfigHome
 $logDir = Join-Path $env:LOCALAPPDATA 'Winarchy'
 $log    = Join-Path $logDir 'yasb-autostart.log'
+if ((Test-Path $log) -and (Get-Item $log).Length -gt 512KB) { Move-Item $log "$log.1" -Force -ErrorAction SilentlyContinue }
 
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 

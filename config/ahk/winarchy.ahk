@@ -15,6 +15,7 @@ EnvSet('NO_COLOR')
 ; --- Rutas (el script vive en <repo>\config\ahk) -----------------------------
 RepoRoot := RegExReplace(A_ScriptDir, "\\config\\ahk$")
 StateDir := RepoRoot "\state"
+OnError(LogAhkError)
 sessionId := 0
 ShellStatusFile := DllCall('ProcessIdToSessionId', 'uint', DllCall('GetCurrentProcessId'), 'uint*', &sessionId, 'int') ? StateDir "\shell-session-" sessionId : ""
 ShellSessionMarker := sessionId ? StateDir "\session-shell-" sessionId : ""
@@ -521,7 +522,16 @@ WinarchyTerminal(args) {
 FlowWindow := 'Flow.Launcher ahk_exe Flow.Launcher.exe'
 
 WLog(text) {
-    try FileAppend(FormatTime(, 'yyyy-MM-dd HH:mm:ss') '.' A_MSec ' ahk ' text '`n', StateDir '\winarchy.log', 'UTF-8-RAW')
+    path := StateDir '\winarchy.log'
+    try if FileGetSize(path) > 524288
+        FileMove(path, path '.1', true)
+    try FileAppend(FormatTime(, 'yyyy-MM-dd HH:mm:ss') '.' A_MSec ' ahk ' text '`n', path, 'UTF-8-RAW')
+}
+
+; devuelve 0: queda además el aviso normal de AutoHotkey
+LogAhkError(err, mode) {
+    try WLog('ERROR ' err.Message ' ' err.Extra ' @ ' err.File ':' err.Line)
+    return 0
 }
 
 ; Dónde quedó el lanzador y dónde estaba el mouse: para diagnosticar una ventana fuera de la vista.
@@ -1128,6 +1138,7 @@ ShellWatch() {
             static pauseTip := -300000
             if ShellRelaunches.Length >= 3 && A_TickCount - pauseTip >= 300000 {
                 pauseTip := A_TickCount
+                WLog('shell watch: relaunch paused, the shell keeps crashing')
                 TrayTip('The shell keeps crashing; relaunch paused. Run: winarchy doctor', 'Winarchy')
             }
         } else {
@@ -1136,6 +1147,7 @@ ShellWatch() {
                 if ProcessExist(pid) {
                     if hadShellState
                         ShowTaskbars()
+                    WLog('shell watch: hung shell pid ' pid ' could not be stopped')
                     TrayTip('The shell is hung and could not be stopped; relaunch paused. Run: winarchy doctor', 'Winarchy')
                     return
                 }
@@ -1144,6 +1156,7 @@ ShellWatch() {
                 if hadShellState && !sessionShell
                     ShowTaskbars()
                 ShellRelaunches.Push(A_TickCount)
+                WLog('shell watch: relaunch ' ShellRelaunches.Length ' in 5 min (previous pid ' pid ', session shell ' sessionShell ')')
                 Run('"' exe '" --root "' RepoRoot '"' (sessionShell ? ' --session-shell' : ''), , 'Hide')
             }
         }
@@ -1153,6 +1166,7 @@ ShellWatch() {
         ShellWatchBusy := recoverSessionShell
     }
     if recoverSessionShell {
+        WLog('shell watch: session shell unresponsive, restoring Explorer')
         ShellRecoveryAttempted := true
         ShellLifecycleStopping := true
         ShellWatchBusy := true

@@ -10,6 +10,7 @@ $exe    = $AhkExe
 $script = $ScriptPath
 $logDir = Join-Path $env:LOCALAPPDATA 'Winarchy'
 $log    = Join-Path $logDir 'ahk-autostart.log'
+if ((Test-Path $log) -and (Get-Item $log).Length -gt 512KB) { Move-Item $log "$log.1" -Force -ErrorAction SilentlyContinue }
 $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
 
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null

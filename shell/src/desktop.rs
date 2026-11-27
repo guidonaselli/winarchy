@@ -1081,13 +1081,7 @@ pub fn init(fallback: &str, root: &std::path::Path, com_initialized: bool) {
             bottom: rect.bottom - rect.top,
         };
         if let Err(error) = desktop_view::init(hwnd, size, root.to_path_buf()) {
-            let message = format!("Winarchy desktop view initialization failed: {error:?}\0");
-            let wide: Vec<u16> = message.encode_utf16().collect();
-            unsafe {
-                windows::Win32::System::Diagnostics::Debug::OutputDebugStringW(PCWSTR(
-                    wide.as_ptr(),
-                ))
-            };
+            crate::boot_log(root, &format!("desktop view initialization failed: {error:?}"));
         }
     }
     refresh();
