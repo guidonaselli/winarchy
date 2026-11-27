@@ -1027,7 +1027,9 @@ impl Component for Explorer {
                 }
             }
             Message::OpenStorageSense => {
-                if let Err(error) = shell::execute("open", "ms-settings:storagesense", None) {
+                // sin Explorer Configuración no abre; el liberador de espacio clásico sí
+                let target = if shell::explorer_is_shell() { "ms-settings:storagesense" } else { "cleanmgr.exe" };
+                if let Err(error) = shell::execute("open", target, None) {
                     self.status = format!("{}: {error}", tr("Could not run"));
                     self.has_error = true;
                 }

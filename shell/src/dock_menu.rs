@@ -233,10 +233,27 @@ fn report_unlaunched(target: &str, hresult: Option<i32>) {
     }
 }
 
+// applets Win32 que sí abren sin Explorer; SettingsFallback de winarchy.ahk repite los suyos
+const SETTINGS_FALLBACK: &[(&str, &str, &str)] = &[
+    ("ms-settings:sound", "control.exe", "mmsys.cpl"),
+    ("ms-settings:apps-volume", "SndVol.exe", ""),
+    ("ms-settings:network", "control.exe", "ncpa.cpl"),
+    ("ms-settings:network-wifi", "control.exe", "ncpa.cpl"),
+    ("ms-settings:powersleep", "control.exe", "powercfg.cpl"),
+    ("ms-settings:dateandtime", "control.exe", "timedate.cpl"),
+];
+
+fn settings_fallback(uri: &str) -> Option<(&'static str, &'static str)> {
+    SETTINGS_FALLBACK.iter().find(|(known, ..)| *known == uri).map(|&(_, exe, args)| (exe, args))
+}
+
 pub fn launch(path: &str, args: &str) {
     // Configuración es UWP: sin Explorer no abre y ShellExecute no lo informa
     if path.starts_with("ms-settings:") && crate::HOST.get().is_some_and(|h| h.session_shell) {
-        report_unlaunched(path, Some(0x80040900u32 as i32));
+        match settings_fallback(path) {
+            Some((exe, args)) => launch(exe, args),
+            None => report_unlaunched(path, Some(0x80040900u32 as i32)),
+        }
         return;
     }
     // sin Explorer, ShellExecute de shell:AppsFolder falla con "Class not registered";
@@ -971,5 +988,19 @@ mod tests {
         assert_eq!(keyboard_row(Some(2), 3, 0, 3, VK_DOWN.0), Some(0));
         assert_eq!(keyboard_row(Some(0), 3, 0, 3, VK_UP.0), Some(2));
         assert_eq!(keyboard_row(None, 0, 0, 0, VK_DOWN.0), None);
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::settings_fallback;
+
+    #[test]
+    fn settings_links_map_to_applets_that_open_without_explorer() {
+        assert_eq!(settings_fallback("ms-settings:sound"), Some(("control.exe", "mmsys.cpl")));
+        assert_eq!(settings_fallback("ms-settings:apps-volume"), Some(("SndVol.exe", "")));
+        // desk.cpl y bthprops.cpl no abren nada sin Explorer
+        assert_eq!(settings_fallback("ms-settings:display"), None);
+        assert_eq!(settings_fallback("ms-settings:bluetooth"), None);
     }
 }

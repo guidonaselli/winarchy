@@ -653,8 +653,18 @@ SwitchUserSystem() {
     DllCall('wtsapi32\WTSDisconnectSession', 'ptr', 0, 'uint', 0xFFFFFFFF, 'int', 0)
 }
 
-ProjectDisplay() {
-    Run('DisplaySwitch.exe')
+; DisplaySwitch.exe no abre su panel sin Explorer: SetDisplayConfig cambia la topología directo
+ProjectDisplay(topology) {
+    if code := DllCall('user32\SetDisplayConfig', 'uint', 0, 'ptr', 0, 'uint', 0, 'ptr', 0, 'uint', 0x80 | topology, 'int')
+        WLog('projection ' topology ' error ' code)
+}
+
+ProjectItems() {
+    return [
+        {text:'PC screen only',     action:(*)=>ProjectDisplay(1)},
+        {text:'Duplicate',          action:(*)=>ProjectDisplay(2)},
+        {text:'Extend',             action:(*)=>ProjectDisplay(4)},
+        {text:'Second screen only', action:(*)=>ProjectDisplay(8)} ]
 }
 
 SignOutSystem() {
@@ -1400,7 +1410,13 @@ WinarchyText(text) {
         'record screen', 'Grabar la pantalla', 'record as GIF', 'Grabar como GIF', 'stop recording', 'Detener la grabación',
         'text from screen (OCR)', 'Texto de pantalla (OCR)', 'colour picker', 'Selector de color', 'QR code scan', 'Escanear código QR',
         'theme gallery', 'Galería de temas', 'next background', 'Siguiente fondo', 'sound', 'Sonido', 'bluetooth', 'Bluetooth',
-        'network', 'Red', 'display', 'Pantalla', 'power & sleep', 'Energía y suspensión'
+        'network', 'Red', 'display', 'Pantalla', 'power & sleep', 'Energía y suspensión', 'magnifier', 'Lupa',
+        'Windows tools', 'Herramientas de Windows', 'Device manager', 'Administrador de dispositivos',
+        'Disk management', 'Administración de discos', 'Task manager', 'Administrador de tareas',
+        'Network connections', 'Conexiones de red', 'Power options', 'Opciones de energía', 'Event viewer', 'Visor de eventos',
+        'Terminal (admin)', 'Terminal (administrador)', 'Magnifier', 'Lupa', 'On-screen keyboard', 'Teclado en pantalla',
+        'PC screen only', 'Solo pantalla de PC', 'Duplicate', 'Duplicar', 'Extend', 'Extender', 'Second screen only', 'Solo segunda pantalla',
+        'This setting needs Explorer', 'Este ajuste necesita Explorer'
     )
     return (SubStr(WinarchyLocale, 1, 2) = 'es' && es.Has(text)) ? es[text] : text
 }
@@ -1434,6 +1450,7 @@ WinarchyMenuItems() {
         {text:WinarchyText('Stay awake') ' · ' OnOff(AwakeFlag), hint:'SUPER+Ctrl+I', action:(*)=>ToggleStayAwake()},
         {text:'Doctor',                                   action:(*)=>WinarchyTerminal('doctor')},
         {text:'Check for updates',                        action:(*)=>WinarchyTerminal('update')},
+        {text:'Windows tools',                            sub: WinarchyToolItems()},
         {text:'System',        hint:'SUPER+Esc',          sub: WinarchySysItems()},
         {text:'Quit Winarchy',                            action:(*)=>QuitStack()} ]
 }
@@ -1507,6 +1524,49 @@ WinarchyBarItems() {
         {text:'Toggle transparency',  action:(*)=>Winarchy('bar transparent')} ]
 }
 
+WinarchyToolItems() {
+    return [
+        {text:'Device manager',                              action:(*)=>RunTool('devmgmt.msc')},
+        {text:'Disk management',                             action:(*)=>RunTool('diskmgmt.msc')},
+        {text:'Task manager',                                action:(*)=>RunTool('taskmgr.exe')},
+        {text:'Network connections',                         action:(*)=>RunTool('control.exe ncpa.cpl')},
+        {text:'Power options',                               action:(*)=>RunTool('control.exe powercfg.cpl')},
+        {text:'Event viewer',                                action:(*)=>RunTool('eventvwr.msc')},
+        {text:'Terminal (admin)',                            action:(*)=>AdminTerminal()},
+        {text:'Magnifier',          hint:'SUPER+NumpadAdd',  action:(*)=>RunTool('magnify.exe')},
+        {text:'On-screen keyboard',                          action:(*)=>RunTool('osk.exe')} ]
+}
+
+; sin Explorer ms-settings: no abre; mismos applets que SETTINGS_FALLBACK de la shell
+SettingsFallback := Map(
+    'ms-settings:sound', 'control.exe mmsys.cpl',
+    'ms-settings:network', 'control.exe ncpa.cpl',
+    'ms-settings:powersleep', 'control.exe powercfg.cpl')
+
+OpenSettings(uri) {
+    global SettingsFallback
+    cls := Buffer(64, 0)
+    DllCall('GetClassName', 'ptr', DllCall('GetShellWindow', 'ptr'), 'ptr', cls, 'int', 32)
+    if StrGet(cls) = 'Progman'
+        return RunTool(uri)
+    if SettingsFallback.Has(uri)
+        return RunTool(SettingsFallback[uri])
+    WLog('settings ' uri ' needs Explorer')
+    ToolTip(WinarchyText('This setting needs Explorer'))
+    SetTimer(() => ToolTip(), -4000)
+}
+
+; cancelar el UAC lanza un error: queda en el log, no en un cartel
+RunTool(command) {
+    try Run(command)
+    catch Error as err
+        WLog('tool ' command ' ' err.Message)
+}
+
+AdminTerminal() {
+    RunTool('*RunAs "' WeztermExe '" --config-file "' RepoRoot '\config\wezterm\wezterm.lua"')
+}
+
 WinarchySysItems() {
     return [
         {text:'Lock',            action:(*)=>LockWorkstation()},
@@ -1517,8 +1577,8 @@ WinarchySysItems() {
         {text:'Sign out',        action:(*)=>SignOutSystem()},
         {text:'Restart',         action:(*)=>RestartSystem()},
         {text:'Shut down',       action:(*)=>ShutdownSystem()},
-        {text:'Project',         action:(*)=>ProjectDisplay()},
-        {text:'Settings',        action:(*)=>Run('ms-settings:')} ]
+        {text:'Project',         sub: ProjectItems()},
+        {text:'Settings',        action:(*)=>OpenSettings('ms-settings:')} ]
 }
 
 ShowMainMenu(*) {
@@ -2398,11 +2458,12 @@ $#v::Send(InTerminal() ? '^+v' : '^v')           ; paste ($: SUPER+Ctrl+V sends 
 #^w::Winarchy('background next')
 
 ; --- System settings -------------------------------------------------------------
-#^a::Run('ms-settings:sound')       ; sound
-#^b::Run('ms-settings:bluetooth')   ; bluetooth
-#^n::Run('ms-settings:network')     ; network
-#^d::Run('ms-settings:display')     ; display
-#^p::Run('ms-settings:powersleep')  ; power & sleep
+#^a::OpenSettings('ms-settings:sound')       ; sound
+#^b::OpenSettings('ms-settings:bluetooth')   ; bluetooth
+#^n::OpenSettings('ms-settings:network')     ; network
+#^d::OpenSettings('ms-settings:display')     ; display
+#^p::OpenSettings('ms-settings:powersleep')  ; power & sleep
+#NumpadAdd::RunTool('magnify.exe')  ; magnifier
 
 ; User overrides: config\ahk\user.ahk (untracked). Its hotkeys show in SUPER+K under
 ; "User", or under their own "; --- Title ---" headers.

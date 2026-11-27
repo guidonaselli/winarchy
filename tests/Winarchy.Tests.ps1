@@ -792,6 +792,43 @@ Describe 'Background gallery' {
         $appearance | Should -Match "text:'Wallpaper gallery'.*Winarchy\('background gallery'\)"
     }
 
+    It 'offers the Win+X tools and the accessibility apps with Spanish labels' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $tools = [regex]::Match($ahk, '(?ms)^WinarchyToolItems\(\) \{.*?^\}').Value
+        foreach ($target in 'devmgmt.msc', 'diskmgmt.msc', 'taskmgr.exe', 'ncpa.cpl', 'powercfg.cpl', 'eventvwr.msc', 'AdminTerminal()', 'magnify.exe', 'osk.exe') {
+            $tools | Should -Match ([regex]::Escape($target))
+        }
+        foreach ($label in [regex]::Matches($tools, "text:'([^']+)'") | ForEach-Object { $_.Groups[1].Value }) {
+            $ahk | Should -Match ([regex]::Escape("'$label', '")) -Because "'$label' needs a Spanish label"
+        }
+        $ahk | Should -Match 'sub: WinarchyToolItems\(\)'
+        $ahk | Should -Match "(?m)^#NumpadAdd::RunTool\('magnify\.exe'\)"
+    }
+
+    It 'switches the projection topology without the Explorer panel' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $ahk | Should -Not -Match 'DisplaySwitch\.exe''\)'
+        $items = [regex]::Match($ahk, '(?ms)^ProjectItems\(\) \{.*?^\}').Value
+        ([regex]::Matches($items, 'ProjectDisplay\((\d)\)') | ForEach-Object { $_.Groups[1].Value }) -join ',' | Should -Be '1,2,4,8'
+        foreach ($label in [regex]::Matches($items, "text:'([^']+)'") | ForEach-Object { $_.Groups[1].Value }) {
+            $ahk | Should -Match ([regex]::Escape("'$label', '")) -Because "'$label' needs a Spanish label"
+        }
+        $ahk | Should -Match "text:'Project',\s+sub: ProjectItems\(\)"
+    }
+
+    It 'replaces settings links without Explorer with the same applets as the shell' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $rust = Get-Content (Join-Path $script:Root 'shell\src\dock_menu.rs') -Raw
+        $ahk | Should -Not -Match "Run\('ms-settings:"
+        $map = [regex]::Match($ahk, '(?s)SettingsFallback := Map\((.*?)\)\r?\n').Groups[1].Value
+        $pairs = [regex]::Matches($map, "'(ms-settings:[^']*)', '(\S+)(?: ([^']+))?'")
+        $pairs.Count | Should -BeGreaterThan 0
+        foreach ($pair in $pairs) {
+            $row = '("{0}", "{1}", "{2}")' -f $pair.Groups[1].Value, $pair.Groups[2].Value, $pair.Groups[3].Value
+            $rust.Contains($row) | Should -BeTrue -Because "the shell needs the row $row"
+        }
+    }
+
     It 'keeps both localized gallery windows floating' {
         $template = Get-Content (Join-Path $script:Root 'templates\komorebi.json.tpl') -Raw
         $template | Should -Match '\^Winarchy — \(Themes\|Temas\|Wallpapers — \.\+\|Fondos — \.\+\)\$'

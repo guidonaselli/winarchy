@@ -4,6 +4,19 @@ pub fn open(path: &Path) -> Result<(), String> {
     execute("open", &path.to_string_lossy(), None)
 }
 
+#[cfg(windows)]
+pub fn explorer_is_shell() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetShellWindow};
+    let mut class = [0u16; 16];
+    let length = unsafe { GetClassNameW(GetShellWindow(), &mut class) };
+    String::from_utf16_lossy(&class[..length as usize]) == "Progman"
+}
+
+#[cfg(not(windows))]
+pub fn explorer_is_shell() -> bool {
+    false
+}
+
 // Verbs such as "open", "properties" or "runas" (elevated, with its own UAC prompt).
 #[cfg(windows)]
 pub fn execute(verb: &str, file: &str, parameters: Option<&str>) -> Result<(), String> {
