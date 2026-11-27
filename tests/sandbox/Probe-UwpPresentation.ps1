@@ -140,18 +140,20 @@ function Get-ShellOwner {
     "$((Get-Process -Id (Get-WindowPid $h) -ErrorAction SilentlyContinue).ProcessName)"
 }
 
-function Start-UwpHost($Scenario, [int]$Run) {
-    foreach ($e in $Scenario.env) { Set-Item "env:$e" '1' }
+function Get-HostStatus { Get-Content C:\uwproot\state\uwphost.status -Raw -ErrorAction SilentlyContinue }
+
+function Start-UwpHost {
+    Remove-Item C:\uwproot\state\uwphost.status -ErrorAction SilentlyContinue
     $watch = [Diagnostics.Stopwatch]::StartNew()
-    $p = Start-Process C:\probe\host\uwu-reference.exe -PassThru -WindowStyle Hidden -RedirectStandardOutput "C:\sandbox\host$Run.log" -RedirectStandardError "C:\sandbox\host$Run.err"
+    $p = Start-Process C:\probe\host\winarchy-uwphost.exe -ArgumentList '--parent', $PID, '--root', 'C:\uwproot' -PassThru
     $null = $p.Handle
-    $ready = Wait-Until { $p.HasExited -or (Select-String -Path "C:\sandbox\host$Run.log" -Pattern 'phase=host-message-loop' -Quiet) } 120
+    $ready = Wait-Until { $p.HasExited -or "$(Get-HostStatus)" -match '\|ready\|' } 120
     @{ process = $p; ready = ($null -ne $ready -and -not $p.HasExited); ms = [int]$watch.Elapsed.TotalMilliseconds }
 }
 
-function Get-HostFacts($Run) { [ordered]@{ ready = $Run.ready; ms = $Run.ms; exited = $Run.process.HasExited; shellWindowOwner = (Get-ShellOwner) } }
+function Get-HostFacts($Run) { [ordered]@{ ready = $Run.ready; ms = $Run.ms; exited = $Run.process.HasExited; shellWindowOwner = (Get-ShellOwner); status = "$(Get-HostStatus)" } }
 
-function Test-Lifecycle([string]$Aumid, $Apps, $Scenario, $HostRun) {
+function Test-Lifecycle([string]$Aumid, $Apps, $HostRun) {
     $r = [ordered]@{}
     $first = Test-Presentation $Aumid 'life-open'
     if ($first.status -ne 'pass') { $r.open = $first; return $r }
@@ -184,9 +186,16 @@ function Test-Lifecycle([string]$Aumid, $Apps, $Scenario, $HostRun) {
     Start-Sleep 3
     $r.afterKill = [ordered]@{ shellWindowOwner = (Get-ShellOwner) }
     if ($open) { $r.afterKill.frameExists = [Uwp]::IsWindow($open.Frame); $r.afterKill.coreExists = [Uwp]::IsWindow($open.Core); $r.afterKill.coreShown = (Get-Shown $open.Core) }
-    $again = Start-UwpHost $Scenario 2
+    $again = Start-UwpHost
     $r.restart = Get-HostFacts $again
     $r.afterRestart = Test-Presentation $Aumid 'life-after-restart'
+    if ($r.afterRestart.status -ne 'pass') {
+        # la app que quedó huérfana se cierra y se relanza: lo que haría el usuario
+        $r.orphanShown = [bool](Get-Frames $r.relaunch.pid | Where-Object { Get-Shown $_.Frame })
+        Stop-Process -Id $r.relaunch.pid -Force -ErrorAction SilentlyContinue
+        Start-Sleep 3
+        $r.afterRelaunch = Test-Presentation $Aumid 'life-after-orphan-closed'
+    }
     if (-not $again.process.HasExited) { $again.process.Kill() }
     $r
 }
@@ -274,7 +283,7 @@ function Test-Hang($HostRun, [string]$Aumid, $Shell) {
 
 # G3/G4: vigilante de prueba (WM_NULL de 1 s cada 2 s, 3 fallos) que mata el host colgado y lo relanza,
 # con la shell sondeada cada 1 s desde otro proceso durante todo el ciclo
-function Test-Watchdog($HostRun, $Scenario, [string]$Aumid) {
+function Test-Watchdog($HostRun, [string]$Aumid) {
     Remove-Item C:\sandbox\sampler.stop, C:\sandbox\sampler.txt -ErrorAction SilentlyContinue
     $script = @'
 Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class P { [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string c, string t); [DllImport("user32.dll")] public static extern IntPtr SendMessageTimeout(IntPtr h, uint m, IntPtr w, IntPtr l, uint f, uint ms, out IntPtr r); }'
@@ -304,7 +313,7 @@ while (-not (Test-Path C:\sandbox\sampler.stop)) {
     $r.failures = $fails
     $r.detectedMs = [int]$watch.Elapsed.TotalMilliseconds
     $HostRun.process.Kill(); [void]$HostRun.process.WaitForExit(5000)
-    $again = Start-UwpHost $Scenario 3
+    $again = Start-UwpHost
     $r.restart = Get-HostFacts $again
     $r.recoveredMs = [int]$watch.Elapsed.TotalMilliseconds
     $r.afterRestart = (Test-Presentation $Aumid 'watchdog-after-restart').status
@@ -407,7 +416,7 @@ try {
     }
     if ($scenario.shell -and -not $scenario.hostFirst) { & $startShell }
     if ($scenario.host) {
-        $hostRun = Start-UwpHost $scenario 1
+        $hostRun = Start-UwpHost
         $report.host = Get-HostFacts $hostRun
         $report.host.exitCode = if ($hostRun.process.HasExited) { $hostRun.process.ExitCode }
         Start-Sleep 2
@@ -432,10 +441,10 @@ try {
             $report.shortcuts = Test-Shortcuts
             try { $null = [Activator]::CreateInstance([Type]::GetTypeFromCLSID([Guid]'c2f03a33-21f5-47fa-b4bb-156362a2f239')); $report.immersiveShellCom = 'available' } catch { $report.immersiveShellCom = $_.Exception.Message }
             $report.hang = Test-Hang $hostRun $targets.settings $scenario.shell
-            if ($scenario.shell) { $report.watchdog = Test-Watchdog $hostRun $scenario $targets.settings }
+            if ($scenario.shell) { $report.watchdog = Test-Watchdog $hostRun $targets.settings }
         }
     }
-    if ($scenario.host -and -not $scenario.extras -and $report.apps.settings.status -eq 'pass') { $report.lifecycle = Test-Lifecycle $targets.settings $apps $scenario $hostRun }
+    if ($scenario.host -and -not $scenario.extras -and $report.apps.settings.status -eq 'pass') { $report.lifecycle = Test-Lifecycle $targets.settings $apps $hostRun }
     if ($scenario.shell) { $report.shellWindowAtEnd = (Get-ShellOwner); $report.shellResponds = ((-not $shell.HasExited) -and [Uwp]::Responds([Uwp]::FindWindow('WinarchyDesktopWallpaper', $null))) }
 
     # control Win32 (el Sandbox no trae Notepad): una ventana de otro proceso, mostrada, nunca cuenta como alojada
@@ -447,7 +456,9 @@ try {
     $report.win32Control = [ordered]@{ shown = ($null -ne $shownMs); hostedFrames = @(Get-Frames $control.Id).Count }
     $control.Kill()
     if ($scenario.host) {
-        $report.symbols = @(Get-ChildItem "$env:LOCALAPPDATA\Nickel" -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName.Substring($env:LOCALAPPDATA.Length + 1)) $($_.Length)" })
+        $report.symbols = @(Get-ChildItem C:\uwproot\state\symbols -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName.Substring(11)) $($_.Length)" })
+        $report.hostStatus = "$(Get-HostStatus)"
+        Copy-Item C:\uwproot\state\uwphost.log C:\sandbox -ErrorAction SilentlyContinue
     }
     $report.defender = try { [ordered]@{ realtime = (Get-MpComputerStatus).RealTimeProtectionEnabled; threats = @(Get-MpThreatDetection).Count } } catch { $_.Exception.Message }
     $report.explorerAtEnd = [bool](Get-Process explorer -ErrorAction SilentlyContinue)

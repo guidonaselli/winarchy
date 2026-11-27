@@ -3,11 +3,11 @@
   Runs a probe (Probe-UwpPresentation.ps1 by default) in a disposable Windows Sandbox with winarchy-shell as the only shell.
 .DESCRIPTION
   Evidence lands in state\verify\uwphost\<timestamp>. Nothing on the real desktop is touched.
-  -HostDir holds a candidate uwu-reference.exe that only ever runs inside the guest; networking is enabled with it
+  -HostExe is a winarchy-uwphost.exe that only ever runs inside the guest; networking is enabled with it
   because it downloads public symbols on first use.
 #>
 [CmdletBinding()]
-param([string]$HostDir, [switch]$NoShell, [switch]$HostFirst, [switch]$Extras, [switch]$Offline, [switch]$Explorer, [string[]]$HostEnv = @(), [string]$Probe = 'Probe-UwpPresentation.ps1', [string]$Exe)
+param([string]$HostExe, [switch]$NoShell, [switch]$HostFirst, [switch]$Extras, [switch]$Offline, [switch]$Explorer, [string]$Probe = 'Probe-UwpPresentation.ps1', [string]$Exe)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $wsb = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\wsb.exe'
@@ -20,9 +20,9 @@ New-Item -ItemType Directory -Path (Join-Path $payload 'config\shell'), $out -Fo
 Copy-Item $Exe (Join-Path $payload 'winarchy-shell.exe')
 Copy-Item (Join-Path $PSScriptRoot $Probe) $in
 Set-Content (Join-Path $in 'guest.marker') 'sandbox'
-if ($HostDir) {
+if ($HostExe) {
     New-Item -ItemType Directory -Path (Join-Path $in 'host') | Out-Null
-    Copy-Item (Join-Path $HostDir 'uwu-reference.exe') (Join-Path $in 'host')
+    Copy-Item $HostExe (Join-Path $in 'host\winarchy-uwphost.exe')
 }
 if ($Extras) {
     # copia de solo lectura del AHK instalado: dentro del Sandbox mide qué hotkeys le quedan con el host vivo
@@ -30,13 +30,13 @@ if ($Extras) {
     if (-not (Test-Path $ahk)) { $ahk = Join-Path $env:ProgramFiles 'AutoHotkey\v2\AutoHotkey64.exe' }
     if (Test-Path $ahk) { New-Item -ItemType Directory -Path (Join-Path $in 'ahk') | Out-Null; Copy-Item $ahk (Join-Path $in 'ahk') }
 }
-@{ shell = -not $NoShell; host = [bool]$HostDir; hostFirst = [bool]$HostFirst; extras = [bool]$Extras; explorer = [bool]$Explorer; env = @($HostEnv) } | ConvertTo-Json | Set-Content (Join-Path $in 'scenario.json')
+@{ shell = -not $NoShell; host = [bool]$HostExe; hostFirst = [bool]$HostFirst; extras = [bool]$Extras; explorer = [bool]$Explorer } | ConvertTo-Json | Set-Content (Join-Path $in 'scenario.json')
 @{ background = '#202020'; opacity = 1.0; foreground = '#ffffff'; accent = '#4da3ff'; muted = '#808080'; font_family = 'Segoe UI'; font_size = 13; position = 'top'; dock = $false } |
     ConvertTo-Json -Compress | Set-Content (Join-Path $payload 'config\shell\theme.json')
 
 $folders = "<MappedFolder><HostFolder>$([Security.SecurityElement]::Escape($in))</HostFolder><SandboxFolder>C:\probe</SandboxFolder><ReadOnly>true</ReadOnly></MappedFolder>" +
     "<MappedFolder><HostFolder>$([Security.SecurityElement]::Escape($out))</HostFolder><SandboxFolder>C:\sandbox</SandboxFolder><ReadOnly>false</ReadOnly></MappedFolder>"
-$config = "<Configuration><vGPU>Disable</vGPU><Networking>$(if ($HostDir -and -not $Offline) { 'Enable' } else { 'Disable' })</Networking><MemoryInMB>4096</MemoryInMB><MappedFolders>$folders</MappedFolders></Configuration>"
+$config = "<Configuration><vGPU>Disable</vGPU><Networking>$(if ($HostExe -and -not $Offline) { 'Enable' } else { 'Disable' })</Networking><MemoryInMB>4096</MemoryInMB><MappedFolders>$folders</MappedFolders></Configuration>"
 $id = ((& $wsb start --raw -c $config | Out-String) | ConvertFrom-Json).Id
 if (-not $id) { throw 'wsb did not return a Sandbox id.' }
 function Invoke-Guest([string]$As, [string]$Mode) {
