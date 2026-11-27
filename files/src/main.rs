@@ -698,10 +698,7 @@ impl Component for Explorer {
     fn create(input: &PathBuf, context: &ComponentContext<Self>) -> Self {
         let saved = settings::load();
         let target = launch_target();
-        let explicit = target.is_some();
-        let restored: Vec<PathBuf> = if explicit { Vec::new() } else { saved.tabs.iter().filter(|tab| tab.is_dir()).cloned().collect() };
-        let (tabs, active_tab) = if restored.is_empty() { (vec![input.clone()], 0) } else { (restored.clone(), saved.active_tab.min(restored.len() - 1)) };
-        let path = tabs[active_tab].clone();
+        let (tabs, active_tab, path) = (vec![input.clone()], 0, input.clone());
         i18n::set_choice(&saved.language);
         #[cfg(windows)]
         let theme_watcher = Theme::start_watching();
@@ -1060,7 +1057,6 @@ impl Component for Explorer {
             Message::NewTab => {
                 self.tabs.push(self.path.clone());
                 self.active_tab = self.tabs.len() - 1;
-                self.save_settings();
             }
             Message::CloseTab => {
                 if self.tabs.len() > 1 {
@@ -1080,7 +1076,6 @@ impl Component for Explorer {
             Message::DuplicateTab => {
                 self.tabs.insert(self.active_tab + 1, self.path.clone());
                 self.active_tab += 1;
-                self.save_settings();
             }
             Message::ReopenTab => {
                 if let Some(path) = self.closed_tabs.pop() {
@@ -1096,7 +1091,6 @@ impl Component for Explorer {
                 self.closed_tabs.append(&mut self.tabs);
                 self.tabs.push(keep);
                 self.active_tab = 0;
-                self.save_settings();
             }
             Message::NextTab => {
                 let next = (self.active_tab + 1) % self.tabs.len();
@@ -1107,7 +1101,6 @@ impl Component for Explorer {
                 if (0..self.tabs.len() as isize).contains(&target) {
                     self.tabs.swap(self.active_tab, target as usize);
                     self.active_tab = target as usize;
-                    self.save_settings();
                 }
             }
             Message::IndexSearch => {
@@ -3320,8 +3313,6 @@ impl Explorer {
             hide_pane: self.hide_pane,
             sidebar_width: self.sidebar_width,
             terminal: self.terminal.clone(),
-            tabs: self.tabs.clone(),
-            active_tab: self.active_tab,
             size_width: self.columns.size,
             modified_width: self.columns.modified,
             pinned,
@@ -3434,7 +3425,6 @@ impl Explorer {
     fn load_path(&mut self, path: PathBuf, context: &ComponentContext<Self>) {
         self.path = path.clone();
         self.tabs[self.active_tab] = path.clone();
-        self.save_settings();
         self.notice = None;
         self.recursive = false;
         self.address = path.to_string_lossy().into_owned();
@@ -4179,7 +4169,7 @@ fn main() {
     shell::set_app_id();
     let path = target
         .map(|(folder, _)| folder)
-        .or_else(|| std::env::current_dir().ok())
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from("C:\\"));
     shell::apply_window_icon(Theme::load().ok().flatten().and_then(|theme| theme.icon_colors()), true);
     shell::stay_above_tiling_border();
