@@ -9,10 +9,12 @@ pub struct Snapshot {
     pub volume: Option<(u32, bool)>,
     pub online: Option<bool>,
     pub battery: Option<(u8, bool)>,
+    // código del idioma de la ventana en primer plano; None con uno solo
+    pub input: Option<[u16; 2]>,
     pub notifications: Option<usize>,
 }
 
-static CURRENT: Mutex<Snapshot> = Mutex::new(Snapshot { volume: None, online: None, battery: None, notifications: None });
+static CURRENT: Mutex<Snapshot> = Mutex::new(Snapshot { volume: None, online: None, battery: None, input: None, notifications: None });
 
 pub fn snapshot() -> Snapshot {
     *CURRENT.lock().unwrap()
@@ -24,11 +26,12 @@ const SLOW_EVERY: u32 = 4;
 const EXPIRY_EVERY: u32 = 120;
 
 // avisa una vez al cruzar cada umbral; enchufar el cargador rearma los dos
-fn battery_alert(battery: Option<(u8, bool)>, (low, critical): (u8, u8), warned: &mut u8) -> Option<u8> {
+fn battery_alert(battery: Option<(u8, bool)>, levels: impl FnOnce() -> (u8, u8), warned: &mut u8) -> Option<u8> {
     let Some((pct, false)) = battery else {
         *warned = 0;
         return None;
     };
+    let (low, critical) = levels();
     let level = if pct <= critical { 2 } else { u8::from(pct <= low) };
     (level > *warned).then(|| {
         *warned = level;
@@ -53,12 +56,13 @@ pub fn spawn(on_change: impl Fn() + Send + 'static) {
                 endpoint = metrics::endpoint();
             }
             next.volume = endpoint.as_ref().and_then(metrics::read_volume);
+            next.input = metrics::input_language();
             if n % SLOW_EVERY == 0 {
                 next.online = metrics::online();
                 next.battery = metrics::battery();
                 // con Explorer el aviso ya lo da Windows
                 if crate::HOST.get().is_some_and(|h| h.session_shell) {
-                    if let Some(pct) = battery_alert(next.battery, metrics::battery_levels(), &mut warned) {
+                    if let Some(pct) = battery_alert(next.battery, metrics::battery_levels, &mut warned) {
                         crate::notify(&format!("{} · {pct}%", t(K::LowBattery)));
                     }
                 }
@@ -86,7 +90,7 @@ mod tests {
     #[test]
     fn low_battery_warns_once_per_threshold_and_rearms_on_power() {
         let mut warned = 0;
-        let mut at = |b| battery_alert(b, (10, 5), &mut warned);
+        let mut at = |b| battery_alert(b, || (10, 5), &mut warned);
         assert_eq!(at(None), None);
         assert_eq!(at(Some((40, false))), None);
         assert_eq!(at(Some((10, false))), Some(10));

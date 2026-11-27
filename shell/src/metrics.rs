@@ -11,6 +11,10 @@ use windows::core::GUID;
 use windows::Win32::Foundation::{LocalFree, HLOCAL};
 use windows::Win32::System::Power::{GetSystemPowerStatus, PowerGetActiveScheme, PowerReadDCValueIndex, SYSTEM_POWER_STATUS};
 use windows::Win32::System::Registry::HKEY;
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+use windows::Win32::Globalization::{GetLocaleInfoW, LOCALE_SISO639LANGNAME};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardLayout, GetKeyboardLayoutList};
+use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, PostMessageW, GUITHREADINFO, WM_INPUTLANGCHANGEREQUEST};
 
 #[derive(Default)]
 pub struct Sampler {
@@ -102,6 +106,47 @@ pub fn battery_levels() -> (u8, u8) {
         let levels = (read(&LOW, 10), read(&CRITICAL, 5));
         let _ = LocalFree(HLOCAL(scheme.cast()));
         levels
+    }
+}
+
+fn foreground_input_window() -> HWND {
+    unsafe {
+        let foreground = GetForegroundWindow();
+        let mut info = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..Default::default() };
+        match GetGUIThreadInfo(GetWindowThreadProcessId(foreground, None), &mut info) {
+            Ok(()) if !info.hwndFocus.is_invalid() => info.hwndFocus,
+            _ => foreground,
+        }
+    }
+}
+
+pub fn input_code(layouts: i32, name: &[u16]) -> Option<[u16; 2]> {
+    let upper = |c: u16| if (b'a' as u16..=b'z' as u16).contains(&c) { c - 32 } else { c };
+    match name {
+        [a, b, ..] if layouts > 1 && *a != 0 && *b != 0 => Some([upper(*a), upper(*b)]),
+        _ => None,
+    }
+}
+
+pub fn input_language() -> Option<[u16; 2]> {
+    unsafe {
+        let layouts = GetKeyboardLayoutList(None);
+        if layouts < 2 {
+            return None;
+        }
+        let layout = GetKeyboardLayout(GetWindowThreadProcessId(foreground_input_window(), None));
+        let mut name = [0u16; 9];
+        GetLocaleInfoW(layout.0 as u32 & 0xFFFF, LOCALE_SISO639LANGNAME, Some(&mut name));
+        input_code(layouts, &name)
+    }
+}
+
+// pedido asíncrono a la ventana con foco: la píldora no toma el foco, así que sigue siendo la del usuario
+pub fn next_input_language() {
+    const INPUTLANGCHANGE_FORWARD: usize = 2;
+    const HKL_NEXT: isize = 1;
+    unsafe {
+        let _ = PostMessageW(foreground_input_window(), WM_INPUTLANGCHANGEREQUEST, WPARAM(INPUTLANGCHANGE_FORWARD), LPARAM(HKL_NEXT));
     }
 }
 

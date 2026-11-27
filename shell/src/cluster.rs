@@ -30,6 +30,7 @@ const SIDE_DIP: i32 = 12;
 const CLOCK_DIP: i32 = 84;
 const BADGE_DIP: i32 = 20;
 const BATTERY_DIP: i32 = 38;
+const INPUT_DIP: i32 = 26;
 const TRAY_CELL_DIP: i32 = 28;
 const TRAY_ICON_DIP: i32 = 18;
 const DESKTOP_DIP: i32 = 10;
@@ -71,15 +72,20 @@ pub struct Shape {
     pub chevron: R,
     pub tray: Vec<R>,
     pub status: R,
+    // vacíos si no hay batería o si hay un solo idioma de entrada
+    pub battery: R,
+    pub input: R,
     pub clock: R,
     pub desktop: R,
     pub width: i32,
 }
 
-pub fn shape(scale: f32, battery: bool, badge: bool, pinned: usize, height: i32) -> Shape {
+pub fn shape(scale: f32, battery: bool, input: bool, badge: bool, pinned: usize, height: i32) -> Shape {
     let (side, glyph, gap, inset) = (px(SIDE_DIP, scale), px(GLYPH_DIP, scale), px(GAP_DIP, scale), px(PART_INSET_DIP, scale));
-    let battery_w = if battery { px(BATTERY_DIP, scale) + gap } else { 0 };
-    let status_w = 2 * side + 2 * glyph + gap + battery_w;
+    let battery_w = if battery { px(BATTERY_DIP, scale) } else { 0 };
+    let input_w = if input { px(INPUT_DIP, scale) } else { 0 };
+    let extra = |w: i32| if w > 0 { w + gap } else { 0 };
+    let status_w = 2 * side + 2 * glyph + gap + extra(battery_w) + extra(input_w);
     let clock_w = px(CLOCK_DIP, scale) + if badge { px(BADGE_DIP, scale) + gap } else { 0 };
     let pad = px(PAD_DIP, scale);
     let cell = px(TRAY_CELL_DIP, scale);
@@ -87,9 +93,12 @@ pub fn shape(scale: f32, battery: bool, badge: bool, pinned: usize, height: i32)
     let tray: Vec<R> = (0..pinned as i32).map(|i| R { x: pad + (i + 1) * cell, y: inset, w: cell, h: height - 2 * inset }).collect();
     let start = pad + (pinned as i32 + 1) * cell + 2 * gap;
     let status = R { x: start, y: inset, w: status_w, h: height - 2 * inset };
+    let part = |x: i32, w: i32| if w > 0 { R { x, y: inset, w, h: height - 2 * inset } } else { R::default() };
+    let battery_x = start + side + 2 * glyph + 2 * gap;
+    let (battery, input) = (part(battery_x, battery_w), part(battery_x + extra(battery_w), input_w));
     let clock = R { x: start + status_w + gap, y: inset, w: clock_w, h: height - 2 * inset };
     let desktop = R { x: clock.x + clock.w + gap, y: inset, w: px(DESKTOP_DIP, scale), h: height - 2 * inset };
-    Shape { chevron, tray, status, clock, desktop, width: desktop.x + desktop.w + pad }
+    Shape { chevron, tray, status, battery, input, clock, desktop, width: desktop.x + desktop.w + pad }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -97,19 +106,21 @@ pub enum StatusPart {
     Network,
     Volume,
     Battery,
+    Input,
 }
 
-// Qué glifo de la píldora de estado está bajo `x` (coordenadas del cluster): red, volumen o batería.
+// Qué glifo de la píldora de estado está bajo `x` (coordenadas del cluster): red, volumen, batería o idioma.
 pub fn status_part(s: &Shape, scale: f32, x: i32) -> StatusPart {
     let (side, glyph, gap) = (px(SIDE_DIP, scale), px(GLYPH_DIP, scale), px(GAP_DIP, scale));
-    let rel = x - s.status.x;
-    let has_battery = s.status.w > 2 * side + 2 * glyph + gap;
-    if rel < side + glyph + gap / 2 {
-        StatusPart::Network
-    } else if !has_battery || rel < side + 2 * glyph + gap + gap / 2 {
-        StatusPart::Volume
-    } else {
+    let from = |r: R| r.w > 0 && x >= r.x - gap / 2;
+    if from(s.input) {
+        StatusPart::Input
+    } else if from(s.battery) {
         StatusPart::Battery
+    } else if x - s.status.x < side + glyph + gap / 2 {
+        StatusPart::Network
+    } else {
+        StatusPart::Volume
     }
 }
 
@@ -161,7 +172,7 @@ pub fn hit(s: &Shape, x: i32, y: i32, height: i32) -> Option<Part> {
 // Ancho en dip que el dock deja libre a cada lado para que el cluster siempre entre.
 // Es el ancho máximo de `shape` (batería, contador y todos los íconos fijados) más el margen de cada lado y holgura por el redondeo de px().
 pub const RESERVE_DIP: i32 = PAD_DIP + (crate::tray::PINNED_MAX as i32 + 1) * TRAY_CELL_DIP + 2 * GAP_DIP
-    + 2 * SIDE_DIP + 2 * GLYPH_DIP + GAP_DIP + BATTERY_DIP + GAP_DIP + GAP_DIP + CLOCK_DIP + BADGE_DIP + GAP_DIP + GAP_DIP + DESKTOP_DIP + PAD_DIP
+    + 2 * SIDE_DIP + 2 * GLYPH_DIP + GAP_DIP + BATTERY_DIP + GAP_DIP + INPUT_DIP + GAP_DIP + GAP_DIP + CLOCK_DIP + BADGE_DIP + GAP_DIP + GAP_DIP + DESKTOP_DIP + PAD_DIP
     + 2 * crate::dock::MARGIN_DIP + 8;
 
 pub fn place(mon: (i32, i32, i32, i32), scale: f32, bottom: bool, dock_right: i32, width: i32) -> Option<(i32, i32)> {
@@ -264,7 +275,7 @@ pub fn init(theme: &Theme, state_dir: &std::path::Path) {
         let ex = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_LAYERED;
         let Ok(hwnd) = CreateWindowExW(ex, w!("WinarchyShellCluster"), w!(""), WS_POPUP, 0, 0, 1, 1, None, None, inst, None) else { return };
         crate::accessibility::create(hwnd, "Winarchy", accesskit::Role::Toolbar);
-        let blank = Shape { chevron: R::default(), tray: Vec::new(), status: R::default(), clock: R::default(), desktop: R::default(), width: 0 };
+        let blank = Shape { chevron: R::default(), tray: Vec::new(), status: R::default(), battery: R::default(), input: R::default(), clock: R::default(), desktop: R::default(), width: 0 };
         let c = Cluster { hwnd, state_dir: state_dir.to_path_buf(), theme: theme.clone(), mon: (0, 0, 0, 0), scale: 1.0, bottom: true, dock_right: 0, vis: 0.0, slide: 0, hover: None, hover_t: Vec::new(), pressed: None, tracking: false, last: None, sig: 0, shape: blank, pos: None, anim_on: false, tip: make_tip(hwnd) };
         CLUSTER.with(|s| *s.borrow_mut() = Some(c));
         HWND_ATOMIC.store(hwnd.0 as isize, Ordering::Relaxed);
@@ -344,13 +355,13 @@ fn paint() {
     let height = px(BAR_DIP, scale);
     let badge = snap.notifications.is_some_and(|n| n > 0);
     let pinned = crate::tray::with_pinned(|i| i.len());
-    let shape = shape(scale, snap.battery.is_some(), badge, pinned, height);
+    let shape = shape(scale, snap.battery.is_some(), snap.input.is_some(), badge, pinned, height);
     let pos = place(mon, scale, bottom, dock_right, shape.width);
     let (hh, mm, dd, mo, yy) = now();
     let sig = {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (snap.volume, snap.online, snap.battery, snap.notifications, (hh, mm, dd, mo, yy), (vis.to_bits(), slide, pos, hover_t.iter().map(|t| t.to_bits()).collect::<Vec<_>>(), shape.width, crate::tray::revision()), (lang() == Lang::Es, &theme.accent, &theme.background, &theme.foreground), KEY_FOCUS.load(Ordering::Relaxed)).hash(&mut h);
+        (snap.volume, snap.online, snap.battery, snap.input, snap.notifications, (hh, mm, dd, mo, yy), (vis.to_bits(), slide, pos, hover_t.iter().map(|t| t.to_bits()).collect::<Vec<_>>(), shape.width, crate::tray::revision()), (lang() == Lang::Es, &theme.accent, &theme.background, &theme.foreground), KEY_FOCUS.load(Ordering::Relaxed)).hash(&mut h);
         h.finish()
     };
     if with(|c| std::mem::replace(&mut c.sig, sig) == sig).unwrap_or(true) {
@@ -391,7 +402,7 @@ fn paint() {
             fill_round_a(buf, w, h, rule, px(1, scale), fg, 0.3);
             draw_label(buf, w, h, shape.chevron, GLYPH_CHEVRON, ICONS, scale, fg, theme.font_size.max(11) + 1);
             draw_tray(buf, w, h, &shape.tray, &hover_t, scale);
-            draw_status(buf, w, h, shape.status, &snap, &theme, scale, fg, accent);
+            draw_status(buf, w, h, &shape, &snap, &theme, scale, fg, accent);
             draw_clock(buf, w, h, shape.clock, snap.notifications.unwrap_or(0), (hh, mm, dd, mo, yy), &theme, scale, fg, accent);
             let pos = POINT { x, y: y + if bottom { slide } else { -slide } };
             let sz = SIZE { cx: w, cy: h };
@@ -434,8 +445,9 @@ fn draw_tray(buf: &mut [u32], w: i32, h: i32, cells: &[R], hover_t: &[f32], scal
 }
 
 #[allow(clippy::too_many_arguments)]
-unsafe fn draw_status(buf: &mut [u32], w: i32, h: i32, r: R, snap: &Snapshot, theme: &Theme, scale: f32, fg: (u8, u8, u8), accent: (u8, u8, u8)) {
+unsafe fn draw_status(buf: &mut [u32], w: i32, h: i32, shape: &Shape, snap: &Snapshot, theme: &Theme, scale: f32, fg: (u8, u8, u8), accent: (u8, u8, u8)) {
     let (side, glyph, gap) = (px(SIDE_DIP, scale), px(GLYPH_DIP, scale), px(GAP_DIP, scale));
+    let r = shape.status;
     let cell = |x: i32, wd: i32| R { x, y: r.y, w: wd, h: r.h };
     let font = theme.font_size.max(11) + 3;
     let mut x = r.x + side;
@@ -445,12 +457,12 @@ unsafe fn draw_status(buf: &mut [u32], w: i32, h: i32, r: R, snap: &Snapshot, th
     x += glyph + gap;
     let muted = snap.volume.is_some_and(|(_, m)| m);
     draw_label(buf, w, h, cell(x, glyph), if muted { GLYPH_MUTE } else { GLYPH_VOLUME }, ICONS, scale, if muted { muted_col } else { fg }, font);
-    x += glyph;
     if let Some((pct, charging)) = snap.battery {
-        x += gap;
         let col = if charging { accent } else if pct < 20 { theme.urgent.as_deref().map(rgb).unwrap_or(accent) } else { fg };
-        let width = px(BATTERY_DIP, scale);
-        draw_label(buf, w, h, cell(x, width), &format!("{} {pct}", if charging { GLYPH_CHARGING } else { GLYPH_BATTERY }), ICONS, scale, col, font - 4);
+        draw_label(buf, w, h, shape.battery, &format!("{} {pct}", if charging { GLYPH_CHARGING } else { GLYPH_BATTERY }), ICONS, scale, col, font - 4);
+    }
+    if let Some(code) = snap.input {
+        draw_label(buf, w, h, shape.input, &String::from_utf16_lossy(&code), &theme.font_family, scale, fg, theme.font_size);
     }
 }
 
@@ -491,7 +503,12 @@ fn publish(snap: &Snapshot, shape: &Shape, height: i32) {
     };
     let mut nodes = crate::tray::with_pinned(|icons| icons.iter().zip(&shape.tray).enumerate().map(|(i, (icon, r))| (format!("tray:{i}"), node(if icon.tip.is_empty() { icon.exe.clone() } else { icon.tip.lines().next().unwrap_or_default().to_string() }, *r))).collect::<Vec<_>>());
     nodes.push(("chevron".to_string(), node(t(K::SystemTray).to_string(), shape.chevron)));
-    nodes.push(("status".to_string(), node(status_label(snap), shape.status)));
+    // el idioma es un botón aparte: el nodo de estado termina donde empieza
+    let status = R { w: if shape.input.w > 0 { shape.input.x - shape.status.x } else { shape.status.w }, ..shape.status };
+    nodes.push(("status".to_string(), node(status_label(snap), status)));
+    if let Some(code) = snap.input {
+        nodes.push(("input".to_string(), node(format!("{} · {}", t(K::InputLanguage), String::from_utf16_lossy(&code)), shape.input)));
+    }
     nodes.push(("clock".to_string(), node(clock, shape.clock)));
     nodes.push(("desktop".to_string(), node(t(K::ShowDesktop).to_string(), shape.desktop)));
     crate::accessibility::publish(hwnd, "Winarchy", (shape.width, height), nodes, None);
@@ -514,6 +531,7 @@ unsafe fn status_panel(h: HWND, x: i32) {
             }))
         }
         StatusPart::Network => (Header::Text(if crate::metrics::online().unwrap_or(false) { t(K::Online) } else { t(K::Offline) }.to_string()), None),
+        StatusPart::Input => return,
         StatusPart::Battery => (crate::metrics::battery().map_or(Header::None, |(p, charging)| Header::Text(format!("{p}%{}", if charging { format!(" · {}", t(K::Charging)) } else { String::new() }))), None),
     };
     menu_with(h, &context_entries(Part::Status, status), header, on_slide)
@@ -764,7 +782,10 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
             let down = with(|c| c.pressed.take()).flatten();
             if let (Some(d), Some(u)) = (down, hit_at(x, y)) {
                 if d == u {
-                    if u == Part::Status && crate::session_shell_active() {
+                    let on_input = u == Part::Status && with(|c| status_part(&c.shape, c.scale, x)) == Some(StatusPart::Input);
+                    if on_input {
+                        crate::metrics::next_input_language();
+                    } else if u == Part::Status && crate::session_shell_active() {
                         status_panel(h, x);
                     } else {
                         activate(u);
@@ -809,7 +830,9 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
         }
         m if m == crate::accessibility::WM_ACTION => {
             for (key, action) in crate::accessibility::actions(h, wp.0) {
-                if action == accesskit::Action::Click {
+                if action == accesskit::Action::Click && key == "input" {
+                    crate::metrics::next_input_language();
+                } else if action == accesskit::Action::Click {
                     activate(match key.strip_prefix("tray:").and_then(|i| i.parse().ok()) {
                         Some(i) => Part::Tray(i),
                         None if key == "status" => Part::Status,

@@ -2,8 +2,8 @@ use super::*;
 
 #[test]
 fn the_pill_grows_with_battery_and_notification_badge() {
-    let base = shape(1.0, false, false, 0, 48);
-    let full = shape(1.0, true, true, 0, 48);
+    let base = shape(1.0, false, false, false, 0, 48);
+    let full = shape(1.0, true, false, true, 0, 48);
     assert!(full.status.w > base.status.w && full.clock.w > base.clock.w);
     assert_eq!(base.width, base.desktop.x + base.desktop.w + 4);
     assert!(base.clock.x + base.clock.w <= base.desktop.x);
@@ -12,7 +12,7 @@ fn the_pill_grows_with_battery_and_notification_badge() {
 
 #[test]
 fn buttons_cover_the_full_height_and_never_overlap() {
-    let s = shape(1.0, true, false, 0, 48);
+    let s = shape(1.0, true, false, false, 0, 48);
     assert_eq!(hit(&s, s.status.x + 2, 1, 48), Some(Part::Status));
     assert_eq!(hit(&s, s.status.x + 2, 47, 48), Some(Part::Status));
     assert_eq!(hit(&s, s.clock.x + 2, 24, 48), Some(Part::Clock));
@@ -24,7 +24,7 @@ fn buttons_cover_the_full_height_and_never_overlap() {
 #[test]
 fn the_pill_sits_on_the_dock_edge_at_the_right_and_yields_to_a_wide_dock() {
     let mon = (0, 0, 2560, 1440);
-    let s = shape(1.0, false, false, 0, 48);
+    let s = shape(1.0, false, false, false, 0, 48);
     let (x, y) = place(mon, 1.0, true, 1500, s.width).unwrap();
     assert_eq!((x, y), (2560 - 6 - s.width, 1440 - 6 - 48));
     assert_eq!(place(mon, 1.0, false, 1500, s.width).unwrap().1, 6);
@@ -76,7 +76,7 @@ fn a_crowded_dock_leaves_room_for_the_cluster_on_a_narrow_monitor() {
         for w in [1366, 1536, 1920, 2560, 3840].into_iter().filter(|w| *w as f32 / scale >= 1280.0) {
             let mon = (0, 0, w, 1080);
             let bar = crate::dock::layout_for(60, scale, mon, true, 6, true).bar;
-            let width = shape(scale, true, true, crate::tray::PINNED_MAX, 48).width;
+            let width = shape(scale, true, true, true, crate::tray::PINNED_MAX, 48).width;
             assert!(place(mon, scale, true, bar.x + bar.w, width).is_some(), "scale {scale} width {w}: bar right edge {}", bar.x + bar.w);
         }
     }
@@ -94,8 +94,8 @@ fn the_reveal_edge_also_covers_the_pill_at_the_right_of_the_dock() {
 
 #[test]
 fn pinned_tray_icons_sit_left_of_the_status_without_overlapping_it() {
-    let s = shape(1.0, true, true, 3, 48);
-    let plain = shape(1.0, true, true, 0, 48);
+    let s = shape(1.0, true, false, true, 3, 48);
+    let plain = shape(1.0, true, false, true, 0, 48);
     assert_eq!(s.tray.len(), 3);
     assert!(s.tray[2].x + s.tray[2].w < s.status.x);
     assert!(s.width > plain.width);
@@ -107,7 +107,7 @@ fn pinned_tray_icons_sit_left_of_the_status_without_overlapping_it() {
 #[test]
 fn the_tray_chevron_leads_the_pill_and_opens_before_any_pinned_icon() {
     for pinned in [0, 3] {
-        let s = shape(1.0, true, true, pinned, 48);
+        let s = shape(1.0, true, false, true, pinned, 48);
         assert!(s.chevron.w > 0 && s.chevron.x + s.chevron.w <= s.status.x);
         assert_eq!(hit(&s, s.chevron.x + 2, 24, 48), Some(Part::Chevron));
         if pinned > 0 {
@@ -124,7 +124,29 @@ fn the_status_and_clock_menus_offer_what_windows_offers() {
     assert!(context_entries(Part::Status, StatusPart::Network).iter().any(|(_, e)| *e == MenuEntry::Open("ms-settings:network")));
     assert!(context_entries(Part::Clock, StatusPart::Volume).iter().any(|(_, e)| *e == MenuEntry::Open("ms-settings:dateandtime")));
     assert!(context_entries(Part::Desktop, StatusPart::Volume).is_empty());
-    let s = shape(1.0, true, false, 0, 48);
+    let s = shape(1.0, true, false, false, 0, 48);
     assert_eq!(status_part(&s, 1.0, s.status.x + 2), StatusPart::Network);
     assert_eq!(status_part(&s, 1.0, s.status.x + s.status.w - 2), StatusPart::Battery);
+}
+
+#[test]
+fn the_language_cell_appears_only_with_several_layouts() {
+    let name = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<_>>();
+    assert_eq!(crate::metrics::input_code(1, &name("es")), None);
+    assert_eq!(crate::metrics::input_code(2, &name("es")), Some([b'E' as u16, b'S' as u16]));
+    assert_eq!(crate::metrics::input_code(2, &[0; 9]), None);
+
+    let one = shape(1.0, true, false, false, 0, 48);
+    let two = shape(1.0, true, true, false, 0, 48);
+    assert_eq!(one.input.w, 0);
+    assert!(two.status.w > one.status.w);
+    assert!(two.battery.x + two.battery.w <= two.input.x && two.input.x + two.input.w <= two.status.x + two.status.w);
+    assert_eq!(status_part(&two, 1.0, two.input.x + 2), StatusPart::Input);
+    assert_eq!(status_part(&two, 1.0, two.battery.x + 2), StatusPart::Battery);
+    assert!(context_entries(Part::Status, StatusPart::Input).is_empty());
+
+    let desktop_pc = shape(1.0, false, true, false, 0, 48);
+    assert_eq!(desktop_pc.battery.w, 0);
+    assert_eq!(status_part(&desktop_pc, 1.0, desktop_pc.input.x + 2), StatusPart::Input);
+    assert_eq!(status_part(&desktop_pc, 1.0, desktop_pc.input.x - 6), StatusPart::Volume);
 }
