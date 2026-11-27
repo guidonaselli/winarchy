@@ -547,6 +547,8 @@ ShellBootUntil := 0
 ShellWatchBusy := false
 ShellLifecycleStopping := false
 ShellRecoveryAttempted := false
+WLog(text) {
+}
 RecordTrayTip(text, title) {
     Report('notice:' title ':' text)
 }
@@ -637,6 +639,8 @@ try {
     SetTimer(ShellWatch, 0)
     if ProcessExist(shellPid)
         ProcessClose(shellPid)
+}
+WLog(text) {
 }
 RecordTrayTip(text, title) {
     Report('notice:' title ':' text)

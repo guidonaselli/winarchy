@@ -1166,8 +1166,8 @@ ShellWatch() {
         ShellWatchBusy := recoverSessionShell
     }
     if recoverSessionShell {
-        WLog('shell watch: session shell unresponsive, restoring Explorer')
         ShellRecoveryAttempted := true
+        WLog('shell watch: session shell unresponsive, restoring Explorer')
         ShellLifecycleStopping := true
         ShellWatchBusy := true
         SetTimer(ShellWatch, 0)
