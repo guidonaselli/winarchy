@@ -113,6 +113,7 @@ SessionShellActive() {
 }
 #HotIf SessionShellActive()
 #d::ShellIsland('desktop.toggle')   ; sin Explorer nadie atiende Win+D
+#NumpadAdd::RunTool('magnify.exe')  ; magnifier; con Explorer, Windows ya hace lanzar y acercar
 Volume_Up::SoundSetVolume('+2')           ; sin Explorer nadie atiende las teclas de volumen; el OSD sale solo al cambiar el nivel
 Volume_Down::SoundSetVolume('-2')
 Volume_Mute::SoundSetMute(-1)
@@ -1563,8 +1564,9 @@ RunTool(command) {
         WLog('tool ' command ' ' err.Message)
 }
 
+; elevada sin perfil ni config del usuario: nada editable sin privilegios corre como administrador
 AdminTerminal() {
-    RunTool('*RunAs "' WeztermExe '" --config-file "' RepoRoot '\config\wezterm\wezterm.lua"')
+    RunTool('*RunAs "' A_WinDir '\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile')
 }
 
 WinarchySysItems() {
@@ -2463,7 +2465,6 @@ $#v::Send(InTerminal() ? '^+v' : '^v')           ; paste ($: SUPER+Ctrl+V sends 
 #^n::OpenSettings('ms-settings:network')     ; network
 #^d::OpenSettings('ms-settings:display')     ; display
 #^p::OpenSettings('ms-settings:powersleep')  ; power & sleep
-#NumpadAdd::RunTool('magnify.exe')  ; magnifier
 
 ; User overrides: config\ahk\user.ahk (untracked). Its hotkeys show in SUPER+K under
 ; "User", or under their own "; --- Title ---" headers.

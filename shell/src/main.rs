@@ -1366,7 +1366,10 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                 }
                 Some(Hit::Mode) => komorebi::cycle_mode(),
                 Some(Hit::Surface) | None => {
-                    if let Some(path) = NOTICE_TARGET.lock().unwrap().take() {
+                    // otra isla puede haber reemplazado al aviso: su clic ya no abre la unidad
+                    let shown = with(|s| s.flash_title.clone());
+                    let current = pipe::ISLAND.lock().unwrap().as_ref().map(|i| i.title.clone());
+                    if let Some(path) = NOTICE_TARGET.lock().unwrap().take().filter(|_| shown.is_some() && shown == current) {
                         let (strip, root) = (with(|s| s.strip), HOST.get().map(|host| host.root.clone()).unwrap_or_default());
                         if let Err(error) = desktop_view::launch_files(&root, std::path::Path::new(&path), strip) {
                             boot_log(&root, &format!("files launch failed: {path} {error}"));

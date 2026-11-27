@@ -231,7 +231,9 @@ fn report_unlaunched(target: &str, hresult: Option<i32>) {
     let why = hresult.map_or_else(|| "timeout".to_owned(), |h| format!("hr=0x{:08X}", h as u32));
     crate::boot_log(&host.root, &format!("launch failed: {target} {why}"));
     if host.session_shell {
-        crate::notify(t(K::UwpUnavailable));
+        // sin Explorer, UWP se cuelga o responde "Class not registered"
+        let uwp = hresult.map_or(true, |h| h == 0x80040900u32 as i32);
+        crate::notify(t(if uwp { K::UwpUnavailable } else { K::LaunchFailed }));
     }
 }
 
@@ -275,7 +277,8 @@ pub fn launch(path: &str, args: &str) {
             let session = crate::HOST.get().is_some_and(|h| h.session_shell);
             if let Err(hresult) = activate_with_deadline(activate, if session { SESSION_ACTIVATION_DEADLINE } else { ACTIVATION_DEADLINE }) {
                 report_unlaunched(&fallback.0, hresult);
-                if !session {
+                // un plazo vencido puede completar después: relanzar abriría la app dos veces
+                if !session && hresult.is_some() {
                     shell_execute(&fallback.0, &fallback.1);
                 }
             }

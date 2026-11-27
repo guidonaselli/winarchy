@@ -42,6 +42,7 @@ messages! {
     EjectFromFiles => ("eject from Files", "se expulsa desde Files"),
     InputLanguage => ("Input language", "Idioma de entrada"),
     UwpUnavailable => ("UWP apps need Explorer for now", "Las apps UWP necesitan Explorer por ahora"),
+    LaunchFailed => ("Could not open the app", "No se pudo abrir la app"),
     Battery => ("BAT", "BAT"),
     Notifications => ("NOTIF", "NOTIF"),
     NotificationDismiss => ("Dismiss notification", "Descartar notificación"),

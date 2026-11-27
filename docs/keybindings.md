@@ -144,7 +144,7 @@ control panels. `SUPER+Ctrl+W` is the background switcher, as in Omarchy, so Net
 | `SUPER+Ctrl+N` | Network |
 | `SUPER+Ctrl+D` | Display |
 | `SUPER+Ctrl+P` | Power and sleep |
-| `SUPER+NumpadAdd` | Magnifier |
+| `SUPER+NumpadAdd` | Magnifier (without Explorer; otherwise Windows' own shortcut) |
 
 In a session without Explorer `ms-settings:` links do not open: Sound, Network and Power open their classic
 Control Panel applets, and Bluetooth and Display show a "needs Explorer" notice. The Winarchy menu has a

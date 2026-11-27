@@ -178,7 +178,7 @@ The shell and the hotkeys open the classic applet for Sound, Network and Power i
 none. If you need any UWP app, stay in coexistence mode (`winarchy shell deactivate`).
 
 Also covered without Explorer: a notice when a drive is connected and when the battery crosses the power plan's
-thresholds, an input-language pill with more than one layout, the `Win+X` functions and display projection from the
+thresholds, an input-language pill with more than one layout, the main `Win+X` tools and display projection from the
 Winarchy menu, the magnifier and on-screen keyboard, taskbar progress on the dock, and a Wi-Fi list on the network
 icon (saved, open and WPA personal networks; Windows asks for the password).
 

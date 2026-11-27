@@ -234,9 +234,10 @@ const T_TRAY_ACTIVATE: usize = 8;
 const T_CLICK: usize = 9;
 const T_PROGRESS: usize = 10;
 const WM_TASKBAR: u32 = WM_APP + 24;
-// una app que copia archivos manda cientos de valores por segundo: un solo aviso en cola
+// una app que copia archivos manda cientos de valores por segundo: un aviso por redibujo
 static TASKBAR_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 const SWEEP_MS: u128 = 1400;
+const PROGRESS_MS: u32 = 66;
 
 pub(crate) fn notify_taskbar() {
     let target = komorebi::NOTIFY.load(std::sync::atomic::Ordering::Relaxed);
@@ -251,7 +252,7 @@ pub(crate) fn notify_taskbar() {
 
 // el timer del barrido solo existe mientras hay un progreso indeterminado a la vista y con efectos
 fn sweeping() -> bool {
-    with(|d| d.motion && d.items.iter().any(|i| crate::taskbar::group(&i.wins).is_some_and(|p| p.kind == crate::taskbar::Kind::Indeterminate)))
+    with(|d| d.motion && d.want_visible() && d.items.iter().any(|i| crate::taskbar::group(&i.wins).is_some_and(|p| p.kind == crate::taskbar::Kind::Indeterminate)))
 }
 
 fn sweep_phase() -> f32 {
@@ -1946,7 +1947,8 @@ pub(crate) unsafe fn fetch_icon(source: &str, size: i32) -> Option<Icon> {
 
 unsafe fn icon_from_bitmap(bmp: HBITMAP) -> Option<Icon> {
     let mut bm = BITMAP::default();
-    if GetObjectW(bmp, std::mem::size_of::<BITMAP>() as i32, Some(&mut bm as *mut _ as *mut _)) == 0 || bm.bmWidth <= 0 || bm.bmHeight <= 0 {
+    if GetObjectW(bmp, std::mem::size_of::<BITMAP>() as i32, Some(&mut bm as *mut _ as *mut _)) == 0 || bm.bmWidth <= 0 || bm.bmHeight <= 0 || bm.bmWidth > 1024 || bm.bmHeight > 1024 {
+        // otro proceso puede mandar cualquier ícono como insignia
         let _ = DeleteObject(bmp);
         return None;
     }
@@ -2750,7 +2752,11 @@ unsafe fn tip_tick(h: HWND) {
 // Los mensajes llegan anidados (ShowWindow envía a su propia ventana): `CUR` se devuelve a lo que era al salir.
 unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if m == WM_GETOBJECT { if let Some(result) = crate::accessibility::get_object(h, wp, lp) { return result; } }
-    if m == WM_NCDESTROY { crate::accessibility::destroy(h); }
+    if m == WM_NCDESTROY {
+        crate::accessibility::destroy(h);
+        // el timer muere con la ventana: sin esto el progreso quedaría congelado
+        TASKBAR_PENDING.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
     let keep = CUR.get();
     let r = dock_msg(h, m, wp, lp);
     CUR.set(keep);
@@ -2871,17 +2877,15 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             LRESULT(0)
         }
         WM_TASKBAR => {
-            TASKBAR_PENDING.store(false, std::sync::atomic::Ordering::Relaxed);
+            // el redibujo sale del timer: acota la frecuencia y no tapa la entrada
             for_each_dock(|| {
                 let hwnd = with(|d| d.hwnd);
-                if sweeping() {
-                    SetTimer(hwnd, T_PROGRESS, ANIM_MS, None);
-                }
-                repaint_progress();
+                SetTimer(hwnd, T_PROGRESS, if sweeping() { ANIM_MS } else { PROGRESS_MS }, None);
             });
             LRESULT(0)
         }
         WM_TIMER if wp.0 == T_PROGRESS => {
+            TASKBAR_PENDING.store(false, std::sync::atomic::Ordering::Relaxed);
             if !sweeping() {
                 let _ = KillTimer(h, T_PROGRESS);
             }

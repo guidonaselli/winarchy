@@ -2,7 +2,7 @@
 use crate::i18n::{t, K};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use windows::core::{GUID, PCWSTR};
+use windows::core::{GUID, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{ERROR_ACCESS_DENIED, HANDLE};
 use windows::Win32::NetworkManagement::WiFi::*;
 use windows::Win32::Security::Credentials::*;
@@ -130,17 +130,21 @@ fn from_wide(buffer: &[u16]) -> String {
     String::from_utf16_lossy(&buffer[..buffer.iter().position(|c| *c == 0).unwrap_or(buffer.len())])
 }
 
-fn read(client: &Client) -> Scan {
+fn interfaces(client: &Client) -> Vec<GUID> {
     let mut interfaces = std::ptr::null_mut();
     if unsafe { WlanEnumInterfaces(client.0, None, &mut interfaces) } != 0 || interfaces.is_null() {
-        return Scan::Unavailable;
+        return Vec::new();
     }
-    let ids: Vec<GUID> = unsafe {
+    unsafe {
         let list = &*interfaces;
         let ids = std::slice::from_raw_parts(list.InterfaceInfo.as_ptr(), list.dwNumberOfItems as usize).iter().map(|i| i.InterfaceGuid).collect();
         WlanFreeMemory(interfaces.cast());
         ids
-    };
+    }
+}
+
+fn read(client: &Client) -> Scan {
+    let ids = interfaces(client);
     if ids.is_empty() {
         return Scan::Unavailable;
     }
@@ -182,9 +186,21 @@ fn read(client: &Client) -> Scan {
 }
 
 pub fn scan() -> Scan {
+    // con el servicio colgado no se acumulan hilos: uno a la vez
+    static SCANNING: AtomicBool = AtomicBool::new(false);
+    if SCANNING.swap(true, Ordering::Relaxed) {
+        return Scan::Unavailable;
+    }
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = tx.send(Client::open().map_or(Scan::Unavailable, |client| read(&client)));
+        if let Some(client) = Client::open() {
+            let _ = tx.send(read(&client));
+            // la lista es la caché de Windows: se pide un barrido para la próxima apertura
+            for interface in interfaces(&client) {
+                unsafe { WlanScan(client.0, &interface, None, None, None) };
+            }
+        }
+        SCANNING.store(false, Ordering::Relaxed);
     });
     rx.recv_timeout(SCAN_WAIT).unwrap_or(Scan::Unavailable)
 }
@@ -238,10 +254,65 @@ fn connected(client: &Client, ssid: &[u8]) -> bool {
     })
 }
 
+fn wipe(mut secret: String) {
+    unsafe { secret.as_bytes_mut() }.fill(0);
+}
+
+// `false` si Windows rechaza el perfil; la clave no queda en memoria
+fn save(client: &Client, network: &Network, key: &str, flags: u32, overwrite: bool) -> bool {
+    let text = profile_xml(network, key);
+    let mut profile = wide(&text);
+    wipe(text);
+    let mut reason = 0;
+    let code = unsafe { WlanSetProfile(client.0, &network.interface, flags, PCWSTR(profile.as_ptr()), PCWSTR::null(), overwrite, None, &mut reason) };
+    profile.fill(0);
+    code == 0
+}
+
+fn stored(client: &Client, network: &Network, name: &str) -> Option<(Vec<u16>, u32)> {
+    let name = wide(name);
+    let (mut text, mut flags) = (PWSTR::null(), 0);
+    if unsafe { WlanGetProfile(client.0, &network.interface, PCWSTR(name.as_ptr()), None, &mut text, Some(&mut flags), None) } != 0 {
+        return None;
+    }
+    unsafe {
+        let copy = text.as_wide().iter().copied().chain(Some(0)).collect();
+        WlanFreeMemory(text.0.cast());
+        // solo importa el bit de perfil de usuario al volver a escribirlo
+        Some((copy, flags & 2))
+    }
+}
+
+// La clave guardada puede haber cambiado en el router: se pide otra y, si tampoco conecta, vuelve el perfil anterior.
+fn renew(client: &Client, network: &Network, profile: &str) -> Option<bool> {
+    let renamed = Network { profile: None, ..network.clone() };
+    // un perfil con otro nombre lo creó otra herramienta: no se pisa
+    if profile != renamed.name() {
+        return None;
+    }
+    let (previous, flags) = stored(client, network, profile)?;
+    let key = ask_passphrase(&network.name())?;
+    let saved = valid_passphrase(&key) && save(client, &renamed, &key, flags, true);
+    wipe(key);
+    if !saved {
+        return Some(false);
+    }
+    let ok = start(client, network, profile) && connected(client, &network.ssid);
+    if !ok {
+        let mut reason = 0;
+        unsafe { WlanSetProfile(client.0, &network.interface, flags, PCWSTR(previous.as_ptr()), PCWSTR::null(), true, None, &mut reason) };
+    }
+    Some(ok)
+}
+
 fn join(network: &Network) -> Option<bool> {
     let client = Client::open()?;
     if let Some(profile) = &network.profile {
-        return Some(start(&client, network, profile) && connected(&client, &network.ssid));
+        if start(&client, network, profile) && connected(&client, &network.ssid) {
+            return Some(true);
+        }
+        let personal = matches!(network.security, Security::Wpa | Security::Wpa2 | Security::Wpa3);
+        return Some(personal && renew(&client, network, profile) == Some(true));
     }
     let key = if network.security == Security::Open {
         String::new()
@@ -252,10 +323,10 @@ fn join(network: &Network) -> Option<bool> {
         }
         key
     };
-    let profile = wide(&profile_xml(network, &key));
-    let mut reason = 0;
     // 2 = perfil del usuario: no pide administrador
-    if unsafe { WlanSetProfile(client.0, &network.interface, 2, PCWSTR(profile.as_ptr()), PCWSTR::null(), false, None, &mut reason) } != 0 {
+    let saved = save(&client, network, &key, 2, false);
+    wipe(key);
+    if !saved {
         return Some(false);
     }
     let name = network.name();
