@@ -200,7 +200,13 @@ AltTabCandidate(hwnd) {
     if WinGetTitle(hwnd) = '' || (WinGetExStyle(hwnd) & 0x80) && !(WinGetExStyle(hwnd) & 0x40000)
         return false
     DllCall('dwmapi\DwmGetWindowAttribute', 'ptr', hwnd, 'uint', 14, 'int*', &cloaked := 0, 'uint', 4)
-    return !cloaked && WinGetProcessName(hwnd) != 'winarchy-shell.exe'
+    return !cloaked && ProcessNameOf(hwnd) != 'winarchy-shell.exe'
+}
+
+; Una ventana protegida (anti-cheat, otro usuario) niega el nombre de su proceso: nunca es de Winarchy.
+ProcessNameOf(hwnd) {
+    try return WinGetProcessName(hwnd)
+    return ''
 }
 
 ; --- Helpers -----------------------------------------------------------------
@@ -386,11 +392,11 @@ CloseWindow() {
         return
     try {
         if WinGetClass(hwnd) ~= '^(Progman|WorkerW|Shell_TrayWnd|Shell_SecondaryTrayWnd)$'
-            || WinGetProcessName(hwnd) ~= '^(yasb|winarchy-shell)\.exe$'
+            || ProcessNameOf(hwnd) ~= '^(yasb|winarchy-shell)\.exe$'
             return
         ; WezTerm tarda 2-4 s en cerrar (apaga los procesos del pane); oculta primero para que
         ; el tiling reaccione al instante. Seguro: window_close_confirmation = NeverPrompt.
-        if WinGetProcessName(hwnd) = 'wezterm-gui.exe'
+        if ProcessNameOf(hwnd) = 'wezterm-gui.exe'
             WinHide(hwnd)
         PostMessage(0x0010, 0, 0, , hwnd)
     }
@@ -441,7 +447,7 @@ DragTarget(hwnd) {
     return (WinGetStyle(hwnd) & 0x10000000) && !(WinGetExStyle(hwnd) & 0x80)
         && WinGetMinMax(hwnd) != -1
         && !(WinGetClass(hwnd) ~= '^(Progman|WorkerW|Shell_TrayWnd|Shell_SecondaryTrayWnd)$')
-        && !(WinGetProcessName(hwnd) ~= '^(yasb|winarchy-shell)\.exe$')
+        && !(ProcessNameOf(hwnd) ~= '^(yasb|winarchy-shell)\.exe$')
 }
 
 ; Floating workspace (tile off) or a floating window: there is no tile to swap with or snap back
