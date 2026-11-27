@@ -437,6 +437,21 @@ unsafe fn monitor_wallpaper(
     }))
 }
 
+// Con un explorer.exe que no es la shell, IDesktopWallpaper queda congelado: manda el fondo aplicado por SystemParametersInfo.
+fn replace_stale(targets: &mut [WallpaperTarget], applied: Option<&std::path::Path>) -> bool {
+    let Some(applied) = applied else { return false };
+    let key = |path: &std::path::Path| path.to_string_lossy().to_lowercase();
+    let wanted = key(applied);
+    // TranscodedWallpaper y las presentaciones viven en Themes: ahí el valor por monitor es el bueno.
+    if wanted.contains(r"\microsoft\windows\themes\") || targets.iter().any(|t| t.path.as_deref().is_some_and(|p| key(p) == wanted)) {
+        return false;
+    }
+    for target in targets.iter_mut() {
+        target.path = Some(applied.to_path_buf());
+    }
+    !targets.is_empty()
+}
+
 unsafe fn desktop_wallpapers() -> Option<(Vec<WallpaperTarget>, COLORREF, WallpaperPosition)> {
     let class = GUID::from_values(
         0xC2CF3110,
@@ -505,7 +520,7 @@ unsafe fn wallpaper_path() -> windows::core::Result<PathBuf> {
     Ok(PathBuf::from(std::ffi::OsString::from_wide(&buffer[..end])))
 }
 
-fn worker(hwnd: isize, requests: Arc<RequestQueue>, results: Sender<DecodeResult>) {
+fn worker(hwnd: isize, requests: Arc<RequestQueue>, results: Sender<DecodeResult>, root: PathBuf) {
     unsafe {
         let mut com_initialized = false;
         let mut factory: Option<IWICImagingFactory> = None;
@@ -517,9 +532,13 @@ fn worker(hwnd: isize, requests: Arc<RequestQueue>, results: Sender<DecodeResult
                 || CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER).ok(),
             );
             let generation = request.generation;
+            let wanted = request.path.clone();
             let image = factory
                 .as_ref()
-                .map_or(Err(()), |factory| decode_targets(factory, request));
+                .map_or(Err(()), |factory| decode_targets(factory, request, &root));
+            if image.is_err() {
+                crate::boot_log(&root, &format!("wallpaper: decode failed for {wanted:?}"));
+            }
             if results.send(DecodeResult { generation, image }).is_err() {
                 break;
             }
@@ -668,13 +687,14 @@ unsafe fn decode(
 unsafe fn decode_targets(
     factory: &IWICImagingFactory,
     request: DecodeRequest,
+    root: &std::path::Path,
 ) -> Result<(Vec<Frame>, COLORREF, WallpaperPosition), ()> {
     let fallback_color = request.color;
     let fallback = WallpaperTarget {
         rect: request.rect,
         path: request.path,
     };
-    let (targets, color, position) = desktop_wallpapers().unwrap_or_else(|| {
+    let (mut targets, color, position) = desktop_wallpapers().unwrap_or_else(|| {
         (
             fallback
                 .path
@@ -689,6 +709,9 @@ unsafe fn decode_targets(
             WallpaperPosition::Fill,
         )
     });
+    if replace_stale(&mut targets, fallback.path.as_deref().filter(|path| path.is_file())) {
+        crate::boot_log(root, &format!("wallpaper: per-monitor API is stale, using {}", fallback.path.as_deref().unwrap_or(root).display()));
+    }
     let mut remaining_images = targets
         .iter()
         .filter_map(|target| target.path.as_ref())
@@ -1019,7 +1042,8 @@ pub fn init(fallback: &str, root: &std::path::Path, com_initialized: bool) {
     let worker_requests = requests.clone();
     let (result_tx, result_rx) = mpsc::channel();
     let notify = hwnd.0 as isize;
-    std::thread::spawn(move || worker(notify, worker_requests, result_tx));
+    let log_root = root.to_path_buf();
+    std::thread::spawn(move || worker(notify, worker_requests, result_tx, log_root));
     let (r, g, b) = crate::theme::rgb(fallback);
     STATE.with(|state| {
         *state.borrow_mut() = Some(State {

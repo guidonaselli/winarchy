@@ -872,3 +872,17 @@ fn factory_initialization_retries_creation_without_reinitializing_com() {
         (true, Some(42), 1, 2)
     );
 }
+
+#[test]
+fn a_frozen_per_monitor_wallpaper_gives_way_to_the_applied_one() {
+    let targets = |path: &str| vec![WallpaperTarget { rect: RECT::default(), path: Some(PathBuf::from(path)) }];
+    let applied = std::path::Path::new(r"D:\themes\gruvbox\a.jpg");
+    let mut stale = targets(r"D:\themes\osaka\b.jpg");
+    assert!(replace_stale(&mut stale, Some(applied)));
+    assert_eq!(stale[0].path.as_deref(), Some(applied));
+    let mut same = targets(r"D:\Themes\Gruvbox\A.JPG");
+    assert!(!replace_stale(&mut same, Some(applied)));
+    let mut kept = targets(r"D:\themes\osaka\b.jpg");
+    assert!(!replace_stale(&mut kept, Some(std::path::Path::new(r"C:\u\AppData\Roaming\Microsoft\Windows\Themes\TranscodedWallpaper"))));
+    assert!(!replace_stale(&mut kept, None));
+}
