@@ -201,6 +201,33 @@ pub(crate) fn notify(text: &str) {
     }
 }
 
+const DBT_DEVICEARRIVAL: usize = 0x8000;
+
+// DEV_BROADCAST_VOLUME de dbt.h
+#[repr(C)]
+struct DevBroadcastVolume {
+    size: u32,
+    device_type: u32,
+    reserved: u32,
+    unit_mask: u32,
+    flags: u16,
+}
+
+unsafe fn arrived_drives(data: *const DevBroadcastVolume) -> Option<String> {
+    const DBT_DEVTYP_VOLUME: u32 = 2;
+    const DBTF_NET: u16 = 2;
+    // el tipo está en la cabecera común: se lee antes de tratar el puntero como volumen
+    if data.is_null() || std::ptr::addr_of!((*data).device_type).read_unaligned() != DBT_DEVTYP_VOLUME || (*data).flags & DBTF_NET != 0 {
+        return None;
+    }
+    drive_letters((*data).unit_mask)
+}
+
+fn drive_letters(mask: u32) -> Option<String> {
+    let letters: Vec<String> = (0..26u8).filter(|i| mask & (1 << i) != 0).map(|i| format!("{}:", (b'A' + i) as char)).collect();
+    (!letters.is_empty()).then(|| letters.join(" "))
+}
+
 static NOTIF_PAGE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 fn notif_page() -> usize {
@@ -1110,6 +1137,13 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             }
             LRESULT(0)
         }
+        // con Explorer el aviso ya lo da Windows
+        WM_DEVICECHANGE if wp.0 == DBT_DEVICEARRIVAL && with(|s| s.session_shell && s.strip == h) => {
+            if let Some(drives) = arrived_drives(lp.0 as *const DevBroadcastVolume) {
+                notify(&format!("{} {drives} · {}", tr(K::DriveConnected), tr(K::EjectFromFiles)));
+            }
+            LRESULT(1)
+        }
         WM_NOTICE => {
             if let Some(title) = NOTICE.lock().unwrap().take() {
                 *pipe::ISLAND.lock().unwrap() = Some(pipe::Island { title: title.clone(), ..Default::default() });
@@ -1674,6 +1708,17 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+
+    #[test]
+    fn a_volume_arrival_names_its_drive_letters() {
+        use super::{arrived_drives, drive_letters, DevBroadcastVolume};
+        assert_eq!(drive_letters(0), None);
+        assert_eq!(drive_letters((1 << 4) | (1 << 5)).as_deref(), Some("E: F:"));
+        let volume = |device_type, flags| DevBroadcastVolume { size: 18, device_type, reserved: 0, unit_mask: 1 << 3, flags };
+        assert_eq!(unsafe { arrived_drives(&volume(2, 0)) }.as_deref(), Some("D:"));
+        assert_eq!(unsafe { arrived_drives(&volume(2, 2)) }, None);
+        assert_eq!(unsafe { arrived_drives(&volume(3, 0)) }, None);
+    }
 
     #[test]
     fn restart_reloads_session_shell_and_exits_normal_shell() {
