@@ -84,6 +84,7 @@ function Show-WinarchyHelp {
     heal-monitors             Restart komorebi if it lost track of a monitor (runs by itself
                               when a display is plugged, unplugged or powered back on)
     doctor                    Stack diagnostics (green/red + suggested fix)
+    logs [n]                  Last n lines of every Winarchy log (default 20)
 
 '@
 }
@@ -358,6 +359,7 @@ function Invoke-Winarchy {
             }
         }
         'doctor' { exit (Invoke-WinarchyDoctor) }
+        'logs' { Show-WinarchyLogs -Lines $(if ($rest.Count -ge 1) { [int]$rest[0] } else { 20 }) }
         default {
             Write-WinarchyErr "Unknown subcommand: $cmd"
             Show-WinarchyHelp

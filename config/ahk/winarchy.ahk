@@ -520,6 +520,20 @@ WinarchyTerminal(args) {
 
 FlowWindow := 'Flow.Launcher ahk_exe Flow.Launcher.exe'
 
+WLog(text) {
+    try FileAppend(FormatTime(, 'yyyy-MM-dd HH:mm:ss') '.' A_MSec ' ahk ' text '`n', StateDir '\winarchy.log', 'UTF-8-RAW')
+}
+
+; Dónde quedó el lanzador y dónde estaba el mouse: para diagnosticar una ventana fuera de la vista.
+LogFlowPlacement(hwnd) {
+    try {
+        WinGetPos(&x, &y, &w, &h, 'ahk_id ' hwnd)
+        CoordMode('Mouse', 'Screen')
+        MouseGetPos(&mx, &my)
+        WLog('flow shown at ' x ',' y ' ' w 'x' h ' mouse ' mx ',' my ' minmax ' WinGetMinMax('ahk_id ' hwnd))
+    }
+}
+
 ToggleFlow() {
     ; Reusa el hotkey nativo de Flow (Alt+Space) para mostrar/ocultar su ventana ya
     ; existente, en vez de relanzar el exe.
@@ -533,6 +547,10 @@ ToggleFlow() {
         if wasVisible
             return 0
         hwnd := WinWait(FlowWindow, , 2)
+        if hwnd
+            SetTimer(LogFlowPlacement.Bind(hwnd), -300)
+        else
+            WLog('flow did not show after Alt+Space')
         return hwnd ? hwnd : 0
     }
     ; Cold start: todavía no hay proceso corriendo (recién logueado), así que tampoco
@@ -542,8 +560,11 @@ ToggleFlow() {
     ; esperábamos antes: se vencía el WinWait, no se activaba nada y la primera pulsación
     ; del día se sentía muerta.
     hwnd := WinWait(FlowWindow, , 5)
-    if !hwnd
+    if !hwnd {
+        WLog('flow did not show after cold start')
         return 0
+    }
+    SetTimer(LogFlowPlacement.Bind(hwnd), -300)
     ; La instancia en background no siempre puede tomar el foreground (lock de Windows):
     ; reintentar la activación hasta que el foco quede realmente en el query box.
     loop 10 {

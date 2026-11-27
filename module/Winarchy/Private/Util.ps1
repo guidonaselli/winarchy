@@ -114,8 +114,36 @@ function Start-WinarchyKomorebi {
 
 function Write-WinarchyInfo { param([string]$Message) Write-Host "  $Message" }
 function Write-WinarchyOk   { param([string]$Message) Write-Host "  [OK] $Message" -ForegroundColor Green }
-function Write-WinarchyWarn { param([string]$Message) Write-Host "  [!!] $Message" -ForegroundColor Yellow }
-function Write-WinarchyErr  { param([string]$Message) Write-Host "  [XX] $Message" -ForegroundColor Red }
+function Write-WinarchyWarn { param([string]$Message) Write-Host "  [!!] $Message" -ForegroundColor Yellow; Write-WinarchyLog "WARN $Message" }
+function Write-WinarchyErr  { param([string]$Message) Write-Host "  [XX] $Message" -ForegroundColor Red; Write-WinarchyLog "ERROR $Message" }
+
+function Write-WinarchyLog {
+    <# Una línea de evento en state\winarchy.log (la comparten CLI y AHK). Nunca falla al llamador. #>
+    param([string]$Message)
+    try {
+        $path = Join-Path (Get-WinarchyStateDir) 'winarchy.log'
+        if ((Test-Path $path) -and (Get-Item $path).Length -gt 512KB) { Move-Item $path "$path.1" -Force }
+        Add-Content -Path $path -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff') cli[$PID] $($Message -replace '\r?\n', ' | ')" -Encoding UTF8
+    }
+    catch { Write-Debug "log: $_" }
+}
+
+function Show-WinarchyLogs {
+    <# Cola de todos los logs del stack, para diagnosticar sin saber dónde escribe cada uno. #>
+    param([int]$Lines = 20)
+    $state = Get-WinarchyStateDir
+    $paths = @(
+        'winarchy.log', 'shell-boot.log', 'proc-exits.log', 'session-autostart.log' | ForEach-Object { Join-Path $state $_ }
+        Get-ChildItem "$env:LOCALAPPDATA\winarchy\*.log", "$env:LOCALAPPDATA\komorebi\komorebi*.log" -ErrorAction SilentlyContinue | Where-Object Name -NotLike '*.out.log' | ForEach-Object FullName
+    )
+    foreach ($path in $paths | Where-Object { Test-Path $_ }) {
+        Write-Host "`n== $path ($((Get-Item $path).LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')))" -ForegroundColor Cyan
+        Get-Content $path -Tail $Lines | ForEach-Object {
+            # la shell fecha en segundos Unix
+            if ($_ -match '^t=(\d+) (.*)$') { "$([DateTimeOffset]::FromUnixTimeSeconds([long]$Matches[1]).ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss')) $($Matches[2])" } else { $_ }
+        }
+    }
+}
 
 function New-WinarchySnapshot {
     <# Copia los paths dados a backups/<timestamp>/ antes de tocar nada. Devuelve el dir del snapshot. #>

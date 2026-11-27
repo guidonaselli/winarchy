@@ -784,8 +784,11 @@ function Set-WinarchyWallpaper {
 public static extern int SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
 '@
         }
-        [Winarchy.Native.Wallpaper]::SystemParametersInfo(20, 0, $wallpaper, 3) | Out-Null
+        if ([Winarchy.Native.Wallpaper]::SystemParametersInfo(20, 0, $wallpaper, 3)) { Write-WinarchyLog "wallpaper $wallpaper" }
+        else { Write-WinarchyWarn "Wallpaper not applied (error $([Runtime.InteropServices.Marshal]::GetLastWin32Error())): $wallpaper" }
+        return
     }
+    Write-WinarchyLog "wallpaper unchanged: no background for $(Split-Path $ThemeDir -Leaf)"
 }
 
 function Set-WinarchyLockScreen {

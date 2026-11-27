@@ -217,6 +217,9 @@ cd C:\winarchy
 winarchy doctor
 ```
 
+When something misbehaves, `winarchy logs` prints the last lines of every log of the stack
+(CLI and AutoHotkey share `state\winarchy.log`: changes, warnings, errors, wallpaper, launcher placement).
+
 ### Notes
 
 - `.\install.ps1` installs in **coexistence mode** by default.

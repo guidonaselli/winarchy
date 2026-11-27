@@ -5,6 +5,20 @@ BeforeAll {
     Import-Module (Join-Path $script:Root 'module\Winarchy\Winarchy.psd1') -Force
 }
 
+Describe 'Write-WinarchyLog' {
+    It 'writes one line per event and rotates past 512 KB' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyStateDir { "$TestDrive" }
+            $log = Join-Path $TestDrive 'winarchy.log'
+            Set-Content $log ('x' * 600KB)
+            Write-WinarchyLog "a`r`nb"
+            Test-Path "$log.1" | Should -BeTrue
+            @(Get-Content $log).Count | Should -Be 1
+            Get-Content $log | Should -Match 'cli\[\d+\] a \| b$'
+        }
+    }
+}
+
 Describe 'ConvertFrom-WinarchyToml' {
     It 'accepts comments after headers, single-quoted strings and empty content' {
         InModuleScope Winarchy {

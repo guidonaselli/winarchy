@@ -6,7 +6,7 @@
     Description       = 'Winarchy — Omarchy-style integration layer for Windows 11 (komorebi + YASB + AHK + Flow Launcher + theme engine).'
     PowerShellVersion = '7.0'
     FunctionsToExport = @(
-        'Invoke-Winarchy',
+        'Invoke-Winarchy', 'Write-WinarchyLog',
         'Set-WinarchyTheme', 'Set-WinarchyNextTheme', 'Add-WinarchyTheme', 'Get-WinarchyThemes', 'Get-WinarchyCurrentTheme',
         'Update-WinarchyAccent', 'Get-WinarchyAccentStatus',
         'Get-WinarchyBackgrounds', 'Get-WinarchyBackground', 'Set-WinarchyBackground',
