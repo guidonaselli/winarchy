@@ -138,7 +138,7 @@ function Show-WinarchyLogs {
     )
     foreach ($path in $paths | Where-Object { Test-Path $_ }) {
         Write-Host "`n== $path ($((Get-Item $path).LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')))" -ForegroundColor Cyan
-        Get-Content $path -Tail $Lines | ForEach-Object {
+        Get-Content $path -Tail $Lines | ForEach-Object { $_ -replace '\x1b\[[0-9;]*m' } | ForEach-Object {
             # la shell fecha en segundos Unix
             if ($_ -match '^t=(\d+) (.*)$') { "$([DateTimeOffset]::FromUnixTimeSeconds([long]$Matches[1]).ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss')) $($Matches[2])" } else { $_ }
         }
