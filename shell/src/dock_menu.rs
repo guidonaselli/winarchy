@@ -310,7 +310,11 @@ fn shell_execute(path: &str, args: &str) {
     unsafe {
         let params = if args.is_empty() { PCWSTR::null() } else { PCWSTR(a.as_ptr()) };
         let directory = dir.as_ref().map_or(PCWSTR::null(), |d| PCWSTR(d.as_ptr()));
-        let _ = ShellExecuteW(None, w!("open"), PCWSTR(p.as_ptr()), params, directory, SW_SHOWNORMAL);
+        // ShellExecute informa el error con un valor de hasta 32
+        let code = ShellExecuteW(None, w!("open"), PCWSTR(p.as_ptr()), params, directory, SW_SHOWNORMAL).0 as usize;
+        if let Some(host) = crate::HOST.get().filter(|_| code <= 32) {
+            crate::boot_log(&host.root, &format!("launch failed: {path} shellexecute={code}"));
+        }
     }
 }
 
