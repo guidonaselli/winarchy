@@ -607,7 +607,7 @@ pub fn shutdown() {
     }
 }
 
-fn launch_files(
+pub(crate) fn launch_files(
     root: &std::path::Path,
     path: &std::path::Path,
     hwnd: HWND,

@@ -232,6 +232,37 @@ const WM_TRAY_FOREGROUND: u32 = WM_APP + 23;
 const T_TRAY_FOCUS: usize = 7;
 const T_TRAY_ACTIVATE: usize = 8;
 const T_CLICK: usize = 9;
+const T_PROGRESS: usize = 10;
+const WM_TASKBAR: u32 = WM_APP + 24;
+// una app que copia archivos manda cientos de valores por segundo: un solo aviso en cola
+static TASKBAR_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+const SWEEP_MS: u128 = 1400;
+
+pub(crate) fn notify_taskbar() {
+    let target = komorebi::NOTIFY.load(std::sync::atomic::Ordering::Relaxed);
+    if target != 0 && !TASKBAR_PENDING.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        unsafe {
+            if PostMessageW(HWND(target as *mut _), WM_TASKBAR, WPARAM(0), LPARAM(0)).is_err() {
+                TASKBAR_PENDING.store(false, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+// el timer del barrido solo existe mientras hay un progreso indeterminado a la vista y con efectos
+fn sweeping() -> bool {
+    with(|d| d.motion && d.items.iter().any(|i| crate::taskbar::group(&i.wins).is_some_and(|p| p.kind == crate::taskbar::Kind::Indeterminate)))
+}
+
+fn sweep_phase() -> f32 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    (START.get_or_init(std::time::Instant::now).elapsed().as_millis() % SWEEP_MS) as f32 / SWEEP_MS as f32
+}
+
+fn repaint_progress() {
+    with(|d| d.sig = 0);
+    render();
+}
 const FOCUS_DELAY_MS: u32 = 220;
 const TIP_FADE_MS: u128 = 130;
 const GLIDE_TAU_MS: f32 = 55.0;
@@ -1368,6 +1399,10 @@ unsafe fn refresh() {
         g.wins.sort_by_key(|w| (opened[w], *w));
     }
     groups.sort_by_key(|g| (opened[&g.wins[0]], g.wins[0]));
+    if crate::tray::native_active() {
+        crate::taskbar::prune();
+        groups.iter().flat_map(|g| &g.wins).for_each(|w| crate::taskbar::announce(*w));
+    }
     with(|d| {
         d.ident = ident;
         d.opened = opened;
@@ -1654,7 +1689,14 @@ fn render() {
         return;
     }
     with(|d| d.sig = sig);
-    let (titles, focused) = with(|d| (d.accessible_titles.clone(), d.key_target.clone()));
+    let (mut titles, focused) = with(|d| (d.accessible_titles.clone(), d.key_target.clone()));
+    for item in &items {
+        if let Some(progress) = crate::taskbar::group(&item.wins).filter(|p| p.kind >= crate::taskbar::Kind::Normal) {
+            if let Some(title) = titles.get_mut(&accessible_group(item)) {
+                title.push_str(&format!(" ({:.0}%)", progress.fraction * 100.0));
+            }
+        }
+    }
     publish_accessibility(hwnd, &items, &display_layout(&layout_, &xs, bar_disp), &titles, focused, want_vis);
     let want_vis = if want_vis { 1.0 } else { 0.0 };
     let vis = with(|d| {
@@ -1742,6 +1784,29 @@ fn render() {
                 }
                 if item.wins.is_empty() {
                     continue;
+                }
+                if let Some(progress) = crate::taskbar::group(&item.wins) {
+                    use crate::taskbar::Kind;
+                    if let Some(badge) = &progress.overlay {
+                        let side = size as f32 * 0.5;
+                        draw_icon(buf, w, h, badge, ccx + side * 0.6, ccy + side * 0.5, side / badge.w as f32, dim);
+                    }
+                    if progress.kind != Kind::None {
+                        let inset = px(7, scale);
+                        let track = R { x: cell.x + inset, y: cell.y + cell.h - px(DOT_DIP, scale) - px(8, scale), w: cell.w - 2 * inset, h: px(3, scale).max(2) };
+                        let fill = match progress.kind {
+                            Kind::Error => urgent,
+                            Kind::Paused => fg,
+                            _ => accent,
+                        };
+                        let halo = crate::theme::contrasting_color(fill);
+                        fill_round_a(buf, w, h, R { x: track.x - 1, y: track.y - 1, w: track.w + 2, h: track.h + 2 }, (track.h + 2) / 2, halo, 0.55);
+                        let phase = if motion { sweep_phase() } else { 0.5 };
+                        let (x, length) = crate::taskbar::segment(track.w, progress.kind, progress.fraction, phase);
+                        if length > 0 {
+                            fill_round_a(buf, w, h, R { x: track.x + x, w: length, ..track }, track.h / 2, fill, if progress.kind == Kind::Paused { 0.75 } else { 1.0 });
+                        }
+                    }
                 }
                 let dot = px(DOT_DIP, scale);
                 let dw = if item.active { dot * 3 } else { dot };
@@ -1845,6 +1910,13 @@ fn spawn_icon_worker(target: isize) {
     });
 }
 
+pub(crate) unsafe fn icon_from_handle(handle: usize) -> Option<Icon> {
+    let mut info = ICONINFO::default();
+    GetIconInfo(HICON(handle as *mut _), &mut info).ok()?;
+    let _ = DeleteObject(info.hbmMask);
+    icon_from_bitmap(info.hbmColor)
+}
+
 unsafe fn fetch_window_icon(source: &str) -> Option<Icon> {
     let hwnd: isize = source[7..].parse().ok()?;
     let mut handle = 0usize;
@@ -1855,10 +1927,7 @@ unsafe fn fetch_window_icon(source: &str) -> Option<Icon> {
     if handle == 0 {
         return None;
     }
-    let mut info = ICONINFO::default();
-    GetIconInfo(HICON(handle as *mut _), &mut info).ok()?;
-    let _ = DeleteObject(info.hbmMask);
-    let icon = icon_from_bitmap(info.hbmColor);
+    let icon = icon_from_handle(handle);
     if icon.is_some() {
         WINDOW_ICONS.lock().unwrap().get_or_insert_with(HashMap::new).insert(source.to_owned(), handle);
     }
@@ -2799,6 +2868,24 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         }
         WM_ICON => {
             drain_ready();
+            LRESULT(0)
+        }
+        WM_TASKBAR => {
+            TASKBAR_PENDING.store(false, std::sync::atomic::Ordering::Relaxed);
+            for_each_dock(|| {
+                let hwnd = with(|d| d.hwnd);
+                if sweeping() {
+                    SetTimer(hwnd, T_PROGRESS, ANIM_MS, None);
+                }
+                repaint_progress();
+            });
+            LRESULT(0)
+        }
+        WM_TIMER if wp.0 == T_PROGRESS => {
+            if !sweeping() {
+                let _ = KillTimer(h, T_PROGRESS);
+            }
+            repaint_progress();
             LRESULT(0)
         }
         x if x == komorebi::WM_WINDOW_MAP => {

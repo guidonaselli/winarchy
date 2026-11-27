@@ -29,6 +29,8 @@ public static class Win {
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string cls, string title);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr GetProp(IntPtr h, string name);
+    [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW")] public static extern bool GetAnimation(uint action, uint p, out int on, uint flags);
+    [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW")] public static extern bool SetAnimation(uint action, uint p, IntPtr on, uint flags);
 }
 '@
 [void][Win]::SetProcessDPIAware()
@@ -102,6 +104,11 @@ try {
     $themePath = 'C:\uwproot\config\shell\theme.json'
     $theme = Get-Content $themePath -Raw | ConvertFrom-Json
     $theme.dock = $true
+    $theme | Add-Member -NotePropertyName urgent -NotePropertyValue '#e5484d'
+    # el Sandbox puede venir con las animaciones apagadas: sin esto el barrido no se mide
+    $on = 0; [void][Win]::GetAnimation(0x1042, 0, [ref]$on, 0)
+    $report.clientAnimationAtStart = [bool]$on
+    [void][Win]::SetAnimation(0x1043, 0, [IntPtr]1, 2)
     $theme | ConvertTo-Json -Compress | Set-Content $themePath
     $shell = Start-Process C:\uwproot\winarchy-shell.exe -ArgumentList '--session-shell', '--root', 'C:\uwproot' -WindowStyle Hidden -PassThru
     Start-Sleep 5
@@ -113,7 +120,10 @@ try {
     # valor, estado TBPF, insignia
     $states = [ordered]@{ normal = '42 2 0'; paused = '70 8 0'; error = '55 4 1'; indeterminate = '0 1 0'; cleared = '0 0 0' }
     $report.calls = [ordered]@{}
-    foreach ($name in $states.Keys) { $report.calls[$name] = Send-Progress $states[$name]; Save-Screen "dock-dark-$name" }
+    foreach ($name in $states.Keys) {
+        $report.calls[$name] = Send-Progress $states[$name]; Save-Screen "dock-dark-$name"
+        if ($name -eq 'indeterminate') { Start-Sleep -Milliseconds 450; Save-Screen 'dock-dark-indeterminate-later' }
+    }
     $theme.background = '#f2f2f2'; $theme.foreground = '#1a1a1a'; $theme.accent = '#005fb8'; $theme.muted = '#6a6a6a'
     $theme | ConvertTo-Json -Compress | Set-Content $themePath
     Start-Sleep 3

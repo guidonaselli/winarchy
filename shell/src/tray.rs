@@ -297,6 +297,10 @@ pub fn active() -> bool {
     CONNECTED.load(Ordering::Relaxed) || NATIVE_ACTIVE.load(Ordering::Relaxed)
 }
 
+pub fn native_active() -> bool {
+    NATIVE_ACTIVE.load(Ordering::Relaxed)
+}
+
 pub fn set_native_active(active: bool) {
     NATIVE_ACTIVE.store(active, Ordering::Relaxed);
 }

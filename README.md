@@ -174,11 +174,15 @@ What the shell draws and owns when Explorer is gone:
 **UWP apps do not work in the session shell.** Settings (and every `ms-settings:` link), Calculator, Microsoft
 Store, Windows Security and other UWP apps fail to activate (`0x80040900`, "Class not registered") and never show
 a window, because Explorer is not there to host them. Win32 apps, including packaged ones such as Notepad, work.
-If you need any UWP app, stay in coexistence mode (`winarchy shell deactivate`).
+The shell and the hotkeys open the classic applet for Sound, Network and Power instead, and say so when there is
+none. If you need any UWP app, stay in coexistence mode (`winarchy shell deactivate`).
 
-Other gaps without Explorer, from an audit of what Explorer normally does: no Focus assist,
-no USB-connected notice, no input-language indicator, no task view or virtual desktops, no `Win+X` menu,
-no on-screen keyboard or magnifier shortcut. The parity table, with the evidence level of every row, is
+Also covered without Explorer: a notice when a drive is connected and when the battery crosses the power plan's
+thresholds, an input-language pill with more than one layout, the `Win+X` functions and display projection from the
+Winarchy menu, the magnifier and on-screen keyboard, and taskbar progress on the dock.
+
+Other gaps without Explorer, from an audit of what Explorer normally does: no Focus assist, no Wi-Fi network list,
+no task view or virtual desktops, no `Win+X` menu, and no Bluetooth, Display or Printers panels. The parity table, with the evidence level of every row, is
 [docs/rust-session-shell-parity.md](docs/rust-session-shell-parity.md). The boot sequence, the single-instance
 rule and the logon race between the autostart task and the policy are covered by tests and the Sandbox scenarios
 under `tests/sandbox/`.

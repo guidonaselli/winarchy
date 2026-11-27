@@ -34,6 +34,7 @@ mod start;
 mod switcher;
 mod start_model;
 mod tray_flyout;
+mod taskbar;
 mod tray_host;
 mod tray_notifications;
 
@@ -191,11 +192,17 @@ pub(crate) struct Host {
 
 // sin inicializar (tests) no hay isla a la que avisar ni log donde escribir
 pub(crate) static HOST: std::sync::OnceLock<Host> = std::sync::OnceLock::new();
-static NOTICE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+// el aviso y, si el clic sobre él abre algo, la carpeta
+static NOTICE: std::sync::Mutex<Option<(String, Option<String>)>> = std::sync::Mutex::new(None);
+static NOTICE_TARGET: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 pub(crate) fn notify(text: &str) {
+    notify_opening(text, None);
+}
+
+fn notify_opening(text: &str, target: Option<String>) {
     let Some(host) = HOST.get() else { return };
-    *NOTICE.lock().unwrap() = Some(text.to_owned());
+    *NOTICE.lock().unwrap() = Some((text.to_owned(), target));
     unsafe {
         let _ = PostMessageW(HWND(host.hwnd as *mut _), WM_NOTICE, WPARAM(0), LPARAM(0));
     }
@@ -1010,6 +1017,7 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
         }
         WM_TIMER if wp.0 == TIMER_FLASH => {
             let _ = KillTimer(h, TIMER_FLASH);
+            NOTICE_TARGET.lock().unwrap().take();
             let title = with(|s| s.flash_title.take());
             let mut island = pipe::ISLAND.lock().unwrap();
             if title.is_some() && island.as_ref().map(|i| &i.title) == title.as_ref() {
@@ -1140,12 +1148,18 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
         // con Explorer el aviso ya lo da Windows
         WM_DEVICECHANGE if wp.0 == DBT_DEVICEARRIVAL && with(|s| s.session_shell && s.strip == h) => {
             if let Some(drives) = arrived_drives(lp.0 as *const DevBroadcastVolume) {
-                notify(&format!("{} {drives} · {}", tr(K::DriveConnected), tr(K::EjectFromFiles)));
+                let first = drives.split(' ').next().map(|drive| format!("{drive}\\"));
+                notify_opening(&format!("{} {drives} · {}", tr(K::DriveConnected), tr(K::EjectFromFiles)), first);
             }
             LRESULT(1)
         }
+        desktop_view::WM_FILES_OPEN_FAILED => {
+            desktop_view::report_files_open_failure(h, wp);
+            LRESULT(0)
+        }
         WM_NOTICE => {
-            if let Some(title) = NOTICE.lock().unwrap().take() {
+            if let Some((title, target)) = NOTICE.lock().unwrap().take() {
+                *NOTICE_TARGET.lock().unwrap() = target;
                 *pipe::ISLAND.lock().unwrap() = Some(pipe::Island { title: title.clone(), ..Default::default() });
                 with(|s| s.flash_title = Some(title));
                 SetTimer(h, TIMER_FLASH, NOTICE_MS, None);
@@ -1350,7 +1364,14 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                     }
                 }
                 Some(Hit::Mode) => komorebi::cycle_mode(),
-                Some(Hit::Surface) | None => {}
+                Some(Hit::Surface) | None => {
+                    if let Some(path) = NOTICE_TARGET.lock().unwrap().take() {
+                        let (strip, root) = (with(|s| s.strip), HOST.get().map(|host| host.root.clone()).unwrap_or_default());
+                        if let Err(error) = desktop_view::launch_files(&root, std::path::Path::new(&path), strip) {
+                            boot_log(&root, &format!("files launch failed: {path} {error}"));
+                        }
+                    }
+                }
             }
             return LRESULT(0);
         }

@@ -37,6 +37,8 @@ pub fn spawn(theme: Theme, scale: f32) -> bool {
             return;
         };
         HOST.store(hwnd.0 as isize, std::sync::atomic::Ordering::Relaxed);
+        // con esta propiedad ITaskbarList3 manda acá el progreso y las insignias
+        let _ = SetPropW(hwnd, w!("TaskbandHWND"), HANDLE(hwnd.0));
         crate::tray::set_native_active(true);
         if !crate::tray_notifications::attach(hwnd, theme, scale) {
             let _ = DestroyWindow(hwnd);
@@ -54,6 +56,7 @@ pub fn spawn(theme: Theme, scale: f32) -> bool {
         while GetMessageW(&mut message, None, 0, 0).as_bool() {
             let _ = DispatchMessageW(&message);
         }
+        let _ = RemovePropW(hwnd, w!("TaskbandHWND"));
         let _ = DestroyWindow(hwnd);
         HOST.store(0, std::sync::atomic::Ordering::Relaxed);
         crate::tray::set_native_active(false);
@@ -82,6 +85,12 @@ unsafe extern "system" fn proc(hwnd: HWND, message: u32, wp: WPARAM, lp: LPARAM)
             }
             return LRESULT(1);
         }
+    }
+    if let Some(changed) = crate::taskbar::handle(message, wp, lp) {
+        if changed {
+            crate::dock::notify_taskbar();
+        }
+        return LRESULT(0);
     }
     DefWindowProcW(hwnd, message, wp, lp)
 }
