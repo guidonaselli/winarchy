@@ -1007,7 +1007,9 @@ function Set-WinarchyTheme {
         Set-Content -Path $currentFile -Value $Name -Encoding UTF8 -NoNewline
         # marker del watcher AccentWatch (AHK): existe = theme dinámico activo + hex aplicado
         if ($dynamicAccent -and $liveAccent) {
-            Set-Content -Path $marker -Value $liveAccent -Encoding UTF8 -NoNewline
+            # sin komorebi.json publicado el accent queda pendiente y AccentWatch lo reintenta
+            $applied = if ($targets | Where-Object { -not $_['Staged'] }) { 'pending' } else { $liveAccent }
+            Set-Content -Path $marker -Value $applied -Encoding UTF8 -NoNewline
         }
         elseif (-not $dynamicAccent -and (Test-Path $marker)) { Remove-Item $marker -Force }
         Invoke-WinarchyReload -Light:$LightRefresh
