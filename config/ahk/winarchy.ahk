@@ -114,8 +114,8 @@ SessionShellActive() {
 #HotIf SessionShellActive()
 #d::ShellIsland('desktop.toggle')   ; sin Explorer nadie atiende Win+D
 #NumpadAdd::RunTool('magnify.exe')  ; magnifier; con Explorer, Windows ya hace lanzar y acercar
-Volume_Up::SoundSetVolume('+2')           ; sin Explorer nadie atiende las teclas de volumen; el OSD sale solo al cambiar el nivel
-Volume_Down::SoundSetVolume('-2')
+Volume_Up::StepVolume('+2')               ; sin Explorer nadie atiende las teclas de volumen; el OSD sale solo al cambiar el nivel
+Volume_Down::StepVolume('-2')
 Volume_Mute::SoundSetMute(-1)
 #n::ShellIsland('notifications.recent')   ; sin Explorer nadie atiende Win+N: se repiten las últimas notificaciones
 ~LWin up:: {
@@ -1562,6 +1562,11 @@ RunTool(command) {
     try Run(command)
     catch Error as err
         WLog('tool ' command ' ' err.Message)
+}
+
+StepVolume(step) {
+    SoundSetMute(0)      ; como Windows: mover el volumen quita el silencio
+    SoundSetVolume(step)
 }
 
 ; elevada sin perfil ni config del usuario: nada editable sin privilegios corre como administrador

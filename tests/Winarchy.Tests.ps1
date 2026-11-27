@@ -805,6 +805,13 @@ Describe 'Background gallery' {
         $ahk | Should -Match "(?m)^#NumpadAdd::RunTool\('magnify\.exe'\)"
     }
 
+    It 'unmutes when a volume key moves the level, as Windows does' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $ahk | Should -Match "(?m)^Volume_Up::StepVolume\('\+2'\)"
+        $ahk | Should -Match "(?m)^Volume_Down::StepVolume\('-2'\)"
+        $ahk | Should -Match '(?ms)^StepVolume\(step\) \{\s+SoundSetMute\(0\)'
+    }
+
     It 'switches the projection topology without the Explorer panel' {
         $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
         $ahk | Should -Not -Match 'DisplaySwitch\.exe''\)'
