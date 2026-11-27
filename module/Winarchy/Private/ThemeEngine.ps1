@@ -924,6 +924,7 @@ function Set-WinarchyTheme {
         if ($t.Template -eq 'komorebi.json.tpl') {
             $rendered = Add-WinarchyAppRulesToKomorebiJson -Json $rendered
             $rendered = Add-WinarchyWindowRulesToKomorebiJson -Json $rendered
+            if (-not $rendered) { continue }
         }
         $stagedFile = Join-Path $staging ([IO.Path]::GetRelativePath($root, $t.Output))
         New-Item -ItemType Directory -Path (Split-Path $stagedFile -Parent) -Force | Out-Null
@@ -985,6 +986,7 @@ function Set-WinarchyTheme {
     try {
         # 4. Apply atómico de los generados (move desde staging)
         foreach ($t in $targets) {
+            if (-not $t['Staged']) { continue }
             $destDir = Split-Path $t.Output -Parent
             if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
             Move-Item -Path $t.Staged -Destination $t.Output -Force
@@ -1028,6 +1030,7 @@ function Set-WinarchyTheme {
     catch {
         Write-WinarchyErr "Failed to apply theme: $($_.Exception.Message) — starting rollback."
         foreach ($t in $targets) {
+            if (-not $t['Staged']) { continue }
             $relative = [IO.Path]::GetRelativePath($root, $t.Output)
             $bak = Join-Path $snapshot $relative
             if (Test-Path $bak) { Copy-Item $bak $t.Output -Force }

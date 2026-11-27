@@ -24,8 +24,9 @@ AutoHotkey v2 (único dueño de hotkeys) + Flow Launcher + theme engine + CLI `w
   AHK lo corre ante `WM_DISPLAYCHANGE` (nunca por polling, y lo pospone con un juego en primer
   plano) y `winarchy reload` lo incluye. Nunca matar komorebi a la fuerza: deja ventanas ocultas.
 - komorebi.json se recarga solo: komorebi vigila el archivo y aplica una recarga estática, que pisa layout, flip,
-  paddings y tiling de cada workspace con lo que diga el archivo. Todo render escribe adentro la vista viva
-  (`Set-WinarchyConfigLiveView`); solo `layout apply` la omite. La vista viva queda en el archivo, así que
+  paddings y tiling de cada workspace, y el modo apilar/mosaico de ventanas nuevas, con lo que diga el archivo.
+  Todo render escribe adentro la vista viva (`Set-WinarchyConfigLiveView`); `layout apply` omite la de los
+  workspaces. Si komorebi corre y no da su estado, no se escribe komorebi.json. La vista viva queda en el archivo, así que
   también sobrevive a un reinicio de komorebi. Nunca `komorebic replace-configuration`: reconstruye
   el WM y pierde las flotantes de workspaces ocultos. Con komorebi en pausa la recarga se descarta.
 - `config/windows.toml` (ubicación de ventanas) es dato de la máquina, no del producto:

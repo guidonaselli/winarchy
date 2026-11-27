@@ -32,6 +32,9 @@ function Add-WinarchyWindowRulesToKomorebiJson {
       El índice de monitor se resuelve contra el estado vivo (las preferencias guardan
       device_id). Sin komorebi corriendo no hay a qué resolver: se devuelve el JSON tal
       cual y las reglas entran en la próxima regeneración.
+
+      Si komorebi corre pero no da su estado, no devuelve nada: publicar sin la vista viva
+      pisaría los layouts, así que quien llama deja el komorebi.json que está.
     #>
     param([Parameter(Mandatory)][string]$Json, [switch]$SkipLiveView)
     if (-not (Test-WinarchyProcess 'komorebi')) { return $Json }
@@ -39,7 +42,11 @@ function Add-WinarchyWindowRulesToKomorebiJson {
         $state = Get-WinarchyKomorebiState
         $map = Get-WinarchyMonitorIndexMap -State $state
     }
-    catch { return $Json }
+    catch {
+        if (-not (Test-Path (Join-Path (Get-WinarchyRoot) 'config\komorebi\komorebi.json'))) { return $Json }
+        Write-WinarchyWarn "komorebi.json not rewritten (`winarchy theme set` applies it later): $($_.Exception.Message)"
+        return
+    }
 
     $config = $Json | ConvertFrom-Json
     # display_index_preferences con el orden vivo de los monitores
@@ -82,14 +89,19 @@ function Add-WinarchyWindowRulesToKomorebiJson {
             }
         }
     }
-    if (-not $SkipLiveView) { Set-WinarchyConfigLiveView -Config $config -State $state -Map $map }
+    Set-WinarchyConfigLiveView -Config $config -State $state -Map $map -GlobalOnly:$SkipLiveView
     $config | ConvertTo-Json -Depth 50
 }
 
 function Set-WinarchyConfigLiveView {
-    <# La recarga estática de komorebi pisa layout, flip, paddings y tiling con lo que diga el archivo:
-       se escribe lo vivo antes de publicarlo. #>
-    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$State, [Parameter(Mandatory)][hashtable]$Map)
+    <# La recarga estática de komorebi pisa layout, flip, paddings, tiling y apilar/mosaico de ventanas nuevas
+       con lo que diga el archivo: se escribe lo vivo antes de publicarlo.
+       -GlobalOnly deja los workspaces como vienen (`layout apply`); el modo global no tiene preferencia guardada. #>
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$State, [Parameter(Mandatory)][hashtable]$Map, [switch]$GlobalOnly)
+    $behaviour = $State.PSObject.Properties['new_window_behaviour']?.Value
+    if ($behaviour) { $Config | Add-Member -NotePropertyName window_container_behaviour -NotePropertyValue $behaviour -Force }
+    else { $Config.PSObject.Properties.Remove('window_container_behaviour') }
+    if ($GlobalOnly) { return }
     foreach ($monitor in $State.monitors.elements) {
         if (-not $monitor.device_id -or -not $Map.ContainsKey($monitor.device_id)) { continue }
         $target = $Config.monitors[$Map[$monitor.device_id]]

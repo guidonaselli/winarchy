@@ -118,6 +118,7 @@ function Update-WinarchyKomorebiRules {
     $rendered = Invoke-WinarchyTemplate -TemplatePath (Join-Path $root 'templates\komorebi.json.tpl') -Context $ctx
     $rendered = Add-WinarchyAppRulesToKomorebiJson -Json $rendered
     $rendered = Add-WinarchyWindowRulesToKomorebiJson -Json $rendered -SkipLiveView:$SkipLiveView
+    if (-not $rendered) { return }
     $rendered | ConvertFrom-Json | Out-Null
     Set-WinarchyFileAtomic -Path (Join-Path $root 'config\komorebi\komorebi.json') -Value $rendered
     if (-not $NoReload -and (Test-WinarchyProcess 'komorebi')) {

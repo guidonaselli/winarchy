@@ -1191,7 +1191,7 @@ Describe 'Window placement' {
     It 'lets the live view win over saved modes unless the live view is skipped' {
         InModuleScope Winarchy {
             Mock Test-WinarchyProcess { $true }
-            Mock Get-WinarchyKomorebiState { '{"monitors":{"elements":[{"device_id":"AAA1","workspaces":{"elements":[
+            Mock Get-WinarchyKomorebiState { '{"new_window_behaviour":"Append","monitors":{"elements":[{"device_id":"AAA1","workspaces":{"elements":[
                 {"layout":{"Default":"Columns"},"tile":true,"layout_flip":"Horizontal","container_padding":17,"workspace_padding":31},
                 {"layout":{"Default":"BSP"},"tile":false,"layout_flip":null,"container_padding":null,"workspace_padding":null}]}}]}}' | ConvertFrom-Json }
             Mock Import-WinarchyWindowPrefs { }
@@ -1208,7 +1208,9 @@ Describe 'Window placement' {
             $live[1].tile | Should -BeFalse
             foreach ($key in 'layout_flip', 'container_padding', 'workspace_padding') { $live[1].PSObject.Properties[$key] | Should -BeNullOrEmpty }
 
-            $saved = (Add-WinarchyWindowRulesToKomorebiJson -Json $json -SkipLiveView | ConvertFrom-Json).monitors[0].workspaces
+            $applied = Add-WinarchyWindowRulesToKomorebiJson -Json $json -SkipLiveView | ConvertFrom-Json
+            $applied.window_container_behaviour | Should -Be 'Append'
+            $saved = $applied.monitors[0].workspaces
             $saved[0].tile | Should -BeFalse
             $saved[0].layout | Should -Be 'BSP'
         }
@@ -1291,6 +1293,39 @@ Describe 'Window placement' {
             $out.monitors[0].workspaces[1].workspace_rules.id | Should -Be 'Code.exe'
             # un monitor ausente no debe caer en otra pantalla
             ($out | ConvertTo-Json -Depth 20) | Should -Not -Match 'Ghost.exe'
+        }
+    }
+
+    It 'writes the live view into the config and skips monitors it cannot identify' {
+        InModuleScope Winarchy {
+            $live = [pscustomobject]@{ layout = [pscustomobject]@{ Default = 'Columns' }; tile = $false; container_padding = 7 }
+            $state = [pscustomobject]@{ new_window_behaviour = 'Append'; monitors = [pscustomobject]@{ elements = @(
+                [pscustomobject]@{ device_id = 'AAA1'; workspaces = [pscustomobject]@{ elements = @($live) } }
+                [pscustomobject]@{ device_id = 'GONE'; workspaces = [pscustomobject]@{ elements = @($live) } }) } }
+            $config = '{"monitors":[{"workspaces":[{"name":"1"}]},{"workspaces":[{"name":"A"}]}]}' | ConvertFrom-Json
+            Set-WinarchyConfigLiveView -Config $config -State $state -Map @{ AAA1 = 0 }
+
+            $config.window_container_behaviour | Should -Be 'Append'
+            $config.monitors[0].workspaces[0].layout | Should -Be 'Columns'
+            $config.monitors[0].workspaces[0].tile | Should -BeFalse
+            $config.monitors[0].workspaces[0].container_padding | Should -Be 7
+            $config.monitors[1].workspaces[0].PSObject.Properties['layout'] | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'does not publish komorebi.json when a running komorebi gives no state' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            Mock Test-WinarchyProcess { $true }
+            Mock Get-WinarchyKomorebiState { throw 'komorebic state returned nothing' }
+            Mock Write-WinarchyWarn { }
+            $base = '{"monitors":[]}'
+            $path = Join-Path $TestDrive 'config\komorebi\komorebi.json'
+            Remove-Item $path -ErrorAction SilentlyContinue
+            Add-WinarchyWindowRulesToKomorebiJson -Json $base | Should -Be $base
+            New-Item -ItemType File -Path $path -Force | Out-Null
+            Add-WinarchyWindowRulesToKomorebiJson -Json $base | Should -BeNullOrEmpty
+            Should -Invoke Write-WinarchyWarn -Times 1
         }
     }
 
