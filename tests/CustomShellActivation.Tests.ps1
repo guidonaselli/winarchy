@@ -116,7 +116,10 @@ Describe 'Restore-Explorer emergency script' {
                     @('Software\Microsoft\Windows\CurrentVersion\Policies\System', $testKey),
                     @('if (-not $isAdmin -and -not $Elevated) {', 'if (-not $Elevated) {'),
                     @('Start-Process powershell.exe -Verb RunAs', $Elevation),
-                    @('Start-Process explorer.exe }', 'Write-Host "(would start explorer)" }'))) {
+                    @('Start-Process explorer.exe }', 'Write-Host "(would start explorer)" }'),
+                    @('[bool](Get-Process explorer -ErrorAction SilentlyContinue | Where-Object SessionId -eq $session)', '$false'),
+                    # a failing copy must fail, not wait for input
+                    @('$null = Read-Host', 'Write-Output'))) {
                 if (-not $text.Contains($pair[0])) { throw "pattern missing: $($pair[0])" }
                 $text = $text.Replace($pair[0], $pair[1])
             }
@@ -139,6 +142,8 @@ Describe 'Restore-Explorer emergency script' {
         $r = Invoke-Restore (New-RestoreCopy 'Start-Process powershell.exe -NoNewWindow') '"C:\x\winarchy-shell.exe"' '{ broken'
         $r.Shell | Should -BeNullOrEmpty
         $r.Output | Should -Match 'recovery record is damaged'
+        $r.Output | Should -Match 'could not be restored'
+        $r.Output | Should -Not -Match 'Shell policy restored'
         $r.Output | Should -Match 'would start explorer'
     }
 
@@ -149,11 +154,18 @@ Describe 'Restore-Explorer emergency script' {
         $r.Output | Should -Match 'would start explorer'
     }
 
+    It 'ignores an unreadable owner and an empty previous value' {
+        $record = @{ owner = 'garbage'; prior = @{ present = $true; kind = 1 } } | ConvertTo-Json
+        $r = Invoke-Restore (New-RestoreCopy 'Start-Process powershell.exe -NoNewWindow') '"C:\x\winarchy-shell.exe"' $record
+        $r.Shell | Should -BeNullOrEmpty
+        $r.Output | Should -Match 'could not be restored'
+    }
+
     It 'says the policy was removed when the previous value cannot be restored' {
         $record = @{ prior = @{ present = $true; kind = 3; bytes = 'AAA=' } } | ConvertTo-Json
         $r = Invoke-Restore (New-RestoreCopy 'Start-Process powershell.exe -NoNewWindow') '"C:\x\winarchy-shell.exe"' $record
         $r.Shell | Should -BeNullOrEmpty
-        $r.Output | Should -Match 'unusual type'
+        $r.Output | Should -Match 'could not be restored'
         $r.Output | Should -Not -Match 'Shell policy restored'
     }
 }

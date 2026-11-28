@@ -9,24 +9,27 @@ function Test-Explorer { [bool](Get-Process explorer -ErrorAction SilentlyContin
 $key = 'Software\Microsoft\Windows\CurrentVersion\Policies\System'
 $recovery = Join-Path $PSScriptRoot '..\state\custom-shell-recovery.json'
 # la política es la de quien activó (o la de quien llamó), aunque el administrador sea otra cuenta
+# es el último recurso: un registro dañado no puede impedir quitar la política
 $record = $null
+$damaged = $false
 if (Test-Path -LiteralPath $recovery) {
-    # es el último recurso: un registro dañado no puede impedir quitar la política
-    try {
-        $record = Get-Content -LiteralPath $recovery -Raw | ConvertFrom-Json
-        if ($record.prior.present) { $null = [Convert]::FromBase64String($record.prior.bytes), [uint32]$record.prior.kind }
-    }
-    catch {
-        $record = $null
-        Write-Warning 'The recovery record is damaged: only a Winarchy policy will be removed. Earlier copies are under backups\.'
-    }
+    try { $record = Get-Content -LiteralPath $recovery -Raw | ConvertFrom-Json } catch { $damaged = $true }
 }
+$sid = try { [Security.Principal.SecurityIdentifier]::new([string]$record.owner).Value } catch { $CallerSid }
 $prior = $record.prior
-$sid = if ($record.owner) { $record.owner } else { $CallerSid }
-$oddPrior = [bool]($prior.present -and [uint32]$prior.kind -notin 1, 2)
+if ($prior.present) {
+    try {
+        if (-not [Convert]::FromBase64String($prior.bytes).Length) { throw 'empty' }
+        $null = [uint32]$prior.kind
+    }
+    catch { $prior = $null; $damaged = $true }
+}
+if ($damaged) { Write-Warning 'The recovery record is damaged: only a Winarchy policy will be removed.' }
+# sin poder reponer el valor anterior, lo que se hace es quitar la política
+$lost = [bool]($damaged -or ($prior.present -and [uint32]$prior.kind -notin 1, 2))
 $account = try { [Security.Principal.SecurityIdentifier]::new($sid).Translate([Security.Principal.NTAccount]).Value } catch { $sid }
 function Write-Result([bool]$changed) {
-    if ($changed -and $oddPrior) { Write-Warning "The previous shell value of $account had an unusual type, so the policy was removed instead. A copy is under backups\." }
+    if ($changed -and $lost) { Write-Warning "The shell policy of $account was removed, but the previous value could not be restored. Copies of the record are under backups\." }
     elseif ($changed) { Write-Host "Shell policy restored for $account. Winarchy stays installed; ``winarchy shell activate --yes`` turns the shell back on." }
     else { Write-Warning "No Winarchy shell policy found for $account; nothing was changed. If another account activated it, sign in with that account and run this again." }
 }
