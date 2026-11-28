@@ -285,7 +285,8 @@ pub fn launch(path: &str, args: &str) {
             if let Err(hresult) = activate_with_deadline(activate, deadline) {
                 // una app Win32 también figura en AppsFolder, pero no se activa como las de la Tienda: se abre su destino
                 if let Some((target, args)) = hresult.and_then(|_| link_target(&fallback.0)) {
-                    shell_execute(&target, &args);
+                    // shortcut: corre desde la carpeta del destino, no desde el "Iniciar en" del acceso directo; leer el .lnk si una app lo necesita
+                    launch(&target, &args);
                     return;
                 }
                 report_unlaunched(&fallback.0, hresult);
