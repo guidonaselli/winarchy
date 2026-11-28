@@ -5017,7 +5017,7 @@ Describe 'Session shell policy on removal' {
             Mock Write-Host { }
             Mock Get-WinarchyCustomShellStatus { [pscustomobject]@{ State = 'Inactive'; Record = $null } }
             Remove-WinarchySessionShellPolicy
-            Mock Get-WinarchyCustomShellStatus { [pscustomobject]@{ State = 'Installed'; Record = $null } }
+            Mock Get-WinarchyCustomShellStatus { [pscustomobject]@{ State = 'Installed'; Record = [pscustomobject]@{ Owner = $null; Prior = $null } } }
             Remove-WinarchySessionShellPolicy -DryRun
             Should -Invoke Invoke-WinarchyCustomShellChange -Times 0 -Exactly
             Remove-WinarchySessionShellPolicy
@@ -5028,6 +5028,15 @@ Describe 'Session shell policy on removal' {
             $text = Get-Content (Join-Path $script:Root $file) -Raw
             $text.IndexOf('Remove-WinarchySessionShellPolicy') | Should -BeGreaterThan -1
             $text.IndexOf('Remove-WinarchySessionShellPolicy') | Should -BeLessThan $text.IndexOf('Unregister-WinarchyAutostart')
+        }
+    }
+
+    It 'stops before touching anything when another account activated the session shell' {
+        InModuleScope Winarchy {
+            Mock Invoke-WinarchyCustomShellChange { }
+            Mock Get-WinarchyCustomShellStatus { [pscustomobject]@{ State = 'Prior'; Record = [pscustomobject]@{ Owner = 'S-1-5-21-1-2-3-1001' } } }
+            { Remove-WinarchySessionShellPolicy } | Should -Throw '*different Windows account*'
+            Should -Invoke Invoke-WinarchyCustomShellChange -Times 0 -Exactly
         }
     }
 }

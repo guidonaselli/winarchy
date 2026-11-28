@@ -129,10 +129,12 @@ function Remove-WinarchySessionShellPolicy {
     $status = Get-WinarchyCustomShellStatus
     Assert-WinarchyCustomShellOwner $status.Record
     if ($status.State -ne 'Installed') { return }
-    if ($DryRun) { Write-Host '  [ ] Give Explorer back as the Windows shell (asks for administrator rights)'; return }
+    if ($DryRun) { Write-Host '  [ ] Restore the previous Windows shell policy (asks for administrator rights)'; return }
     $null = Invoke-WinarchyCustomShellChange -Action deactivate
     Set-WinarchyUwphost -Action off
-    Write-WinarchyOk 'Explorer is the Windows shell again'
+    $prior = $status.Record.Prior
+    if ($prior -and $prior.Present) { Write-WinarchyOk "Restored the shell policy you had before: $([Text.Encoding]::Unicode.GetString($prior.RawBytes).TrimEnd([char]0))" }
+    else { Write-WinarchyOk 'Explorer is the Windows shell again' }
 }
 
 function Test-WinarchyElevated {
