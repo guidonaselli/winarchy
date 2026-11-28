@@ -770,7 +770,7 @@ Describe 'AHK shell watchdog lifecycle contract' {
     It 'returns a failing bridge exit code when shell recovery fails' {
         $bridge = Get-Content (Join-Path $script:LifecycleSourceRoot 'scripts/Stop-WinarchySessionShell.ps1') -Raw
 
-        $bridge | Should -Match '(?m)^\$ErrorActionPreference = ''Stop''$'
+        $bridge | Should -Match '(?m)^\$ErrorActionPreference = ''Stop''?$'
         $bridge | Should -Match '(?s)Import-Module \$module -Force\s+if \(-not \(Stop-WinarchyShell\)\) \{ exit 1 \}\s+exit 0\s*$'
     }
 

@@ -50,7 +50,9 @@ fn a_folder_shortcut_resolves_to_its_target() {
     std::fs::create_dir(&target).unwrap();
     let shortcut = fixture.save(&target);
 
-    assert_eq!(unsafe { folder_shortcut_target(&shortcut) }, Some(target));
+    // el temp puede venir en forma 8.3 y el acceso directo devuelve la larga
+    let found = unsafe { folder_shortcut_target(&shortcut) }.map(|p| p.canonicalize().unwrap());
+    assert_eq!(found, Some(target.canonicalize().unwrap()));
 }
 
 #[test]
