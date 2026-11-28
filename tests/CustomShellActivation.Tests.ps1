@@ -103,3 +103,57 @@ Describe 'komorebi without Explorer' {
         (Get-Content (Join-Path $root 'module\Winarchy\Private\ThemeEngine.ps1') -Raw) | Should -Match "(?s)computed\.window_hiding'\] = if \(\(Get-WinarchyCustomShellStatus\)\.State -eq 'Installed'\) \{ 'Hide' \} else \{ 'Cloak' \}"
     }
 }
+
+Describe 'Restore-Explorer emergency script' {
+    # runs a copy pointed at a throwaway key: no UAC, no real policy, no Explorer launched
+    BeforeAll {
+        $script:testKey = "Software\WinarchyTest\Restore-$([guid]::NewGuid())"
+        function New-RestoreCopy([string]$Elevation) {
+            $dir = Join-Path $TestDrive ([guid]::NewGuid())
+            New-Item -ItemType Directory (Join-Path $dir 'scripts'), (Join-Path $dir 'state') -Force | Out-Null
+            $text = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\Restore-Explorer.ps1') -Raw
+            foreach ($pair in @(
+                    @('Software\Microsoft\Windows\CurrentVersion\Policies\System', $testKey),
+                    @('if (-not $isAdmin -and -not $Elevated) {', 'if (-not $Elevated) {'),
+                    @('Start-Process powershell.exe -Verb RunAs', $Elevation),
+                    @('Start-Process explorer.exe }', 'Write-Host "(would start explorer)" }'))) {
+                if (-not $text.Contains($pair[0])) { throw "pattern missing: $($pair[0])" }
+                $text = $text.Replace($pair[0], $pair[1])
+            }
+            if ($text -match 'Policies\\System|Start-Process explorer|RunAs') { throw 'the copy still reaches the real system' }
+            Set-Content (Join-Path $dir 'scripts\Restore-Explorer.ps1') $text
+            $dir
+        }
+        function Invoke-Restore([string]$Dir, [string]$Shell, [string]$Record) {
+            $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($testKey)
+            $key.SetValue('Shell', $Shell, 'String')
+            if ($Record) { Set-Content (Join-Path $Dir 'state\custom-shell-recovery.json') $Record }
+            $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Dir 'scripts\Restore-Explorer.ps1') 3>&1 2>&1
+            [pscustomobject]@{ Output = ($output | Out-String) -replace '\s+', ' '; Shell = $key.GetValue('Shell', $null) }
+            $key.Close()
+        }
+    }
+    AfterAll { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($testKey, $false) }
+
+    It 'removes a Winarchy policy even with a damaged recovery record' {
+        $r = Invoke-Restore (New-RestoreCopy 'Start-Process powershell.exe -NoNewWindow') '"C:\x\winarchy-shell.exe"' '{ broken'
+        $r.Shell | Should -BeNullOrEmpty
+        $r.Output | Should -Match 'recovery record is damaged'
+        $r.Output | Should -Match 'would start explorer'
+    }
+
+    It 'still starts Explorer and explains when the administrator step cannot run' {
+        $r = Invoke-Restore (New-RestoreCopy 'Start-Process winarchy-no-such.exe') '"C:\x\winarchy-shell.exe"'
+        $r.Shell | Should -Not -BeNullOrEmpty
+        $r.Output | Should -Match 'did not finish'
+        $r.Output | Should -Match 'would start explorer'
+    }
+
+    It 'says the policy was removed when the previous value cannot be restored' {
+        $record = @{ prior = @{ present = $true; kind = 3; bytes = 'AAA=' } } | ConvertTo-Json
+        $r = Invoke-Restore (New-RestoreCopy 'Start-Process powershell.exe -NoNewWindow') '"C:\x\winarchy-shell.exe"' $record
+        $r.Shell | Should -BeNullOrEmpty
+        $r.Output | Should -Match 'unusual type'
+        $r.Output | Should -Not -Match 'Shell policy restored'
+    }
+}
