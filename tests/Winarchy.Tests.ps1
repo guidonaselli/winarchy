@@ -3696,6 +3696,20 @@ Describe 'UWP host' {
         }
     }
 
+    It 'comes on with the session shell, and a missing binary does not undo the activation' {
+        InModuleScope Winarchy {
+            Mock Invoke-WinarchyCustomShellChange { [pscustomobject]@{ State = 'Installed' } }
+            Mock Get-WinarchyCurrentTheme { }
+            Mock Set-WinarchyUwphost { throw 'no binary' }
+            Mock Write-WinarchyWarn { }
+            Mock Write-WinarchyOk { }
+            Invoke-Winarchy shell activate --yes
+            Should -Invoke Set-WinarchyUwphost -Times 1 -ParameterFilter { $Action -eq 'on' }
+            Should -Invoke Write-WinarchyWarn -Times 1
+            Should -Invoke Write-WinarchyOk -Times 1
+        }
+    }
+
     It 'reports off, ready, blocked and down from the flag and the helper status' {
         InModuleScope Winarchy -Parameters @{ Repo = $script:repo } {
             param($Repo)

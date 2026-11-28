@@ -78,8 +78,8 @@ function Show-WinarchyHelp {
     rules sync [--apply]      Refresh the vendored community ASC (shows the diff first;
                               never touches your config/komorebi/rules.toml)
     shell <status|activate|deactivate>   Replace Explorer with the Winarchy shell at next sign-in (opt-in, reversible; activate needs --yes)
-    uwphost [status|on|off|retry]   Open Store apps inside the Winarchy session shell (next sign-in;
-                              retry: try again after it gave up)
+    uwphost [status|on|off|retry]   Open Store apps inside the Winarchy session shell (on by default with
+                              shell activate; next sign-in; retry: try again after it gave up)
     taskbar <hide|autohide|show>   Native Windows taskbar mode (hide: gone, dock only)
     harden [--revert]         Turn off Bing search, ads, suggestions, widgets and tips (HKCU)
     reload                    Reload komorebi, YASB, AHK and Flow
@@ -326,10 +326,13 @@ function Invoke-Winarchy {
                     if ($rest -notcontains '--yes') {
                         Write-WinarchyWarn 'This replaces Explorer with the Winarchy shell at your NEXT sign-in (per-user policy; Windows asks for admin approval once; no reboot).'
                         Write-WinarchyInfo 'Undo: `winarchy shell deactivate`, or without Winarchy: Ctrl+Alt+Del > Task Manager > Run new task > scripts\Restore-Explorer.cmd'
+                        Write-WinarchyInfo 'It also turns on the UWP host (Store apps; experimental, downloads Microsoft symbols). Turn it off with `winarchy uwphost off`.'
                         Write-WinarchyInfo 'Run `winarchy shell activate --yes` to proceed.'
                         break
                     }
                     $status = Invoke-WinarchyCustomShellChange -Action activate
+                    try { Set-WinarchyUwphost -Action on }
+                    catch { Write-WinarchyWarn "Store apps will not open in the session shell: $($_.Exception.Message) Retry with: winarchy uwphost on" }
                     $theme = Get-WinarchyCurrentTheme; if ($theme) { Set-WinarchyTheme -Name $theme }
                     Write-WinarchyOk "CustomShell policy $($status.State). Sign out and back in to use the Winarchy shell."
                 }
