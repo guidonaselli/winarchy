@@ -18,6 +18,7 @@ mod cluster;
 mod world;
 mod wpn;
 mod extras;
+mod rescue;
 mod i18n;
 mod ics;
 mod layout;
@@ -1655,6 +1656,7 @@ fn main() {
             switcher::init();
             komorebi::spawn_ahk_watch(root.clone());
             komorebi::spawn_komorebi_watch(root.clone());
+            rescue::spawn(root.clone());
         }
         ics::spawn_feed(theme_path.clone());
         extras::spawn_weather(theme_path);
