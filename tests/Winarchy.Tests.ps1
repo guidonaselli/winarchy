@@ -5161,3 +5161,29 @@ Describe 'Dynamic accent marker' {
         }
     }
 }
+
+Describe 'Alt+Tab order' {
+    It 'lists windows from the most recently used, keeping the never-focused ones after' {
+        $exe = @("$env:LOCALAPPDATA\Programs\AutoHotkey\v2\AutoHotkey64.exe", "$env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if (-not $exe) { Set-ItResult -Skipped -Because 'AutoHotkey v2 is not installed.'; return }
+        $source = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $function = [regex]::Match($source, '(?ms)^AltTabOrder\(candidates, history\) \{.*?^\}').Value
+        $function | Should -Not -BeNullOrEmpty
+        $script = Join-Path $TestDrive 'order.ahk'
+        $out = Join-Path $TestDrive 'order.txt'
+        Set-Content $script @"
+#Requires AutoHotkey v2.0
+#NoTrayIcon
+#Warn All, StdOut
+$function
+text := ''
+for hwnd in AltTabOrder([10, 20, 30, 40], [30, 99, 40, 10])
+    text .= hwnd ' '
+FileAppend(Trim(text), '$out')
+ExitApp
+"@
+        $process = Start-Process $exe -ArgumentList '/ErrorStdOut', "`"$script`"" -PassThru
+        if (-not $process.WaitForExit(15000)) { $process.Kill(); throw 'AutoHotkey did not finish' }
+        Get-Content $out -Raw | Should -Be '30 40 10 20'
+    }
+}

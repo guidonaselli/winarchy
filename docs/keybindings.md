@@ -91,7 +91,7 @@ so `Ctrl+C` still interrupts.
 | `SUPER+Alt+u` or `SUPER+Alt+G` | Unstack the focused window |
 | `SUPER+Ctrl+S` / `SUPER+Ctrl+U` | Stack every window in the workspace / unstack the whole container |
 | `SUPER+Alt+,` / `SUPER+Alt+.` | Previous / next tab in the stack |
-| `Alt+Tab` / `Alt+Shift+Tab` | Sin Explorer: un toque vuelve a la ventana anterior; con Alt sostenido, cada Tab solo mueve la selección por z-order (sin cambiar de ventana) y la shell muestra un conmutador con la miniatura en vivo, el ícono y el título de cada ventana; la elegida se activa al soltar Alt. Incluye las ventanas de todos los workspaces: las de uno oculto van al final, salen con el ícono en grande y elegirlas te lleva ahí, igual que un clic en el dock |
+| `Alt+Tab` / `Alt+Shift+Tab` | Sin Explorer: recorre las ventanas por uso, como Windows. Un toque vuelve a la última usada, aunque esté en otro workspace; con Alt sostenido, cada Tab (o `←`/`→`) solo mueve la selección y `Esc` cancela (sin cambiar de ventana) y la shell muestra un conmutador con la miniatura en vivo, el ícono y el título de cada ventana; la elegida se activa al soltar Alt. Incluye las ventanas de todos los workspaces: las de uno oculto salen con el ícono en grande y elegirlas te lleva ahí, igual que un clic en el dock |
 | `SUPER+Alt+Shift+Tab` / `SUPER+Alt+Tab`, `SUPER+Ctrl+←` / `SUPER+Ctrl+→`, `SUPER+Alt+WheelUp` / `SUPER+Alt+WheelDown` | Previous / next tab in the stack (Omarchy's group keys) |
 | `SUPER+Alt+1..5` | Go to tab N of the stack |
 
