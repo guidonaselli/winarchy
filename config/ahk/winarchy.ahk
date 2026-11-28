@@ -124,12 +124,21 @@ Volume_Mute::SoundSetMute(-1)
 }
 ; Al apretar Win se suelta el confinamiento del mouse que fija un juego, para pasar el cursor a otro monitor antes de que el launcher tome el foco.
 ~LWin::DllCall('ClipCursor', 'ptr', 0)
-; Sin Explorer no hay conmutador de Alt+Tab: un toque vuelve a la ventana anterior y Tab con Alt sostenido sigue por z-order; la shell dibuja el conmutador.
+; Sin Explorer no hay conmutador de Alt+Tab: recorre las ventanas de la usada más recientemente a la más vieja, como Windows; la shell lo dibuja.
 !Tab::AltTabStep(1)
 !+Tab::AltTabStep(-1)
+#HotIf AltTabOpened && SessionShellActive()
+*!Left::AltTabStep(-1)   ; con * también andan mientras Shift sigue apretado
+*!Right::AltTabStep(1)
+*!Esc::AltTabStep(0, true)   ; cancela: la ventana activa no cambia
 #HotIf
+AltTabOpened := false
+; EVENT_SYSTEM_FOREGROUND: se anota recién a los 200 ms, así el foco de paso de un cambio de workspace no cuenta como uso
+if !DllCall('user32\SetWinEventHook', 'uint', 3, 'uint', 3, 'ptr', 0, 'ptr', CallbackCreate((*) => SetTimer(AltTabRemember, -200), , 7), 'uint', 0, 'uint', 0, 'uint', 2, 'ptr')
+    WLog('ERROR Alt+Tab: sin aviso de foco, el orden de uso solo aprende al abrirlo')
 
-AltTabStep(dir) {
+AltTabStep(dir, cancel := false) {
+    global AltTabOpened
     ; Sin Critical, un Tab o la suelta de Alt interrumpen al paso que espera a komorebi y el conmutador queda abierto.
     Critical
     static list := [], idx := -1, shown := false   ; idx -1: no hay conmutador abierto
@@ -137,14 +146,17 @@ AltTabStep(dir) {
         SetTimer(AltTabRelease, 0)
         if shown
             ShellIsland('switcher.hide')
-        if idx >= 0
+        if idx >= 0 && !cancel
             AltTabActivate(list[idx + 1])
         shown := false
         idx := -1
+        AltTabOpened := false
         return
     }
     if idx < 0 {
+        AltTabOpened := true   ; antes de armar la lista: un Esc o una flecha temprana no se escapa a la app
         list := []
+        AltTabRemember()
         active := DllCall('user32\GetAncestor', 'ptr', WinExist('A'), 'uint', 3, 'ptr')
         managed := KomorebiWindows()
         prev := A_DetectHiddenWindows
@@ -157,13 +169,16 @@ AltTabStep(dir) {
                 (visible ? list : away).Push(hwnd)
         }
         DetectHiddenWindows(prev)
-        list.Push(away*)   ; al final: un toque sigue volviendo a la ventana anterior en pantalla
+        list.Push(away*)
+        list := AltTabOrder(list, AltTabHistory())
         if list.Length > 64   ; tope que acepta la shell
             list.Length := 64
-        ; si la primera no es la activa (escritorio, dueño oculto), el primer Tab no la saltea
+        ; sin ventana activa en la lista, el primer Tab no saltea la primera
         current := list.Length && list[1] = active
-        if list.Length < (current ? 2 : 1)
+        if list.Length < (current ? 2 : 1) {
+            AltTabOpened := false
             return
+        }
         idx := current || dir < 0 ? 0 : -1
     }
     idx := Mod(idx + dir + list.Length, list.Length)
@@ -172,6 +187,39 @@ AltTabStep(dir) {
         ids .= (ids ? ',' : '') hwnd
     shown := ShellIsland('switcher.show', ',"params":{"windows":[' ids '],"index":' idx '}')
     SetTimer(AltTabRelease, 30)
+}
+
+; hwnds de la usada más recientemente a la más vieja
+AltTabHistory() {
+    static history := []
+    return history
+}
+
+AltTabRemember() {
+    hwnd := DllCall('user32\GetAncestor', 'ptr', WinExist('A'), 'uint', 3, 'ptr')
+    if !hwnd
+        return
+    history := AltTabHistory()
+    for i, known in history
+        if known = hwnd {
+            history.RemoveAt(i)
+            break
+        }
+    history.InsertAt(1, hwnd)
+    if history.Length > 128
+        history.Pop()
+}
+
+; Primero las usadas, en orden de uso; las que nunca tuvieron el foco quedan después en el orden en que llegaron.
+AltTabOrder(candidates, history) {
+    left := Map(), ordered := []
+    for hwnd in candidates
+        left[hwnd] := true
+    for list in [history, candidates]
+        for hwnd in list
+            if left.Has(hwnd)
+                ordered.Push(hwnd), left.Delete(hwnd)
+    return ordered
 }
 
 ; Alt se consulta en vez de esperar su key-up: un juego o una ventana protegida se lo traga y el conmutador queda abierto.
