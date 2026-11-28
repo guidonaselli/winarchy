@@ -443,9 +443,12 @@ function Copy-WinarchyRunningBinary {
     New-Item -ItemType Directory -Path (Split-Path $dest -Parent) -Force | Out-Null
     # un .exe en uso no se puede pisar, pero sí renombrar; un .old en uso sobrevive a esta pasada
     Remove-Item "$dest.*.old" -Force -ErrorAction SilentlyContinue
+    # se copia aparte y recién ahí se renombra: un corte a mitad de la copia no deja la sesión sin binario
+    $new = "$dest.new"
+    Copy-Item -Path $Source -Destination $new -Force -ErrorAction Stop
     $old = "$dest.$([guid]::NewGuid().ToString('N')).old"
     if (Test-Path -LiteralPath $dest) { Move-Item -LiteralPath $dest -Destination $old -Force }
-    try { Copy-Item -Path $Source -Destination $dest -Force -ErrorAction Stop }
+    try { Move-Item -LiteralPath $new -Destination $dest -Force -ErrorAction Stop }
     catch {
         if (Test-Path -LiteralPath $old) { Move-Item -LiteralPath $old -Destination $dest -Force }
         throw
@@ -512,7 +515,13 @@ function Set-WinarchyBar {
     }
     if ($Name -eq 'yasb' -and -not (Get-Command yasbc -ErrorAction SilentlyContinue)) { Install-WinarchyYasb }
     if ($Name -eq 'native') {
-        if (-not (Test-WinarchyShellCurrent)) { $null = Install-WinarchyShellRelease }
+        if (-not (Test-WinarchyShellCurrent)) {
+            try { $null = Install-WinarchyShellRelease }
+            catch {
+                if (-not (Get-WinarchyShellExe)) { throw }
+                Write-WinarchyWarn "Could not update the native shell ($($_.Exception.Message)); using the installed one."
+            }
+        }
         $theme = Join-Path (Get-WinarchyRoot) 'config\shell\theme.json'
         $current = Join-Path (Get-WinarchyStateDir) 'current-theme'
         if (-not (Test-Path $theme) -and (Test-Path $current)) { Set-WinarchyTheme -Name (Get-Content $current -Raw).Trim() }

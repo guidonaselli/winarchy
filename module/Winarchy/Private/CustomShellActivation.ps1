@@ -26,9 +26,17 @@ function Read-WinarchyCustomShellRecovery {
     if (-not (Test-Path -LiteralPath $Path)) { return $null }
     try {
         $raw = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-        [pscustomobject]@{ Prior = (ConvertFrom-WinarchyCustomShellRecord $raw.prior); Installed = (ConvertFrom-WinarchyCustomShellRecord $raw.installed); Command = [string]$raw.command }
+        [pscustomobject]@{ Prior = (ConvertFrom-WinarchyCustomShellRecord $raw.prior); Installed = (ConvertFrom-WinarchyCustomShellRecord $raw.installed); Command = [string]$raw.command; Owner = [string]$raw.owner }
     }
     catch { throw "The CustomShell recovery record is unreadable ($($_.Exception.Message)); not touching the policy. Restore it by hand (docs/custom-shell-policy.md)." }
+}
+
+function Assert-WinarchyCustomShellOwner {
+    <# El registro describe el HKCU de quien activó: desde otra cuenta el estado que se lee no es el suyo. #>
+    param($Record)
+    if ($Record -and $Record.Owner -and $Record.Owner -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+        throw 'The session shell was activated by a different Windows account; run this from that account, or get Explorer back with scripts\Restore-Explorer.cmd.'
+    }
 }
 
 function Get-WinarchyCustomShellCommand {
@@ -59,16 +67,22 @@ function Enable-WinarchyCustomShell {
     if (-not $ShellExe -or -not (Test-Path -LiteralPath $ShellExe)) { throw 'winarchy-shell.exe not found: install or build it first (winarchy bar use native).' }
     if (-not (Test-Path -LiteralPath (Join-Path $Root 'config\shell\theme.json'))) { throw 'config\shell\theme.json is missing: run `winarchy theme set` first, the shell does not start without it.' }
     $status = Get-WinarchyCustomShellStatus -SubKey $SubKey -RecoveryPath $RecoveryPath
+    Assert-WinarchyCustomShellOwner $status.Record
     if ($status.State -eq 'Installed') { return $status }
     if ($status.State -eq 'Conflict') { throw 'The CustomShell policy changed after Winarchy recorded it; refusing to overwrite. Check it with `winarchy shell status`.' }
 
+    # guardar otra copia de Winarchy como "valor anterior" haría que desactivar vuelva a una shell que puede no existir
+    if ($status.Current.Present -and [Text.Encoding]::Unicode.GetString($status.Current.RawBytes) -match 'winarchy-shell\.exe') {
+        throw 'The CustomShell policy already launches another Winarchy shell; run scripts\Restore-Explorer.cmd first.'
+    }
+    if ($ShellExe -like '*\target\release\*') { Write-WinarchyWarn "The session will start the development build ($ShellExe): removing it leaves the next sign-in without a shell." }
     $command = Get-WinarchyCustomShellCommand -ShellExe $ShellExe -Root $Root
     $bytes = [Text.Encoding]::Unicode.GetBytes($command + [char]0)
     $installed = New-WinarchyCustomShellPolicySnapshot -Present $true -Kind String -RawBytes $bytes
     $prior = $status.Current
 
     # el registro de recuperación se escribe ANTES de tocar el registro: sin él no hay vuelta atrás verificable
-    $record = [ordered]@{ command = $command; created = (Get-Date).ToString('o'); prior = (ConvertTo-WinarchyCustomShellRecord $prior); installed = (ConvertTo-WinarchyCustomShellRecord $installed) }
+    $record = [ordered]@{ owner = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; command = $command; created = (Get-Date).ToString('o'); prior = (ConvertTo-WinarchyCustomShellRecord $prior); installed = (ConvertTo-WinarchyCustomShellRecord $installed) }
     $temp = "$RecoveryPath.tmp"
     $record | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $temp -Encoding UTF8
     Move-Item -LiteralPath $temp -Destination $RecoveryPath -Force
@@ -95,6 +109,7 @@ function Disable-WinarchyCustomShell {
         [string]$RecoveryPath = (Get-WinarchyCustomShellRecoveryPath)
     )
     $status = Get-WinarchyCustomShellStatus -SubKey $SubKey -RecoveryPath $RecoveryPath
+    Assert-WinarchyCustomShellOwner $status.Record
     switch ($status.State) {
         'Inactive' { return $status }
         'External' { throw 'The CustomShell policy was not set by Winarchy; leaving it alone.' }
@@ -111,7 +126,9 @@ function Disable-WinarchyCustomShell {
 function Remove-WinarchySessionShellPolicy {
     <# Antes de desinstalar o hacer rollback: con la política puesta, el próximo inicio de sesión quedaría sin shell. #>
     param([switch]$DryRun)
-    if ((Get-WinarchyCustomShellStatus).State -ne 'Installed') { return }
+    $status = Get-WinarchyCustomShellStatus
+    Assert-WinarchyCustomShellOwner $status.Record
+    if ($status.State -ne 'Installed') { return }
     if ($DryRun) { Write-Host '  [ ] Give Explorer back as the Windows shell (asks for administrator rights)'; return }
     $null = Invoke-WinarchyCustomShellChange -Action deactivate
     Set-WinarchyUwphost -Action off

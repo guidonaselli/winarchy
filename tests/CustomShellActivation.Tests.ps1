@@ -55,6 +55,28 @@ Describe 'CustomShell activation and recovery' {
         }
     }
 
+    It 'refuses to touch a policy recorded by another account' {
+        InModuleScope Winarchy -Parameters @{ k = $subKey; r = $recovery; e = $exe; root = $fakeRoot } {
+            param($k, $r, $e, $root)
+            Mock Get-WinarchyBackupsDir { $TestDrive }
+            $null = Enable-WinarchyCustomShell -SubKey $k -RecoveryPath $r -ShellExe $e -Root $root
+            $record = Get-Content $r -Raw | ConvertFrom-Json
+            $record.owner = 'S-1-5-21-1-2-3-1001'
+            $record | ConvertTo-Json -Depth 4 | Set-Content $r
+            { Disable-WinarchyCustomShell -SubKey $k -RecoveryPath $r } | Should -Throw '*different Windows account*'
+            [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($k).GetValue('Shell') | Should -Match 'session-shell'
+        }
+    }
+
+    It 'does not record another Winarchy shell as the value to go back to' {
+        [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($subKey, $true).SetValue('Shell', '"C:\old\winarchy-shell.exe" --session-shell', 'String')
+        InModuleScope Winarchy -Parameters @{ k = $subKey; r = $recovery; e = $exe; root = $fakeRoot } {
+            param($k, $r, $e, $root)
+            { Enable-WinarchyCustomShell -SubKey $k -RecoveryPath $r -ShellExe $e -Root $root } | Should -Throw '*another Winarchy shell*'
+            Test-Path $r | Should -BeFalse
+        }
+    }
+
     It 'refuses to activate without the shell binary or the theme' {
         InModuleScope Winarchy -Parameters @{ k = $subKey; r = $recovery; root = $fakeRoot } {
             param($k, $r, $root)

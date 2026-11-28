@@ -5015,9 +5015,9 @@ Describe 'Session shell policy on removal' {
             Mock Set-WinarchyUwphost { }
             Mock Write-WinarchyOk { }
             Mock Write-Host { }
-            Mock Get-WinarchyCustomShellStatus { [pscustomobject]@{ State = 'Inactive' } }
+            Mock Get-WinarchyCustomShellStatus { [pscustomobject]@{ State = 'Inactive'; Record = $null } }
             Remove-WinarchySessionShellPolicy
-            Mock Get-WinarchyCustomShellStatus { [pscustomobject]@{ State = 'Installed' } }
+            Mock Get-WinarchyCustomShellStatus { [pscustomobject]@{ State = 'Installed'; Record = $null } }
             Remove-WinarchySessionShellPolicy -DryRun
             Should -Invoke Invoke-WinarchyCustomShellChange -Times 0 -Exactly
             Remove-WinarchySessionShellPolicy

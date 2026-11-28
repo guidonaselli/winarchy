@@ -72,7 +72,8 @@ foreach ($p in Get-Process -ErrorAction SilentlyContinue | Where-Object SessionI
 foreach ($e in $entries) {
     $cmd = Split-Command $e.Command
     $exeName = [IO.Path]::GetFileNameWithoutExtension($cmd.File)
-    if ($cmd.File -notmatch '\.lnk$' -and $exeName -and $running.ContainsKey($exeName.ToLowerInvariant())) { Write-Log "already running: $($e.Name)"; continue }
+    # un host de scripts corriendo no dice nada sobre esta entrada
+    if ($cmd.File -notmatch '\.lnk$' -and $exeName -and $exeName -notin 'cmd', 'powershell', 'pwsh', 'rundll32', 'wscript', 'mshta' -and $running.ContainsKey($exeName.ToLowerInvariant())) { Write-Log "already running: $($e.Name)"; continue }
     try {
         if (-not (Test-Path -LiteralPath $cmd.File)) { Write-Log "missing target: $($e.Name): $($cmd.File)"; continue }
         # RunOnce se borra antes de correr; si no se puede (HKLM sin elevar) no se corre, o volvería en cada sesión

@@ -12,8 +12,11 @@ if (-not $isAdmin -and -not $Elevated) {
 }
 $key = 'Software\Microsoft\Windows\CurrentVersion\Policies\System'
 $recovery = Join-Path $PSScriptRoot '..\state\custom-shell-recovery.json'
-# la política es la de quien llamó, aunque el aviso de administrador se haya aceptado con otra cuenta
-$hive = [Microsoft.Win32.Registry]::Users.OpenSubKey("$CallerSid\$key", $true)
+# la política es la de quien activó (o la de quien llamó), aunque el administrador sea otra cuenta
+$owner = if (Test-Path -LiteralPath $recovery) { (Get-Content -LiteralPath $recovery -Raw | ConvertFrom-Json).owner }
+$sid = if ($owner) { $owner } else { $CallerSid }
+if (-not [Microsoft.Win32.Registry]::Users.OpenSubKey($sid)) { throw 'That account is not signed in, so its policy cannot be changed; sign in with it and run this again.' }
+$hive = [Microsoft.Win32.Registry]::Users.OpenSubKey("$sid\$key", $true)
 if ($hive) {
     $current = [string]$hive.GetValue('Shell', $null)
     $prior = if (Test-Path -LiteralPath $recovery) { (Get-Content -LiteralPath $recovery -Raw | ConvertFrom-Json).prior } else { $null }
