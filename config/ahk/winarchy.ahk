@@ -127,14 +127,15 @@ Volume_Mute::SoundSetMute(-1)
 ; Sin Explorer no hay conmutador de Alt+Tab: recorre las ventanas de la usada más recientemente a la más vieja, como Windows; la shell lo dibuja.
 !Tab::AltTabStep(1)
 !+Tab::AltTabStep(-1)
-#HotIf SessionShellActive() && AltTabOpened
-!Left::AltTabStep(-1)
-!Right::AltTabStep(1)
-!Esc::AltTabStep(0, true)   ; cancela: la ventana activa no cambia
+#HotIf AltTabOpened && SessionShellActive()
+*!Left::AltTabStep(-1)   ; con * también andan mientras Shift sigue apretado
+*!Right::AltTabStep(1)
+*!Esc::AltTabStep(0, true)   ; cancela: la ventana activa no cambia
 #HotIf
 AltTabOpened := false
 ; EVENT_SYSTEM_FOREGROUND: se anota recién a los 200 ms, así el foco de paso de un cambio de workspace no cuenta como uso
-DllCall('user32\SetWinEventHook', 'uint', 3, 'uint', 3, 'ptr', 0, 'ptr', CallbackCreate((*) => SetTimer(AltTabRemember, -200), , 7), 'uint', 0, 'uint', 0, 'uint', 2, 'ptr')
+if !DllCall('user32\SetWinEventHook', 'uint', 3, 'uint', 3, 'ptr', 0, 'ptr', CallbackCreate((*) => SetTimer(AltTabRemember, -200), , 7), 'uint', 0, 'uint', 0, 'uint', 2, 'ptr')
+    WLog('ERROR Alt+Tab: sin aviso de foco, el orden de uso solo aprende al abrirlo')
 
 AltTabStep(dir, cancel := false) {
     global AltTabOpened
@@ -153,6 +154,7 @@ AltTabStep(dir, cancel := false) {
         return
     }
     if idx < 0 {
+        AltTabOpened := true   ; antes de armar la lista: un Esc o una flecha temprana no se escapa a la app
         list := []
         AltTabRemember()
         active := DllCall('user32\GetAncestor', 'ptr', WinExist('A'), 'uint', 3, 'ptr')
@@ -171,14 +173,15 @@ AltTabStep(dir, cancel := false) {
         list := AltTabOrder(list, AltTabHistory())
         if list.Length > 64   ; tope que acepta la shell
             list.Length := 64
-        ; si la primera no es la activa (escritorio, dueño oculto), el primer Tab no la saltea
+        ; sin ventana activa en la lista, el primer Tab no saltea la primera
         current := list.Length && list[1] = active
-        if list.Length < (current ? 2 : 1)
+        if list.Length < (current ? 2 : 1) {
+            AltTabOpened := false
             return
+        }
         idx := current || dir < 0 ? 0 : -1
     }
     idx := Mod(idx + dir + list.Length, list.Length)
-    AltTabOpened := true
     ids := ''
     for hwnd in list
         ids .= (ids ? ',' : '') hwnd
