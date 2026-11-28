@@ -1,18 +1,19 @@
 # Salida de emergencia sin el módulo de Winarchy: devuelve Explorer como shell del usuario.
 # Se puede lanzar desde Administrador de tareas > Ejecutar nueva tarea (scripts\Restore-Explorer.cmd).
-param([switch]$Elevated)
+param([switch]$Elevated, [string]$CallerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
 $ErrorActionPreference = 'Stop'
 # Windows protege HKCU\...\Policies: tocarlo exige administrador. El hijo elevado edita el registro; Explorer lo arranca quien llamó.
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin -and -not $Elevated) {
-    $child = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-Elevated'
+    $child = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-Elevated', '-CallerSid', $CallerSid
     if ($child.ExitCode -ne 0) { throw 'The administrator step failed or was declined; the policy was not changed.' }
     if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }
     return
 }
 $key = 'Software\Microsoft\Windows\CurrentVersion\Policies\System'
 $recovery = Join-Path $PSScriptRoot '..\state\custom-shell-recovery.json'
-$hive = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($key, $true)
+# la política es la de quien llamó, aunque el aviso de administrador se haya aceptado con otra cuenta
+$hive = [Microsoft.Win32.Registry]::Users.OpenSubKey("$CallerSid\$key", $true)
 if ($hive) {
     $current = [string]$hive.GetValue('Shell', $null)
     $prior = if (Test-Path -LiteralPath $recovery) { (Get-Content -LiteralPath $recovery -Raw | ConvertFrom-Json).prior } else { $null }

@@ -108,6 +108,16 @@ function Disable-WinarchyCustomShell {
     Get-WinarchyCustomShellStatus -SubKey $SubKey -RecoveryPath $RecoveryPath
 }
 
+function Remove-WinarchySessionShellPolicy {
+    <# Antes de desinstalar o hacer rollback: con la política puesta, el próximo inicio de sesión quedaría sin shell. #>
+    param([switch]$DryRun)
+    if ((Get-WinarchyCustomShellStatus).State -ne 'Installed') { return }
+    if ($DryRun) { Write-Host '  [ ] Give Explorer back as the Windows shell (asks for administrator rights)'; return }
+    $null = Invoke-WinarchyCustomShellChange -Action deactivate
+    Set-WinarchyUwphost -Action off
+    Write-WinarchyOk 'Explorer is the Windows shell again'
+}
+
 function Test-WinarchyElevated {
     ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
@@ -120,7 +130,10 @@ function Invoke-WinarchyCustomShellChange {
     $manifest = Join-Path (Get-WinarchyRoot) 'module\Winarchy\Winarchy.psd1'
     $errorFile = Join-Path (Get-WinarchyStateDir) 'custom-shell-elevated.err'
     Remove-Item -LiteralPath $errorFile -Force -ErrorAction SilentlyContinue
-    $command = "try { Import-Module '$manifest' -Force; & (Get-Module Winarchy) { $function | Out-Null } } catch { Set-Content -LiteralPath '$errorFile' -Value `$_.Exception.Message; exit 1 }"
+    $quotedManifest, $quotedError = ($manifest, $errorFile).Replace("'", "''")
+    # con credenciales de otra cuenta el HKCU del hijo sería el de ella: se rechaza antes de escribir
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $command = "try { if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne '$sid') { throw 'The administrator prompt was answered with a different account; run this from an account that is an administrator. To get Explorer back use scripts\Restore-Explorer.cmd.' }; Import-Module '$quotedManifest' -Force; & (Get-Module Winarchy) { $function | Out-Null } } catch { Set-Content -LiteralPath '$quotedError' -Value `$_.Exception.Message; exit 1 }"
     Write-WinarchyInfo 'Changing this policy needs administrator rights: accept the Windows prompt (UAC).'
     $exe = (Get-Process -Id $PID).Path
     try { $process = Start-Process $exe -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $command }

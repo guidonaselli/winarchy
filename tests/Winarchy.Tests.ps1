@@ -4988,7 +4988,7 @@ Describe 'Custom shell policy maintenance caller order' -Tag 'CustomShellPolicyM
         @{ File = 'uninstall.ps1'; Function = $null; Mutations = @('Stop-WinarchyShell', 'Stop-WinarchyWindowSlots', 'Stop-Process', 'Unregister-WinarchyAutostart') }
         @{ File = 'scripts\rollback-to-seelen.ps1'; Function = $null; Mutations = @('Stop-WinarchyShell', 'komorebic', 'Stop-Process', 'Remove-Item', 'Set-ItemProperty', 'Unregister-WinarchyAutostart') }
         @{ File = 'module\Winarchy\Private\SelfUpdate.ps1'; Function = 'Invoke-WinarchySelfUpdate'; Mutations = @('git', 'pwsh') }
-        @{ File = 'module\Winarchy\Private\Shell.ps1'; Function = 'Install-WinarchyShellBinary'; Mutations = @('Copy-Item') }
+        @{ File = 'module\Winarchy\Private\Shell.ps1'; Function = 'Install-WinarchyShellBinary'; Mutations = @('Copy-WinarchyRunningBinary') }
     ) {
         param($File, $Function, $Mutations)
         $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root $File), [ref]$null, [ref]$null)
@@ -5004,6 +5004,30 @@ Describe 'Custom shell policy maintenance caller order' -Tag 'CustomShellPolicyM
             foreach ($sideEffect in $sideEffects) {
                 $guard[0].Extent.StartOffset | Should -BeLessThan $sideEffect.Extent.StartOffset
             }
+        }
+    }
+}
+
+Describe 'Session shell policy on removal' {
+    It 'gives Explorer back before uninstall or rollback, only when Winarchy owns the policy' {
+        InModuleScope Winarchy {
+            Mock Invoke-WinarchyCustomShellChange { }
+            Mock Set-WinarchyUwphost { }
+            Mock Write-WinarchyOk { }
+            Mock Write-Host { }
+            Mock Get-WinarchyCustomShellStatus { [pscustomobject]@{ State = 'Inactive' } }
+            Remove-WinarchySessionShellPolicy
+            Mock Get-WinarchyCustomShellStatus { [pscustomobject]@{ State = 'Installed' } }
+            Remove-WinarchySessionShellPolicy -DryRun
+            Should -Invoke Invoke-WinarchyCustomShellChange -Times 0 -Exactly
+            Remove-WinarchySessionShellPolicy
+            Should -Invoke Invoke-WinarchyCustomShellChange -Times 1 -Exactly -ParameterFilter { $Action -eq 'deactivate' }
+            Should -Invoke Set-WinarchyUwphost -Times 1 -Exactly -ParameterFilter { $Action -eq 'off' }
+        }
+        foreach ($file in 'uninstall.ps1', 'scripts\rollback-to-seelen.ps1') {
+            $text = Get-Content (Join-Path $script:Root $file) -Raw
+            $text.IndexOf('Remove-WinarchySessionShellPolicy') | Should -BeGreaterThan -1
+            $text.IndexOf('Remove-WinarchySessionShellPolicy') | Should -BeLessThan $text.IndexOf('Unregister-WinarchyAutostart')
         }
     }
 }

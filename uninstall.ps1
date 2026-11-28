@@ -37,6 +37,7 @@ function Invoke-Step {
     catch { Write-WinarchyWarn "$($Describe): $($_.Exception.Message)" }
 }
 if (-not $DryRun) { Assert-WinarchyCustomShellPolicySafeForMaintenance }
+Remove-WinarchySessionShellPolicy -DryRun:$DryRun
 if (-not $DryRun -and -not (Stop-WinarchyShell)) { throw 'Explorer could not be restored; uninstall stopped before Winarchy services were removed.' }
 
 Invoke-Step 'Stop komorebi, YASB and the Winarchy AHK script' {

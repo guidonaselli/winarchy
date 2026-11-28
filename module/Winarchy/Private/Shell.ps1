@@ -433,9 +433,23 @@ function Install-WinarchyShellBinary {
     if ($actual -ne $expected.ToUpperInvariant()) {
         throw "winarchy-shell.exe SHA256 mismatch (expected $expected, got $actual): not installed."
     }
-    $dest = Join-Path (Join-Path (Get-WinarchyStateDir) 'bin') 'winarchy-shell.exe'
+    Copy-WinarchyRunningBinary -Source $Source -Name 'winarchy-shell.exe'
+}
+
+function Copy-WinarchyRunningBinary {
+    <# Deja $Source como state\bin\$Name aunque la versión anterior esté corriendo. #>
+    param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$Name)
+    $dest = Join-Path (Join-Path (Get-WinarchyStateDir) 'bin') $Name
     New-Item -ItemType Directory -Path (Split-Path $dest -Parent) -Force | Out-Null
-    Copy-Item -Path $Source -Destination $dest -Force
+    # un .exe en uso no se puede pisar, pero sí renombrar; un .old en uso sobrevive a esta pasada
+    Remove-Item "$dest.*.old" -Force -ErrorAction SilentlyContinue
+    $old = "$dest.$([guid]::NewGuid().ToString('N')).old"
+    if (Test-Path -LiteralPath $dest) { Move-Item -LiteralPath $dest -Destination $old -Force }
+    try { Copy-Item -Path $Source -Destination $dest -Force -ErrorAction Stop }
+    catch {
+        if (Test-Path -LiteralPath $old) { Move-Item -LiteralPath $old -Destination $dest -Force }
+        throw
+    }
     $dest
 }
 
@@ -498,7 +512,7 @@ function Set-WinarchyBar {
     }
     if ($Name -eq 'yasb' -and -not (Get-Command yasbc -ErrorAction SilentlyContinue)) { Install-WinarchyYasb }
     if ($Name -eq 'native') {
-        if (-not (Get-WinarchyShellExe)) { $null = Install-WinarchyShellRelease }
+        if (-not (Test-WinarchyShellCurrent)) { $null = Install-WinarchyShellRelease }
         $theme = Join-Path (Get-WinarchyRoot) 'config\shell\theme.json'
         $current = Join-Path (Get-WinarchyStateDir) 'current-theme'
         if (-not (Test-Path $theme) -and (Test-Path $current)) { Set-WinarchyTheme -Name (Get-Content $current -Raw).Trim() }

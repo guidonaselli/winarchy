@@ -16,6 +16,7 @@ Import-Module (Join-Path $Root 'module\Winarchy\Winarchy.psd1') -Force
 Write-Host "`n== Rollback Winarchy → Seelen ==" -ForegroundColor Cyan
 
 Assert-WinarchyCustomShellPolicySafeForMaintenance
+Remove-WinarchySessionShellPolicy
 if (-not (Stop-WinarchyShell)) { throw 'Explorer could not be restored; rollback stopped before Winarchy services were removed.' }
 
 # 1. Parar Winarchy y sacar su autostart

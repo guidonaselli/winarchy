@@ -33,6 +33,9 @@ function Split-Command([string]$command) {
             if (Test-Path -LiteralPath $path -PathType Leaf) { return [pscustomobject]@{ File = $path; Arguments = ($words[$n..($words.Count)] -join ' ').Trim() } }
         }
     }
+    # un nombre suelto (rundll32.exe, cmd) se busca en el PATH, como CreateProcess
+    $found = if ($words[0] -notmatch '[\\/]') { Get-Command -Name $words[0] -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 }
+    if ($found) { return [pscustomobject]@{ File = $found.Source; Arguments = ($words[1..($words.Count)] -join ' ').Trim() } }
     [pscustomobject]@{ File = $text; Arguments = '' }
 }
 
@@ -62,6 +65,7 @@ foreach ($spec in @(
     }
 }
 
+$elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $running = @{}
 # solo cuenta lo de esta sesión: un servicio con el mismo nombre (p. ej. Everything en la sesión 0) no es el cliente del usuario
 foreach ($p in Get-Process -ErrorAction SilentlyContinue | Where-Object SessionId -eq $sessionId) { $running[$p.ProcessName.ToLowerInvariant()] = $true }
@@ -70,8 +74,10 @@ foreach ($e in $entries) {
     $exeName = [IO.Path]::GetFileNameWithoutExtension($cmd.File)
     if ($cmd.File -notmatch '\.lnk$' -and $exeName -and $running.ContainsKey($exeName.ToLowerInvariant())) { Write-Log "already running: $($e.Name)"; continue }
     try {
-        if ($e.Once) { Remove-ItemProperty -LiteralPath $e.Key -Name $e.Name -ErrorAction SilentlyContinue }
         if (-not (Test-Path -LiteralPath $cmd.File)) { Write-Log "missing target: $($e.Name): $($cmd.File)"; continue }
+        # RunOnce se borra antes de correr; si no se puede (HKLM sin elevar) no se corre, o volvería en cada sesión
+        if ($e.Once -and $e.Key -like 'HKLM:*' -and -not $elevated) { Write-Log "skip HKLM RunOnce (needs elevation): $($e.Name)"; continue }
+        if ($e.Once) { Remove-ItemProperty -LiteralPath $e.Key -Name $e.Name -ErrorAction Stop }
         $start = @{ FilePath = $cmd.File; WorkingDirectory = (Split-Path $cmd.File) }
         if ($cmd.Arguments) { $start.ArgumentList = $cmd.Arguments }
         Start-Process @start
