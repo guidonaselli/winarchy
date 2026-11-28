@@ -30,7 +30,7 @@ The installed Windows `WinLogon.admx` on the benchmark host maps `CustomShell` t
 
 ### Escape path if the session comes up without a usable shell
 
-1. Ctrl+Alt+Del, Task Manager, Run new task, `<repo>\scripts\Restore-Explorer.cmd`. It needs neither the module nor the shell; it restores the recorded value (or removes the policy) and starts Explorer.
+1. Ctrl+Alt+Del, Task Manager, Run new task, `<repo>\scripts\Restore-Explorer.cmd`. It needs neither the module nor the shell; it restores the recorded value (or removes the policy) and starts Explorer; with a damaged record it still removes a Winarchy policy.
 2. Changing this key needs administrator rights (Windows owns `Policies`): in Task Manager tick "Create this task with administrative privileges", or let `Restore-Explorer.cmd` raise the UAC prompt itself.
 3. Even simpler when the prior value was absent: Run new task, `reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\System" /v Shell /f`, then `explorer.exe`.
 4. From another account, or from safe mode with the same user: delete that same value.
