@@ -6,211 +6,39 @@
   </picture>
 </p>
 
-```text
-__        ___ _   _    _    ____   ____ _   ___   __
-\ \      / / | \ | |  / \  |  _ \ / ___| | | \ \ / /
- \ \ /\ / /| |  \| | / _ \ | |_) | |   | |_| |\ V /
-  \ V  V / | | |\  |/ ___ \|  _ <| |___|  _  | | |
-   \_/\_/  |_|_| \_/_/   \_\_| \_\\____|_| |_| |_|
-```
-
 > A love letter to Linux workflows — rebuilt, carefully, for Windows 11.
 
-Winarchy is my attempt to get as close as possible to the **Omarchy** experience on a Windows desktop.
+Winarchy brings the [Omarchy](https://omarchy.org) way of working to a Windows desktop: keyboard-driven tiling,
+one theme across every app, and a single CLI. It is for people who like that flow and still need Windows for
+games and Windows-only software. It is not a clone or a Linux layer.
 
-I love Linux. I tried Omarchy, and it instantly clicked: the keyboard-driven flow, the tiling behavior, the cohesive theming, the feeling that the whole machine is working *with* you instead of against you.
+## What you get
 
-But on my main desktop, I still have real reasons to stay on Windows for now: **gaming**, a few **Windows-only tools**, and some day-to-day software I am not ready to leave behind.
+- **Tiling** with [komorebi](https://github.com/LGUG2Z/komorebi): tiling, scrolling or floating per workspace,
+  window placement memory and community application rules.
+- **A native Rust shell**: the [Island bar](docs/island.md), a per-monitor dock with live thumbnails, a Start menu
+  and an Alt+Tab switcher that reaches every workspace.
+- **SUPER keybindings**, owned by AutoHotkey v2: [reference](docs/keybindings.md), or `SUPER+K` in session.
+- **[Themes](docs/themes.md)** applied atomically, with rollback, to the shell, komorebi, WezTerm, Windows Terminal,
+  Flow Launcher, Neovim, btop and optional editors; `auto-accent` follows the Windows accent.
+- **A themed terminal**: WezTerm plus starship, fzf, zoxide, eza and bat on PowerShell 7.
+- **Game mode**: games are never tiled and hotkeys step aside in fullscreen.
+- **Files**, a native file manager in Rust (build it from `files/` until a release ships it), and an optional
+  voice assistant.
+- **One update channel** and a `doctor` that says what is wrong and how to fix it.
 
-So instead of giving up on that workflow, I tried to recreate it here.
+## Two ways to run it
 
-**Winarchy is not a clone.**
-It is a pragmatic, Windows-native translation of the ideas that made Omarchy feel great.
+| | Coexistence (default) | Session shell (opt-in) |
+|---|---|---|
+| Explorer | stays | never starts |
+| Desktop, Start, tray, notifications | Windows, plus the Winarchy dock and bar | Winarchy |
+| Store apps | work as always | need the experimental UWP host, turned on with the session shell |
+| How to switch | `.\install.ps1 -Activate` | `winarchy shell activate --yes`, then sign out |
+| How to go back | `.\uninstall.ps1` | `winarchy shell deactivate` |
 
----
-
-## What Winarchy is
-
-Winarchy is an opinionated integration layer for Windows 11:
-
-- **tiling window management**
-- **a native Rust shell**: the Island bar, a per-monitor dock, a Start menu and an Alt+Tab switcher
-- **an optional session shell that replaces Explorer** (explicit opt-in, reversible)
-- **SUPER-based keybindings**
-- **coordinated cross-app themes**
-- **single CLI for setup, updates, themes, and recovery**
-
-All built on top of native Windows-compatible tools instead of pretending Windows is Linux.
-
----
-
-## Stack mapping
-
-| Omarchy / Linux idea | Winarchy equivalent |
-|---|---|
-| Hyprland | **komorebi** |
-| Waybar | **Winarchy shell** (Island + dock + cluster), **YASB** optional |
-| Walker | **Flow Launcher** |
-| compositor-driven keybinds | **AutoHotkey v2** |
-| `omarchy-theme-set` | **`winarchy theme set`** |
-| `omarchy-update` | **`winarchy update`** |
-| launcher / menu glue | **`winarchy menu`** |
-| lightweight notification stack | Windows toasts, relayed by the shell's own popup |
-
----
-
-## Why this exists
-
-Because I wanted this:
-
-- the **speed** of a Linux keyboard workflow
-- the **cohesion** of a curated desktop
-- the **comfort** of familiar Omarchy-inspired patterns
-- without giving up the parts of Windows I still need on my main machine
-
-That means Winarchy optimizes for:
-
-- **daily-driver practicality**
-- **fast recovery and rollback**
-- **minimal friction**
-- **gaming compatibility**
-- **native Windows coexistence**, not replacement for the sake of replacement
-
----
-
-## Features
-
-- **Opinionated SUPER keymap**
-  - one place for global shortcuts
-  - Linux-style muscle memory, adapted to Windows reality
-
-- **Winarchy Island (the default bar)**
-  - a notch glued to the screen edge (flat on the edge, rounded below) with workspace dots and a clock;
-    it opens on hover (120 ms) or `SUPER+I` into a panel with media controls, CPU/RAM/volume meters,
-    workspace chips, the weather and only the notes that matter (battery, notifications, game mode)
-  - click a workspace dot or chip to switch to it, the pin button to keep the panel open (it stays until
-    you press it again), the weather row to open the forecast in your browser, the VOL bar to set the
-    volume, CPU or RAM to open Task Manager; scroll over it for volume, middle-click to mute; with
-    `position = bottom` the notch sits on the bottom edge instead
-  - the weather comes from Open-Meteo (no key); set your place with `{"location": {"lat": -34.6, "lon": -58.4}}`
-    in `config/shell/user.json` (without it, the shell falls back to the location YASB cached, if any)
-    (an out-of-range location is ignored, and edits apply within ~30 min; clicking CPU/RAM opens Task Manager, which asks for UAC)
-  - click the clock for a month calendar with the day's agenda; add read-only ICS feeds (Google Calendar: Settings →
-    your calendar → "Secret address in iCal format") with `{"calendar": ["https://…/basic.ics"]}` in `config/shell/user.json`
-    (refreshed every 15 min; events in other time zones are read as local time). A meeting starting within 15 min
-    shows a countdown in the bar. The current temperature sits next to the dots (click it to open the forecast)
-  - world clock: list cities in `config/shell/user.json` as `{"clocks": [{"city": "NYC", "tz": "Eastern Standard Time"}]}` (Windows zone names, see `tzutil /l`);
-    one row with their time appears at the bottom of the clock panel, `+1d`/`-1d` when it is another day there. Without `clocks` nothing is shown
-  - brightness: when PowerToys PowerDisplay is installed, a BRI meter appears in the panel (average of all monitors);
-    scroll over it to change every monitor by 5 points, click the bar to set them all. Without PowerToys it is hidden
-  - all island text is translated (English/Spanish): it follows `WINARCHY_LANG=es|en` or the Windows language; new texts go in `shell/src/i18n.rs`
-  - Espectro, the assistant's spirit (a dark, glowing-eyed creature tinted with your theme's accent), shows in the pill only while the assistant listens, thinks or speaks; its eyes follow the mouse and its face changes with each state; `{"pet": false}` in
-    `config/shell/user.json` hides it (that file survives `theme set` and updates)
-  - the voice assistant (`winarchy assistant on`) speaks Spanish or English, taken from your Windows regional
-    format or `WINARCHY_LANG=es|en`; it can run PowerShell and look at your screen when you ask. Speech uses
-    Microsoft's Edge neural voices (the text is sent to Microsoft) with a local Piper voice as fallback;
-    `WINARCHY_TTS=piper` keeps it fully local and `WINARCHY_EDGE_VOICE` picks another voice. The speech models load
-    while you hold the key and are released after 10 idle minutes, so an idle assistant holds no VRAM
-  - source in `shell/` (Rust + Win32); `install.ps1` downloads the binary from the GitHub Release
-    and installs it only if its SHA256 matches `versions.lock.toml`
-  - YASB is optional: `install.ps1 -WithYasb`, or `winarchy bar use yasb` (installs it if missing).
-    Machines that already had YASB keep it after an update
-
-- **Tiling that respects Windows**
-  - powered by `komorebi`
-  - designed to coexist with regular desktop usage
-
-- **A themed desktop, not just themed apps**
-  - Winarchy regenerates and applies coordinated theme outputs for:
-    - komorebi
-    - YASB
-    - WezTerm (whole config) and Windows Terminal (color scheme)
-    - Flow Launcher
-    - Neovim
-    - btop
-    - optional app adapters
-
-- **One launcher for apps and commands**
-  - `SUPER+Space` searches Winarchy's own commands alongside your applications
-  - `SUPER+Alt+Space` keeps the nested menu for browsing rather than typing
-
-- **Atomic theme application with rollback**
-  - changes are staged
-  - snapshots are created
-  - rollback is built in
-
-- **Dynamic accent mode**
-  - follows Windows' live accent color
-  - especially nice with wallpaper rotation / Wallpaper Engine setups
-
-- **Game mode as a first-class concern**
-  - fullscreen apps can suspend Winarchy hotkeys automatically
-  - games can be kept out of tiling rules
-
----
-
-## The session shell (optional, no Explorer)
-
-By default Winarchy runs next to Explorer (coexistence mode). `winarchy shell activate --yes` makes
-`winarchy-shell.exe` the Windows shell at the next sign-in through the per-user Custom User Interface
-policy, so `explorer.exe` never starts. It is opt-in, records the exact prior value, and
-`winarchy shell deactivate` or the SYSTEM recovery task put Explorer back
-(see [docs/custom-shell-policy.md](docs/custom-shell-policy.md)). Do not activate it on a machine you
-cannot recover.
-
-What the shell draws and owns when Explorer is gone:
-
-- **Start menu** (`Win` tap or the dock logo): pinned apps, all apps from `shell:AppsFolder`, type to search,
-  power menu. Drop folders or files on the logo to pin them as *places*; right-click or `Shift+F10` unpins.
-- **Dock** per monitor with live DWM thumbnails, drag-and-drop to open files with an app, jump-list recents,
-  a tray flyout with the real tray icons and a system cluster (Quick Settings, clock, show desktop).
-- **Alt+Tab** across every workspace, with live thumbnails of the visible ones; holding `Alt` and stepping only previews, the window changes when you release.
-- **Desktop** with icons, wallpaper and the context menu; Windows notifications as toasts, and `Win+N` or the bell
-  replays the last five (there is no persistent notification list yet).
-- **Volume keys** (`Volume_Up/Down/Mute`) through AutoHotkey, with the volume OSD in the island.
-- **Run dialog** on `Win+Alt+R`.
-- **Files**, a native file manager in Rust (`files/`), is what `Win+E` opens when it is installed.
-
-**UWP apps need the UWP host, which is experimental and off by default.** Without it Settings (and every
-`ms-settings:` link), Calculator, Microsoft Store, Windows Security and other UWP apps fail to activate
-(`0x80040900`, "Class not registered") and never show a window, because Explorer is not there to host them. Win32
-apps, including packaged ones such as Notepad, work. The shell and the hotkeys open the classic applet for Sound,
-Network and Power instead, and say so when there is none.
-
-`winarchy uwphost on` makes the shell launch `winarchy-uwphost.exe` (`uwphost/`) from the next sign-in. It relies on
-private Windows interfaces: it downloads Microsoft's public symbols for the installed build on first use, checks them
-before calling anything and refuses to run when they do not match. The shell supervises it, restarts it after a crash
-or a hang, and after repeated failures tells you in the island and goes on without it until the next sign-in
-(`winarchy uwphost status` and `retry`). Without network on first use it retries and gives up until the next
-sign-in. So far it has only been verified in Windows Sandbox at 100 % scaling, and no release ships
-its binary yet: build it with `cargo build --release` in `uwphost/`. Apps left open across a host restart are closed by the
-new one, because Windows refuses to activate them again. If you need UWP apps you can count on, stay in coexistence mode
-(`winarchy shell deactivate`).
-
-Also covered without Explorer: a notice when a drive is connected and when the battery crosses the power plan's
-thresholds, an input-language pill with more than one layout, the main `Win+X` tools and display projection from the
-Winarchy menu, the magnifier and on-screen keyboard, taskbar progress on the dock, and a Wi-Fi list on the network
-icon (saved, open and WPA personal networks; Windows asks for the password).
-
-Other gaps without Explorer, from an audit of what Explorer normally does: no Focus assist, no enterprise Wi-Fi sign-in,
-no task view or virtual desktops, no `Win+X` menu, and no Bluetooth, Display or Printers panels. The parity table, with the evidence level of every row, is
-[docs/rust-session-shell-parity.md](docs/rust-session-shell-parity.md). The boot sequence, the single-instance
-rule and the logon race between the autostart task and the policy are covered by tests and the Sandbox scenarios
-under `tests/sandbox/`.
-
----
-
-## Performance
-
-The native shell is a 1.5 MB Rust binary. In a live session (30 s sample, dock and cluster on) it used
-**53 MB** of working set and **0.38 %** of one core, while `explorer.exe` on the same machine used
-294 MB and 2.58 %. Hot paths take nanoseconds (`hit_test` 16 ns, dock layout 88 ns). Method, commands
-and caveats are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
-
-Without Explorer the stack holds about 160 MB against about 360 MB with it. In a clean Windows Sandbox,
-installing Winarchy in coexistence mode added 5 processes and about 63 MB of resident Winarchy processes
-(`winarchy-shell` 14 MB, `komorebi` 33 MB, `AutoHotkey64` 16 MB), with idle CPU of the whole machine going from
-0.01 % to 0.12 %. Those Sandbox figures come from a single run.
+The session shell is newer and has gaps: read [what it covers and what it does not](docs/session-shell.md) before
+activating it, and do not activate it on a machine you cannot recover.
 
 ## Installation
 
@@ -271,8 +99,6 @@ and the winget pins. Run it from an admin PowerShell to also remove the Defender
 `-RemovePackages` also uninstalls komorebi and YASB; the other apps stay. Your backups stay in
 `backups\`; delete the folder when you no longer need them.
 
----
-
 ## CLI
 
 ```text
@@ -296,439 +122,45 @@ winarchy game-mode on|off|status|add <exe>|remove <exe>
 winarchy layout save | apply | order | list | forget <exe>
 winarchy mode [list | save | default [tiling|scrolling|floating]]
 winarchy accent sync [--force] | status
+winarchy uwphost [status|on|off|retry]  # Store apps inside the session shell
 winarchy reload
 winarchy doctor
+winarchy logs [n]
 ```
 
-### Updates — three axes
+Details: [updates, terminal, game mode, workspace modes, window placement and application rules](docs/guide.md).
 
-Winarchy is the single update channel; third-party auto-updaters (YASB, Flow) are off.
+## Performance
 
-| Command | Updates | How |
-| --- | --- | --- |
-| `winarchy update` | the packages Winarchy declares in `versions.lock.toml`, plus scoop | reports the outcome per package; warns if a core or Winarchy update is available |
-| `winarchy update --core` | pinned core: komorebi / YASB / Flow Launcher / AutoHotkey | unpins, upgrades, repins, rewrites `versions.lock.toml` |
-| `winarchy update --self` | Winarchy itself (CLI, templates, configs, AHK, themes) | `git fetch` + `git merge --ff-only` of `release` (must be checked out) + idempotent migration (`install.ps1`, mode preserved) |
+The native shell is a 1.5 MB Rust binary. In a live session (30 s sample, dock and cluster on) it used
+**53 MB** of working set and **0.38 %** of one core, while `explorer.exe` on the same machine used
+294 MB and 2.58 %. Hot paths take nanoseconds (`hit_test` 16 ns, dock layout 88 ns). Method, commands
+and caveats are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
-`winarchy update` deliberately touches only what Winarchy declares, not every package on
-the machine: the stack owns its own dependencies, not your unrelated apps. Core components
-are pinned because the stack depends on their concrete behaviour, so a major release never
-lands without someone reading the changelog first.
+Without Explorer the stack holds about 160 MB against about 360 MB with it. In a clean Windows Sandbox,
+installing Winarchy in coexistence mode added 5 processes and about 63 MB of resident Winarchy processes
+(`winarchy-shell` 14 MB, `komorebi` 33 MB, `AutoHotkey64` 16 MB), with idle CPU of the whole machine going from
+0.01 % to 0.12 %. Those Sandbox figures come from a single run.
 
-The version check is best-effort (GitHub Releases API), cached 6 h, and never blocks the
-flow. `winarchy doctor` shows installed vs latest release. Self-update only runs on a git
-checkout and aborts if the working tree has uncommitted changes to tracked files (your
-customization lives in untracked overrides, so it is never touched). Roll back with
-`git checkout <previous-tag>` + `install.ps1`.
+## Stack
 
----
-
-## Themes
-
-Themes are drop-in folders inside `themes/`.
-
-```text
-themes/my-theme/
-  theme.toml
-  preview.png
-  backgrounds/
-  lockscreen.png
-  wallpaper-engine.txt
-  jetbrains.icls
-  vscode.json
-```
-
-Everything in `backgrounds/` is a wallpaper the theme offers. Applying the theme sets the
-one you picked last time for it (the first one otherwise); `winarchy background gallery` opens
- a visual picker. `winarchy background next` or `SUPER + CTRL + SPACE` cycles through the
-rest. A theme without the folder leaves the
-wallpaper alone, and `wallpaper-engine.txt` wins over it when Wallpaper Engine is installed.
-
-Applying a theme also sets the lock screen image, which the sign-in screen reuses: the
-theme's `lockscreen.png` (or `.jpg`), otherwise its current wallpaper. Themes using
-`wallpaper-engine.txt` leave it alone unless they ship a `lockscreen.*`. Dynamic themes such as
-auto-accent draw it from the live accent (the Winarchy mark with its last bar in the accent) and
-redraw it whenever the accent changes. If the lock screen is set to Windows Spotlight it switches
-to Picture, and the sign-in screen only follows it with "Show the lock screen background picture
-on the sign-in screen" on.
-
-Only `theme.toml` is required, and any other file is ignored: keep leftovers from other
-ecosystems out of the folder.
-
-Values are substituted into generated JSON, CSS, YAML, XAML, INI, TOML and Lua, so their
-format is checked on the way in and the whole theme is rejected before anything is written:
-`colors.*`, `borders.*` and `ui.*` must be `#rrggbb`; the `[bar]` measures must be integers
-and `font_family` a font name; the `extension` in `vscode.json` must be `publisher.name`.
-
-Running:
-
-```powershell
-winarchy theme set my-theme
-```
-
-regenerates and applies the full surface atomically.
-
-A theme can also name its colors instead of numbering them, and Winarchy derives the rest:
-
-```toml
-[colors]
-accent = "#3264eb"
-selection = "#d0d0d0"
-muted = "#9e9e9e"
-background = "#fafafa"
-darker_background = "#dedede"
-foreground = "#212121"
-light_foreground = "#424242"
-bright_foreground = "#000000"
-red = "#c900c4"
-green = "#4a2fd0"
-# ... yellow, blue, magenta, cyan and their bright_ variants
-```
-
-`color0`-`color15`, `cursor`, `selection_background`, `selection_foreground` and the whole
-`[borders]` section are filled in from those names. Whatever the theme declares itself always
-wins, so both forms can be mixed and an existing ANSI theme keeps working untouched. Porting
-a theme is then a copy of its upstream palette rather than a manual remap.
-
-`theme.toml` also takes an optional `[bar]` section that drives the YASB bar geometry and
-typography (and the stackbar font komorebi draws over stacked windows). Omit it and the
-theme inherits the defaults:
-
-```toml
-[bar]
-height = 34
-font_family = "JetBrainsMono NF"
-font_size = 13
-padding = 8
-```
-
-`color0`-`color15` are the ANSI palette (terminal, btop, nvim), where red has to stay red.
-The bar reads them by default for its icon groups, but a theme can decouple the two with an
-optional `[ui]` section — useful when the accent is dynamic and a fixed palette would clash
-(see `auto-accent`):
-
-```toml
-[ui]
-system = "#c8c8c8"   # gpu / cpu / memory   (default: color6)
-media = "#9ba3b8"    # volume / mic / media (default: color5)
-net = "#7e8699"      # wifi / bluetooth     (default: color4)
-```
-
-Included themes track the current Omarchy catalog, plus Winarchy's own
-`auto-accent` dynamic theme:
-
-| Dark themes | Light themes |
+| Omarchy idea | Winarchy |
 |---|---|
-| `catppuccin` | `catppuccin-latte` |
-| `ethereal` | `flexoki-light` |
-| `everforest` | `rose-pine` |
-| `gruvbox` | `lupine` |
-| `hackerman` | `white` |
-| `kanagawa` | |
-| `last-horizon` | |
-| `lumon` | |
-| `matte-black` | |
-| `miasma` | |
-| `nord` | |
-| `osaka-jade` | |
-| `retro-82` | |
-| `ristretto` | |
-| `solitude` | |
-| `tokyo-night` | |
-| `vantablack` | |
-| `auto-accent` | |
-
-Light themes automatically switch Windows apps/system surfaces to light mode;
-dark themes switch them back to dark mode. `auto-accent` stays dark, but follows
-Windows' live accent color.
-
-### App adapters
-
-If a theme ships the optional drop-ins, Winarchy can also sync:
-
-- **JetBrains IDEs**
-- **VS Code / Cursor**
-- **Obsidian**
-- **Claude Code** — follows the theme's `mode` (dark/light); no drop-in needed
-
-Missing apps are skipped silently. Existing rollback snapshots cover these external writes too.
-
----
-
-## Dynamic accent mode
-
-```powershell
-winarchy theme set auto-accent
-```
-
-This mode reads **Windows' live accent color** for borders and accent surfaces at the moment you run it.
-
-**There is no background watcher.** Nothing re-applies the theme when the Windows
-accent changes on its own (auto accent color, a wallpaper rotation, a Wallpaper
-Engine playlist) — every surface (starship, YASB, komorebi borders, WezTerm, …)
-keeps showing the colors from the last `theme set`/`accent sync` until you run
-one again.
-
-Recommended if:
-
-- you use automatic accent colors
-- you rotate wallpapers
-- you use Wallpaper Engine playlists
-
-Manual controls (run after the accent actually changes):
-
-```powershell
-winarchy accent sync
-winarchy accent status
-```
-
----
-
-## Terminal profile
-
-**WezTerm is the default terminal** — `SUPER+Return`, the coding-agent launcher and
-`winarchy menu` all open it. Its whole config is generated at
-`config\wezterm\wezterm.lua` from the active theme (colors, JetBrainsMono NF with
-ligatures, padding, opacity, 10k scrollback, tabs and panes behind the `CTRL+Space`
-leader — see `docs/keybindings.md`). Your own settings go in `config\wezterm\user.lua`
-(gitignored, never touched by `theme set` or `update`; copy `user.lua.example` to start).
-Windows Terminal stays installed and keeps getting the "Winarchy" color scheme, but
-Winarchy no longer launches it.
-
-Winarchy ships an omarchy-style shell experience on PowerShell 7 + WezTerm:
-
-- **starship** prompt, themed by the theme engine (`config/pwsh/starship.toml` is regenerated on every `winarchy theme set`; the prompt recolors live, no restart needed)
-- **PSFzf + fzf** — fuzzy history (`Ctrl+R`) and file picker (`Ctrl+T`)
-- **zoxide** — smart `cd` (`z proj`, `zi`)
-- **eza / bat** — modern `ls`/`ll`/`la`/`lt` and `cat`
-- **PSReadLine** — fish-style history predictions in list view
-
-`install.ps1` installs the tools (winget + PSGallery) and adds a single marked block to your pwsh `$PROFILE` that dot-sources the managed profile (`config/pwsh/profile.ps1`). Every integration is guarded: if a binary is missing, that piece is silently skipped — the profile never breaks your shell.
-
-Your own customization goes in `config/pwsh/user.ps1` (gitignored), loaded last so it can override anything. To uninstall the hook: `Remove-WinarchyShellProfile` (a snapshot of your `$PROFILE` is taken before any change).
-
----
-
-## Game mode
-
-Winarchy treats gaming as a real requirement, not an afterthought.
-
-- registered games are never tiled
-- fullscreen game windows suspend SUPER hotkeys automatically
-- manual overrides are available when needed
-
-```powershell
-winarchy game-mode on
-winarchy game-mode off
-winarchy game-mode add <exe>
-```
-
-`game-mode add` writes to `games.user.toml` (yours, gitignored), so `winarchy update --self`
-never collides with it. The shipped catalog stays in `games.toml`. Names with spaces work
-quoted or not: `winarchy game-mode add The iTero Coach.exe`.
-
----
-
-## Workspace modes
-
-Every workspace is in one of three modes, like Omarchy 4.5: **tiling** (BSP), **scrolling**
-(a strip of columns) or **floating** (windows stay where you put them, as in plain Windows).
-`SUPER+Shift+L` cycles the focused workspace forward and `SUPER+Alt+Shift+L` back; the
-`SUPER+Alt+Space` layout menu picks one directly. Each workspace keeps its own mode.
-
-The mode is saved to `config/windows.toml` (machine data, gitignored) a moment after you
-change it, and `winarchy reload` or a komorebi restart restores it. `winarchy mode` lists the
-live modes and `winarchy mode default floating` sets the mode of workspaces with no saved one
-(applied by the next `winarchy layout apply`). The default stays `tiling`.
-
----
-
-## Window placement memory
-
-komorebi decides where a new window lands based on what is focused at that moment, so the
-same app ends up somewhere different depending on the order you opened things. Winarchy
-lets you capture the arrangement instead of declaring it:
-
-```powershell
-winarchy layout save      # remember where every app currently lives (monitor, workspace, tile)
-winarchy layout list      # review what was captured
-winarchy layout forget <exe>
-```
-
-Preferences land in `config/windows.toml` — your machine, not the repo, so no application
-is ever hardcoded into Winarchy. `winarchy layout apply` bakes them into the generated
-`komorebi.json`, so they survive reloads and cold starts. Runtime rules
-(`komorebic workspace-rule`) are deliberately not used: a config reload wipes those at an
-indeterminate point afterwards.
-
-Monitors are stored by their `device_id`, not by index: the index depends on the order
-Windows enumerates displays and changes when you reconnect or switch ports. If a saved
-monitor is not connected, that entry is skipped with a warning rather than applied to the
-wrong screen — and `winarchy doctor` reports it.
-
-By default a preference only applies the **first time** a window appears, so the app is
-born where you want it and you can still move it freely afterwards. Set `pin = true` on an
-entry to have komorebi keep returning it there.
-
-### Tile position (slots)
-
-The workspace is only half the answer: within it, komorebi orders windows by insertion, so
-whichever app opens first takes the main tile. `winarchy layout save` also records the tile
-position of each window as a `slot` (0 = the first tile), and a background reconciler keeps
-it that way:
-
-```powershell
-winarchy layout order     # put every window back in its saved slot, right now
-```
-
-The reconciler reacts to komorebi's own events, and what it does depends on who moved the
-window:
-
-| What happened | What it does |
-| --- | --- |
-| A window appears in the workspace | Puts the windows back in their saved slots |
-| **You** move a window | **Learns it** — the new position becomes the saved slot |
-
-So a workspace with Discord pinned to `slot = 0` keeps Discord on the left whatever you open
-next to it, and the day you decide Discord belongs on the right, you just move it and that
-sticks. Nothing to re-run.
-
-Only the slot is learned: the monitor, the workspace and `pin` stay as they were, and an app
-without a saved preference never gets one just for being moved.
-
-To opt out, delete the `slot` line from that entry in `config/windows.toml` — an entry with
-no slot is never reordered. The reconciler runs as its own hidden process, started at logon
-alongside the rest of the stack; `winarchy doctor` reports it when there are slots to keep,
-and its log lives in `%LOCALAPPDATA%\winarchy\window-slots.log`.
-
-**What this does not cover:** geometry. Slots fix the *order* of the tiles, not their size —
-how wide each tile is stays a komorebi layout decision.
-
----
-
-## Application rules
-
-Some apps do not behave under a tiling window manager: they minimise to the tray and come
-back wrong, spawn ghost child windows, announce their window too late to be tiled, or use
-`WS_EX_LAYERED` and break borders. komorebi has a knob for each case, and the community
-maintains those answers for hundreds of apps in
-[komorebi-application-specific-configuration](https://github.com/LGUG2Z/komorebi-application-specific-configuration).
-
-Winarchy vendors that file (`vendor/asc/applications.json`, pinned in `versions.lock.toml`)
-and **compiles it into the generated `komorebi.json`** instead of pointing komorebi at it
-with `app_specific_configuration_path`. That way Winarchy owns the precedence, the result is
-a single inspectable file, and no third-party path stays live at runtime.
-
-Four layers, lowest priority first:
-
-| # | layer | who edits it |
-|---|---|---|
-| 1 | `vendor/asc/applications.json` | the community (vendored, pinned) |
-| 2 | `templates/komorebi.json.tpl` | Winarchy |
-| 3 | `games.toml` + `games.user.toml` | Winarchy / **you** (`game-mode add`, gitignored) |
-| 4 | `config/komorebi/rules.toml` | **you** — gitignored, never overwritten |
-
-**Placement** (`ignore` / `manage` / `floating`) is exclusive: the highest layer that has an
-opinion about a window wins, and its decision *replaces* the lower ones. That is what makes
-your `[[ignore]]` actually beat a community `manage` — komorebi's lists are additive, so
-adding the ignore is not enough, the manage has to be removed.
-
-**Attributes** (`tray_and_multi_window`, `object_name_change`, `slow_application`, `layered`,
-`transparency_ignore`) describe behaviour rather than placement, so they are unioned across
-every layer and never override each other.
-
-Copy `config/komorebi/rules.toml.example` to `config/komorebi/rules.toml` to add your own:
-
-```toml
-[[ignore]]
-exe = "GalaxyClient.exe"      # beats the community `manage` for this window
-
-[[disable]]
-asc = "GOG Galaxy"            # drop that community entry entirely, by app name
-```
-
-`rules.toml` is gitignored, so neither `git pull` nor `winarchy update` can touch it — it is
-a separate layer, not the same file.
-
-```powershell
-winarchy rules explain zen.exe   # which rules match, and which layer won
-winarchy rules collisions        # community rules a higher layer overrode
-winarchy rules sync              # diff the upstream file (--apply to re-vendor it)
-```
-
-`winarchy rules sync` shows the per-app diff before changing anything and flags which of
-those apps you have disabled locally. `winarchy doctor` reports the pinned revision and the
-current collisions.
-
----
-
-## Keybindings
-
-- Readable reference: [docs/keybindings.md](docs/keybindings.md)
-- In-session overlay: `SUPER+K`
-
----
-
-## Architecture
-
-- the repo is the **source of truth**
-- generated files come from `templates/*.tpl`
-- runtime state lives in `state/`
-- snapshots and rollback data live in `backups/`
-- pinned core versions live in `versions.lock.toml`
-
-This project prefers:
-
-- explicit configuration
-- narrow, reversible changes
-- deterministic regeneration
-- practical recovery over cleverness
-
----
-
-## What Winarchy is not
-
-Winarchy is **not**:
-
-- a Linux compatibility layer
-- a fake Hyprland port
-- a Windows shell replacement by default: the session shell is an explicit opt-in and Explorer stays unless you activate it
-- a promise that Windows will behave exactly like Linux
-
-It is a **best-effort, highly practical translation** of a workflow I genuinely enjoy.
-
-That distinction matters.
-
----
+| Hyprland | komorebi |
+| Waybar | Winarchy shell (Island + dock), YASB optional |
+| Walker | Flow Launcher |
+| compositor keybindings | AutoHotkey v2 |
+| `omarchy-theme-set` / `omarchy-update` | `winarchy theme set` / `winarchy update` |
+
+The repo is the source of truth: generated files come from `templates/*.tpl`, your overrides are untracked files
+that updates never touch, runtime state lives in `state/`, snapshots in `backups/` and pinned versions in
+`versions.lock.toml`. Changes are meant to be narrow and reversible.
 
 ## Limitations
 
-Some things map beautifully from Omarchy to Windows. Some do not.
-
-Accepted limitations include:
-
-- notifications are Windows toasts: there is no Linux-style daemon, and without Explorer no persistent notification list
-- Windows foreground/focus rules that sometimes require small workarounds
-- app-specific theming limits when upstream software does not expose enough control
-
-Winarchy embraces those constraints instead of hiding them behind brittle hacks.
-
----
-
-## Inspiration
-
-This project exists because **Omarchy made me want this workflow everywhere**.
-
-So if you are someone who:
-
-- loves Linux
-- appreciates curated environments
-- still needs Windows on a primary desktop
-- wants a cleaner, faster, more intentional setup
-
-then Winarchy might feel familiar.
-
----
+- Windows foreground and focus rules sometimes need small workarounds.
+- Apps that expose little theming stay only partly themed.
+- Notifications are Windows toasts; without Explorer there is no persistent notification list.
 
 ## Credits
 
@@ -738,8 +170,6 @@ then Winarchy might feel familiar.
 - **Flow Launcher**
 - **AutoHotkey**
 - and the Windows power-user ecosystem that makes projects like this possible
-
----
 
 ## License
 
