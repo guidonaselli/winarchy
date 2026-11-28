@@ -1,5 +1,4 @@
-// Una app puede quedar en modo de ahorro (prioridad Idle) estando a la vista: con el equipo cargado su hilo
-// de interfaz no llega a ejecutar y Windows la da por colgada. Acá se le devuelve la prioridad normal.
+// Una app en modo de ahorro a la vista no llega a ejecutar con el equipo cargado y queda "no responde".
 use windows::Win32::Foundation::{CloseHandle, BOOL, HWND, LPARAM};
 use windows::Win32::System::Threading::{
     GetPriorityClass, GetProcessInformation, OpenProcess, ProcessPowerThrottling, SetPriorityClass, SetProcessInformation, IDLE_PRIORITY_CLASS,
@@ -36,24 +35,32 @@ unsafe extern "system" fn collect_hung(window: HWND, out: LPARAM) -> BOOL {
     true.into()
 }
 
-// En Idle y sin estar colgada ni al frente es una tarea de fondo legítima: no se toca.
+// Solo se rescata el modo de ahorro (Idle + EcoQoS): un Idle sin EcoQoS lo eligió alguien.
 unsafe fn rescue(pid: u32, hung: bool, foreground: bool) -> bool {
-    let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_INFORMATION, false, pid) else { return false };
-    let size = std::mem::size_of::<PROCESS_POWER_THROTTLING_STATE>() as u32;
-    let mut state = PROCESS_POWER_THROTTLING_STATE { Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION, ..Default::default() };
-    let starved = GetPriorityClass(process) == IDLE_PRIORITY_CLASS.0
-        && (hung
-            || (foreground
-                && GetProcessInformation(process, ProcessPowerThrottling, &mut state as *mut _ as *mut _, size).is_ok()
-                && state.ControlMask & state.StateMask & PROCESS_POWER_THROTTLING_EXECUTION_SPEED != 0));
-    let rescued = starved && SetPriorityClass(process, NORMAL_PRIORITY_CLASS).is_ok();
+    // la escritura se pide recién con el modo confirmado: un juego con anti-cheat al frente solo recibe la consulta
+    if !(hung || foreground) || !saving(pid) {
+        return false;
+    }
+    let Ok(process) = OpenProcess(PROCESS_SET_INFORMATION, false, pid) else { return false };
+    let rescued = SetPriorityClass(process, NORMAL_PRIORITY_CLASS).is_ok();
     if rescued {
         // máscaras en cero: Windows vuelve a decidir la velocidad de ejecución
         let reset = PROCESS_POWER_THROTTLING_STATE { Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION, ..Default::default() };
-        let _ = SetProcessInformation(process, ProcessPowerThrottling, &reset as *const _ as *const _, size);
+        let _ = SetProcessInformation(process, ProcessPowerThrottling, &reset as *const _ as *const _, std::mem::size_of_val(&reset) as u32);
     }
     let _ = CloseHandle(process);
     rescued
+}
+
+unsafe fn saving(pid: u32) -> bool {
+    let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return false };
+    let mut state = PROCESS_POWER_THROTTLING_STATE { Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION, ..Default::default() };
+    let size = std::mem::size_of_val(&state) as u32;
+    let saving = GetPriorityClass(process) == IDLE_PRIORITY_CLASS.0
+        && GetProcessInformation(process, ProcessPowerThrottling, &mut state as *mut _ as *mut _, size).is_ok()
+        && state.ControlMask & state.StateMask & PROCESS_POWER_THROTTLING_EXECUTION_SPEED != 0;
+    let _ = CloseHandle(process);
+    saving
 }
 
 #[cfg(test)]
@@ -64,7 +71,7 @@ mod tests {
     use windows::Win32::Foundation::HANDLE;
 
     #[test]
-    fn only_a_hung_or_throttled_foreground_idle_process_gets_its_priority_back() {
+    fn only_a_visible_process_in_power_saving_gets_its_priority_back() {
         let mut child = std::process::Command::new("cmd.exe")
             .args(["/c", "pause"])
             .stdin(std::process::Stdio::piped())
@@ -77,14 +84,18 @@ mod tests {
             assert!(!rescue(pid, true, true), "a normal process is left alone");
             SetPriorityClass(process, IDLE_PRIORITY_CLASS).unwrap();
             assert!(!rescue(pid, false, false), "background work stays idle");
-            assert!(!rescue(pid, false, true), "idle without throttling in the foreground was chosen by someone");
+            assert!(!rescue(pid, false, true), "idle without throttling was chosen by someone");
+            assert!(!rescue(pid, true, false), "also when hung");
             let eco = PROCESS_POWER_THROTTLING_STATE { Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION, ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED, StateMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED };
-            SetProcessInformation(process, ProcessPowerThrottling, &eco as *const _ as *const _, std::mem::size_of_val(&eco) as u32).unwrap();
-            assert!(rescue(pid, false, true));
-            assert_eq!(GetPriorityClass(process), NORMAL_PRIORITY_CLASS.0);
-            SetPriorityClass(process, IDLE_PRIORITY_CLASS).unwrap();
-            assert!(rescue(pid, true, false));
-            assert_eq!(GetPriorityClass(process), NORMAL_PRIORITY_CLASS.0);
+            let throttle = || SetProcessInformation(process, ProcessPowerThrottling, &eco as *const _ as *const _, std::mem::size_of_val(&eco) as u32).unwrap();
+            throttle();
+            assert!(!rescue(pid, false, false), "background power saving is left alone");
+            for (hung, foreground) in [(false, true), (true, false)] {
+                SetPriorityClass(process, IDLE_PRIORITY_CLASS).unwrap();
+                throttle();
+                assert!(rescue(pid, hung, foreground));
+                assert_eq!(GetPriorityClass(process), NORMAL_PRIORITY_CLASS.0);
+            }
         }
         let _ = child.kill();
         let _ = child.wait();
