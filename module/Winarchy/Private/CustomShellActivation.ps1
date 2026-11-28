@@ -129,7 +129,7 @@ function Remove-WinarchySessionShellPolicy {
     $status = Get-WinarchyCustomShellStatus
     Assert-WinarchyCustomShellOwner $status.Record
     if ($status.State -ne 'Installed') { return }
-    if ($DryRun) { Write-Host '  [ ] Give Explorer back as the Windows shell (asks for administrator rights)'; return }
+    if ($DryRun) { Write-Host '  [ ] Restore the previous Windows shell policy (asks for administrator rights)'; return }
     $null = Invoke-WinarchyCustomShellChange -Action deactivate
     Set-WinarchyUwphost -Action off
     $prior = $status.Record.Prior
