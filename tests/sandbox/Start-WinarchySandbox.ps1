@@ -2,14 +2,17 @@
 .SYNOPSIS
   Installs Winarchy in a clean Windows Sandbox as a regular (non-elevated) user and checks the result.
 .DESCRIPTION
-  Tests what is committed (HEAD), not the working tree: the sandbox clones a bare copy of the
-  repo whose `release` branch points at HEAD.
+  Tests what is committed (HEAD) unless -WorkingTree is given, which snapshots the working tree
+  (tracked and untracked, not ignored) without touching any branch or the index of the repo. The sandbox
+  clones a bare copy of the repo whose `release` branch points at that commit.
     install     winget -> git + pwsh, clone, install.ps1 twice, Assert-Install
     uninstall   install -Activate, uninstall.ps1 twice (no pins, env vars, PATH entry, logon task,
                 running stack, profile hook or Start menu command left), reinstall, Assert-Install
     paths       boot.ps1 into a folder with a space, an accent and an apostrophe, activated,
                 Assert-Install -Mode active
-    ahkv1       AutoHotkey 1.1 already installed, then install.ps1: it must end on the pinned v2
+    interrupted install.ps1 -Activate killed (process tree) after 60 s, then install.ps1 -Activate and install.ps1
+                again: the re-run must finish and Assert-Install must pass
+    uninstall-interrupted install -Activate, uninstall.ps1 killed (process tree) once its autostart task is gone, uninstall.ps1 again, reinstall\n                 (the re-run must leave nothing behind and Assert-Install must pass)\n    ahkv1       AutoHotkey 1.1 already installed, then install.ps1: it must end on the pinned v2
                 (the AutoHotkey 1.1 installer can hang in the sandbox; it is stopped after 10 min)
     published   the real one-liner against GitHub (irm .../release/boot.ps1 | iex), Assert-Install
     selfupdate  install.ps1 twice, then roll the checkout back to v1.6.0 (AHK/Flow unpinned, as
@@ -25,8 +28,9 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'barswitch')][string]$Scenario,
+    [Parameter(Mandatory)][ValidateSet('install', 'boot', 'selfupdate', 'published', 'uninstall', 'paths', 'ahkv1', 'barswitch', 'interrupted', 'uninstall-interrupted', 'hungpipe', 'benchmark')][string]$Scenario,
     [switch]$Keep,
+    [switch]$WorkingTree,
     [string]$Out = (Join-Path $env:TEMP 'winarchy-sandbox')
 )
 $ErrorActionPreference = 'Stop'
@@ -38,6 +42,17 @@ $run = Join-Path $Out "$(Get-Date -Format 'yyyyMMdd-HHmmss')-$Scenario"
 New-Item -ItemType Directory -Path $run -Force | Out-Null
 git clone --quiet --bare $root (Join-Path $run 'winarchy.git')
 git -C (Join-Path $run 'winarchy.git') branch -f release HEAD
+if ($WorkingTree) {
+    # snapshot of the working tree (tracked + untracked, not ignored) as a child of HEAD that no ref in the repo points at
+    $idx = Join-Path $run 'snapshot.index'
+    $env:GIT_INDEX_FILE = $idx
+    try {
+        git -C $root read-tree HEAD
+        git -C $root add -A
+        $tip = (git -C $root commit-tree (git -C $root write-tree) -p HEAD -m 'working tree snapshot').Trim()
+    } finally { Remove-Item Env:\GIT_INDEX_FILE; Remove-Item $idx -ErrorAction SilentlyContinue }
+    git -C $root push --quiet (Join-Path $run 'winarchy.git') "${tip}:refs/heads/release"
+}
 Copy-Item (Join-Path $root 'boot.ps1') $run
 Copy-Item $PSScriptRoot (Join-Path $run 'scripts') -Recurse
 
@@ -85,10 +100,13 @@ try {
         if ($code -ne 0) { throw "elevated check exited with $code; see $run" }
     }
     Invoke-GuestScript ExistingLogin 'Invoke-SandboxScenario.ps1' "-Scenario $Scenario"
-    $mode = if ($Scenario -in 'boot', 'paths') { 'active' } else { 'coexistence' }
-    $code = Invoke-Guest ExistingLogin "pwsh.exe -NoProfile -ExecutionPolicy Bypass -File C:\sandbox\scripts\Assert-Install.ps1 -Mode $mode"
-    Get-Content (Join-Path $run 'assert.txt')
-    if ($code -ne 0) { throw "Assert-Install failed; see $run" }
+    # hungpipe y benchmark no dejan una instalación que verificar: uno corre un test de Pester y el otro solo mide
+    if ($Scenario -notin 'hungpipe', 'benchmark') {
+        $mode = if ($Scenario -in 'boot', 'paths') { 'active' } else { 'coexistence' }
+        $code = Invoke-Guest ExistingLogin "pwsh.exe -NoProfile -ExecutionPolicy Bypass -File C:\sandbox\scripts\Assert-Install.ps1 -Mode $mode"
+        Get-Content (Join-Path $run 'assert.txt')
+        if ($code -ne 0) { throw "Assert-Install failed; see $run" }
+    }
     Write-Host "PASS: $Scenario" -ForegroundColor Green
 }
 finally {

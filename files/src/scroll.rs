@@ -153,3 +153,30 @@ pub fn locate(x: i32, y: i32) -> Option<(f64, f64, String, f64)> {
         Some((f64::from(x - origin.x) / scale, f64::from(y - origin.y) / scale, name, fraction))
     }
 }
+
+// Every list row as (name, screen rect `(left, top, right, bottom)`); with `wide` a row spans the whole list width.
+pub fn row_rects(wide: bool) -> Vec<(String, (i32, i32, i32, i32))> {
+    use windows::Win32::UI::Accessibility::{UIA_ButtonControlTypeId, UIA_ControlTypePropertyId};
+    (|| -> Result<Vec<(String, (i32, i32, i32, i32))>> {
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)?;
+            let root = automation.ElementFromHandle(GetForegroundWindow())?;
+            let Some((_, view)) = list_scroller(&automation, &root)? else { return Ok(Vec::new()) };
+            let buttons = root.FindAll(TreeScope_Descendants, &automation.CreatePropertyCondition(UIA_ControlTypePropertyId, &VARIANT::from(UIA_ButtonControlTypeId.0))?)?;
+            let mut rows = Vec::new();
+            for index in 0..buttons.Length()? {
+                let element = buttons.GetElement(index)?;
+                let row = element.CurrentBoundingRectangle()?;
+                let middle = (row.left + row.right) / 2;
+                if middle < view.left || middle > view.right || row.bottom <= view.top || row.top >= view.bottom {
+                    continue;
+                }
+                let (left, right) = if wide { (view.left, view.right) } else { (row.left, row.right) };
+                rows.push((element.CurrentName()?.to_string(), (left, row.top, right, row.bottom)));
+            }
+            Ok(rows)
+        }
+    })()
+    .unwrap_or_default()
+}

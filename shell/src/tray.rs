@@ -4,34 +4,42 @@
 // van directo a la ventana dueña del ícono. Sin la DLL, o con YASB corriendo (dueño del mutex), la shell no hace nada y
 // el botón de bandeja del dock sigue abriendo la bandeja nativa.
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
+use std::collections::VecDeque;
 use std::sync::Mutex;
 
 const NIF_MESSAGE: u32 = 0x1;
 const NIF_ICON: u32 = 0x2;
 const NIF_TIP: u32 = 0x4;
 const NIF_STATE: u32 = 0x8;
+const NIF_INFO: u32 = 0x10;
+const NIF_REALTIME: u32 = 0x40;
 const NIS_HIDDEN: u32 = 0x1;
 const NIM_ADD: u32 = 0;
 const NIM_MODIFY: u32 = 1;
 const NIM_DELETE: u32 = 2;
 const NIM_SETVERSION: u32 = 4;
+const NIF_GUID: u32 = 0x20;
+const NIIF_USER: u32 = 0x4;
 const PACKET_ICON: u32 = 2;
 const HEADER: usize = 28;
 const MAX_SIDE: u32 = 256;
 
 const WM_LBUTTONDOWN: u32 = 0x201;
 const WM_LBUTTONUP: u32 = 0x202;
+const WM_LBUTTONDBLCLK: u32 = 0x203;
 const WM_RBUTTONDOWN: u32 = 0x204;
 const WM_RBUTTONUP: u32 = 0x205;
 const WM_MBUTTONDOWN: u32 = 0x207;
 const WM_MBUTTONUP: u32 = 0x208;
 const WM_CONTEXTMENU: u32 = 0x7B;
 const NIN_SELECT: u32 = 0x400;
+const NIN_BALLOONHIDE: u32 = 0x403;
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Icon {
     pub hwnd: u32,
     pub uid: u32,
+    pub guid: [u8; 16],
     pub callback: u32,
     pub version: u32,
     pub tip: String,
@@ -46,18 +54,118 @@ pub struct Packet {
     pub message: u32,
     pub hwnd: u32,
     pub uid: u32,
+    pub guid: [u8; 16],
     pub flags: u32,
     pub callback: u32,
     pub version: u32,
     pub tip: String,
+    pub info: String,
+    pub info_title: String,
+    pub info_flags: u32,
+    pub timeout_ms: u32,
     pub state: u32,
     pub mask: u32,
     pub icon: Option<(u32, u32, Vec<u8>)>,
+    pub balloon_icon: Option<(u32, u32, Vec<u8>)>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BalloonRequest {
+    pub hwnd: u32,
+    pub uid: u32,
+    pub guid: [u8; 16],
+    pub callback: u32,
+    pub version: u32,
+    pub title: String,
+    pub text: String,
+    pub flags: u32,
+    pub timeout_ms: u32,
+    pub realtime: bool,
+    pub sequence: u64,
+    pub icon: Option<(u32, u32, Vec<u8>)>,
+}
+
+#[derive(Default)]
+pub struct BalloonQueue {
+    current: Option<BalloonRequest>,
+    pending: VecDeque<BalloonRequest>,
+}
+
+impl BalloonQueue {
+    pub fn submit(&mut self, request: BalloonRequest) -> bool {
+        if request.text.is_empty() {
+            return false;
+        }
+        if self.current.is_none() {
+            self.current = Some(request);
+            return true;
+        }
+        if request.realtime || self.pending.len() >= 32 {
+            return false;
+        }
+        self.pending.push_back(request);
+        true
+    }
+
+    #[cfg(test)]
+    pub fn finish(&mut self) -> Option<BalloonRequest> {
+        self.current.take();
+        self.current = self.pending.pop_front();
+        self.current.clone()
+    }
+
+    pub fn finish_if(&mut self, expected: &BalloonRequest) -> Option<(BalloonRequest, Option<BalloonRequest>)> {
+        if self.current.as_ref()?.sequence != expected.sequence { return None; }
+        let completed = self.current.take()?;
+        self.current = self.pending.pop_front();
+        Some((completed, self.current.clone()))
+    }
+
+    pub fn update_callback(&mut self, hwnd: u32, uid: u32, guid: [u8; 16], callback: Option<u32>, version: Option<u32>) {
+        let matches = |r: &BalloonRequest| if guid != [0; 16] { r.guid == guid } else { r.guid == [0; 16] && r.hwnd == hwnd && r.uid == uid };
+        for request in self.current.iter_mut().chain(self.pending.iter_mut()).filter(|r| matches(r)) {
+            if let Some(callback) = callback { request.callback = callback; }
+            if let Some(version) = version { request.version = version; }
+        }
+    }
+
+    pub fn cancel(&mut self, hwnd: u32, uid: u32, guid: [u8; 16]) -> (Option<BalloonRequest>, Option<BalloonRequest>) {
+        let matches = |r: &BalloonRequest| if guid != [0; 16] { r.guid == guid } else { r.guid == [0; 16] && r.hwnd == hwnd && r.uid == uid };
+        let removed = if self.current.as_ref().is_some_and(matches) { self.current.take() } else { None };
+        self.pending.retain(|r| !matches(r));
+        let next = if removed.is_some() {
+            self.current = self.pending.pop_front();
+            self.current.clone()
+        } else {
+            None
+        };
+        (removed, next)
+    }
+
+    pub fn current(&self) -> Option<&BalloonRequest> {
+        self.current.as_ref()
+    }
+
+    #[cfg(test)]
+    pub fn pending_len(&self) -> usize {
+        self.pending.len()
+    }
+}
+
+fn utf16_field(data: &[u8], start: usize, len: usize) -> String {
+    let units = data.get(start..start.saturating_add(len))
+        .unwrap_or_default()
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .take_while(|u| *u != 0)
+        .collect::<Vec<_>>();
+    String::from_utf16_lossy(&units)
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Gesture {
     Left,
+    LeftDouble,
     Right,
     Middle,
 }
@@ -67,6 +175,27 @@ fn u32_at(b: &[u8], off: usize) -> u32 {
 }
 
 // Una trama del hook: cabecera `=IQIIII` (tipo, dwData, cbData, ancho, alto, bytes de ícono), el SHELLTRAYDATA crudo y los píxeles BGRA.
+pub fn parse_shell_notify(data: &[u8], icon: Option<(u32, u32, Vec<u8>)>, balloon_icon: Option<(u32, u32, Vec<u8>)>) -> Option<Packet> {
+    if data.len() < 964 || data.len() > 4096 || u32_at(data, 0) != 0x34753423 {
+        return None;
+    }
+    let (message, flags) = (u32_at(data, 4), u32_at(data, 20));
+    if !matches!(message, NIM_ADD | NIM_MODIFY | NIM_DELETE | NIM_SETVERSION) {
+        return None;
+    }
+    let tip = if flags & NIF_TIP != 0 { utf16_field(data, 32, 256) } else { String::new() };
+    Some(Packet {
+        message, hwnd: u32_at(data, 12), uid: u32_at(data, 16),
+        guid: if flags & NIF_GUID != 0 { data[944..960].try_into().unwrap() } else { [0; 16] },
+        flags, callback: u32_at(data, 24), version: u32_at(data, 808), tip,
+        info: if flags & NIF_INFO != 0 { utf16_field(data, 296, 512) } else { String::new() },
+        info_title: if flags & NIF_INFO != 0 { utf16_field(data, 812, 128) } else { String::new() },
+        info_flags: if flags & NIF_INFO != 0 { u32_at(data, 940) } else { 0 },
+        timeout_ms: if flags & NIF_INFO != 0 { u32_at(data, 808) } else { 0 },
+        state: u32_at(data, 288), mask: u32_at(data, 292), icon, balloon_icon,
+    })
+}
+
 pub fn parse(data: &[u8]) -> Option<Packet> {
     if u32_at(data, 0) != PACKET_ICON || data.len() < HEADER {
         return None;
@@ -77,28 +206,33 @@ pub fn parse(data: &[u8]) -> Option<Packet> {
         return None;
     }
     let flags = u32_at(payload, 20);
-    let tip = if flags & NIF_TIP != 0 && payload.len() >= 288 {
-        let units: Vec<u16> = payload[32..288].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|u| *u != 0).collect();
-        String::from_utf16_lossy(&units)
-    } else {
-        String::new()
-    };
+    let tip = if flags & NIF_TIP != 0 { utf16_field(payload, 32, 256) } else { String::new() };
+    let info = if flags & NIF_INFO != 0 { utf16_field(payload, 296, 512) } else { String::new() };
+    let info_title = if flags & NIF_INFO != 0 { utf16_field(payload, 812, 128) } else { String::new() };
+    let info_flags = if flags & NIF_INFO != 0 { u32_at(payload, 940) } else { 0 };
+    let timeout_ms = if flags & NIF_INFO != 0 { u32_at(payload, 808) } else { 0 };
+    let balloon_icon = if flags & NIF_INFO != 0 && info_flags & 0xF == NIIF_USER && payload.len() >= 964 { icon_pixels(u32_at(payload, 960)) } else { None };
     let pixels = data.get(HEADER + cb..HEADER + cb + icon_len);
     let icon = pixels.filter(|p| w > 0 && h > 0 && w <= MAX_SIDE && h <= MAX_SIDE && p.len() == (w * h * 4) as usize).map(|p| (w, h, p.to_vec()));
-    Some(Packet { message: u32_at(payload, 4), hwnd: u32_at(payload, 12), uid: u32_at(payload, 16), flags, callback: u32_at(payload, 24), version: u32_at(payload, 808), tip, state: u32_at(payload, 288), mask: u32_at(payload, 292), icon })
+    Some(Packet { message: u32_at(payload, 4), hwnd: u32_at(payload, 12), uid: u32_at(payload, 16), guid: if flags & NIF_GUID != 0 && payload.len() >= 960 { payload[944..960].try_into().unwrap() } else { [0; 16] }, flags, callback: u32_at(payload, 24), version: u32_at(payload, 808), tip, info, info_title, info_flags, timeout_ms, state: u32_at(payload, 288), mask: u32_at(payload, 292), icon, balloon_icon })
 }
 
 // Aplica una trama a la lista; devuelve si algo cambió. `uVersion` solo cuenta en NIM_SETVERSION: en NIM_MODIFY comparte lugar con el timeout.
 pub fn apply(icons: &mut Vec<Icon>, p: Packet) -> bool {
-    let at = icons.iter().position(|i| i.hwnd == p.hwnd && i.uid == p.uid);
+    let at = icons.iter().position(|i| if p.guid != [0; 16] { i.guid == p.guid } else { i.guid == [0; 16] && i.hwnd == p.hwnd && i.uid == p.uid });
+    if p.message != NIM_ADD && at.is_none() {
+        return false;
+    }
     match p.message {
         NIM_ADD | NIM_MODIFY | NIM_SETVERSION => {
             let before = at.map(|i| icons[i].clone());
             let i = at.unwrap_or_else(|| {
-                icons.push(Icon { hwnd: p.hwnd, uid: p.uid, callback: 0, version: 0, tip: String::new(), hidden: false, exe: String::new(), size: (0, 0), bgra: Vec::new() });
+                icons.push(Icon { hwnd: p.hwnd, uid: p.uid, guid: p.guid, callback: 0, version: 0, tip: String::new(), hidden: false, exe: String::new(), size: (0, 0), bgra: Vec::new() });
                 icons.len() - 1
             });
             let icon = &mut icons[i];
+            icon.hwnd = p.hwnd;
+            icon.uid = p.uid;
             if p.message == NIM_SETVERSION {
                 icon.version = p.version;
             } else {
@@ -127,6 +261,8 @@ pub fn apply(icons: &mut Vec<Icon>, p: Packet) -> bool {
 pub fn messages_for(g: Gesture, version: u32) -> Vec<u32> {
     let mut m = match g {
         Gesture::Left => vec![WM_LBUTTONDOWN, WM_LBUTTONUP],
+        // varias apps (clientes de torrents, VPN) solo abren con el doble clic
+        Gesture::LeftDouble => vec![WM_LBUTTONDBLCLK, WM_LBUTTONUP],
         Gesture::Right => vec![WM_RBUTTONDOWN, WM_RBUTTONUP],
         Gesture::Middle => vec![WM_MBUTTONDOWN, WM_MBUTTONUP],
     };
@@ -150,21 +286,49 @@ pub fn callback_params(version: u32, uid: u32, message: u32, at: (i32, i32)) -> 
 }
 
 static ICONS: Mutex<Vec<Icon>> = Mutex::new(Vec::new());
+static BALLOONS: Mutex<BalloonQueue> = Mutex::new(BalloonQueue { current: None, pending: VecDeque::new() });
 static REVISION: AtomicU64 = AtomicU64::new(0);
+static NEXT_BALLOON_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static CONNECTED: AtomicBool = AtomicBool::new(false);
+static NATIVE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static HOOK: AtomicIsize = AtomicIsize::new(0);
 
 pub fn active() -> bool {
-    CONNECTED.load(Ordering::Relaxed)
+    CONNECTED.load(Ordering::Relaxed) || NATIVE_ACTIVE.load(Ordering::Relaxed)
+}
+
+pub fn native_active() -> bool {
+    NATIVE_ACTIVE.load(Ordering::Relaxed)
+}
+
+pub fn set_native_active(active: bool) {
+    NATIVE_ACTIVE.store(active, Ordering::Relaxed);
 }
 
 pub fn revision() -> u64 {
     REVISION.load(Ordering::Relaxed)
 }
 
+pub fn current_balloon() -> Option<BalloonRequest> {
+    BALLOONS.lock().unwrap().current().cloned()
+}
+
+pub fn finish_balloon_if(expected: &BalloonRequest) -> Option<(BalloonRequest, Option<BalloonRequest>)> {
+    BALLOONS.lock().unwrap().finish_if(expected)
+}
+
+pub fn cancel_balloon(hwnd: u32, uid: u32, guid: [u8; 16]) -> (Option<BalloonRequest>, Option<BalloonRequest>) {
+    let result = BALLOONS.lock().unwrap().cancel(hwnd, uid, guid);
+    result
+}
+
 // Identidad estable de un ícono entre sesiones: el ejecutable dueño y su id.
 pub fn key(i: &Icon) -> String {
-    format!("{}:{}", i.exe, i.uid)
+    if i.guid != [0; 16] {
+        format!("guid:{}", i.guid.iter().map(|b| format!("{b:02x}")).collect::<String>())
+    } else {
+        format!("{}:{}", i.exe, i.uid)
+    }
 }
 
 // Máximo de íconos fijos a la vista en la píldora; el resto queda en el flyout.
@@ -241,10 +405,185 @@ fn set_icons(change: impl FnOnce(&mut Vec<Icon>) -> bool) -> bool {
     changed
 }
 
-pub fn click(hwnd: u32, uid: u32, gesture: Gesture, at: (i32, i32)) {
+fn retain_live_icons(icons: &mut Vec<Icon>, mut is_window: impl FnMut(u32) -> bool) -> bool {
+    let count = icons.len();
+    icons.retain(|icon| is_window(icon.hwnd));
+    icons.len() != count
+}
+
+fn cleanup_stale() -> bool {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::IsWindow;
+    set_icons(|icons| retain_live_icons(icons, |hwnd| unsafe { IsWindow(HWND(hwnd as usize as *mut _)).as_bool() }))
+}
+
+pub fn spawn_cleanup(on_change: impl Fn() + Send + 'static) -> bool {
+    std::thread::Builder::new().name("tray-cleanup".into()).spawn(move || loop {
+        if cleanup_stale() { on_change(); }
+        std::thread::sleep(std::time::Duration::from_millis(RETRY_MS));
+    }).is_ok()
+}
+
+pub fn ingest_shell_notify(data: &[u8]) -> bool {
+    let icon = if u32_at(data, 20) & NIF_ICON != 0 { icon_pixels(u32_at(data, 28)) } else { None };
+    let flags = u32_at(data, 20);
+    let balloon_icon = if flags & NIF_INFO != 0 && u32_at(data, 940) & 0xF == NIIF_USER { icon_pixels(u32_at(data, 960)) } else { None };
+    let Some(packet) = parse_shell_notify(data, icon, balloon_icon) else { return false };
+    ingest_packet(packet)
+}
+
+fn carries_balloon(message: u32, flags: u32) -> bool {
+    matches!(message, NIM_ADD | NIM_MODIFY) && flags & NIF_INFO != 0
+}
+
+fn ingest_packet(packet: Packet) -> bool {
+    let (message, hwnd, uid, guid, flags) = (packet.message, packet.hwnd, packet.uid, packet.guid, packet.flags);
+    let notification = carries_balloon(message, flags).then(|| (packet.info_title.clone(), packet.info.clone(), packet.info_flags, packet.timeout_ms, packet.balloon_icon.clone()));
+    let callback_update = (flags & NIF_MESSAGE != 0).then_some(()).or((message == NIM_SETVERSION).then_some(()));
+    let (icon_changed, balloon, callback, version) = {
+        let mut icons = ICONS.lock().unwrap();
+        let changed = apply(&mut icons, packet);
+        fill_exes(&mut icons);
+        let balloon = if message == NIM_DELETE {
+            None
+        } else if let Some((title, text, info_flags, timeout_ms, icon)) = notification {
+            icons.iter().find(|i| if guid != [0; 16] { i.guid == guid } else { i.guid == [0; 16] && i.hwnd == hwnd && i.uid == uid }).map(|i| BalloonRequest {
+                hwnd, uid, guid, callback: i.callback, version: i.version,
+                title, text, flags: info_flags, timeout_ms, realtime: flags & NIF_REALTIME != 0,
+                sequence: NEXT_BALLOON_SEQUENCE.fetch_add(1, Ordering::Relaxed), icon,
+            })
+        } else {
+            None
+        };
+        let metadata = if callback_update.is_some() {
+            icons.iter().find(|i| if guid != [0; 16] { i.guid == guid } else { i.guid == [0; 16] && i.hwnd == hwnd && i.uid == uid })
+                .map(|icon| ((flags & NIF_MESSAGE != 0).then_some(icon.callback), (message == NIM_SETVERSION).then_some(icon.version)))
+        } else { None };
+        if changed { REVISION.fetch_add(1, Ordering::Relaxed); }
+        (changed, balloon, metadata.map(|m| m.0).flatten(), metadata.map(|m| m.1).flatten())
+    };
+    if callback_update.is_some() {
+        BALLOONS.lock().unwrap().update_callback(hwnd, uid, guid, callback, version);
+    }
+    let has_balloon = balloon.is_some();
+    let (removed, next) = if message == NIM_DELETE || balloon.as_ref().is_some_and(|b| b.text.is_empty()) {
+        cancel_balloon(hwnd, uid, guid)
+    } else if let Some(balloon) = balloon {
+        enqueue_balloon(balloon);
+        (None, None)
+    } else {
+        (None, None)
+    };
+    let balloon_changed = removed.is_some() || next.is_some();
+    if let Some(removed) = &removed { notify_balloon_owner(removed, NIN_BALLOONHIDE); }
+    if removed.is_some() { crate::tray_notifications::dismiss(); }
+    if next.is_some() { crate::tray_notifications::start(); }
+    icon_changed || balloon_changed || has_balloon
+}
+
+fn enqueue_balloon(balloon: BalloonRequest) {
+    let availability = crate::tray_notifications::availability(&balloon);
+    if availability == crate::tray_notifications::Availability::Hide {
+        notify_balloon_owner(&balloon, NIN_BALLOONHIDE);
+    }
+    let became_current = if matches!(availability, crate::tray_notifications::Availability::Hide | crate::tray_notifications::Availability::Discard) {
+        false
+    } else {
+        let mut queue = BALLOONS.lock().unwrap();
+        let was_idle = queue.current().is_none();
+        queue.submit(balloon) && was_idle
+    };
+    if became_current { crate::tray_notifications::start(); }
+}
+
+// Toast de Windows sin ícono de bandeja dueño: no hay ventana a la que devolver eventos (callback 0).
+// `open` es lo que abre el clic (ruta o shell:AppsFolder\AUMID); la tabla se limpia al terminar el toast.
+pub fn submit_toast(title: String, text: String, timeout_ms: u32, open: Option<String>) {
+    let sequence = NEXT_BALLOON_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    if let Some(open) = open {
+        toast_targets().lock().unwrap().insert(sequence, open);
+    }
+    enqueue_balloon(BalloonRequest {
+        hwnd: 0, uid: 0, guid: [0; 16], callback: 0, version: 4,
+        title, text, flags: 0, timeout_ms, realtime: false,
+        sequence, icon: None,
+    });
+}
+
+fn toast_targets() -> &'static std::sync::Mutex<std::collections::HashMap<u64, String>> {
+    static T: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<u64, String>>> = std::sync::OnceLock::new();
+    T.get_or_init(Default::default)
+}
+
+pub fn notify_balloon_owner(balloon: &BalloonRequest, event: u32) {
     use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, GetWindowThreadProcessId, IsWindow, SendNotifyMessageW};
-    let Some((callback, version)) = ICONS.lock().unwrap().iter().find(|i| i.hwnd == hwnd && i.uid == uid).map(|i| (i.callback, i.version)) else { return };
+    if balloon.callback == 0 {
+        if balloon.hwnd == 0 && balloon.uid == 0 {
+            let target = {
+                let mut t = toast_targets().lock().unwrap();
+                if event == 0x402 { None } else { t.remove(&balloon.sequence).filter(|_| event == 0x405) }
+            };
+            if let Some(open) = target { crate::dock_menu::launch(&open, ""); }
+        }
+        return;
+    }
+    let hwnd = HWND(balloon.hwnd as usize as *mut _);
+    unsafe {
+        if !IsWindow(hwnd).as_bool() { return; }
+        if event == 0x405 {
+            let mut pid = 0;
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            let _ = AllowSetForegroundWindow(pid);
+        }
+        let (w, l) = if balloon.version >= 4 { (0, (((balloon.uid & 0xFFFF) << 16) | (event & 0xFFFF)) as isize) } else { (balloon.uid as usize, event as isize) };
+        let _ = SendNotifyMessageW(hwnd, balloon.callback, WPARAM(w), LPARAM(l));
+    }
+}
+
+fn icon_pixels(handle: u32) -> Option<(u32, u32, Vec<u8>)> {
+    use windows::Win32::Graphics::Gdi::*;
+    use windows::Win32::UI::WindowsAndMessaging::{CopyIcon, DestroyIcon, DrawIconEx, GetIconInfo, DI_NORMAL, HICON, ICONINFO};
+    if handle == 0 { return None; }
+    unsafe {
+        let icon = CopyIcon(HICON(handle as usize as *mut _)).ok()?;
+        let mut info = ICONINFO::default();
+        if GetIconInfo(icon, &mut info).is_err() { let _ = DestroyIcon(icon); return None; }
+        let bitmap = if !info.hbmColor.is_invalid() { info.hbmColor } else { info.hbmMask };
+        let mut dimensions = BITMAP::default();
+        let read = GetObjectW(bitmap, std::mem::size_of::<BITMAP>() as i32, Some(&mut dimensions as *mut _ as *mut _));
+        let width = dimensions.bmWidth;
+        let height = if info.hbmColor.is_invalid() { dimensions.bmHeight / 2 } else { dimensions.bmHeight };
+        if !info.hbmColor.is_invalid() { let _ = DeleteObject(info.hbmColor); }
+        if !info.hbmMask.is_invalid() { let _ = DeleteObject(info.hbmMask); }
+        if read == 0 || width <= 0 || height <= 0 || width > MAX_SIDE as i32 || height > MAX_SIDE as i32 {
+            let _ = DestroyIcon(icon);
+            return None;
+        }
+        let (w, h) = (width as u32, height as u32);
+        let len = w.checked_mul(h)?.checked_mul(4)? as usize;
+        let dc = CreateCompatibleDC(None);
+        if dc.is_invalid() { let _ = DestroyIcon(icon); return None; }
+        let bmi = BITMAPINFO { bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: width, biHeight: -height, biPlanes: 1, biBitCount: 32, ..Default::default() }, ..Default::default() };
+        let mut bits = std::ptr::null_mut();
+        let Ok(dib) = CreateDIBSection(dc, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) else {
+            let _ = DeleteDC(dc); let _ = DestroyIcon(icon); return None;
+        };
+        let previous = SelectObject(dc, dib);
+        let drawn = DrawIconEx(dc, 0, 0, icon, width, height, 0, None, DI_NORMAL).is_ok();
+        let pixels = if drawn && !bits.is_null() { std::slice::from_raw_parts(bits as *const u8, len).to_vec() } else { Vec::new() };
+        let _ = SelectObject(dc, previous);
+        let _ = DeleteObject(dib);
+        let _ = DeleteDC(dc);
+        let _ = DestroyIcon(icon);
+        (!pixels.is_empty()).then_some((w, h, pixels))
+    }
+}
+
+pub fn click_identity(hwnd: u32, uid: u32, guid: [u8; 16], gesture: Gesture, at: (i32, i32)) {
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, GetWindowThreadProcessId, IsWindow, SendNotifyMessageW};
+    let Some((callback, version)) = ICONS.lock().unwrap().iter().find(|i| if guid != [0; 16] { i.guid == guid } else { i.guid == [0; 16] && i.hwnd == hwnd && i.uid == uid }).map(|i| (i.callback, i.version)) else { return };
     let target = HWND(hwnd as usize as *mut _);
     unsafe {
         if callback == 0 || !IsWindow(target).as_bool() {
@@ -380,13 +719,7 @@ fn replay_icons() {
 fn inject_loop(dll: std::path::PathBuf, on_change: impl Fn()) {
     loop {
         if CONNECTED.load(Ordering::Relaxed) {
-            use windows::Win32::Foundation::HWND;
-            use windows::Win32::UI::WindowsAndMessaging::IsWindow;
-            if set_icons(|icons| {
-                let n = icons.len();
-                icons.retain(|i| unsafe { IsWindow(HWND(i.hwnd as usize as *mut _)).as_bool() });
-                icons.len() != n
-            }) {
+            if cleanup_stale() {
                 on_change();
             }
         } else {

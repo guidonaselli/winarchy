@@ -2,6 +2,7 @@
 
 mod directory;
 mod group;
+mod handler;
 mod i18n;
 mod pdf;
 mod clipboard;
@@ -13,6 +14,7 @@ mod settings;
 mod shell;
 mod style;
 mod theme;
+mod thumbs;
 #[cfg(windows)]
 mod xaml_drag;
 
@@ -172,6 +174,7 @@ struct Command {
     label: String,
     message: Option<Message>,
     icon: Option<icons::Icon>,
+    image: Option<PathBuf>,
     enabled: bool,
 }
 
@@ -210,41 +213,52 @@ impl Explorer {
     fn commands(&self) -> Vec<Command> {
         let (some, one) = (!self.selected.is_empty(), self.selected.len() == 1);
         let idle = !self.deleting && !self.transferring;
-        let in_folder = idle && !self.in_favorites;
+        let in_folder = idle && self.view == Place::Folder;
+        // Recycle Bin rows are the shell's `$R…` files: only Restore and Delete permanently are safe on them
+        let editable = some && self.view != Place::RecycleBin;
         let command = |label: &str, message: Message, icon: Option<icons::Icon>, enabled: bool| Command {
             label: tr_dynamic(label),
             message: Some(message),
             icon,
+            image: None,
             enabled,
         };
-        let separator = || Command { label: String::new(), message: None, icon: None, enabled: true };
-        vec![
+        let separator = || Command { label: String::new(), message: None, icon: None, image: None, enabled: true };
+        let apps = self.open_with.iter().map(|(name, exe, image)| Command {
+            label: name.clone(),
+            message: Some(Message::OpenWithApp(exe.clone())),
+            icon: None,
+            image: image.clone(),
+            enabled: true,
+        });
+        let mut all = vec![
             command("Create folder", Message::Ask(Prompt::NewFolder), Some(icons::Icon::FolderPlus), in_folder),
             command("Create file", Message::Ask(Prompt::NewFile), Some(icons::Icon::FilePlus), in_folder),
             separator(),
-            command("Cut", Message::Clip(true), Some(icons::Icon::Scissors), some),
+            command("Cut", Message::Clip(true), Some(icons::Icon::Scissors),editable),
             command("Copy", Message::Clip(false), Some(icons::Icon::Copy), some),
             command("Paste here", Message::Paste, Some(icons::Icon::ClipboardText), clipboard::has_files() && in_folder),
             separator(),
-            command("Rename selected", Message::Ask(Prompt::Rename), Some(icons::Icon::PencilSimple), some && idle),
-            command("Copy to…", Message::Ask(Prompt::CopyTo), Some(icons::Icon::Copy), some && idle),
-            command("Move to…", Message::Ask(Prompt::MoveTo), Some(icons::Icon::Scissors), some && idle),
-            command("Delete to Recycle Bin", Message::DeleteSelected, Some(icons::Icon::Trash), some && idle),
+            command("Rename selected", Message::Ask(Prompt::Rename), Some(icons::Icon::PencilSimple), editable && idle),
+            command("Copy to…", Message::Ask(Prompt::CopyTo), Some(icons::Icon::Copy), editable && idle),
+            command("Move to…", Message::Ask(Prompt::MoveTo), Some(icons::Icon::Scissors), editable && idle),
+            command("Delete to Recycle Bin", Message::DeleteSelected, Some(icons::Icon::Trash), editable && idle),
             command("Delete permanently", Message::DeletePermanently, Some(icons::Icon::Trash), some && idle),
             command("Copy path", Message::CopyPath(false), Some(icons::Icon::LinkSimple), true),
             command("Copy path with quotes", Message::CopyPath(true), Some(icons::Icon::LinkSimple), true),
             command("Show in folder", Message::ShowInFolder, Some(icons::Icon::FolderOpen), one),
             command("Paste as shortcut", Message::PasteShortcut, Some(icons::Icon::LinkSimple), clipboard::has_files() && in_folder),
-            command("Create shortcut", Message::CreateShortcut, Some(icons::Icon::LinkSimple), one),
-            command("Compress to zip", Message::Compress, Some(icons::Icon::FileZip), some && !self.transferring),
+            command("Create shortcut", Message::CreateShortcut, Some(icons::Icon::LinkSimple), one && editable),
+            command("Compress to zip", Message::Compress, Some(icons::Icon::FileZip), editable && !self.transferring),
             command("Extract here", Message::Extract, Some(icons::Icon::FileZip), one && !self.transferring && self.selected.iter().next().is_some_and(|path| path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")))),
             command("Edit in Notepad", Message::RunVerb("notepad"), Some(icons::Icon::PencilSimple), one),
-            command("Share", Message::Share, Some(icons::Icon::ShareNetwork), some),
-            command("Add tags", Message::Ask(Prompt::Tags), Some(icons::Icon::Tag), some),
-            command("Clear tags", Message::Tag(false), Some(icons::Icon::Tag), some),
-            command("Open with…", Message::RunVerb("openas"), None, one && self.selected.iter().all(|path| path.is_file())),
+            command("Share", Message::Share, Some(icons::Icon::ShareNetwork),editable),
+            command("Add tags", Message::Ask(Prompt::Tags), Some(icons::Icon::Tag),editable),
+            command("Clear tags", Message::Tag(false), Some(icons::Icon::Tag),editable),
+            command(OPEN_WITH, Message::CloseMenu, None, one && self.selected.iter().all(|path| path.is_file())),
             command("Properties", Message::RunVerb("properties"), Some(icons::Icon::Info), one),
-            command("Show more options", Message::NativeMenu, Some(icons::Icon::DotsThree), true),
+            command(ORGANIZE, Message::CloseMenu, Some(icons::Icon::DotsThree), some),
+            command("Show more options", Message::NativeMenu, Some(icons::Icon::DotsThree), self.view == Place::Folder || editable),
             command("Terminal here", Message::OpenTerminal, Some(icons::Icon::TerminalWindow), true),
             command("Terminal as administrator", Message::RunVerb("admin-terminal"), Some(icons::Icon::TerminalWindow), true),
             command("Git init", Message::Git("init"), Some(icons::Icon::GitBranch), !self.transferring),
@@ -276,6 +290,9 @@ impl Explorer {
             command("Open in editor", Message::OpenEditor, Some(icons::Icon::PencilSimple), true),
             command("Settings file", Message::OpenSettings, None, true),
             command("Storage settings", Message::OpenStorageSense, None, true),
+            command("Copy SHA-256", Message::Hash, None, one && self.selected.iter().all(|path| path.is_file())),
+            command("Folder size", Message::FolderSize, None, self.view == Place::Folder),
+            command("Restore", Message::RestoreSelected, None, some && self.view == Place::RecycleBin),
             command("Open Recycle Bin", Message::OpenRecycleBin, Some(icons::Icon::Trash), true),
             command("Empty Recycle Bin", Message::EmptyRecycleBin, Some(icons::Icon::Trash), true),
             command(self.sort_label(SortKey::Name, "Sort by name"), Message::Sort(SortKey::Name), None, true),
@@ -304,7 +321,10 @@ impl Explorer {
                 None,
                 true,
             ),
-        ]
+        ];
+        all.extend(apps);
+        all.push(command("Choose another app…", Message::RunVerb("openas"), None, one && self.selected.iter().all(|path| path.is_file())));
+        all
     }
 }
 
@@ -384,6 +404,8 @@ enum Prompt {
     GitClone,
     CopyTo,
     MoveTo,
+    Palette,
+    Search,
 }
 
 impl Prompt {
@@ -396,6 +418,8 @@ impl Prompt {
             Prompt::GitClone => "Repository URL",
             Prompt::CopyTo => "Copy to this folder",
             Prompt::MoveTo => "Move to this folder",
+            Prompt::Palette => "Run command",
+            Prompt::Search => "Search in this folder (Windows index)",
         }
     }
 
@@ -412,6 +436,8 @@ impl Prompt {
             Prompt::GitClone => Message::Git("clone"),
             Prompt::CopyTo => Message::TransferSelected(false),
             Prompt::MoveTo => Message::TransferSelected(true),
+            Prompt::Palette => Message::RunPalette,
+            Prompt::Search => Message::IndexSearch,
         }
     }
 }
@@ -457,6 +483,10 @@ enum Message {
     ReopenTab,
     CloseOtherTabs,
     NextTab,
+    MoveTab(isize),
+    RunPalette,
+    IndexSearch,
+    IndexSearched(u64, Result<Vec<PathBuf>, String>),
     SwitchTab(usize),
     ToggleRecursive,
     ToggleHidden,
@@ -467,13 +497,20 @@ enum Message {
     Extract,
     ArchiveDone(Result<(), String>, Option<PathBuf>),
     RunVerb(&'static str),
+    OpenWithApp(PathBuf),
     EmptyRecycleBin,
     OpenRecycleBin,
+    RestoreSelected,
+    Hash,
+    Hashed(PathBuf, Result<String, String>),
+    FolderSize,
+    FolderSized(PathBuf, u64, u64),
+    Thumbs(u64, Vec<(PathBuf, PathBuf)>, Vec<thumbs::Job>),
     TogglePin,
     Eject(PathBuf),
     RefreshDrives,
     ToggleFavorite,
-    OpenFavorites,
+    OpenView(Place),
     PinDown(PathBuf),
     OpenPin(PathBuf),
     MovePin(i32),
@@ -504,6 +541,9 @@ enum Message {
     Refresh,
     Focus(bool),
     Resize(WindowSize),
+    MarqueeStart(f64, f64),
+    MarqueeMove(bool),
+    MarqueeEnd,
     ResizeStart(Column, f64),
     ResizeDrag(f64, bool),
     ResizeEnd,
@@ -610,6 +650,7 @@ struct Explorer {
     walk: Option<std::sync::Arc<directory::Walk>>,
     searching: bool,
     drag: Option<(Column, f64, f64)>,
+    marquee: Option<Marquee>,
     terminal: String,
     sidebar_width: f64,
     sidebar_drag: Option<(f64, f64)>,
@@ -640,7 +681,11 @@ struct Explorer {
     drives: Vec<directory::Drive>,
     pinned: Vec<PathBuf>,
     favorites: Vec<PathBuf>,
-    in_favorites: bool,
+    bin_origins: std::collections::HashMap<PathBuf, PathBuf>,
+    purge_armed: HashSet<PathBuf>,
+    thumbs: std::sync::Arc<std::collections::HashMap<PathBuf, PathBuf>>,
+    open_with: Vec<(String, PathBuf, Option<PathBuf>)>,
+    view: Place,
     pin_armed: Option<PathBuf>,
     tags: std::collections::BTreeMap<PathBuf, Vec<String>>,
     list_width: f64,
@@ -652,10 +697,8 @@ impl Component for Explorer {
 
     fn create(input: &PathBuf, context: &ComponentContext<Self>) -> Self {
         let saved = settings::load();
-        let explicit = std::env::args_os().nth(1).is_some_and(|arg| PathBuf::from(arg).is_dir());
-        let restored: Vec<PathBuf> = if explicit { Vec::new() } else { saved.tabs.iter().filter(|tab| tab.is_dir()).cloned().collect() };
-        let (tabs, active_tab) = if restored.is_empty() { (vec![input.clone()], 0) } else { (restored.clone(), saved.active_tab.min(restored.len() - 1)) };
-        let path = tabs[active_tab].clone();
+        let target = launch_target();
+        let (tabs, active_tab, path) = (vec![input.clone()], 0, input.clone());
         i18n::set_choice(&saved.language);
         #[cfg(windows)]
         let theme_watcher = Theme::start_watching();
@@ -695,6 +738,7 @@ impl Component for Explorer {
             columns: Columns::from_saved(saved.size_width, saved.modified_width),
             tags: saved.tags.clone(),
             drag: None,
+            marquee: None,
             sidebar_width: if saved.sidebar_width > 0.0 { saved.sidebar_width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH) } else { SIDEBAR_DEFAULT_WIDTH },
             sidebar_drag: None,
             terminal: saved.terminal.clone(),
@@ -729,7 +773,7 @@ impl Component for Explorer {
             path: path.clone(),
             load_generation: 0,
             entries: Vec::new(),
-            selected: HashSet::new(),
+            selected: target.and_then(|(_, item)| item).into_iter().collect(),
             deleting: false,
             transferring: false,
             status,
@@ -748,7 +792,11 @@ impl Component for Explorer {
             drives: directory::drives(),
             pinned: saved.pinned.clone(),
             favorites: saved.favorites.clone(),
-            in_favorites: false,
+            bin_origins: std::collections::HashMap::new(),
+            purge_armed: HashSet::new(),
+            thumbs: std::sync::Arc::default(),
+            open_with: Vec::new(),
+            view: Place::Folder,
             pin_armed: None,
             list_width: DEFAULT_LIST_WIDTH,
         };
@@ -886,19 +934,38 @@ impl Component for Explorer {
                     }
                 }
                 self.write_settings(self.pinned.clone(), self.favorites.clone());
-                if self.in_favorites {
-                    self.update(Message::OpenFavorites, context);
+                if self.view == Place::Favorites {
+                    self.update(Message::OpenView(Place::Favorites), context);
                 }
             }
-            Message::OpenFavorites => {
-                self.favorites = settings::load().favorites;
+            Message::OpenView(view) => {
                 self.load_generation += 1;
-                self.in_favorites = true;
+                self.view = view;
                 self.recursive = false;
                 self.selected.clear();
-                self.address = tr("Favorites").to_owned();
-                self.entries = self.favorites.iter().filter_map(|path| directory::entry_at(path)).map(std::sync::Arc::new).collect();
-                self.apply_sort();
+                self.address = tr(view.title()).to_owned();
+                self.entries = match view {
+                    Place::Favorites => {
+                        self.favorites = settings::load().favorites;
+                        self.favorites.iter().filter_map(|path| directory::entry_at(path)).map(std::sync::Arc::new).collect()
+                    }
+                    Place::Recent => directory::recent(RECENT_LIMIT).into_iter().map(std::sync::Arc::new).collect(),
+                    Place::ThisPc => directory::drives()
+                        .iter()
+                        .filter_map(|drive| directory::entry_at(&drive.path).map(|entry| Entry { name: drive.label.clone(), ..entry }))
+                        .map(std::sync::Arc::new)
+                        .collect(),
+                    Place::RecycleBin => {
+                        let items = directory::recycle_bin();
+                        self.bin_origins = items.iter().map(|(entry, original)| (entry.path.clone(), original.clone())).collect();
+                        items.into_iter().map(|(entry, _)| std::sync::Arc::new(entry)).collect()
+                    }
+                    Place::Folder | Place::Search => Vec::new(),
+                };
+                if view != Place::Recent {
+                    self.apply_sort();
+                }
+                self.request_thumbs(context);
                 self.loaded = true;
                 self.has_error = false;
                 self.refresh_status();
@@ -960,15 +1027,19 @@ impl Component for Explorer {
                 }
             }
             Message::OpenStorageSense => {
-                if let Err(error) = shell::execute("open", "ms-settings:storagesense", None) {
+                // sin Explorer Configuración no abre; el liberador de espacio clásico sí
+                let target = if shell::explorer_is_shell() { "ms-settings:storagesense" } else { "cleanmgr.exe" };
+                if let Err(error) = shell::execute("open", target, None) {
                     self.status = format!("{}: {error}", tr("Could not run"));
                     self.has_error = true;
                 }
             }
             Message::OpenTerminal => {
+                use std::os::windows::process::CommandExt;
                 let mut custom = self.terminal.split_whitespace();
                 let opened = match custom.next() {
                     Some(program) => std::process::Command::new(program)
+                        .creation_flags(0x0800_0000)
                         .args(custom.map(|arg| arg.replace("{path}", &self.path.to_string_lossy())))
                         .current_dir(&self.path)
                         .spawn(),
@@ -988,7 +1059,6 @@ impl Component for Explorer {
             Message::NewTab => {
                 self.tabs.push(self.path.clone());
                 self.active_tab = self.tabs.len() - 1;
-                self.save_settings();
             }
             Message::CloseTab => {
                 if self.tabs.len() > 1 {
@@ -1008,7 +1078,6 @@ impl Component for Explorer {
             Message::DuplicateTab => {
                 self.tabs.insert(self.active_tab + 1, self.path.clone());
                 self.active_tab += 1;
-                self.save_settings();
             }
             Message::ReopenTab => {
                 if let Some(path) = self.closed_tabs.pop() {
@@ -1024,11 +1093,75 @@ impl Component for Explorer {
                 self.closed_tabs.append(&mut self.tabs);
                 self.tabs.push(keep);
                 self.active_tab = 0;
-                self.save_settings();
             }
             Message::NextTab => {
                 let next = (self.active_tab + 1) % self.tabs.len();
                 self.update(Message::SwitchTab(next), context);
+            }
+            Message::MoveTab(delta) => {
+                let target = self.active_tab as isize + delta;
+                if (0..self.tabs.len() as isize).contains(&target) {
+                    self.tabs.swap(self.active_tab, target as usize);
+                    self.active_tab = target as usize;
+                }
+            }
+            Message::IndexSearch => {
+                let term = self.new_folder_name.trim().to_owned();
+                if term.is_empty() || self.view != Place::Folder {
+                    return;
+                }
+                self.new_folder_name.clear();
+                self.prompt = None;
+                self.status = tr("Searching…").to_owned();
+                self.has_error = false;
+                let (scope, generation) = (self.path.clone(), self.load_generation);
+                let _task = context.spawn_background(move |_| Message::IndexSearched(generation, directory::search_index(&scope, &term)));
+            }
+            Message::IndexSearched(generation, result) => {
+                if generation != self.load_generation {
+                    return;
+                }
+                match result {
+                    Ok(paths) => {
+                        self.load_generation += 1;
+                        self.view = Place::Search;
+                        self.selected.clear();
+                        self.entries = paths.iter().filter_map(|path| directory::entry_at(path)).map(std::sync::Arc::new).collect();
+                        self.address = tr(Place::Search.title()).to_owned();
+                        self.apply_sort();
+                        self.request_thumbs(context);
+                        self.loaded = true;
+                        self.refresh_status();
+                    }
+                    Err(error) => {
+                        self.has_error = true;
+                        self.status = error;
+                    }
+                }
+            }
+            Message::RunPalette => {
+                let needle = self.new_folder_name.trim().to_lowercase();
+                let candidates: Vec<Command> = self
+                    .commands()
+                    .into_iter()
+                    .filter(|c| c.enabled && !needle.is_empty() && !matches!(c.message, Some(Message::CloseMenu | Message::OpenWithApp(_)) | None) && c.label.to_lowercase().contains(&needle))
+                    .collect();
+                let found = match candidates.iter().position(|c| c.label.to_lowercase() == needle) {
+                    Some(exact) => candidates.into_iter().nth(exact),
+                    None if candidates.len() == 1 => candidates.into_iter().next(),
+                    None => None,
+                };
+                match found {
+                    Some(command) => {
+                        self.new_folder_name.clear();
+                        self.prompt = None;
+                        self.update(Message::Command(command.label), context);
+                    }
+                    None => {
+                        self.has_error = true;
+                        self.status = tr("No matching command").to_owned();
+                    }
+                }
             }
             Message::SwitchTab(index) => {
                 if index < self.tabs.len() && index != self.active_tab {
@@ -1061,6 +1194,7 @@ impl Component for Explorer {
             }
             Message::CycleLayout => {
                 self.layout = self.layout.next();
+                self.request_thumbs(context);
                 self.save_settings();
             }
             Message::Tag(add) => {
@@ -1170,6 +1304,16 @@ impl Component for Explorer {
                     }
                 }
             }
+            Message::OpenWithApp(exe) => {
+                if let [file] = &self.selected.iter().collect::<Vec<_>>()[..] {
+                    let result = shell::execute("open", &exe.to_string_lossy(), Some(&format!("\"{}\"", file.display())));
+                    self.has_error = result.is_err();
+                    if let Err(error) = result {
+                        self.status = format!("{}: {error}", tr("Could not run"));
+                    }
+                }
+                self.open_with.clear();
+            }
             Message::RunVerb(verb) => {
                 let target = match &self.selected.iter().collect::<Vec<_>>()[..] {
                     [one] => (*one).clone(),
@@ -1226,17 +1370,71 @@ impl Component for Explorer {
                     }
                 }
             }
-            Message::OpenRecycleBin => {
-                if let Err(error) = shell::execute("open", "shell:RecycleBinFolder", None) {
-                    self.status = format!("{}: {error}", tr("Could not run"));
-                    self.has_error = true;
-                }
-            }
+            Message::OpenRecycleBin => self.update(Message::OpenView(Place::RecycleBin), context),
             Message::EmptyRecycleBin => {
                 if let Err(error) = shell::empty_recycle_bin() {
                     self.status = format!("{}: {error}", tr("Could not run"));
                     self.has_error = true;
+                } else if self.view == Place::RecycleBin {
+                    self.update(Message::OpenView(Place::RecycleBin), context);
                 }
+            }
+            Message::Thumbs(generation, ready, rest) => {
+                if generation != self.load_generation {
+                    return;
+                }
+                if !ready.is_empty() {
+                    let mut map = (*self.thumbs).clone();
+                    map.extend(ready);
+                    self.thumbs = std::sync::Arc::new(map);
+                }
+                self.render_thumbs(generation, rest, context);
+            }
+            Message::Hash => {
+                let Some(path) = self.selected.iter().next().filter(|path| self.selected.len() == 1 && path.is_file()).cloned() else { return };
+                self.status = tr("Calculating SHA-256…").to_owned();
+                self.has_error = false;
+                let _task = context.spawn_background(move |_| {
+                    use std::os::windows::process::CommandExt;
+                    let output = std::process::Command::new("certutil").args(["-hashfile"]).arg(&path).arg("SHA256").creation_flags(0x0800_0000).output();
+                    let hash = output.map_err(|error| error.to_string()).and_then(|output| {
+                        let text = String::from_utf8_lossy(&output.stdout).into_owned();
+                        text.lines().nth(1).map(|line| line.replace(' ', "")).filter(|line| line.len() == 64).ok_or_else(|| text.trim().to_owned())
+                    });
+                    Message::Hashed(path, hash)
+                });
+            }
+            Message::Hashed(path, hash) => match hash {
+                Ok(hash) => {
+                    let _ = clipboard::set_text(&hash);
+                    self.status = format!("SHA-256 {}: {hash}", file_label(&path).unwrap_or_default());
+                }
+                Err(error) => {
+                    self.status = format!("SHA-256: {error}");
+                    self.has_error = true;
+                }
+            },
+            Message::FolderSize => {
+                let target = match self.selected.iter().next() {
+                    Some(path) if self.selected.len() == 1 && path.is_dir() => path.clone(),
+                    _ => self.path.clone(),
+                };
+                self.status = tr("Calculating folder size…").to_owned();
+                self.has_error = false;
+                let _task = context.spawn_background(move |_| {
+                    let (bytes, files) = directory::tree_size(&target);
+                    Message::FolderSized(target, bytes, files)
+                });
+            }
+            Message::FolderSized(path, bytes, files) => {
+                self.status = format!("{}: {} · {files} {}", file_label(&path).unwrap_or_else(|| path.display().to_string()), directory::format_bytes(bytes), tr("files"));
+            }
+            Message::RestoreSelected => {
+                let moves: Vec<_> = self.selected.iter().filter_map(|data| Some((data.clone(), self.bin_origins.get(data)?.clone()))).collect();
+                let failures: Vec<String> = moves.iter().filter_map(|(data, original)| directory::restore(data, original).err()).collect();
+                self.update(Message::OpenView(Place::RecycleBin), context);
+                self.has_error = !failures.is_empty();
+                self.status = if failures.is_empty() { tr("Restored").to_owned() } else { failures.join(" · ") };
             }
             Message::Crumb(label) => {
                 let index = label.chars().rev().take_while(|c| *c == ZERO_WIDTH).count();
@@ -1309,6 +1507,39 @@ impl Component for Explorer {
                     self.handle_key(key, context);
                 }
             }
+            Message::MarqueeStart(x, y) => {
+                let start = shell::cursor_pos();
+                let names: HashSet<&str> = self.entries.iter().map(|entry| entry.name.as_str()).collect();
+                let mut rows = scroll::row_rects(!matches!(self.layout, Layout::Tiles | Layout::Grid));
+                rows.retain(|(name, _)| names.contains(name.as_str()));
+                let on_row = rows.iter().any(|(_, rect)| rect.0 <= start.0 && start.0 < rect.2 && rect.1 <= start.1 && start.1 < rect.3);
+                if !on_row {
+                    let keep = keys::ctrl_down() || keys::shift_down();
+                    if !keep && !self.selected.is_empty() {
+                        self.selected.clear();
+                        self.refresh_status();
+                    }
+                    self.marquee = Some(Marquee { origin: (x, y), current: (x, y), screen: start, rows, base: if keep { self.selected.clone() } else { HashSet::new() } });
+                }
+            }
+            Message::MarqueeMove(pressed) => {
+                if !pressed {
+                    self.marquee = None;
+                } else if let Some(marquee) = self.marquee.as_mut() {
+                    let now = shell::cursor_pos();
+                    let scale = shell::dip_scale();
+                    marquee.current = (marquee.origin.0 + f64::from(now.0 - marquee.screen.0) / scale, marquee.origin.1 + f64::from(now.1 - marquee.screen.1) / scale);
+                    let (left, top, right, bottom) = (marquee.screen.0.min(now.0), marquee.screen.1.min(now.1), marquee.screen.0.max(now.0), marquee.screen.1.max(now.1));
+                    let hit: HashSet<&str> = marquee.rows.iter().filter(|(_, rect)| rect.0 < right && rect.2 > left && rect.1 < bottom && rect.3 > top).map(|(name, _)| name.as_str()).collect();
+                    let mut selected = marquee.base.clone();
+                    selected.extend(self.entries.iter().filter(|entry| hit.contains(entry.name.as_str())).map(|entry| entry.path.clone()));
+                    if selected != self.selected {
+                        self.selected = selected;
+                        self.refresh_status();
+                    }
+                }
+            }
+            Message::MarqueeEnd => self.marquee = None,
             Message::ResizeStart(column, x) => self.drag = Some((column, x, self.columns.get(column))),
             Message::ResizeDrag(x, pressed) => {
                 if let (Some((column, start_x, start_width)), true) = (self.drag, pressed) {
@@ -1354,6 +1585,28 @@ impl Component for Explorer {
             }
             Message::CloseMenu => self.close_side_menu(),
             Message::MenuCommand(label) => {
+                if label == tr_dynamic(OPEN_WITH) {
+                    if let (Some((x, y, _)), [file]) = (self.menu, &self.selected.iter().collect::<Vec<_>>()[..]) {
+                        self.open_with = shell::open_with_handlers(file)
+                            .into_iter()
+                            .map(|(name, exe)| {
+                                let job = (exe.clone(), None, 0);
+                                let image = thumbs::ensure(&job);
+                                (name, exe, image)
+                            })
+                            .collect();
+                        self.menu = Some((x, y, MenuKind::OpenWith));
+                        self.menu_focus = None;
+                    }
+                    return;
+                }
+                if label == tr_dynamic(ORGANIZE) {
+                    if let Some((x, y, _)) = self.menu {
+                        self.menu = Some((x, y, MenuKind::Organize));
+                        self.menu_focus = None;
+                    }
+                    return;
+                }
                 let side = self.menu.is_some_and(|(_, _, kind)| kind == MenuKind::Side);
                 self.close_menu();
                 self.update(Message::Command(label), context);
@@ -1411,7 +1664,8 @@ impl Component for Explorer {
                 } else if let Some(prompt) = self.prompt {
                     self.has_error = false;
                     self.update(prompt.message(), context);
-                    if !self.has_error {
+                    // a command run from the palette may have opened another prompt
+                    if !self.has_error && self.prompt == Some(prompt) {
                         self.prompt = None;
                     }
                 }
@@ -1440,7 +1694,8 @@ impl Component for Explorer {
                 }
             }
             Message::RetryFocus => self.request_address_focus(context),
-            Message::Refresh if self.in_favorites => self.update(Message::OpenFavorites, context),
+            Message::Refresh if self.view != Place::Folder => self.update(Message::OpenView(self.view), context),
+            Message::Refresh if self.view == Place::Search => {}
             Message::Refresh => self.navigate(self.path.clone(), context),
             Message::Sort(key) => {
                 self.descending = self.sort == key && !self.descending;
@@ -1737,7 +1992,7 @@ impl Component for Explorer {
             }
             Message::NativeMenuRun => {
                 let paths: Vec<PathBuf> = if self.selected.is_empty() { vec![self.path.clone()] } else { self.selected.iter().cloned().collect() };
-                match shell::native_menu(&paths) {
+                match shell::native_menu(&paths, self.selected.is_empty()) {
                     Ok(true) => self.update(Message::Refresh, context),
                     Ok(false) => {}
                     Err(error) => {
@@ -1774,6 +2029,7 @@ impl Component for Explorer {
                         self.entries = entries.into_iter().map(std::sync::Arc::new).collect();
                         self.selected.retain(|selected| self.entries.iter().any(|entry| entry.path == *selected));
                         self.apply_sort();
+                        self.request_thumbs(context);
                         self.refresh_status();
                         if let Some(notice) = self.notice.take() {
                             self.status = notice;
@@ -1788,7 +2044,7 @@ impl Component for Explorer {
             Message::Loaded(_, _, _) => {}
             // the drag's own delayed refresh covers moves made by the target app; reloading mid-drag would cancel it
             Message::DirChanged(path, changed) => {
-                if !changed || path != self.path || self.recursive || self.in_favorites {
+                if !changed || path != self.path || self.recursive || self.view != Place::Folder {
                     return;
                 }
                 if self.drag_polling || self.last_drag_end.is_some_and(|end| end.elapsed() < OWN_DROP_WINDOW) {
@@ -1822,7 +2078,8 @@ impl Component for Explorer {
     }
 
     fn view(&self, _input: &PathBuf, context: &mut ViewContext<Self>) -> View {
-        context.window_title("Files — Winarchy");
+        let place = self.path.file_name().map_or_else(|| self.path.display().to_string(), |name| name.to_string_lossy().into_owned());
+        context.window_title(&format!("{place} - Winarchy Files"));
         let pane = if self.pane_hidden() { 0.0 } else { PANE_WIDTH };
         let limits = WindowConstraints { min_width: Some(self.chrome_width() + pane + MIN_LIST_WIDTH), ..Default::default() };
         let visuals = WindowVisuals::new().constraints(limits);
@@ -1850,6 +2107,7 @@ impl Component for Explorer {
         let width = self.list_width;
         let hide_extensions = self.hide_extensions;
         let layout = self.layout;
+        let thumbs = self.thumbs.clone();
         let per_row = layout.cell_width().map_or(1, |cell| ((width / cell) as usize).max(1));
         let group = self.group;
         let columns = self.columns;
@@ -1876,9 +2134,12 @@ impl Component for Explorer {
                         columns,
                         hide_extensions,
                         compact,
+                        layout == Layout::Details,
+                        thumbs.get(&entry.path).map(PathBuf::as_path),
                     ),
                     Layout::Tiles | Layout::Grid => {
-                        tile(entry, selected.contains(&entry.path), hovered.as_ref() == Some(&entry.path), theme.as_ref(), &sender, busy, layout, hide_extensions)
+                        let thumb = thumbs.get(&entry.path).map(PathBuf::as_path);
+                        tile(entry, selected.contains(&entry.path), hovered.as_ref() == Some(&entry.path), theme.as_ref(), &sender, busy, layout, hide_extensions, thumb)
                     }
                 };
                 let build = |entry: &Entry| -> View {
@@ -2037,19 +2298,39 @@ impl Component for Explorer {
             Border::new()
                 .grid_column(0)
                 .background_optional(self.theme.as_ref().map(Theme::surface))
+                .capture_pointer_on_press(true)
                 .on_pointer_pressed(context.callback(|info: PointerEventInfo| {
                     if info.is_right_button_pressed {
                         Message::ContextBackground(info.window_x, info.window_y)
+                    } else if info.is_left_button_pressed {
+                        Message::MarqueeStart(info.x, info.y)
                     } else {
                         Message::CloseMenu
                     }
                 }))
+                .on_pointer_moved(context.callback(|info: PointerEventInfo| Message::MarqueeMove(info.is_left_button_pressed)))
+                .on_pointer_released(context.callback(|_: PointerEventInfo| Message::MarqueeEnd))
                 .content(
                     ScrollViewer::new()
                         .horizontal_scroll_bar_visibility(ScrollBarVisibility::Disabled)
                         .content(ItemsRepeater::new().horizontal_alignment(HorizontalAlignment::Stretch).virtual_source(source)),
                 ),
         )];
+        if let Some(marquee) = &self.marquee {
+            let (left, top) = (marquee.origin.0.min(marquee.current.0), marquee.origin.1.min(marquee.current.1));
+            body_items.push(KeyedView::new(
+                3usize,
+                Border::new()
+                    .grid_column(0)
+                    .horizontal_alignment(HorizontalAlignment::Left)
+                    .vertical_alignment(VerticalAlignment::Top)
+                    .margin(Thickness::new(left, top, 0.0, 0.0))
+                    .width((marquee.origin.0 - marquee.current.0).abs())
+                    .height((marquee.origin.1 - marquee.current.1).abs())
+                    .opacity(MARQUEE_OPACITY)
+                    .background_optional(self.theme.as_ref().map(Theme::accent)),
+            ));
+        }
         if self.loaded && !self.has_error && visible.is_empty() {
             let message = match (self.filter.is_empty(), self.entries.is_empty()) {
                 (true, true) => "This folder is empty",
@@ -2168,7 +2449,7 @@ impl Component for Explorer {
                     GridLength::Auto,
                     GridLength::Auto,
                     GridLength::STAR,
-                    GridLength::Pixel(FILTER_WIDTH),
+                    GridLength::Pixel(if self.list_width < COMPACT_BELOW { FILTER_COMPACT_WIDTH } else { FILTER_WIDTH }),
                 ])
                 .column_spacing(ROW_GAP)
                 .children((
@@ -2261,19 +2542,31 @@ impl Component for Explorer {
         let mut sidebar_items: Vec<KeyedView> = Vec::new();
         sidebar_items.push(KeyedView::new(
             FAVORITES_KEY,
-            place(tr("Favorites"), icons::Icon::Star, self.in_favorites, tr("Favorites").to_owned(), Message::OpenFavorites, None, None),
+            place(tr("Favorites"), icons::Icon::Star, self.view == Place::Favorites, tr("Favorites").to_owned(), Message::OpenView(Place::Favorites), None, None),
+        ));
+        sidebar_items.push(KeyedView::new(
+            RECENT_KEY,
+            place(tr("Recent"), icons::Icon::Clock, self.view == Place::Recent, tr("Recent").to_owned(), Message::OpenView(Place::Recent), None, None),
+        ));
+        sidebar_items.push(KeyedView::new(
+            RECYCLE_BIN_KEY,
+            place(tr("Recycle Bin"), icons::Icon::Trash, self.view == Place::RecycleBin, tr("Recycle Bin").to_owned(), Message::OpenView(Place::RecycleBin), None, None),
+        ));
+        sidebar_items.push(KeyedView::new(
+            THIS_PC_KEY,
+            place(tr("This PC"), icons::Icon::DesktopTower, self.view == Place::ThisPc, tr("This PC").to_owned(), Message::OpenView(Place::ThisPc), None, None),
         ));
         for (index, (label, path)) in self.places.iter().enumerate() {
             let target = path.clone();
             sidebar_items.push(KeyedView::new(
                 index,
-                place(label, place_icon(path, false), !self.in_favorites && *path == self.path, path.to_string_lossy().into_owned(), Message::OpenFolder(path.clone()), Some(target), None),
+                place(label, place_icon(path, false), self.view == Place::Folder && *path == self.path, path.to_string_lossy().into_owned(), Message::OpenFolder(path.clone()), Some(target), None),
             ));
         }
         if !self.pinned.is_empty() {
             let pins = self.pinned.iter().map(|path| {
                 let label = path.file_name().map_or_else(|| path.to_string_lossy().into_owned(), |name| name.to_string_lossy().into_owned());
-                let current = !self.in_favorites && *path == self.path;
+                let current = self.view == Place::Folder && *path == self.path;
                 let (opened, new_tab, armed) = (path.clone(), path.clone(), path.clone());
                 let glyph = if path.is_dir() { place_icon(path, true) } else { icons::Icon::File };
                 KeyedView::new(
@@ -2314,7 +2607,7 @@ impl Component for Explorer {
                 DEVICES_HEADER_KEY,
                 StackPanel::new().margin(Thickness::new(0.0, DEVICES_HEADER_GAP, 0.0, 0.0)).children((
                     Border::new().height(1.0).opacity(DEVICES_RULE_OPACITY).background_optional(theme.map(Theme::muted)),
-                    caption(tr("Devices"), theme.map(Theme::muted)).margin(Thickness::new(ROW_GAP, DEVICES_HEADER_GAP, 0.0, 0.0)),
+                    caption(tr("Devices"), theme.map(Theme::muted)).margin(Thickness::new(ACCENT_BAR_WIDTH + ROW_GAP + BUTTON_INSET, DEVICES_HEADER_GAP, 0.0, 0.0)),
                 )),
             ));
             for (index, drive) in self.drives.iter().enumerate() {
@@ -2330,7 +2623,7 @@ impl Component for Explorer {
                     place(
                         &drive.label,
                         glyph,
-                        !self.in_favorites && drive.path == self.path,
+                        self.view == Place::Folder && drive.path == self.path,
                         drive.path.to_string_lossy().into_owned(),
                         Message::OpenFolder(drive.path.clone()),
                         Some(drive.path.clone()),
@@ -2364,7 +2657,7 @@ impl Component for Explorer {
                     .on_drop(context.callback(Message::DroppedOnSidebar))
                     .content(Grid::new().rows([GridLength::STAR, GridLength::Auto]).children((
                         ScrollViewer::new().grid_row(0).content(StackPanel::new().spacing(TIGHT_GAP).keyed_children(sidebar_items)),
-                        StackPanel::new().grid_row(1).spacing(TIGHT_GAP).keyed_children(device_items),
+                        StackPanel::new().grid_row(1).spacing(TIGHT_GAP).margin(Thickness::new(0.0, 0.0, 0.0, CARD_PADDING)).keyed_children(device_items),
                     ))),
                 splitter,
                 Border::new()
@@ -2495,14 +2788,16 @@ impl Explorer {
             commands.iter().find(|command| command.label == label)
         };
         match kind {
-            MenuKind::Item => ["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Compress to zip", "Extract here", "Copy path", "Share", "Add tags", "Add to favorites", "Remove from favorites", "Pin to sidebar", "Unpin from sidebar", "Terminal here", "Open with…", "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
+            MenuKind::Item => ["Cut", "Copy", "Paste here", "Rename selected", "Delete to Recycle Bin", "Compress to zip", "Extract here", OPEN_WITH, ORGANIZE, "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
+            MenuKind::Organize => ["Copy path", "Share", "Add tags", "Add to favorites", "Remove from favorites", "Pin to sidebar", "Unpin from sidebar", "Terminal here"].iter().filter_map(|label| find(label)).collect(),
+            MenuKind::OpenWith => commands.iter().filter(|command| matches!(command.message, Some(Message::OpenWithApp(_))) || command.label == tr_dynamic("Choose another app…")).collect(),
             MenuKind::Side => ["Open in new tab", "Pin to sidebar", "Unpin from sidebar", "Add to favorites", "Remove from favorites", "Copy path", "Properties", "Show more options"].iter().filter_map(|label| find(label)).collect(),
-            MenuKind::Background => ["Paste here", "Paste as shortcut", "Create folder", "Create file", "Terminal here", "Open in editor", "Select none"].iter().filter_map(|label| find(label)).collect(),
+            MenuKind::Background => ["Paste here", "Paste as shortcut", "Create folder", "Create file", "Terminal here", "Open in editor", "Select none", "Show more options"].iter().filter_map(|label| find(label)).collect(),
             MenuKind::New => NEW_LABELS.iter().filter_map(|label| find(label)).collect(),
             MenuKind::Sort => self.sort_labels().iter().filter_map(|label| find(label)).collect(),
             MenuKind::More => {
-                let shown: Vec<String> = NEW_LABELS.iter().chain(&TOOL_LABELS).copied().chain(self.sort_labels()).map(tr_dynamic).collect();
-                commands.iter().filter(|command| command.message.is_some() && !shown.contains(&command.label)).collect()
+                let shown: Vec<String> = NEW_LABELS.iter().chain(&TOOL_LABELS).copied().chain(self.sort_labels()).chain([ORGANIZE, OPEN_WITH]).map(tr_dynamic).collect();
+                commands.iter().filter(|command| command.message.is_some() && !matches!(command.message, Some(Message::OpenWithApp(_))) && !shown.contains(&command.label)).collect()
             }
         }
     }
@@ -2537,9 +2832,10 @@ impl Explorer {
                             .orientation(Orientation::Horizontal)
                             .spacing(ROW_GAP)
                             .children((
-                                match command.icon {
-                                    Some(glyph) => icon_state(glyph, ICON_SIZE, self.theme.as_ref(), command.enabled),
-                                    None => StackPanel::new().width(ICON_SIZE).into(),
+                                match (command.icon, command.image.as_ref().and_then(|file| Image::new().source_file(file).ok())) {
+                                    (_, Some(image)) => image.width(ICON_SIZE).height(ICON_SIZE).stretch(Stretch::Uniform).into(),
+                                    (Some(glyph), None) => icon_state(glyph, ICON_SIZE, self.theme.as_ref(), command.enabled),
+                                    (None, None) => StackPanel::new().width(ICON_SIZE).into(),
                                 },
                                 text(&command.label, self.theme.as_ref().map(Theme::foreground)),
                             )),
@@ -2613,12 +2909,17 @@ impl Explorer {
             keys::Key::Back => self.update(Message::Back, context),
             keys::Key::Forward => self.update(Message::Forward, context),
             keys::Key::PrevTab => self.update(Message::SwitchTab((self.active_tab + self.tabs.len() - 1) % self.tabs.len()), context),
+            keys::Key::MoveTabLeft => self.update(Message::MoveTab(-1), context),
+            keys::Key::MoveTabRight => self.update(Message::MoveTab(1), context),
+            keys::Key::Search => self.update(Message::Ask(Prompt::Search), context),
+            keys::Key::Palette => self.update(Message::Ask(Prompt::Palette), context),
             keys::Key::ReopenTab => self.update(Message::ReopenTab, context),
             keys::Key::JumpTab(index) => {
                 if index < self.tabs.len() {
                     self.update(Message::SwitchTab(index), context);
                 }
             }
+            keys::Key::QuickLook => self.update(Message::TogglePane, context),
             keys::Key::Rename => self.update(Message::Command(tr_dynamic("Rename selected")), context),
             keys::Key::NewFolder => self.update(Message::Command(tr_dynamic("Create folder")), context),
             keys::Key::CopyPath => self.update(Message::CopyPath(false), context),
@@ -2689,6 +2990,7 @@ impl Explorer {
             self.list_width.to_bits(),
         )
             .hash(&mut hasher);
+        self.thumbs.len().hash(&mut hasher);
         self.dragged.is_empty().hash(&mut hasher);
         // order-independent so HashSet iteration order cannot change the revision
         let selection = self
@@ -2946,6 +3248,31 @@ impl Explorer {
         self.sidebar_width + SPLITTER_WIDTH + SCROLL_ALLOWANCE + 2.0 * WINDOW_MARGIN + 2.0 * CARD_PADDING
     }
 
+    // Only the tile layouts show thumbnails. Rendering is sequential in a worker, a few at a time, so the list fills in as it goes.
+    // shortcut: only the first THUMB_LIMIT entries of a folder get one, until thumbnails are requested for the visible rows only.
+    fn request_thumbs(&mut self, context: &ComponentContext<Self>) {
+        let previews = matches!(self.layout, Layout::Tiles | Layout::Grid);
+        let jobs: Vec<thumbs::Job> = self
+            .entries
+            .iter()
+            .filter(|entry| !entry.is_directory && thumbs::wanted(&entry.path) && (previews || thumbs::has_own_icon(&entry.path)) && !self.thumbs.contains_key(&entry.path))
+            .take(THUMB_LIMIT)
+            .map(|entry| (entry.path.clone(), entry.modified, entry.size))
+            .collect();
+        self.render_thumbs(self.load_generation, jobs, context);
+    }
+
+    fn render_thumbs(&self, generation: u64, mut jobs: Vec<thumbs::Job>, context: &ComponentContext<Self>) {
+        if jobs.is_empty() {
+            return;
+        }
+        let rest = jobs.split_off(jobs.len().min(THUMB_BATCH));
+        let _task = context.spawn_background(move |_| {
+            let ready = jobs.iter().filter_map(|job| Some((job.0.clone(), thumbs::ensure(job)?))).collect();
+            Message::Thumbs(generation, ready, rest)
+        });
+    }
+
     fn apply_sort(&mut self) {
         let (key, descending) = (self.sort, self.descending);
         self.entries.sort_by(|a, b| {
@@ -2988,8 +3315,6 @@ impl Explorer {
             hide_pane: self.hide_pane,
             sidebar_width: self.sidebar_width,
             terminal: self.terminal.clone(),
-            tabs: self.tabs.clone(),
-            active_tab: self.active_tab,
             size_width: self.columns.size,
             modified_width: self.columns.modified,
             pinned,
@@ -3040,7 +3365,10 @@ impl Explorer {
                 .iter()
                 .filter(|entry| self.matches(entry, &needle))
                 .count();
-            self.status = if shown == self.entries.len() {
+            let hidden = if needle.is_empty() && !self.show_hidden { self.entries.iter().filter(|entry| entry.hidden).count() } else { 0 };
+            self.status = if hidden > 0 && shown + hidden == self.entries.len() {
+                format!("{shown} {} · {hidden} {} · {} {}", count_word(shown, "item", "items"), tr("hidden"), self.selected.len(), count_word(self.selected.len(), "selected|one", "selected"))
+            } else if shown == self.entries.len() {
                 format!("{shown} {} · {} {}", count_word(shown, "item", "items"), self.selected.len(), count_word(self.selected.len(), "selected|one", "selected"))
             } else {
                 format!(
@@ -3099,7 +3427,6 @@ impl Explorer {
     fn load_path(&mut self, path: PathBuf, context: &ComponentContext<Self>) {
         self.path = path.clone();
         self.tabs[self.active_tab] = path.clone();
-        self.save_settings();
         self.notice = None;
         self.recursive = false;
         self.address = path.to_string_lossy().into_owned();
@@ -3109,7 +3436,7 @@ impl Explorer {
         self.git_branch = None;
         self.status = tr("Loading folder…").to_owned();
         self.loaded = false;
-        self.in_favorites = false;
+        self.view = Place::Folder;
         self.has_error = false;
         self.queue_load(path, context);
     }
@@ -3155,6 +3482,24 @@ impl Explorer {
             return;
         }
         let paths: Vec<_> = self.selected.iter().cloned().collect();
+        if self.view == Place::RecycleBin {
+            if !permanent {
+                return;
+            }
+            if self.purge_armed != self.selected {
+                self.purge_armed = self.selected.clone();
+                self.status = tr("Press Delete permanently again to erase these items for good").to_owned();
+                return;
+            }
+            self.purge_armed.clear();
+            let failures: Vec<String> = paths.iter().filter_map(|data| directory::purge(data).err()).collect();
+            self.update(Message::OpenView(Place::RecycleBin), context);
+            self.has_error = !failures.is_empty();
+            if !failures.is_empty() {
+                self.status = failures.join(" · ");
+            }
+            return;
+        }
         let parent = self.path.clone();
         self.deleting = true;
         self.status = tr(if permanent { "Deleting permanently…" } else { "Deleting to Recycle Bin…" }).to_owned();
@@ -3478,16 +3823,43 @@ fn select_box(entry: &Entry, is_selected: bool, shown: bool, sender: &LocalSende
         )
 }
 
-fn open_button(entry: &Entry, sender: &LocalSender<Message>, column: i32, content: impl Into<View>) -> View {
+fn open_button(entry: &Entry, sender: &LocalSender<Message>, column: i32, align: HorizontalAlignment, content: impl Into<View>) -> View {
     let action = Message::RowClick(entry.path.clone());
     Button::new()
         .grid_column(column)
-        .horizontal_content_alignment(HorizontalAlignment::Left)
+        .horizontal_content_alignment(align)
         .style(ButtonStyle::Subtle)
         .automation_name(entry.name.clone())
         .on_click(sender.message(action))
         .content(content)
 }
+
+#[derive(Clone, Copy, PartialEq)]
+enum Place {
+    Folder,
+    Favorites,
+    Recent,
+    ThisPc,
+    RecycleBin,
+    Search,
+}
+
+impl Place {
+    fn title(self) -> &'static str {
+        match self {
+            Place::Folder => "",
+            Place::Favorites => "Favorites",
+            Place::Recent => "Recent",
+            Place::ThisPc => "This PC",
+            Place::RecycleBin => "Recycle Bin",
+            Place::Search => "Search results",
+        }
+    }
+}
+
+const RECENT_LIMIT: usize = 200;
+const THUMB_LIMIT: usize = 400;
+const THUMB_BATCH: usize = 6;
 
 enum SidebarDrop {
     Into(PathBuf),
@@ -3513,20 +3885,39 @@ fn row(
     columns: Columns,
     hide_extensions: bool,
     compact: bool,
+    show_size: bool,
+    thumb: Option<&Path>,
 ) -> View {
+    let glyph: View = match thumb.and_then(|file| Image::new().source_file(file).ok()) {
+        Some(image) => image.width(ICON_SIZE).height(ICON_SIZE).stretch(Stretch::Uniform).into(),
+        None => icon(directory::icon(entry), ICON_SIZE, theme),
+    };
     let name = StackPanel::new()
         .horizontal_alignment(HorizontalAlignment::Left)
         .orientation(Orientation::Horizontal)
         .spacing(ROW_GAP)
         .children((
-            icon(directory::icon(entry), ICON_SIZE, theme),
+            glyph,
             text(&display_name(entry, hide_extensions), theme.map(Theme::foreground)),
         ));
     let check = select_box(entry, is_selected, hovered, sender, busy).grid_column(0);
-    let button = open_button(entry, sender, 1, name);
+    let button = open_button(entry, sender, 1, HorizontalAlignment::Left, name);
     let grid = Grid::new().column_spacing(COLUMN_GAP);
     let content: View = if compact {
-        grid.columns([GridLength::Auto, GridLength::STAR]).children((check, button)).into()
+        if show_size {
+            grid.columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
+                .children((
+                    check,
+                    button,
+                    caption(&directory::format_size(entry), theme.map(Theme::muted))
+                        .grid_column(2)
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .margin(Thickness::new(0.0, 0.0, ROW_TRAILING, 0.0)),
+                ))
+                .into()
+        } else {
+            grid.columns([GridLength::Auto, GridLength::STAR]).children((check, button)).into()
+        }
     } else {
         grid.columns([
             GridLength::Pixel(CHECK_WIDTH),
@@ -3569,11 +3960,18 @@ fn tile(
     busy: bool,
     layout: Layout,
     hide_extensions: bool,
+    thumb: Option<&Path>,
 ) -> View {
     let name = text(&display_name(entry, hide_extensions), theme.map(Theme::foreground));
-    let icon = icon(directory::icon(entry), if layout == Layout::Grid { ICON_SIZE_LARGE } else { ICON_SIZE }, theme);
+    let icon: View = match thumb.and_then(|file| Image::new().source_file(file).ok()) {
+        Some(image) => {
+            let edge = if layout == Layout::Grid { THUMB_GRID_SIZE } else { THUMB_TILE_SIZE };
+            image.width(edge).height(edge).stretch(Stretch::Uniform).into()
+        }
+        None => icon(directory::icon(entry), if layout == Layout::Grid { GRID_ICON_SIZE } else { ICON_SIZE }, theme),
+    };
     let content: View = if layout == Layout::Grid {
-        StackPanel::new().spacing(TIGHT_GAP).horizontal_alignment(HorizontalAlignment::Center).children((icon, name)).into()
+        StackPanel::new().spacing(TIGHT_GAP).width(GRID_CELL_WIDTH - 2.0 * CARD_MARGIN - BUTTON_CONTENT_INSET).horizontal_alignment(HorizontalAlignment::Center).children((icon, name.text_wrapping(TextWrapping::Wrap).max_lines(2).horizontal_alignment(HorizontalAlignment::Center))).into()
     } else {
         let detail = if entry.is_directory { tr("Folder").to_owned() } else { directory::format_size(entry) };
         let lines = vec![KeyedView::new(0usize, name), KeyedView::new(1usize, caption(&detail, theme.map(Theme::muted)))];
@@ -3593,14 +3991,18 @@ fn tile(
         .margin(Thickness::new(CARD_MARGIN, CARD_MARGIN, CARD_MARGIN, CARD_MARGIN))
         .corner_radius(CornerRadius::uniform(CARD_RADIUS))
         .background_optional(card)
-        .content(
-            Grid::new()
-                .columns([GridLength::Auto, GridLength::STAR])
-                .children((
-                    select_box(entry, is_selected, hovered, sender, busy).grid_column(0),
-                    open_button(entry, sender, 1, content),
-                )),
-        )
+        .content(if layout == Layout::Grid {
+            // one cell: the icon and name centered on the whole card, the checkbox floating over its corner
+            Grid::new().children((
+                open_button(entry, sender, 0, HorizontalAlignment::Center, content),
+                select_box(entry, is_selected, hovered, sender, busy).horizontal_alignment(HorizontalAlignment::Left).vertical_alignment(VerticalAlignment::Top),
+            ))
+        } else {
+            Grid::new().columns([GridLength::Auto, GridLength::STAR]).children((
+                select_box(entry, is_selected, hovered, sender, busy).grid_column(0),
+                open_button(entry, sender, 1, HorizontalAlignment::Left, content),
+            ))
+        })
         .into()
 }
 
@@ -3640,6 +4042,19 @@ fn icon_state(glyph: icons::Icon, size: f64, theme: Option<&Theme>, enabled: boo
     Border::new().opacity(if enabled { 1.0 } else { ICON_DISABLED_OPACITY }).content(icon(glyph, size, theme)).into()
 }
 
+// opens the submenu of the less common actions on an item
+const MARQUEE_OPACITY: f64 = 0.25;
+
+struct Marquee {
+    origin: (f64, f64),
+    current: (f64, f64),
+    screen: (i32, i32),
+    rows: Vec<(String, (i32, i32, i32, i32))>,
+    base: HashSet<PathBuf>,
+}
+
+const ORGANIZE: &str = "Organize ▸";
+const OPEN_WITH: &str = "Open with ▸";
 const NEW_LABELS: [&str; 4] = ["Create folder", "Create file", "Create shortcut", "Git clone"];
 const TOOL_LABELS: [&str; 7] = ["Cut", "Copy", "Copy path", "Paste here", "Rename selected", "Share", "Delete to Recycle Bin"];
 
@@ -3651,6 +4066,8 @@ enum MenuKind {
     New,
     Sort,
     More,
+    Organize,
+    OpenWith,
 }
 
 // Duotone icon: an accent-tinted layer under a foreground outline, drawn from a themed SVG.
@@ -3677,15 +4094,128 @@ fn text(value: &str, foreground: Option<Brush>) -> TextBlock {
         .unwrap_or(block)
 }
 
+// The location the command line asks for, as Explorer's own switches spell it: a folder, a file (opens its folder with it
+// selected), `/select,<path>`, `/root,<path>`; `/e` and other flags are ignored.
+fn raw_launch_path(args: &[String]) -> Option<String> {
+    let mut select_next = false;
+    for arg in args {
+        let lower = arg.to_lowercase();
+        let rest = if lower.starts_with("/select,") || lower.starts_with("/root,") { Some(&arg[arg.find(',')? + 1..]) } else { None };
+        match rest {
+            Some("") => select_next = true,
+            Some(path) => return Some(path.trim_matches('"').to_owned()),
+            None if select_next => return Some(arg.trim_matches('"').to_owned()),
+            None if arg.starts_with('/') => {}
+            None => return Some(arg.clone()),
+        }
+    }
+    None
+}
+
+// The folder to show and the item to leave selected in it.
+fn launch_target() -> Option<(PathBuf, Option<PathBuf>)> {
+    let args: Vec<String> = std::env::args_os().skip(1).map(|arg| arg.to_string_lossy().into_owned()).collect();
+    let raw = raw_launch_path(&args)?;
+    // `"D:\"` reaches us as `D:` once the shell's quoting eats the backslash
+    let raw = if raw.len() == 2 && raw.ends_with(':') { format!("{raw}\\") } else { raw };
+    let path = shell::resolve_address(&raw);
+    if path.is_dir() && !args.iter().any(|arg| arg.to_lowercase().starts_with("/select")) {
+        Some((path, None))
+    } else if path.exists() {
+        Some((path.parent()?.to_path_buf(), Some(path)))
+    } else {
+        None
+    }
+}
+
+// `--register-handler` and friends: no window, the result is the exit code (and a line on the parent console).
+fn handler_command() -> Option<i32> {
+    let flag = std::env::args().nth(1)?;
+    let outcome = match flag.as_str() {
+        "--register-handler" => handler::register(&std::env::current_exe().ok()?).map(|()| "Files is now the folder handler for this user".to_owned()),
+        "--unregister-handler" => handler::unregister().map(|()| "Folder handler restored".to_owned()),
+        "--install" => install().map(|folder| format!("Installed in {}", folder.display())),
+        "--handler-status" => {
+            let registered = handler::is_registered(&std::env::current_exe().ok()?);
+            Ok(format!("folder handler: {}", if registered { "Files" } else { "not registered" }))
+        }
+        _ => return None,
+    };
+    shell::print_to_parent_console(&match &outcome {
+        Ok(line) => line.clone(),
+        Err(error) => format!("error: {error}"),
+    });
+    Some(i32::from(outcome.is_err()))
+}
+
+// Copies the exe to a fixed per-user folder and adds a Start menu entry; the folder handler stays untouched.
+fn install() -> Result<PathBuf, String> {
+    let folder = PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA is not set")?).join("Programs").join("winarchy-files");
+    std::fs::create_dir_all(&folder).map_err(|error| error.to_string())?;
+    let target = folder.join("winarchy-files.exe");
+    let source = std::env::current_exe().map_err(|error| error.to_string())?;
+    if source != target {
+        std::fs::copy(&source, &target).map_err(|error| format!("{}: {error}", target.display()))?;
+    }
+    Theme::remember_location(&folder, &source);
+    let menu = PathBuf::from(std::env::var_os("APPDATA").ok_or("APPDATA is not set")?).join(r"Microsoft\Windows\Start Menu\Programs");
+    shell::create_app_shortcut(&target, &menu.join("Files.lnk"), shell::APP_ID)?;
+    Ok(folder)
+}
+
+// Sin consola, un panic no deja rastro: va a %LOCALAPPDATA%\winarchy\files.log.
+fn log_panics() {
+    let Some(base) = std::env::var_os("LOCALAPPDATA") else { return };
+    let path = PathBuf::from(base).join("winarchy").join("files.log");
+    std::panic::set_hook(Box::new(move |info| {
+        use std::io::Write;
+        if let Some(folder) = path.parent() {
+            let _ = std::fs::create_dir_all(folder);
+        }
+        if std::fs::metadata(&path).is_ok_and(|m| m.len() > 512 * 1024) {
+            let _ = std::fs::rename(&path, path.with_extension("log.1"));
+        }
+        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            let _ = writeln!(file, "t={t} panic: {info}");
+        }
+    }));
+}
+
 fn main() {
-    let path = std::env::args_os()
-        .nth(1)
-        .map(PathBuf::from)
-        .filter(|path| path.is_dir())
-        .or_else(|| std::env::current_dir().ok())
+    log_panics();
+    if let Some(code) = handler_command() {
+        std::process::exit(code);
+    }
+    let target = launch_target();
+    shell::set_app_id();
+    let path = target
+        .map(|(folder, _)| folder)
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from("C:\\"));
     shell::apply_window_icon(Theme::load().ok().flatten().and_then(|theme| theme.icon_colors()), true);
+    shell::stay_above_tiling_border();
     App::run_component::<Explorer>(path).unwrap();
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::raw_launch_path;
+
+    fn parse(args: &[&str]) -> Option<String> {
+        raw_launch_path(&args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn reads_explorer_switches() {
+        assert_eq!(parse(&[r"C:\Temp"]).as_deref(), Some(r"C:\Temp"));
+        assert_eq!(parse(&["/e,", r"C:\Temp"]).as_deref(), Some(r"C:\Temp"));
+        assert_eq!(parse(&[r#"/select,"C:\Temp\a b.txt""#]).as_deref(), Some(r"C:\Temp\a b.txt"));
+        assert_eq!(parse(&["/select,", r"C:\Temp\a.txt"]).as_deref(), Some(r"C:\Temp\a.txt"));
+        assert_eq!(parse(&[r"/root,C:\"]).as_deref(), Some(r"C:\"));
+        assert_eq!(parse(&["/e"]), None);
+        assert_eq!(parse(&[]), None);
+    }
 }
 
 #[cfg(test)]

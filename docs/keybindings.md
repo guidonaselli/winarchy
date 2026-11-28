@@ -8,11 +8,13 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 | Keybinding | Action |
 |---|---|
 | `SUPER+Return` | WezTerm (the default terminal) |
+| `SUPER+D` | Show/restore the desktop (only when Winarchy is the session shell; Explorer handles it otherwise) |
+| `Win` (tap) | Start menu (session shell only): pinned apps and pinned folders/files (drop them on the dock logo; right-click or Shift+F10 to unpin), all apps, search by typing, power menu. Clicking the dock logo opens the same menu. Outside the session shell it opens Flow Launcher |
 | `SUPER+Space` | Flow Launcher — applications and Winarchy's own commands in one search |
 | `SUPER+S` | File search — Flow scoped to Everything (`f ` prefix), replaces Windows Search |
 | `SUPER+Shift+Return` or `SUPER+Shift+B` | Default browser |
 | `SUPER+Shift+F` | File explorer (`SUPER+E` also works: it is Windows' native shortcut, not intercepted) |
-| `SUPER+N` | Notification center (Windows native — not intercepted, so YASB's bell works) |
+| `SUPER+N` | Notification center (Windows native; with the Winarchy session shell it opens the island calendar, since Explorer is not there to handle it) |
 | `SUPER+Shift+M` | Music (Spotify, fallback YT Music webapp) |
 | `SUPER+Shift+O` | Obsidian |
 | `SUPER+Shift+Q` | Calculator |
@@ -23,8 +25,9 @@ escape — otherwise Windows' native Win+N (launch taskbar app N) would fire ins
 ## Menu (popup, Omarchy-style)
 | Keybinding | Action |
 |---|---|
+| `SUPER+Alt+R` | Run dialog (Win+R is retile; works without Explorer) |
 | `SUPER+Alt+Space` | Winarchy menu (Apps/Appearance/Reload/Game mode/Doctor/Update/System/Quit) — same content as right-clicking the tray icon, or the rightmost button on the YASB bar |
-| `SUPER+Esc` | System / power submenu directly (Screensaver/Lock/Sleep/Hibernate/Sign out/Restart/Shut down) |
+| `SUPER+Esc` | System / power submenu directly (Screensaver/Lock/Sleep/Hibernate/Switch user/Sign out/Restart/Shut down/Project) |
 
 The menu's **Apps** entry opens Flow Launcher pre-scoped to the `Program` plugin
 (action keyword `app`), and `SUPER+S` pre-scoped to the `Explorer` plugin's
@@ -88,6 +91,7 @@ so `Ctrl+C` still interrupts.
 | `SUPER+Alt+u` or `SUPER+Alt+G` | Unstack the focused window |
 | `SUPER+Ctrl+S` / `SUPER+Ctrl+U` | Stack every window in the workspace / unstack the whole container |
 | `SUPER+Alt+,` / `SUPER+Alt+.` | Previous / next tab in the stack |
+| `Alt+Tab` / `Alt+Shift+Tab` | Sin Explorer: un toque vuelve a la ventana anterior; con Alt sostenido, cada Tab solo mueve la selección por z-order (sin cambiar de ventana) y la shell muestra un conmutador con la miniatura en vivo, el ícono y el título de cada ventana; la elegida se activa al soltar Alt. Incluye las ventanas de todos los workspaces: las de uno oculto van al final, salen con el ícono en grande y elegirlas te lleva ahí, igual que un clic en el dock |
 | `SUPER+Alt+Shift+Tab` / `SUPER+Alt+Tab`, `SUPER+Ctrl+←` / `SUPER+Ctrl+→`, `SUPER+Alt+WheelUp` / `SUPER+Alt+WheelDown` | Previous / next tab in the stack (Omarchy's group keys) |
 | `SUPER+Alt+1..5` | Go to tab N of the stack |
 
@@ -140,6 +144,12 @@ control panels. `SUPER+Ctrl+W` is the background switcher, as in Omarchy, so Net
 | `SUPER+Ctrl+N` | Network |
 | `SUPER+Ctrl+D` | Display |
 | `SUPER+Ctrl+P` | Power and sleep |
+| `SUPER+NumpadAdd` | Magnifier (without Explorer; otherwise Windows' own shortcut) |
+
+In a session without Explorer `ms-settings:` links do not open: Sound, Network and Power open their classic
+Control Panel applets, and Bluetooth and Display show a "needs Explorer" notice. The Winarchy menu has a
+**Windows tools** submenu (Device, Disk and Task managers, network, power, Event viewer, admin terminal,
+Magnifier, on-screen keyboard).
 
 ## Themes
 | Keybinding | Action |

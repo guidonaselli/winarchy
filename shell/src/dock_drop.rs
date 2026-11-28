@@ -70,8 +70,14 @@ impl IDropTarget_Impl for Target_Impl {
     }
 
     fn DragOver(&self, _: MODIFIERKEYS_FLAGS, pt: &POINTL, effect: *mut DROPEFFECT) -> Result<()> {
-        let ok = crate::dock::drop_launch(self.owner, pt.x, pt.y).is_some();
-        unsafe { *effect = if ok { DROPEFFECT_COPY } else { DROPEFFECT_NONE } };
+        let effect_for = if crate::dock::brand_at(self.owner, pt.x, pt.y) {
+            DROPEFFECT_LINK
+        } else if crate::dock::drop_launch(self.owner, pt.x, pt.y).is_some() {
+            DROPEFFECT_COPY
+        } else {
+            DROPEFFECT_NONE
+        };
+        unsafe { *effect = effect_for };
         Ok(())
     }
 
@@ -81,6 +87,13 @@ impl IDropTarget_Impl for Target_Impl {
 
     fn Drop(&self, data: Option<&IDataObject>, _: MODIFIERKEYS_FLAGS, pt: &POINTL, effect: *mut DROPEFFECT) -> Result<()> {
         unsafe { *effect = DROPEFFECT_NONE };
+        if let (Some(data), true) = (data, crate::dock::brand_at(self.owner, pt.x, pt.y)) {
+            let files = unsafe { paths(data) };
+            if !files.is_empty() && crate::start::pin_paths(files) {
+                unsafe { *effect = DROPEFFECT_LINK };
+            }
+            return Ok(());
+        }
         let (Some(data), Some((open, _))) = (data, crate::dock::drop_launch(self.owner, pt.x, pt.y)) else { return Ok(()) };
         let files = unsafe { paths(data) };
         if !files.is_empty() {

@@ -14,9 +14,14 @@ pub struct WinAttrs {
 }
 
 // Filtro estándar de taskbar: WS_EX_APPWINDOW gana sobre owner y toolwindow. komorebi cloakea las
-// ventanas de otros workspaces, así que una cloaked que él gestiona sigue contando.
+// ventanas de otros workspaces (o con window_hiding_behaviour=Hide, las oculta): una que él gestiona sigue contando aunque no se vea.
 pub fn eligible(a: &WinAttrs) -> bool {
-    a.visible && !a.own_process && (!a.owned || a.appwindow) && (!a.toolwindow || a.appwindow) && (!a.cloaked || a.managed)
+    (a.visible || a.managed) && !a.own_process && (!a.owned || a.appwindow) && (!a.toolwindow || a.appwindow) && (!a.cloaked || a.managed)
+}
+
+// sin Explorer komorebi no puede cloakear y usa Hide: fuera de vista es cualquiera de las dos
+pub fn off_view(visible: bool, cloaked: bool, managed: bool) -> bool {
+    cloaked || (managed && !visible)
 }
 
 // Un AUMID agrupa mejor que el exe (Configuración, PWAs y Electron comparten `ApplicationFrameHost`/`msedge`).
@@ -78,7 +83,7 @@ pub fn covers_monitor(fg: &Foreground, monitor: Rect) -> bool {
 // `quns_busy` viene de SHQueryUserNotificationState, que no distingue monitor: solo cuenta si el foreground está en el del dock.
 // Una maximizada con marco (Steam, fuera de komorebi) cubre el monitor con el dock en `hide` y Windows la da por fullscreen: no cuenta.
 pub fn should_hide(fg: Option<&Foreground>, monitor: Rect, quns_busy: bool) -> bool {
-    fg.is_some_and(|f| covers_monitor(f, monitor) || (quns_busy && f.on_dock_monitor && !(f.zoomed && (f.caption || f.thickframe))))
+    fg.is_some_and(|f| covers_monitor(f, monitor) || (quns_busy && f.on_dock_monitor && !f.shell_like && !(f.zoomed && (f.caption || f.thickframe))))
 }
 
 #[cfg(test)]
@@ -97,6 +102,7 @@ mod tests {
     #[test]
     fn hidden_owned_and_tool_windows_are_not() {
         assert!(!eligible(&WinAttrs { visible: false, ..win() }));
+        assert!(eligible(&WinAttrs { visible: false, managed: true, ..win() }));
         assert!(!eligible(&WinAttrs { owned: true, ..win() }));
         assert!(!eligible(&WinAttrs { toolwindow: true, ..win() }));
     }
@@ -116,6 +122,14 @@ mod tests {
     fn cloaked_counts_only_when_komorebi_manages_it() {
         assert!(!eligible(&WinAttrs { cloaked: true, ..win() }));
         assert!(eligible(&WinAttrs { cloaked: true, managed: true, ..win() }));
+    }
+
+    #[test]
+    fn a_managed_window_komorebi_hid_is_off_view() {
+        assert!(off_view(false, false, true));
+        assert!(off_view(true, true, true));
+        assert!(!off_view(true, false, true));
+        assert!(!off_view(false, false, false));
     }
 
     #[test]
@@ -286,6 +300,11 @@ mod tests {
         assert!(!should_hide(Some(&Foreground { shell_like: true, ..fg() }), MON, false));
         assert!(!should_hide(Some(&Foreground { zoomed: true, ..fg() }), MON, false));
         assert!(!should_hide(Some(&Foreground { caption: true, thickframe: true, ..fg() }), MON, false));
+    }
+
+    #[test]
+    fn desktop_reported_as_busy_does_not_hide_the_dock() {
+        assert!(!should_hide(Some(&Foreground { shell_like: true, ..fg() }), MON, true));
     }
 
     #[test]

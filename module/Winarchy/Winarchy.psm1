@@ -3,8 +3,12 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-foreach ($file in Get-ChildItem -Path (Join-Path $PSScriptRoot 'Private') -Filter '*.ps1') {
-    . $file.FullName
+# parsear y ejecutar evita ~150 ms de dot-sourcear 34 archivos; conserva archivo, línea y $PSScriptRoot
+foreach ($file in [IO.Directory]::GetFiles((Join-Path $PSScriptRoot 'Private'), '*.ps1')) {
+    $errors = $null
+    $ast = [Management.Automation.Language.Parser]::ParseFile($file, [ref]$null, [ref]$errors)
+    if ($errors) { throw "${file}:$($errors[0].Extent.StartLineNumber): $($errors[0].Message)" }
+    . $ast.GetScriptBlock()
 }
 
 function Show-WinarchyHelp {
@@ -73,12 +77,16 @@ function Show-WinarchyHelp {
     rules collisions          ASC rules dropped because a higher layer decided otherwise
     rules sync [--apply]      Refresh the vendored community ASC (shows the diff first;
                               never touches your config/komorebi/rules.toml)
+    shell <status|activate|deactivate>   Replace Explorer with the Winarchy shell at next sign-in (opt-in, reversible; activate needs --yes)
+    uwphost [status|on|off|retry]   Open Store apps inside the Winarchy session shell (on by default with
+                              shell activate; next sign-in; retry: try again after it gave up)
     taskbar <hide|autohide|show>   Native Windows taskbar mode (hide: gone, dock only)
     harden [--revert]         Turn off Bing search, ads, suggestions, widgets and tips (HKCU)
     reload                    Reload komorebi, YASB, AHK and Flow
     heal-monitors             Restart komorebi if it lost track of a monitor (runs by itself
                               when a display is plugged, unplugged or powered back on)
     doctor                    Stack diagnostics (green/red + suggested fix)
+    logs [n]                  Last n lines of every Winarchy log (default 20)
 
 '@
 }
@@ -306,6 +314,48 @@ function Invoke-Winarchy {
                 default { throw "Unknown subcommand: wezterm context-menu $action (install|remove|status)" }
             }
         }
+        'shell' {
+            $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'status' }
+            switch ($sub) {
+                'status' {
+                    $status = Get-WinarchyCustomShellStatus
+                    Write-WinarchyInfo "CustomShell policy: $($status.State) (Installed = Winarchy replaces Explorer at next sign-in; Inactive = Explorer)"
+                    if ($status.Record) { Write-WinarchyInfo "command: $($status.Record.Command)" }
+                }
+                'activate' {
+                    if ($rest -notcontains '--yes') {
+                        Write-WinarchyWarn 'This replaces Explorer with the Winarchy shell at your NEXT sign-in (per-user policy; Windows asks for admin approval once; no reboot).'
+                        Write-WinarchyInfo 'Undo: `winarchy shell deactivate`, or without Winarchy: Ctrl+Alt+Del > Task Manager > Run new task > scripts\Restore-Explorer.cmd'
+                        Write-WinarchyInfo 'It also turns on the UWP host (Store apps; experimental, downloads Microsoft symbols). Turn it off with `winarchy uwphost off`.'
+                        Write-WinarchyInfo 'Run `winarchy shell activate --yes` to proceed.'
+                        break
+                    }
+                    $status = Invoke-WinarchyCustomShellChange -Action activate
+                    try { Set-WinarchyUwphost -Action on }
+                    catch { Write-WinarchyWarn "Store apps will not open in the session shell: $($_.Exception.Message) Retry with: winarchy uwphost on" }
+                    $theme = Get-WinarchyCurrentTheme; if ($theme) { Set-WinarchyTheme -Name $theme }
+                    Write-WinarchyOk "CustomShell policy $($status.State). Sign out and back in to use the Winarchy shell."
+                }
+                'deactivate' {
+                    $status = Invoke-WinarchyCustomShellChange -Action deactivate
+                    $theme = Get-WinarchyCurrentTheme; if ($theme) { Set-WinarchyTheme -Name $theme }
+                    Write-WinarchyOk "CustomShell policy $($status.State): Explorer returns at next sign-in."
+                }
+                default { throw "Unknown subcommand: shell $sub (status|activate|deactivate)" }
+            }
+        }
+        'uwphost' {
+            $sub = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { 'status' }
+            if ($sub -eq 'status') {
+                $uwp = Get-WinarchyUwphostState
+                Write-WinarchyInfo "UWP host: $($uwp.State) ($($uwp.Detail))"
+            }
+            elseif ($sub -in 'on', 'off', 'retry') {
+                Set-WinarchyUwphost -Action $sub
+                Write-WinarchyOk "UWP host: $sub. It takes effect at your next sign-in."
+            }
+            else { throw "Unknown subcommand: uwphost $sub (status|on|off|retry)" }
+        }
         'taskbar' {
             $mode = if ($rest.Count -ge 1) { $rest[0].ToLower() } else { '' }
             if ($mode -notin 'hide', 'autohide', 'show') { throw 'Usage: winarchy taskbar <hide|autohide|show>' }
@@ -326,6 +376,7 @@ function Invoke-Winarchy {
             }
         }
         'doctor' { exit (Invoke-WinarchyDoctor) }
+        'logs' { Show-WinarchyLogs -Lines $(if ($rest.Count -ge 1) { [int]$rest[0] } else { 20 }) }
         default {
             Write-WinarchyErr "Unknown subcommand: $cmd"
             Show-WinarchyHelp

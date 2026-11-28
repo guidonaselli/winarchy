@@ -3,8 +3,8 @@
 Shell nativa opcional de Winarchy (franja reservada + isla). Se activa con `state/bar=native`; sin ese archivo manda YASB.
 
 - Build: `cargo build --release` (Rust estable, target MSVC).
-- Uso: `winarchy-shell.exe [ruta\a\theme.json]` (por defecto `config\shell\theme.json` del repo).
-- Control: tubería `\.\pipe\winarchy-shell`, una línea JSON por pedido `{"v":1,"id":1,"cmd":"ping"}`; comandos `ping`, `version`, `reload`, `quit`.
+- Uso: `winarchy-shell.exe [ruta\a\theme.json] [--root <repo>] [--theme <ruta>] [--session-shell]`. Los launchers pasan `--root` porque el binario instalado vive en `state\bin`; `--session-shell` es exclusivo del proceso que Windows inicia como shell y activa el host nativo de bandeja.
+- Control: pipe de esta sesión `\\.\pipe\winarchy-shell-{sessionId}`, una línea JSON por pedido `{"v":1,"id":1,"cmd":"ping"}`; comandos `ping`, `version`, `reload`, `restart`, `quit` y `return`. `restart` conserva la sesión shell durante una recarga; `return` inicia Explorer antes de salir del shell de sesión. La suscripción a komorebi usa `winarchy-shell-komorebi-{sessionId}`.
 
 ## Dock
 

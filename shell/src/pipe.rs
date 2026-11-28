@@ -8,8 +8,11 @@ use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile, FILE_FLAGS_AND_ATTRIBUTES, PIPE_ACCESS_DUPLEX};
 use windows::Win32::System::Pipes::*;
 
-pub const PIPE_NAME: PCWSTR = w!("\\\\.\\pipe\\winarchy-shell");
 const VERSION: u32 = 1;
+
+pub fn pipe_name(session_id: u32) -> String {
+    format!(r"\\.\pipe\winarchy-shell-{session_id}")
+}
 
 #[derive(Deserialize)]
 struct Request {
@@ -28,6 +31,21 @@ pub struct Island {
 }
 
 pub static ISLAND: std::sync::Mutex<Option<Island>> = std::sync::Mutex::new(None);
+
+// Ventanas del conmutador de Alt+Tab (hwnd) y la seleccionada; las ordena AHK, la shell solo las dibuja.
+pub static SWITCHER: std::sync::Mutex<(Vec<isize>, usize)> = std::sync::Mutex::new((Vec::new(), 0));
+
+const MAX_SWITCHER: usize = 64;
+
+fn switcher_from(params: &Value) -> Option<(Vec<isize>, usize)> {
+    let wins = params.get("windows")?.as_array()?;
+    if wins.is_empty() || wins.len() > MAX_SWITCHER {
+        return None;
+    }
+    let wins = wins.iter().map(|v| v.as_i64().filter(|h| *h > 0).map(|h| h as isize)).collect::<Option<Vec<_>>>()?;
+    let index = usize::try_from(params.get("index")?.as_u64()?).ok().filter(|i| *i < wins.len())?;
+    Some((wins, index))
+}
 
 const MAX_TEXT: usize = 120;
 
@@ -51,17 +69,27 @@ fn island_from(params: &Value) -> Result<Island, &'static str> {
 pub enum Command {
     Reload,
     Quit,
+    Restart,
+    ReturnToExplorer,
     Redraw,
     Expand,
     Tray,
+    Start,
     TrayDismiss,
+    ToggleDesktop,
+    ToggleClock,
+    Notifications,
     DockFocus,
     DockPin(usize),
+    SwitcherShow,
+    SwitcherHide,
+    FocusWindow(isize),
 }
 
 // Un cliente por vez; el hilo de UI recibe Reload/Quit por `dispatch`, nunca bloquea acá.
-pub fn serve(dispatch: impl Fn(Command) + Send + 'static) {
+pub fn serve(session_id: u32, dispatch: impl Fn(Command) + Send + 'static) {
     std::thread::spawn(move || unsafe {
+        let name = pipe_name(session_id).encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
         // Solo el dueño del proceso (el usuario) puede abrir la tubería.
         let mut sd = PSECURITY_DESCRIPTOR::default();
         let ok = ConvertStringSecurityDescriptorToSecurityDescriptorW(w!("D:P(A;;GA;;;OW)"), SDDL_REVISION_1, &mut sd, None);
@@ -71,7 +99,7 @@ pub fn serve(dispatch: impl Fn(Command) + Send + 'static) {
         let sa = SECURITY_ATTRIBUTES { nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: sd.0, bInheritHandle: false.into() };
         loop {
             let h = CreateNamedPipeW(
-                PIPE_NAME,
+                PCWSTR(name.as_ptr()),
                 FILE_FLAGS_AND_ATTRIBUTES(PIPE_ACCESS_DUPLEX.0),
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                 1,
@@ -166,12 +194,47 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
             }
             None => json!({"v": VERSION, "id": req.id, "ok": false, "error": "bad n"}),
         },
+        "notifications.recent" => {
+            dispatch(Command::Notifications);
+            ok(json!({}))
+        }
+        "start.toggle" => {
+            dispatch(Command::Start);
+            ok(json!({}))
+        }
+        "switcher.show" => match switcher_from(&req.params) {
+            Some(state) => {
+                *SWITCHER.lock().unwrap() = state;
+                dispatch(Command::SwitcherShow);
+                ok(json!({}))
+            }
+            None => json!({"v": VERSION, "id": req.id, "ok": false, "error": "bad switcher"}),
+        },
+        "switcher.hide" => {
+            dispatch(Command::SwitcherHide);
+            ok(json!({}))
+        }
+        "window.focus" => match req.params["hwnd"].as_i64().filter(|h| *h > 0) {
+            Some(h) => {
+                dispatch(Command::FocusWindow(h as isize));
+                ok(json!({}))
+            }
+            None => json!({"v": VERSION, "id": req.id, "ok": false, "error": "bad hwnd"}),
+        },
         "dock.tray" => {
             dispatch(Command::Tray);
             ok(json!({}))
         }
         "dock.tray.dismiss" => {
             dispatch(Command::TrayDismiss);
+            ok(json!({}))
+        }
+        "clock.toggle" => {
+            dispatch(Command::ToggleClock);
+            ok(json!({}))
+        }
+        "desktop.toggle" => {
+            dispatch(Command::ToggleDesktop);
             ok(json!({}))
         }
         "island.dismiss" => {
@@ -189,6 +252,14 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
             dispatch(Command::Quit);
             ok(json!({}))
         }
+        "restart" => {
+            dispatch(Command::Restart);
+            ok(json!({}))
+        }
+        "return" => {
+            dispatch(Command::ReturnToExplorer);
+            ok(json!({}))
+        }
         other => json!({"v": VERSION, "id": req.id, "ok": false, "error": format!("unknown command {other}")}),
     }
 }
@@ -196,6 +267,13 @@ fn handle(line: &[u8], dispatch: &impl Fn(Command)) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pipe_names_are_scoped_to_the_windows_session() {
+        assert_eq!(pipe_name(1), r"\\.\pipe\winarchy-shell-1");
+        assert_eq!(pipe_name(42), r"\\.\pipe\winarchy-shell-42");
+        assert_ne!(pipe_name(1), pipe_name(42));
+    }
 
     #[test]
     fn dock_focus_dispatches_and_acknowledges_request() {
@@ -206,6 +284,21 @@ mod tests {
         });
         assert_eq!(called.get(), 1);
         assert_eq!(response, json!({"v": 1, "id": 7, "ok": true}));
+    }
+
+    #[test]
+    fn restart_dispatches_without_changing_quit_semantics() {
+        let commands = std::cell::RefCell::new(Vec::new());
+        let dispatch = |command| commands.borrow_mut().push(match command {
+            Command::Restart => "restart",
+            Command::Quit => "quit",
+            Command::ReturnToExplorer => "return",
+            _ => "other",
+        });
+        handle(br#"{"v":1,"id":1,"cmd":"restart"}"#, &dispatch);
+        handle(br#"{"v":1,"id":2,"cmd":"quit"}"#, &dispatch);
+        handle(br#"{"v":1,"id":3,"cmd":"return"}"#, &dispatch);
+        assert_eq!(*commands.borrow(), ["restart", "quit", "return"]);
     }
 
     #[test]
@@ -234,10 +327,29 @@ mod tests {
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"confirm.request"}"#, &|_| {})["result"], "denied");
         let called = std::cell::Cell::new(false);
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"dock.tray"}"#, &|c| { assert!(matches!(c, Command::Tray)); called.set(true); })["ok"], true);
+        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"switcher.show","params":{"windows":[10,20,30],"index":2}}"#, &|c| assert!(matches!(c, Command::SwitcherShow)))["ok"], true);
+        assert_eq!(*SWITCHER.lock().unwrap(), (vec![10, 20, 30], 2));
+        for bad in [r#"{"windows":[],"index":0}"#, r#"{"windows":[1,2],"index":2}"#, r#"{"windows":[1,"x"],"index":0}"#, r#"{"windows":[-5],"index":0}"#, r#"{"index":0}"#] {
+            let req = format!(r#"{{"v":1,"id":1,"cmd":"switcher.show","params":{bad}}}"#);
+            assert_eq!(handle(req.as_bytes(), &|_| panic!("dispatched"))["ok"], false);
+        }
+        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"start.toggle"}"#, &|c| assert!(matches!(c, Command::Start)))["ok"], true);
         assert!(called.get());
         called.set(false);
         assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"dock.tray.dismiss"}"#, &|c| { assert!(matches!(c, Command::TrayDismiss)); called.set(true); })["ok"], true);
+        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"notifications.recent"}"#, &|c| assert!(matches!(c, Command::Notifications)))["ok"], true);
+        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"clock.toggle"}"#, &|c| assert!(matches!(c, Command::ToggleClock)))["ok"], true);
+        assert_eq!(handle(br#"{"v":1,"id":1,"cmd":"desktop.toggle"}"#, &|c| assert!(matches!(c, Command::ToggleDesktop)))["ok"], true);
         assert!(called.get());
+    }
+
+    #[test]
+    fn window_focus_validates_the_handle_and_dispatches_it() {
+        let got = std::cell::Cell::new(0);
+        let focus = |line: &[u8]| handle(line, &|c| if let Command::FocusWindow(h) = c { got.set(h) });
+        assert_eq!(focus(br#"{"v":1,"id":1,"cmd":"window.focus","params":{"hwnd":42}}"#)["ok"], true);
+        assert_eq!(got.get(), 42);
+        assert_eq!(focus(br#"{"v":1,"id":1,"cmd":"window.focus","params":{"hwnd":0}}"#)["ok"], false);
     }
 
     #[test]

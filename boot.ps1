@@ -28,7 +28,14 @@
     }
 
     foreach ($tool in @(@{ Command = 'git'; Id = 'Git.Git' }, @{ Command = 'pwsh'; Id = 'Microsoft.PowerShell' })) {
-        if (Test-App $tool.Command) { continue }
+        if (Test-App $tool.Command) {
+            # The installer runs on the latest PowerShell 7: upgrade an existing one (best effort, no-op when current).
+            if ($tool.Command -eq 'pwsh') {
+                winget upgrade --id $tool.Id --exact --source winget --silent --accept-package-agreements --accept-source-agreements | Out-Null
+                $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+            }
+            continue
+        }
         Write-Host "Installing $($tool.Id)..."
         winget install --id $tool.Id --exact --source winget --silent --accept-package-agreements --accept-source-agreements
         if ($LASTEXITCODE -notin 0, -1978334967, -1978335135, -1978335189) {

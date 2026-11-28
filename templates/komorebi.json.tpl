@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/LGUG2Z/komorebi/v0.1.41/schema.json",
   "_managed": "managed by winarchy — generado desde templates/komorebi.json.tpl + themes/{{computed.theme_dir}}/theme.toml. NO editar a mano.",
-  "window_hiding_behaviour": "Cloak",
+  "window_hiding_behaviour": "{{computed.window_hiding}}",
   "cross_monitor_move_behaviour": "Insert",
   "default_workspace_padding": 3,
   "default_container_padding": 2,
@@ -9,6 +9,7 @@
   "alt_focus_hack": false,
   "global_work_area_offset": { "left": 0, "top": {{computed.work_top}}, "right": 0, "bottom": {{computed.work_bottom}} },
   "border": true,
+  "border_implementation": "Windows",
   "border_style": "Rounded",
   "border_width": 1,
   "border_offset": -1,

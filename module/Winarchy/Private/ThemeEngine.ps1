@@ -147,6 +147,8 @@ function Build-WinarchyThemeContext {
     $ctx['computed.bar_opacity'] = if (Test-WinarchyBarTransparent) { '0.72' } else { '1' }
     $dockOn = Test-WinarchyBarDock
     $offset = if ($dockOn) { Get-WinarchyDockWorkAreaOffset }
+    # Cloak usa el COM de Explorer (ImmersiveShell): sin Explorer komorebi aborta al mover un contenedor (verificado, 0x80040154), así que con la shell de sesión se esconde con Hide
+    $ctx['computed.window_hiding'] = if ((Get-WinarchyCustomShellStatus).State -eq 'Installed') { 'Hide' } else { 'Cloak' }
     $ctx['computed.dock'] = if ($dockOn) { 'true' } else { 'false' }
     $ctx['computed.dock_float'] = if ((Get-WinarchyDockMode) -eq 'float') { 'true' } else { 'false' }
     $ctx['computed.dock_hide'] = if ((Get-WinarchyDockMode) -eq 'hide') { 'true' } else { 'false' }
@@ -782,8 +784,11 @@ function Set-WinarchyWallpaper {
 public static extern int SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
 '@
         }
-        [Winarchy.Native.Wallpaper]::SystemParametersInfo(20, 0, $wallpaper, 3) | Out-Null
+        if ([Winarchy.Native.Wallpaper]::SystemParametersInfo(20, 0, $wallpaper, 3)) { Write-WinarchyLog "wallpaper $wallpaper" }
+        else { Write-WinarchyWarn "Wallpaper not applied (error $([Runtime.InteropServices.Marshal]::GetLastWin32Error())): $wallpaper" }
+        return
     }
+    Write-WinarchyLog "wallpaper unchanged: no background for $(Split-Path $ThemeDir -Leaf)"
 }
 
 function Set-WinarchyLockScreen {
@@ -820,7 +825,7 @@ function Invoke-WinarchyReload {
     }
     # -Light corre solo (sync de accent, cambio de barra): ahí nunca se reinicia komorebi
     elseif ($Light -or -not (Repair-WinarchyKomorebiMonitors)) {
-        Invoke-WinarchyKomorebiReplace -ConfigPath (Join-Path $env:KOMOREBI_CONFIG_HOME 'komorebi.json')
+        Invoke-WinarchyKomorebiStaticReload -ConfigPath (Join-Path $env:KOMOREBI_CONFIG_HOME 'komorebi.json')
     }
     # YASB: reinicio limpio (kill + start) en vez de `yasbc reload`. El hot-reload de
     # YASB re-suscribe su widget de komorebi al named pipe pero deja viva la suscripción
@@ -841,12 +846,15 @@ function Invoke-WinarchyReload {
     }
     if ((Get-WinarchyActiveBar) -eq 'native') {
         Stop-Process -Name 'yasb' -Force -ErrorAction SilentlyContinue
-        Stop-WinarchyShell
+        $shellRelaunchAllowed = if ($Light) { -not (Test-WinarchyShellRelaunchInhibited) } else { Clear-WinarchyShellRelaunchInhibit }
+        if (-not (Stop-WinarchyShell -Restart)) { throw 'The shell could not reload; Winarchy reload stopped.' }
+        $sessionShell = Test-WinarchySessionShellMarker
+        $shellArgs = Get-WinarchyShellArguments
         $shellExe = Get-WinarchyShellExe
-        if ($shellExe) { Start-Process $shellExe -WindowStyle Hidden }
+        if (-not $sessionShell -and $shellExe -and $shellRelaunchAllowed) { Start-Process $shellExe -ArgumentList $shellArgs -WindowStyle Hidden }
     }
     else {
-        Stop-WinarchyShell
+        if (-not (Stop-WinarchyShell -Restart)) { throw 'The shell could not reload; Winarchy reload stopped.' }
         if (Test-WinarchyTaskbarHidden) { Restore-WinarchyNativeTaskbar }
     }
     if ($Light) { return }
@@ -916,6 +924,7 @@ function Set-WinarchyTheme {
         if ($t.Template -eq 'komorebi.json.tpl') {
             $rendered = Add-WinarchyAppRulesToKomorebiJson -Json $rendered
             $rendered = Add-WinarchyWindowRulesToKomorebiJson -Json $rendered
+            if (-not $rendered) { continue }
         }
         $stagedFile = Join-Path $staging ([IO.Path]::GetRelativePath($root, $t.Output))
         New-Item -ItemType Directory -Path (Split-Path $stagedFile -Parent) -Force | Out-Null
@@ -977,6 +986,7 @@ function Set-WinarchyTheme {
     try {
         # 4. Apply atómico de los generados (move desde staging)
         foreach ($t in $targets) {
+            if (-not $t['Staged']) { continue }
             $destDir = Split-Path $t.Output -Parent
             if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
             Move-Item -Path $t.Staged -Destination $t.Output -Force
@@ -991,26 +1001,30 @@ function Set-WinarchyTheme {
             if (-not (Test-Path $btopThemes)) { New-Item -ItemType Directory -Path $btopThemes -Force | Out-Null }
             Copy-Item (Join-Path $root 'config\btop\winarchy.theme') (Join-Path $btopThemes 'winarchy.theme') -Force
         }
-        if (-not $LightRefresh) {
-            Sync-WinarchyJetBrains -ThemeDir $themeDir
-            Sync-WinarchyVSCode -ThemeDir $themeDir
-            Sync-WinarchyObsidian -CssPath (Join-Path $root 'config\obsidian\winarchy-theme.css')
-            Sync-WinarchyClaudeCode -Mode $theme['mode']
-            Set-WinarchyWindowsAppearance -Mode $theme['mode'] -AccentHex $theme['colors']['accent'] -SkipAccent:$dynamicAccent
-            if (-not $dynamicAccent) { Set-WinarchyWallpaper -ThemeDir $themeDir }
-        }
-        if (-not $LightRefresh -or $dynamicAccent) {
-            Update-WinarchyLockScreen -ThemeDir $themeDir -Colors $theme['colors'] -Dynamic:$dynamicAccent
-        }
+        if (-not $LightRefresh -and -not $dynamicAccent) { Set-WinarchyWallpaper -ThemeDir $themeDir }
 
         # 6. Persistencia + recarga de servicios
         Set-Content -Path $currentFile -Value $Name -Encoding UTF8 -NoNewline
         # marker del watcher AccentWatch (AHK): existe = theme dinámico activo + hex aplicado
         if ($dynamicAccent -and $liveAccent) {
-            Set-Content -Path $marker -Value $liveAccent -Encoding UTF8 -NoNewline
+            # sin komorebi.json publicado el accent queda pendiente y AccentWatch lo reintenta
+            $applied = if ($targets | Where-Object { -not $_['Staged'] }) { 'pending' } else { $liveAccent }
+            Set-Content -Path $marker -Value $applied -Encoding UTF8 -NoNewline
         }
         elseif (-not $dynamicAccent -and (Test-Path $marker)) { Remove-Item $marker -Force }
         Invoke-WinarchyReload -Light:$LightRefresh
+
+        # Lo lento (Windows, editores, pantalla de bloqueo) va después: la barra y los bordes no lo esperan.
+        if (-not $LightRefresh) {
+            Set-WinarchyWindowsAppearance -Mode $theme['mode'] -AccentHex $theme['colors']['accent'] -SkipAccent:$dynamicAccent
+            Sync-WinarchyJetBrains -ThemeDir $themeDir
+            Sync-WinarchyVSCode -ThemeDir $themeDir
+            Sync-WinarchyObsidian -CssPath (Join-Path $root 'config\obsidian\winarchy-theme.css')
+            Sync-WinarchyClaudeCode -Mode $theme['mode']
+        }
+        if (-not $LightRefresh -or $dynamicAccent) {
+            Update-WinarchyLockScreen -ThemeDir $themeDir -Colors $theme['colors'] -Dynamic:$dynamicAccent
+        }
 
         if ($LightRefresh) { Write-WinarchyOk "Accent synced: $($theme['colors']['accent'])." }
         else { Write-WinarchyOk "Theme '$($theme['name'])' applied across all surfaces." }
@@ -1018,6 +1032,7 @@ function Set-WinarchyTheme {
     catch {
         Write-WinarchyErr "Failed to apply theme: $($_.Exception.Message) — starting rollback."
         foreach ($t in $targets) {
+            if (-not $t['Staged']) { continue }
             $relative = [IO.Path]::GetRelativePath($root, $t.Output)
             $bak = Join-Path $snapshot $relative
             if (Test-Path $bak) { Copy-Item $bak $t.Output -Force }

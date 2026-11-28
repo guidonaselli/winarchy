@@ -29,6 +29,7 @@ const ANIM_MS: u32 = 16;
 const WATCH_MS: u32 = 40;
 const T_ANIM: usize = 1;
 const T_WATCH: usize = 2;
+const T_LATE_CLOSE: usize = 3;
 const MOUSE_LEAVE: u32 = 0x02A3;
 const WM_SYNC: u32 = WM_APP + 41;
 
@@ -64,11 +65,12 @@ pub fn place(anchor: R, mon: (i32, i32, i32, i32), bottom: bool, size: (i32, i32
     let margin = px(MARGIN_DIP, scale);
     let x = (anchor.x + anchor.w / 2 - size.0 / 2).clamp(mon.0 + margin, (mon.2 - margin - size.0).max(mon.0 + margin));
     let y = if bottom { anchor.y - margin - size.1 } else { anchor.y + anchor.h + margin };
-    (x, y)
+    // Con muchas filas el flyout podría no entrar entre el dock y el borde del monitor: se queda dentro.
+    (x, y.clamp(mon.1 + margin, (mon.3 - margin - size.1).max(mon.1 + margin)))
 }
 
 // Reduce (o amplía) un ícono BGRA con alfa recta a `side`×`side`, ya premultiplicado.
-pub fn scaled(src: &[u8], (w, h): (u32, u32), side: i32) -> Vec<u32> {
+pub(crate) fn scaled(src: &[u8], (w, h): (u32, u32), side: i32) -> Vec<u32> {
     let side = side.max(1) as usize;
     let texel = |x: i32, y: i32| -> [f32; 4] {
         let i = ((y.clamp(0, h as i32 - 1) as usize) * w as usize + x.clamp(0, w as i32 - 1) as usize) * 4;
@@ -119,6 +121,11 @@ struct Flyout {
 }
 
 static HWND_ATOMIC: AtomicIsize = AtomicIsize::new(0);
+// Ventana en primer plano al abrir: si cambia (clic en otra app, Alt+Tab, tecla Win) el flyout se cierra.
+static FG_AT_OPEN: AtomicIsize = AtomicIsize::new(0);
+// Hasta este GetTickCount64 el foco lo puede tomar el menú contextual del ícono sin cerrar el flyout.
+static FG_GRACE_UNTIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+const MENU_GRACE_MS: u64 = 1500;
 thread_local! { static FLY: RefCell<Option<Flyout>> = const { RefCell::new(None) }; }
 
 fn with<R>(f: impl FnOnce(&mut Flyout) -> R) -> Option<R> {
@@ -151,10 +158,15 @@ pub fn toggle(anchor: R, mon: (i32, i32, i32, i32), bottom: bool, scale: f32, th
     });
     let Some(h) = started else { return false };
     unsafe {
+        FG_AT_OPEN.store(GetForegroundWindow().0 as isize, Ordering::Relaxed);
         SetTimer(h, T_WATCH, WATCH_MS, None);
         start_anim(h);
     }
     paint();
+    // una ventana activada antes puede ser topmost y quedar encima; solo al abrir, para no tapar el menú de la app durante el fundido de salida
+    unsafe {
+        let _ = SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
     true
 }
 
@@ -173,7 +185,7 @@ pub fn close() {
 fn create(theme: &Theme) -> bool {
     unsafe {
         let Ok(inst) = GetModuleHandleW(PCWSTR::null()) else { return false };
-        let class = WNDCLASSW { lpfnWndProc: Some(proc), hInstance: inst.into(), hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(), lpszClassName: w!("WinarchyShellTray"), ..Default::default() };
+        let class = WNDCLASSW { lpfnWndProc: Some(proc), hInstance: inst.into(), hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(), lpszClassName: w!("WinarchyShellTray"), style: CS_DBLCLKS, ..Default::default() };
         RegisterClassW(&class);
         let ex = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_LAYERED;
         let Ok(hwnd) = CreateWindowExW(ex, w!("WinarchyShellTray"), w!(""), WS_POPUP, 0, 0, 1, 1, None, None, inst, None) else { return false };
@@ -194,7 +206,32 @@ pub fn notify() {
     }
 }
 
+pub fn set_theme(theme: &Theme) {
+    if with(|f| {
+        f.theme = theme.clone();
+        f.open
+    }) == Some(true) {
+        paint();
+    }
+}
+
 unsafe fn start_anim(h: HWND) {
+    let animate = with(|f| crate::dock::motion_enabled(&f.theme)).unwrap_or(false);
+    if !animate {
+        let _ = KillTimer(h, T_ANIM);
+        let n = tray::with_visible(|v| v.len());
+        with(|f| {
+            f.vis = if f.open { 1.0 } else { 0.0 };
+            f.hover_t.resize(n, 0.0);
+            for (i, t) in f.hover_t.iter_mut().enumerate() {
+                *t = if f.hover == Some(i) { 1.0 } else { 0.0 };
+            }
+            f.anim_on = false;
+            f.last = None;
+        });
+        paint();
+        return;
+    }
     if with(|f| std::mem::replace(&mut f.anim_on, true)) == Some(false) {
         SetTimer(h, T_ANIM, ANIM_MS, None);
     }
@@ -227,12 +264,20 @@ unsafe fn anim_tick(h: HWND) {
     }
 }
 
+fn theme_render_key(theme: &Theme) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let visual = style(theme);
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (&theme.background, &theme.foreground, &theme.accent, &theme.muted, &theme.font_family, theme.font_size, visual.radius, visual.opacity.to_bits()).hash(&mut h);
+    h.finish()
+}
+
 fn paint() {
     let Some((hwnd, theme, scale, vis, bottom, anchor, mon, hover, hover_pin, hover_t, revision)) = with(|f| (f.hwnd, f.theme.clone(), f.scale, f.vis, f.bottom, f.anchor, f.mon, f.hover, f.hover_pin, f.hover_t.clone(), tray::revision())) else { return };
     let sig = {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (vis.to_bits(), hover, hover_pin, hover_t.iter().map(|t| t.to_bits()).collect::<Vec<_>>(), revision, (anchor.x, anchor.y, scale.to_bits()), &theme.background, &theme.foreground).hash(&mut h);
+        (vis.to_bits(), hover, hover_pin, hover_t.iter().map(|t| t.to_bits()).collect::<Vec<_>>(), revision, (anchor.x, anchor.y, scale.to_bits()), theme_render_key(&theme)).hash(&mut h);
         h.finish()
     };
     if with(|f| std::mem::replace(&mut f.sig, sig) == sig).unwrap_or(true) {
@@ -348,8 +393,8 @@ fn cell_at(x: i32, y: i32) -> Option<usize> {
     .flatten()
 }
 
-fn icon_at(index: usize) -> Option<(u32, u32)> {
-    tray::with_visible(|v| v.get(index).map(|i| (i.hwnd, i.uid)))
+fn icon_at(index: usize) -> Option<(u32, u32, [u8; 16])> {
+    tray::with_visible(|v| v.get(index).map(|i| (i.hwnd, i.uid, i.guid)))
 }
 
 fn on_pin(index: usize, x: i32, y: i32) -> bool {
@@ -365,13 +410,25 @@ fn send(index: usize, gesture: Gesture) {
     unsafe {
         let _ = GetCursorPos(&mut p);
     }
-    if let Some((hwnd, uid)) = icon_at(index) {
-        tray::click(hwnd, uid, gesture, (p.x, p.y));
+    if let Some((hwnd, uid, guid)) = icon_at(index) {
+        if !matches!(gesture, Gesture::Left | Gesture::LeftDouble) {
+            FG_GRACE_UNTIL.store(unsafe { windows::Win32::System::SystemInformation::GetTickCount64() } + MENU_GRACE_MS, Ordering::Relaxed);
+        }
+        tray::click_identity(hwnd, uid, guid, gesture, (p.x, p.y));
     }
 }
 
 // Un clic fuera del flyout (lo que haya debajo del cursor, menús contextuales incluidos) lo cierra; sin hooks de mouse.
 unsafe fn watch(h: HWND) {
+    let fg = GetForegroundWindow();
+    let baseline = FG_AT_OPEN.load(Ordering::Relaxed);
+    if baseline == 0 {
+        // abierto en una transición sin ventana activa: el primer primer plano real es la referencia
+        FG_AT_OPEN.store(fg.0 as isize, Ordering::Relaxed);
+    } else if fg.0 as isize != 0 && fg.0 as isize != baseline && GetAncestor(fg, GA_ROOT) != h && windows::Win32::System::SystemInformation::GetTickCount64() >= FG_GRACE_UNTIL.load(Ordering::Relaxed) {
+        close();
+        return;
+    }
     let down = GetAsyncKeyState(VK_LBUTTON.0 as i32) < 0 || GetAsyncKeyState(VK_RBUTTON.0 as i32) < 0;
     let mut p = POINT::default();
     if !down || GetCursorPos(&mut p).is_err() {
@@ -431,6 +488,20 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
             start_anim(h);
             return LRESULT(0);
         }
+        WM_TIMER if wp.0 == T_LATE_CLOSE => {
+            let _ = KillTimer(h, T_LATE_CLOSE);
+            close();
+            return LRESULT(0);
+        }
+        WM_LBUTTONDBLCLK => {
+            let (x, y) = client(lp);
+            if let Some(u) = cell_at(x, y).filter(|u| !on_pin(*u, x, y)) {
+                let _ = KillTimer(h, T_LATE_CLOSE);
+                send(u, Gesture::LeftDouble);
+                close();
+            }
+            return LRESULT(0);
+        }
         WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN => {
             let (x, y) = client(lp);
             let cell = cell_at(x, y);
@@ -453,7 +524,8 @@ unsafe extern "system" fn proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESU
                         _ => Gesture::Middle,
                     });
                     if m == WM_LBUTTONUP {
-                        close();
+                        // el flyout espera el tiempo de doble clic: un segundo clic llega como doble clic al ícono; si la app toma el foco se cierra antes
+                        SetTimer(h, T_LATE_CLOSE, windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime(), None);
                     }
                 }
             }

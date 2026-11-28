@@ -31,11 +31,11 @@ foreach ($file in Get-ChildItem -Path (Join-Path $root 'module\Winarchy\Private'
 $logDir = Join-Path $env:LOCALAPPDATA 'winarchy'
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $log = Join-Path $logDir 'window-slots.log'
-if ((Test-Path $log) -and (Get-Item $log).Length -gt 1MB) { Remove-Item $log -Force }
+if ((Test-Path $log) -and (Get-Item $log).Length -gt 1MB) { Move-Item $log "$log.1" -Force -ErrorAction SilentlyContinue }
 
 function Write-Log {
     param([string]$Message)
-    if ((Test-Path $log) -and (Get-Item $log).Length -gt 1MB) { Remove-Item $log -Force }
+    if ((Test-Path $log) -and (Get-Item $log).Length -gt 1MB) { Move-Item $log "$log.1" -Force -ErrorAction SilentlyContinue }
     "{0:yyyy-MM-dd HH:mm:ss} {1}" -f (Get-Date), $Message | Add-Content -Path $log -Encoding UTF8
 }
 
@@ -75,7 +75,7 @@ while ($true) {
 
         # Hilo que sólo drena el pipe: mantiene a komorebi desbloqueado mientras el hilo
         # principal reordena. Se guarda el tipo de evento, no el estado que lo acompaña.
-        $events = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
+        $events = [System.Collections.Concurrent.BlockingCollection[string]]::new()
         $runspace = [runspacefactory]::CreateRunspace()
         $runspace.Open()
         $runspace.SessionStateProxy.SetVariable('reader', $reader)
@@ -83,13 +83,15 @@ while ($true) {
         $pump = [powershell]::Create()
         $pump.Runspace = $runspace
         $null = $pump.AddScript({
-                while ($true) {
-                    $line = $reader.ReadLine()
-                    if ($null -eq $line) { $events.Enqueue('!eof'); break }
-                    try { $events.Enqueue(($line | ConvertFrom-Json).event.type) } catch { }
+                try {
+                    while ($null -ne ($line = $reader.ReadLine())) {
+                        # solo el tipo: parsear los ~24 KB de estado de cada evento costaba el doble
+                        if ($line -match '^\{"event":\{"type":"(\w+)"') { $events.Add($Matches[1]) }
+                    }
                 }
+                finally { $events.CompleteAdding() }
             })
-        $handle = $pump.BeginInvoke()
+        $null = $pump.BeginInvoke()
         Write-Log 'subscribed'
 
         # Referencia inicial ANTES del primer evento: sin esto, el primer movimiento del
@@ -99,25 +101,20 @@ while ($true) {
         # cambio de orden es nuestro y no del usuario, así que no se aprende.
         $selfMoves = 0
         $pending = $false
-        $quiet = 0
         # cortacircuito para una reconciliación que no converge
         $burst = 0
         $burstLimit = 10
         $suspendUntil = [datetime]::MinValue
         $lastReconcile = [datetime]::MinValue
 
-        while (-not $handle.IsCompleted) {
+        while (-not $events.IsCompleted) {
             $type = $null
-            if ($events.TryDequeue([ref]$type)) {
-                if ($type -eq '!eof') { break }
+            # bloquea hasta el próximo evento: sin nada pendiente no hay por qué despertar seguido
+            if ($events.TryTake([ref]$type, $(if ($pending) { $debounceMs } else { 5000 }))) {
                 if (Test-WinarchySlotEvent -Type $type) { $pending = $true }
-                $quiet = 0
                 continue
             }
-
-            Start-Sleep -Milliseconds 50
-            $quiet += 50
-            if (-not $pending -or $quiet -lt $debounceMs) { continue }
+            if (-not $pending) { continue }
             $pending = $false
 
             try {

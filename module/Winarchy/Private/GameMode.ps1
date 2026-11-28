@@ -102,12 +102,14 @@ function Get-WinarchyGames {
 }
 
 function Update-WinarchyKomorebiRules {
-    <# Re-renderiza komorebi.json (con las ignore-rules nuevas) y recarga komorebi.
-       Con -NoReload solo escribe el archivo: el próximo arranque de komorebi lo toma. #>
-    param([switch]$NoReload)
+    <# Re-renderiza komorebi.json (con las ignore-rules nuevas); el watcher de komorebi lo recarga solo.
+       -NoReload omite los pasos posteriores a la recarga; -SkipLiveView deja ganar a lo guardado sobre lo vivo.
+       -PassThru dice si komorebi.json se escribió. #>
+    param([switch]$NoReload, [switch]$SkipLiveView, [switch]$PassThru)
     $current = Get-WinarchyCurrentTheme
     if (-not $current) {
         Write-WinarchyWarn 'No active theme yet; the rules will apply with the first `winarchy theme set`.'
+        if ($PassThru) { return $false }
         return
     }
     $root = Get-WinarchyRoot
@@ -117,12 +119,19 @@ function Update-WinarchyKomorebiRules {
     $ctx = Build-WinarchyThemeContext -Theme $theme -ThemeDir $themeDir
     $rendered = Invoke-WinarchyTemplate -TemplatePath (Join-Path $root 'templates\komorebi.json.tpl') -Context $ctx
     $rendered = Add-WinarchyAppRulesToKomorebiJson -Json $rendered
-    $rendered = Add-WinarchyWindowRulesToKomorebiJson -Json $rendered
+    $rendered = Add-WinarchyWindowRulesToKomorebiJson -Json $rendered -SkipLiveView:$SkipLiveView
+    if (-not $rendered) {
+        if ($PassThru) { return $false }
+        return
+    }
     $rendered | ConvertFrom-Json | Out-Null
     Set-WinarchyFileAtomic -Path (Join-Path $root 'config\komorebi\komorebi.json') -Value $rendered
     if (-not $NoReload -and (Test-WinarchyProcess 'komorebi')) {
-        Invoke-WinarchyKomorebiReplace -ConfigPath (Join-Path $root 'config\komorebi\komorebi.json')
+        $config = Join-Path $root 'config\komorebi\komorebi.json'
+        Restore-WinarchyFloatingApps -ConfigPath $config
+        Write-WinarchyStaleIgnoreWarning -ConfigPath $config
     }
+    if ($PassThru) { return $true }
 }
 
 function Restart-WinarchyPowerToys {

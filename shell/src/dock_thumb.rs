@@ -17,7 +17,7 @@ const GAP_DIP: i32 = 6;
 
 struct Thumb {
     hwnd: HWND,
-    handle: isize,
+    handles: Vec<isize>,
     bg: COLORREF,
     edge: COLORREF,
 }
@@ -69,7 +69,7 @@ unsafe fn window() -> Option<HWND> {
     RegisterClassW(&class);
     let ex = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT;
     let hwnd = CreateWindowExW(ex, w!("WinarchyShellDockThumb"), w!(""), WS_POPUP, 0, 0, 1, 1, None, None, inst, None).ok()?;
-    THUMB.with(|t| *t.borrow_mut() = Some(Thumb { hwnd, handle: 0, bg: COLORREF(0), edge: COLORREF(0) }));
+    THUMB.with(|t| *t.borrow_mut() = Some(Thumb { hwnd, handles: Vec::new(), bg: COLORREF(0), edge: COLORREF(0) }));
     Some(hwnd)
 }
 
@@ -78,9 +78,8 @@ pub fn hide() {
         let Ok(mut t) = t.try_borrow_mut() else { return };
         if let Some(t) = t.as_mut() {
             unsafe {
-                if t.handle != 0 {
-                    let _ = DwmUnregisterThumbnail(t.handle);
-                    t.handle = 0;
+                for handle in t.handles.drain(..) {
+                    let _ = DwmUnregisterThumbnail(handle);
                 }
                 let _ = ShowWindow(t.hwnd, SW_HIDE);
             }
@@ -89,43 +88,85 @@ pub fn hide() {
 }
 
 // `tip` es el rectángulo (x, y, w, h) del tooltip en pantalla: la miniatura se apila del lado contrario a la barra.
-pub unsafe fn show(target: isize, cx: i32, tip: (i32, i32, i32, i32), bottom: bool, mon: (i32, i32, i32, i32), scale: f32, theme: &Theme) {
+// Posiciones de una fila de miniaturas con `gap` entre ellas: (x, ancho, alto) por cada una que cabe en `max_total`.
+// shortcut: las que no caben se omiten (sin desplazamiento), mejorar con scroll si un grupo supera el ancho del monitor.
+pub fn row_layout(sizes: &[(i32, i32)], gap: i32, max_total: i32) -> Vec<(i32, i32, i32)> {
+    let mut out = Vec::new();
+    let mut x = 0;
+    for (w, h) in sizes {
+        if !out.is_empty() && x + w > max_total {
+            break;
+        }
+        out.push((x, *w, *h));
+        x += w + gap;
+    }
+    out
+}
+
+// Una miniatura por ventana del grupo; la que enfocaría el clic va a opacidad completa y las demás atenuadas.
+pub unsafe fn show(targets: &[isize], focus: isize, cx: i32, tip: (i32, i32, i32, i32), bottom: bool, mon: (i32, i32, i32, i32), scale: f32, theme: &Theme) {
     hide();
-    let src = HWND(target as *mut _);
-    if !IsWindow(src).as_bool() {
-        return;
-    }
     let Some(hwnd) = window() else { return };
-    let Ok(handle) = DwmRegisterThumbnail(hwnd, src) else { return };
-    let Ok(size) = DwmQueryThumbnailSourceSize(handle) else {
-        let _ = DwmUnregisterThumbnail(handle);
-        return;
-    };
-    let (tw, th) = fit(size.cx, size.cy, px(MAX_W_DIP, scale), px(MAX_H_DIP, scale));
-    if tw == 0 {
-        let _ = DwmUnregisterThumbnail(handle);
+    let (pad, gap) = (px(PAD_DIP, scale), px(GAP_DIP, scale));
+    let mut sources: Vec<(isize, isize, (i32, i32))> = Vec::new();
+    for target in targets {
+        let src = HWND(*target as *mut _);
+        if !IsWindow(src).as_bool() {
+            continue;
+        }
+        let Ok(handle) = DwmRegisterThumbnail(hwnd, src) else { continue };
+        let Ok(size) = DwmQueryThumbnailSourceSize(handle) else {
+            let _ = DwmUnregisterThumbnail(handle);
+            continue;
+        };
+        let fitted = fit(size.cx, size.cy, px(MAX_W_DIP, scale), px(MAX_H_DIP, scale));
+        if fitted.0 == 0 {
+            let _ = DwmUnregisterThumbnail(handle);
+            continue;
+        }
+        sources.push((*target, handle, fitted));
+    }
+    if sources.is_empty() {
         return;
     }
-    let (pad, gap) = (px(PAD_DIP, scale), px(GAP_DIP, scale));
-    let (w, h) = (tw + 2 * pad, th + 2 * pad);
+    let sizes: Vec<(i32, i32)> = sources.iter().map(|s| s.2).collect();
+    let row = row_layout(&sizes, gap, (mon.2 - mon.0) - 2 * pad);
+    for (_, handle, _) in sources.iter().skip(row.len()) {
+        let _ = DwmUnregisterThumbnail(*handle);
+    }
+    sources.truncate(row.len());
+    let total_w = row.last().map(|r| r.0 + r.1).unwrap_or(0);
+    let row_h = row.iter().map(|r| r.2).max().unwrap_or(0);
+    let (w, h) = (total_w + 2 * pad, row_h + 2 * pad);
     let x = (cx - w / 2).clamp(mon.0, (mon.2 - w).max(mon.0));
     let y = if bottom { tip.1 - h - gap } else { tip.1 + tip.3 + gap }.clamp(mon.1, (mon.3 - h).max(mon.1));
+    for ((target, handle, _), (rx, rw, rh)) in sources.iter().zip(&row) {
+        let top = pad + (row_h - rh) / 2;
+        let opacity = if sources.len() == 1 || *target == focus { 255 } else { 140 };
+        let props = DWM_THUMBNAIL_PROPERTIES { dwFlags: DWM_TNP_RECTDESTINATION | DWM_TNP_VISIBLE | DWM_TNP_OPACITY, rcDestination: RECT { left: pad + rx, top, right: pad + rx + rw, bottom: top + rh }, opacity, fVisible: true.into(), ..Default::default() };
+        let _ = DwmUpdateThumbnailProperties(*handle, &props);
+    }
     THUMB.with(|t| {
         if let Some(t) = t.borrow_mut().as_mut() {
-            t.handle = handle;
+            t.handles = sources.iter().map(|s| s.1).collect();
             t.bg = colorref(rgb(&theme.background));
             t.edge = colorref(rgb(&theme.accent));
         }
     });
-    let props = DWM_THUMBNAIL_PROPERTIES { dwFlags: DWM_TNP_RECTDESTINATION | DWM_TNP_VISIBLE | DWM_TNP_OPACITY, rcDestination: RECT { left: pad, top: pad, right: pad + tw, bottom: pad + th }, opacity: 255, fVisible: true.into(), ..Default::default() };
-    let _ = DwmUpdateThumbnailProperties(handle, &props);
     let _ = SetWindowRgn(hwnd, CreateRoundRectRgn(0, 0, w + 1, h + 1, px(8, scale), px(8, scale)), true);
     let _ = SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::fit;
+    use super::{fit, row_layout};
+
+    #[test]
+    fn the_row_stops_when_the_next_thumbnail_does_not_fit() {
+        assert_eq!(row_layout(&[(100, 60), (100, 60), (100, 60)], 10, 250), vec![(0, 100, 60), (110, 100, 60)]);
+        assert_eq!(row_layout(&[(300, 60)], 10, 250), vec![(0, 300, 60)]);
+        assert!(row_layout(&[], 10, 250).is_empty());
+    }
 
     #[test]
     fn thumbnails_keep_the_aspect_ratio_and_never_grow() {

@@ -261,7 +261,7 @@ function Add-WinarchyAppRulesToKomorebiJson {
 }
 
 function Get-WinarchyStaleIgnores {
-    <# Ignores que komorebi tiene en memoria y el config ya no: replace-configuration suma reglas pero nunca las saca. #>
+    <# Ignores que komorebi tiene en memoria y el config ya no: la recarga suma reglas pero nunca las saca. #>
     param($Live, $Config)
     $keep = @{}
     foreach ($rule in @($Config)) { if ($null -ne $rule) { $keep[(ConvertTo-WinarchyRuleTarget -Rule $rule)] = $true } }
@@ -270,64 +270,6 @@ function Get-WinarchyStaleIgnores {
         $target = ConvertTo-WinarchyRuleTarget -Rule $rule
         if (-not $keep.ContainsKey($target)) { $target }
     }
-}
-
-function Get-WinarchyKomorebiHwnds {
-    param([Parameter(Mandatory)]$State, [switch]$Floating)
-    foreach ($m in $State.monitors.elements) {
-        foreach ($w in $m.workspaces.elements) {
-            @($w.floating_windows.elements) | Where-Object { $_ } | ForEach-Object { [long]$_.hwnd }
-            if ($Floating) { continue }
-            @($w.containers.elements) | ForEach-Object { @($_.windows.elements) } | Where-Object { $_ } | ForEach-Object { [long]$_.hwnd }
-            if ($w.monocle_container) { @($w.monocle_container.windows.elements) | Where-Object { $_ } | ForEach-Object { [long]$_.hwnd } }
-        }
-    }
-}
-
-function Invoke-WinarchyKomorebiReplace {
-    <# replace-configuration reconstruye el WM entero y, en komorebi 0.1.41, nunca vuelve a mostrar las flotantes de
-       un workspace oculto: quedan ocultas y fuera del estado nuevo. Mostrarlas hace que komorebi las retome con sus reglas. #>
-    param([Parameter(Mandatory)][string]$ConfigPath)
-    Add-Type -Namespace Winarchy.Native -Name Cloak -ErrorAction SilentlyContinue -MemberDefinition @'
-[DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int a, out int v, int s);
-[DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
-public static bool IsCloaked(long h) { int v; return DwmGetWindowAttribute(new IntPtr(h), 14, out v, 4) == 0 && v != 0; }
-[ComImport, Guid("6D5140C1-7436-11CE-8034-00AA006009FA"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-interface IServiceProvider { [PreserveSig] int QueryService(ref Guid s, ref Guid r, out IntPtr o); }
-[UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int GetViewForHwnd(IntPtr self, IntPtr hwnd, out IntPtr view);
-[UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int SetCloak(IntPtr self, int type, int flags);
-static T Slot<T>(IntPtr obj, int i) { return (T)(object)Marshal.GetDelegateForFunctionPointer(Marshal.ReadIntPtr(Marshal.ReadIntPtr(obj), i * IntPtr.Size), typeof(T)); }
-// El mismo cloak de shell que usa komorebi (IApplicationViewCollection -> IApplicationView::SetCloak).
-public static bool Show(long hwnd) {
-    var shell = (IServiceProvider)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("C2F03A33-21F5-47FA-B4BB-156362A2F239")));
-    var iid = new Guid("1841c6d7-4f9d-42c0-af41-8747538f10e5");
-    IntPtr views, view;
-    if (shell.QueryService(ref iid, ref iid, out views) != 0) return false;
-    int hr = Slot<GetViewForHwnd>(views, 6)(views, new IntPtr(hwnd), out view);
-    Marshal.Release(views);
-    if (hr != 0 || view == IntPtr.Zero) return false;
-    hr = Slot<SetCloak>(view, 12)(view, 1, 0);
-    Marshal.Release(view);
-    return hr == 0;
-}
-'@
-    $state = komorebic state 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
-    $hidden = @(if ($state) { Get-WinarchyKomorebiHwnds -State $state -Floating | Where-Object { [Winarchy.Native.Cloak]::IsCloaked($_) } })
-    komorebic replace-configuration $ConfigPath 2>$null | Out-Null
-    # El rebuild corre bajo el lock de komorebi: cuando las ocultas dejan de figurar, terminó.
-    for ($i = 0; $hidden -and $i -lt 15; $i++) {
-        $state = komorebic state 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
-        if (-not $state) { Start-Sleep -Milliseconds 200; continue }
-        $managed = @(Get-WinarchyKomorebiHwnds -State $state)
-        if (-not @($hidden | Where-Object { $managed -contains $_ })) {
-            $hidden | Where-Object { [Winarchy.Native.Cloak]::IsWindow([IntPtr]$_) -and [Winarchy.Native.Cloak]::IsCloaked($_) } |
-                ForEach-Object { $null = [Winarchy.Native.Cloak]::Show($_) }
-            break
-        }
-        Start-Sleep -Milliseconds 200
-    }
-    Restore-WinarchyFloatingApps -ConfigPath $ConfigPath
-    Write-WinarchyStaleIgnoreWarning -ConfigPath $ConfigPath
 }
 
 function Get-WinarchyTiledFloatingExes {

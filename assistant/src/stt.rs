@@ -9,7 +9,7 @@ pub struct Stt {
 }
 
 impl Stt {
-    /// Lanza el sidecar y espera a que el modelo esté caliente (la primera inferencia en CUDA tarda ~20 s).
+    /// Lanza el sidecar y espera a que el modelo esté caliente (unos 3 s en CUDA; la primera vez tras instalar, más).
     pub fn spawn(python: &Path, script: &Path) -> Result<Self, String> {
         let mut child = Command::new(python)
             .arg("-I")

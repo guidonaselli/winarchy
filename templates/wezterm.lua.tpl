@@ -134,10 +134,11 @@ end
 
 -- Titulo de tab: indice + programa. El default muestra la linea de comando entera, que
 -- con un pwsh.exe -NoLogo -File ... deja todas las tabs con el mismo texto ilegible.
+-- Nunca pane.foreground_process_name: recorre el árbol de procesos y wezterm#7705 lo
+-- desborda (se cierra la terminal) cuando Windows reusa un PID.
 wezterm.on('format-tab-title', function(tab, _, _, _, _, max_width)
-  local pane = tab.active_pane
-  local name = pane.foreground_process_name
-  name = name and name:gsub('.*[/\\]', ''):gsub('%.exe$', '') or pane.title
+  local name = tab.active_pane.title
+  name = name:match '%a:[\\/].-([^\\/]+)%.exe' or name
   local title = ' ' .. (tab.tab_index + 1) .. ': ' .. name .. ' '
   if #title > max_width then title = wezterm.truncate_right(title, max_width - 1) .. '… ' end
   return title

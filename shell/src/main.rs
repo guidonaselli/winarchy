@@ -1,31 +1,48 @@
 #![windows_subsystem = "windows"]
 
 mod apps;
+#[cfg(test)]
+mod bench_tests;
 mod accessibility;
 mod dock;
+mod desktop;
+mod desktop_view;
 mod dock_drop;
 mod dock_menu;
 mod dock_recent;
 mod dock_thumb;
 mod brightness;
 mod calendar;
+mod clipboard;
 mod cluster;
 mod world;
+mod wpn;
 mod extras;
+mod rescue;
 mod i18n;
 mod ics;
 mod layout;
+mod menu;
 mod metrics;
 mod komorebi;
+mod pill_access;
 mod pipe;
 mod spirit;
 mod system;
 mod theme;
 mod tray;
+mod start;
+mod switcher;
+mod start_model;
 mod tray_flyout;
+mod taskbar;
+mod tray_host;
+mod tray_notifications;
+mod wifi;
+mod uwphost;
 
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use i18n::{lang, t as tr, K};
 use layout::{px, Hit, Inputs, Layout, PanelShape, R};
@@ -42,11 +59,30 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 const WM_CMD_RELOAD: u32 = WM_APP + 2;
 const WM_CMD_QUIT: u32 = WM_APP + 3;
+const WM_CMD_RESTART: u32 = WM_APP + 11;
+
+enum RestartAction { Reload, Exit }
+
+fn restart_action(session_shell: bool) -> RestartAction {
+    if session_shell { RestartAction::Reload } else { RestartAction::Exit }
+}
+const WM_CMD_RETURN: u32 = WM_APP + 12;
+const WM_CMD_RETURN_READY: u32 = WM_APP + 44;
+const WM_CMD_RETURN_FAILED: u32 = WM_APP + 45;
 const WM_WORKSPACES: u32 = WM_APP + 4;
 const WM_CMD_TRAY: u32 = WM_APP + 8;
 const WM_CMD_TRAY_DISMISS: u32 = WM_APP + 9;
+const WM_CMD_TOGGLE_DESKTOP: u32 = WM_APP + 174;
+const WM_CMD_TOGGLE_CLOCK: u32 = WM_APP + 175;
 const WM_CMD_DOCK_FOCUS: u32 = WM_APP + 10;
+const WM_CMD_START: u32 = WM_APP + 13;
+const WM_CMD_NOTIFICATIONS: u32 = WM_APP + 176;
+const WM_NOTICE: u32 = WM_APP + 177;
+const WM_UWPHOST_DEGRADED: u32 = WM_APP + 178;
+const WM_CMD_SWITCHER_SHOW: u32 = WM_APP + 100;
+const WM_CMD_SWITCHER_HIDE: u32 = WM_APP + 101;
 const WM_CMD_DOCK_PIN: u32 = WM_APP + 43;
+const WM_CMD_FOCUS_WINDOW: u32 = WM_APP + 102;
 const WM_EXPAND: u32 = WM_APP + 5;
 const WM_COLLAPSE: u32 = WM_APP + 6;
 const WM_BRIGHTNESS: u32 = WM_APP + 7;
@@ -58,11 +94,15 @@ const TIMER_SPIRIT: usize = 3;
 const TIMER_FLASH: usize = 4;
 const TIMER_HOVER: usize = 5;
 const FLASH_MS: u32 = 800;
+const NOTICE_MS: u32 = 6000;
 const HOVER_MS: u32 = 120;
 const PILL_MAX_W: i32 = 1400;
 const FADE_SECS: f32 = 0.18;
+static RETURN_TO_EXPLORER_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 struct State {
+    session_shell: bool,
+    state_dir: PathBuf,
     theme: Theme,
     theme_path: PathBuf,
     theme_mtime: Option<SystemTime>,
@@ -96,6 +136,8 @@ struct State {
     layout_sig: Vec<(i32, i32, i32, i32, u32)>,
     fade: f32,
     was_open: bool,
+    osd_p: Option<f32>,
+    target_p: Option<f32>,
     clock_open: bool,
     cal_ym: (i64, u32),
     cal_sel: i64,
@@ -124,9 +166,86 @@ struct CalView {
     marks: Vec<bool>,
     agenda: Vec<String>,
     world: String,
+    notifs: Vec<wpn::Toast>,
+    notif_pages: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum DockChange {
+    Enable,
+    Disable,
+    Update,
+    None,
+}
+
+fn dock_change(previous: bool, current: bool) -> DockChange {
+    match (previous, current) {
+        (false, true) => DockChange::Enable,
+        (true, false) => DockChange::Disable,
+        (true, true) => DockChange::Update,
+        (false, false) => DockChange::None,
+    }
 }
 
 const AGENDA_LINES: usize = 3;
+const NOTIF_LINES: usize = 3;
+pub(crate) struct Host {
+    hwnd: isize,
+    pub(crate) session_shell: bool,
+    pub(crate) root: std::path::PathBuf,
+}
+
+// sin inicializar (tests) no hay isla a la que avisar ni log donde escribir
+pub(crate) static HOST: std::sync::OnceLock<Host> = std::sync::OnceLock::new();
+// el aviso y, si el clic sobre él abre algo, la carpeta
+static NOTICE: std::sync::Mutex<Option<(String, Option<String>)>> = std::sync::Mutex::new(None);
+static NOTICE_TARGET: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub(crate) fn notify(text: &str) {
+    notify_opening(text, None);
+}
+
+fn notify_opening(text: &str, target: Option<String>) {
+    let Some(host) = HOST.get() else { return };
+    *NOTICE.lock().unwrap() = Some((text.to_owned(), target));
+    unsafe {
+        let _ = PostMessageW(HWND(host.hwnd as *mut _), WM_NOTICE, WPARAM(0), LPARAM(0));
+    }
+}
+
+const DBT_DEVICEARRIVAL: usize = 0x8000;
+
+// DEV_BROADCAST_VOLUME de dbt.h
+#[repr(C)]
+struct DevBroadcastVolume {
+    size: u32,
+    device_type: u32,
+    reserved: u32,
+    unit_mask: u32,
+    flags: u16,
+}
+
+unsafe fn arrived_drives(data: *const DevBroadcastVolume) -> Option<String> {
+    const DBT_DEVTYP_VOLUME: u32 = 2;
+    const DBTF_NET: u16 = 2;
+    // el tipo está en la cabecera común: se lee antes de tratar el puntero como volumen
+    if data.is_null() || std::ptr::addr_of!((*data).device_type).read_unaligned() != DBT_DEVTYP_VOLUME || (*data).flags & DBTF_NET != 0 {
+        return None;
+    }
+    drive_letters((*data).unit_mask)
+}
+
+fn drive_letters(mask: u32) -> Option<String> {
+    let letters: Vec<String> = (0..26u8).filter(|i| mask & (1 << i) != 0).map(|i| format!("{}:", (b'A' + i) as char)).collect();
+    (!letters.is_empty()).then(|| letters.join(" "))
+}
+
+static NOTIF_PAGE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn notif_page() -> usize {
+    let pages = wpn::latest().len().div_ceil(NOTIF_LINES).max(1);
+    NOTIF_PAGE.load(std::sync::atomic::Ordering::Relaxed) % pages
+}
 
 fn day_in_month(days: i64, (y, m): (i64, u32)) -> Option<u32> {
     let (dy, dm, dd) = calendar::civil_from_days(days);
@@ -134,6 +253,25 @@ fn day_in_month(days: i64, (y, m): (i64, u32)) -> Option<u32> {
 }
 
 // Día que se elige al abrir un mes: hoy si es el actual, si no el 1.
+pub(crate) unsafe fn toggle_clock() {
+    with(|s| {
+        s.clock_open = !s.clock_open;
+        s.fade = 0.0;
+        if s.clock_open {
+            let today = calendar::now_local().0;
+            let (y, m, _) = calendar::civil_from_days(today);
+            s.cal_ym = (y, m);
+            s.cal_sel = today;
+        }
+        s.expand_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(EXPAND_SECS));
+    });
+    tick(with(|s| s.strip));
+}
+
+pub(crate) fn session_shell_active() -> bool {
+    with(|s| s.session_shell)
+}
+
 fn default_sel((y, m): (i64, u32)) -> i64 {
     let today = calendar::now_local().0;
     if day_in_month(today, (y, m)).is_some() { today } else { calendar::days_from_civil(y, m, 1) }
@@ -175,6 +313,8 @@ fn calendar_view(ym: (i64, u32), sel: i64, configured: bool, world: String) -> C
         marks,
         agenda,
         world,
+        notifs: wpn::latest().into_iter().skip(notif_page() * NOTIF_LINES).take(NOTIF_LINES).collect(),
+        notif_pages: wpn::latest().len().div_ceil(NOTIF_LINES),
     }
 }
 
@@ -215,7 +355,7 @@ impl Meter {
 
 impl Panel {
     fn shape(&self) -> PanelShape {
-        PanelShape { media: self.media.is_some(), weather: self.weather.is_some(), meters: self.meters.len(), cal_rows: self.cal.as_ref().map_or(0, |c| c.rows), agenda: if self.cal.is_some() { AGENDA_LINES } else { 0 }, world: self.cal.as_ref().is_some_and(|c| !c.world.is_empty()) }
+        PanelShape { media: self.media.is_some(), weather: self.weather.is_some(), meters: self.meters.len(), cal_rows: self.cal.as_ref().map_or(0, |c| c.rows), agenda: if self.cal.is_some() { AGENDA_LINES } else { 0 }, world: self.cal.as_ref().is_some_and(|c| !c.world.is_empty()), notifs: self.cal.as_ref().map_or(0, |c| c.notifs.len()) }
     }
 }
 
@@ -373,11 +513,12 @@ unsafe fn render_pill(pill: HWND) {
     let widest = need_raw.max(if live_panel.is_some() { px(layout::PANEL_W_DIP, scale) } else { 0 });
     let need = widest.min(px(PILL_MAX_W, scale)).min((mon.right - mon.left) * 3 / 4);
     let base = layout::bar_width(scale, orb, temp_w, &dots, 0, ext.cx);
-    let (width, height, animating, strip, label, panel) = with(|s| {
+    let animate = dock::motion_enabled(&theme);
+    let (width, height, animating, strip, label, panel, osd_p) = with(|s| {
         if live_panel.is_some() != s.was_open {
             s.was_open = live_panel.is_some();
             if s.was_open {
-                s.fade = 0.0;
+                s.fade = if animate { 0.0 } else { 1.0 };
             }
         }
         if let Some(p) = &live_panel {
@@ -390,9 +531,22 @@ unsafe fn render_pill(pill: HWND) {
         };
         s.target_w = need as f32;
         s.target_h = (bar_h + extra) as f32;
-        if s.cur_w == 0.0 {
+        if let Some(p) = progress {
+            let p = p as f32;
+            s.target_p = Some(p);
+            if !animate || s.osd_p.is_none() {
+                s.osd_p = Some(p);
+            }
+        } else {
+            s.target_p = None;
+            s.osd_p = None;
+        }
+        if s.cur_w == 0.0 || !animate {
             s.cur_w = s.target_w;
             s.cur_h = s.target_h;
+            s.vel = 0.0;
+            s.vel_h = 0.0;
+            s.fade = 1.0;
         }
         let width = (s.cur_w.round() as i32).max(base);
         let height = (s.cur_h.round() as i32).max(bar_h);
@@ -405,7 +559,9 @@ unsafe fn render_pill(pill: HWND) {
         if live_panel.is_none() && height as f32 <= s.target_h + 1.0 {
             s.panel_shown = None;
         }
-        (width, height, (s.cur_w - s.target_w).abs() > 0.5 || (s.cur_h - s.target_h).abs() > 0.5 || s.fade < 1.0, s.strip, s.last_label.clone(), s.panel_shown.clone())
+        let p_anim = matches!((s.osd_p, s.target_p), (Some(c), Some(t)) if (c - t).abs() > 0.005);
+        let anim = animate && ((s.cur_w - s.target_w).abs() > 0.5 || (s.cur_h - s.target_h).abs() > 0.5 || s.fade < 1.0 || p_anim);
+        (width, height, anim, s.strip, s.last_label.clone(), s.panel_shown.clone(), s.osd_p)
     });
     if animating {
         SetTimer(strip, TIMER_ANIM, 8, None);
@@ -452,9 +608,11 @@ unsafe fn render_pill(pill: HWND) {
     } else {
         let _ = KillTimer(strip, TIMER_SPIRIT);
     }
-    if let Some(p) = progress {
+    if let Some(p) = osd_p {
         let r = lay.place(lay.progress);
-        fill_round(pixels, width, height, R { w: (r.w as f64 * p) as i32, ..r }, r.h / 2, accent, bg);
+        let track = tint(bg, fg, 0.12);
+        fill_round(pixels, width, height, r, r.h / 2, track, bg);
+        fill_round(pixels, width, height, R { w: (r.w as f32 * p).round() as i32, ..r }, r.h / 2, accent, track);
     }
     SetBkMode(mem, TRANSPARENT);
     let (fg_c, muted_c, bg_c) = (colorref(&theme.foreground), colorref(&theme.muted), colorref(&theme.background));
@@ -547,6 +705,16 @@ unsafe fn render_pill(pill: HWND) {
                 draw_text(mem, line, lay.place(*r), fg_c, DT_VCENTER);
             }
             draw_text(mem, &cv.world, lay.place(pr.world), muted_c, DT_VCENTER);
+            if let Some((head, rows)) = pr.notifs.split_first() {
+                let title = if cv.notif_pages > 1 { format!("{}  {}/{} ›", tr(K::RecentNotifications), notif_page() + 1, cv.notif_pages) } else { tr(K::RecentNotifications).to_string() };
+                draw_text(mem, &title, lay.place(*head), muted_c, DT_VCENTER);
+                for (n, r) in cv.notifs.iter().zip(rows) {
+                    let (hh, mm) = wpn::arrival_clock(n.arrival, calendar::utc_offset_min());
+                    let body = if n.text.is_empty() { n.title.clone() } else { format!("{}  {}", n.title, n.text.replace(char::from(10), " ")) };
+                    let body = n.app.as_deref().map_or(body.clone(), |a| format!("{} · {body}", wpn::app_label(a)));
+                    draw_text(mem, &short(&format!("{hh:02}:{mm:02}  {body}"), 44), lay.place(*r), fg_c, DT_VCENTER);
+                }
+            }
         }
         let chip_bg = tint(bg, fg, 0.07);
         for c in &pr.chips {
@@ -579,6 +747,12 @@ unsafe fn render_pill(pill: HWND) {
         }
     }
 
+    if !animating {
+        let clock = String::from_utf16_lossy(&text);
+        let island = String::from_utf16_lossy(&label);
+        let bar = pill_access::Bar { clock: &clock, temp: &temp, island: &island, pinned: with(|s| s.pinned) };
+        accessibility::publish(pill, tr(K::BarName), (width, height), pill_access::nodes(&lay, &bar, panel.as_ref()), None);
+    }
     with(|s| {
         s.pill_mon = mon;
         s.layout = lay;
@@ -624,7 +798,14 @@ unsafe fn spring_step(strip: HWND) {
         let w = spring(&mut s.cur_w, &mut s.vel, s.target_w, dt);
         let h = spring(&mut s.cur_h, &mut s.vel_h, s.target_h, dt);
         s.fade = (s.fade + dt / FADE_SECS).min(1.0);
-        let settled = w && h && s.fade >= 1.0;
+        if let (Some(c), Some(t)) = (s.osd_p.as_mut(), s.target_p) {
+            *c = dock::approach(*c, t, dt * 1000.0, 90.0);
+        }
+        let p_done = match (s.osd_p, s.target_p) {
+            (Some(c), Some(t)) => (c - t).abs() <= 0.005,
+            _ => true,
+        };
+        let settled = w && h && s.fade >= 1.0 && p_done;
         if settled {
             s.anim_last = None;
         }
@@ -650,7 +831,7 @@ unsafe fn animations_enabled() -> bool {
 }
 
 unsafe fn fullscreen_busy() -> bool {
-    matches!(SHQueryUserNotificationState(), Ok(s) if s == QUNS_BUSY || s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE)
+    !desktop::is_host_window(GetForegroundWindow()) && matches!(SHQueryUserNotificationState(), Ok(s) if s == QUNS_BUSY || s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE)
 }
 
 // Parte la etiqueta en palabras; las claves en mayúsculas al inicio de un ítem ("CPU", "VOL") y los separadores van atenuados.
@@ -769,6 +950,7 @@ unsafe fn tick(_strip: HWND) {
 }
 
 unsafe fn tick_inner() {
+    desktop::tick();
     let (pill, hidden, last) = with(|s| (s.pill, s.hidden, s.last_minute));
     let minute_now = GetLocalTime().wMinute;
     if with(|s| s.countdown_minute != minute_now) {
@@ -792,11 +974,12 @@ unsafe fn tick_inner() {
         if m != s.theme_mtime {
             s.theme_mtime = m;
             if let Some(t) = Theme::load(&s.theme_path) {
+                let was_dock = s.theme.dock;
                 s.theme = t;
-                return true;
+                return Some((was_dock, s.theme.dock, s.theme.clone(), s.state_dir.clone()));
             }
         }
-        false
+        None
     });
     let sig = layout_sig();
     if with(|s| s.layout_sig != sig) {
@@ -812,14 +995,20 @@ unsafe fn tick_inner() {
     let minute = GetLocalTime().wMinute;
     let fm = focus_monitor();
     let moved = with(|s| (fm.left, fm.top) != (s.pill_mon.left, s.pill_mon.top));
-    if reloaded {
-        if with(|s| s.theme.dock) {
-            dock::set_theme(&with(|s| s.theme.clone()));
-        } else {
-            dock::restore_native_taskbar();
+    if let Some((was_dock, has_dock, theme, state_dir)) = &reloaded {
+        start::set_theme(theme);
+        tray_flyout::set_theme(theme);
+        switcher::set_theme(theme);
+        desktop::set_fallback_color(&theme.background);
+        if with(|s| s.session_shell) { tray_notifications::update_theme(theme.clone()); }
+        match dock_change(*was_dock, *has_dock) {
+            DockChange::Enable => { let _ = dock::init(theme, state_dir); }
+            DockChange::Disable => dock::shutdown(),
+            DockChange::Update => dock::set_theme(theme),
+            DockChange::None => {}
         }
     }
-    if !busy && (reloaded || expanding || moved || minute != last) {
+    if !busy && (reloaded.is_some() || expanding || moved || minute != last) {
         with(|s| s.last_minute = minute);
         render_pill(pill);
     }
@@ -833,6 +1022,7 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
         }
         WM_TIMER if wp.0 == TIMER_FLASH => {
             let _ = KillTimer(h, TIMER_FLASH);
+            NOTICE_TARGET.lock().unwrap().take();
             let title = with(|s| s.flash_title.take());
             let mut island = pipe::ISLAND.lock().unwrap();
             if title.is_some() && island.as_ref().map(|i| &i.title) == title.as_ref() {
@@ -866,6 +1056,10 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             tick(h);
             LRESULT(0)
         }
+        WM_CMD_FOCUS_WINDOW => {
+            komorebi::bring_to_front(wp.0 as isize);
+            LRESULT(0)
+        }
         WM_CMD_DOCK_PIN => {
             dock::launch_pin(wp.0);
             LRESULT(0)
@@ -874,12 +1068,36 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             dock::focus_keyboard();
             LRESULT(0)
         }
+        WM_CMD_NOTIFICATIONS => {
+            wpn::replay_recent();
+            LRESULT(0)
+        }
+        WM_CMD_START => {
+            dock::open_start();
+            LRESULT(0)
+        }
+        WM_CMD_SWITCHER_SHOW => {
+            dock::show_switcher();
+            LRESULT(0)
+        }
+        WM_CMD_SWITCHER_HIDE => {
+            switcher::hide();
+            LRESULT(0)
+        }
         WM_CMD_TRAY => {
             dock::show_tray();
             LRESULT(0)
         }
         WM_CMD_TRAY_DISMISS => {
             dock::dismiss_tray();
+            LRESULT(0)
+        }
+        WM_CMD_TOGGLE_DESKTOP => {
+            cluster::toggle_desktop();
+            LRESULT(0)
+        }
+        WM_CMD_TOGGLE_CLOCK => {
+            toggle_clock();
             LRESULT(0)
         }
         WM_EXPAND => {
@@ -936,12 +1154,74 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
             }
             LRESULT(0)
         }
+        // con Explorer el aviso ya lo da Windows
+        WM_DEVICECHANGE if wp.0 == DBT_DEVICEARRIVAL && with(|s| s.session_shell && s.strip == h) => {
+            if let Some(drives) = arrived_drives(lp.0 as *const DevBroadcastVolume) {
+                let first = drives.split(' ').next().map(|drive| format!("{drive}\\"));
+                notify_opening(&format!("{} {drives} · {}", tr(K::DriveConnected), tr(K::EjectFromFiles)), first);
+            }
+            LRESULT(1)
+        }
+        desktop_view::WM_FILES_OPEN_FAILED => {
+            desktop_view::report_files_open_failure(h, wp);
+            LRESULT(0)
+        }
+        WM_UWPHOST_DEGRADED => {
+            desktop::claim_shell_window();
+            notify(tr(K::UwpDegraded));
+            LRESULT(0)
+        }
+        WM_NOTICE => {
+            if let Some((title, target)) = NOTICE.lock().unwrap().take() {
+                *NOTICE_TARGET.lock().unwrap() = target;
+                *pipe::ISLAND.lock().unwrap() = Some(pipe::Island { title: title.clone(), ..Default::default() });
+                with(|s| s.flash_title = Some(title));
+                SetTimer(h, TIMER_FLASH, NOTICE_MS, None);
+                render_pill(with(|s| s.pill));
+            }
+            LRESULT(0)
+        }
         WM_CMD_QUIT => {
+            exit_log("quit command");
+            if with(|s| s.session_shell) {
+                request_explorer_return(h);
+            } else {
+                let _ = DestroyWindow(h);
+            }
+            LRESULT(0)
+        }
+        WM_CMD_RESTART => {
+            match restart_action(with(|s| s.session_shell)) {
+                RestartAction::Reload => {
+                    with(|s| s.theme_mtime = None);
+                    tick(h);
+                }
+                RestartAction::Exit => { exit_log("restart command"); let _ = DestroyWindow(h); }
+            }
+            LRESULT(0)
+        }
+        WM_CMD_RETURN => {
+            exit_log("return-to-explorer command");
+            if with(|s| s.session_shell) {
+                request_explorer_return(h);
+            } else {
+                let _ = DestroyWindow(h);
+            }
+            LRESULT(0)
+        }
+        WM_CMD_RETURN_READY => {
+            RETURN_TO_EXPLORER_PENDING.store(false, std::sync::atomic::Ordering::Release);
             let _ = DestroyWindow(h);
+            LRESULT(0)
+        }
+        WM_CMD_RETURN_FAILED => {
+            RETURN_TO_EXPLORER_PENDING.store(false, std::sync::atomic::Ordering::Release);
             LRESULT(0)
         }
         WM_DESTROY => {
             if with(|s| s.strip) == h {
+                exit_log("main window destroyed");
+                desktop::shutdown();
                 dock::restore_native_taskbar();
                 PostQuitMessage(0);
             }
@@ -951,14 +1231,64 @@ unsafe extern "system" fn strip_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) ->
     }
 }
 
-unsafe fn shell_open(target: &str) {
+pub(crate) unsafe fn shell_open(target: &str) {
     let t = widestr(target);
     let _ = ShellExecuteW(None, w!("open"), PCWSTR(t.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
 }
 
+fn request_explorer_return(hwnd: HWND) {
+    use std::sync::atomic::Ordering;
+    if RETURN_TO_EXPLORER_PENDING.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() {
+        return;
+    }
+    let target = hwnd.0 as isize;
+    if std::thread::Builder::new().name("explorer-return".into()).spawn(move || {
+        let message = if dock::start_system_explorer() { WM_CMD_RETURN_READY } else { WM_CMD_RETURN_FAILED };
+        let posted = unsafe { PostMessageW(HWND(target as *mut _), message, WPARAM(0), LPARAM(0)).is_ok() };
+        if message == WM_CMD_RETURN_FAILED || !posted {
+            RETURN_TO_EXPLORER_PENDING.store(false, Ordering::Release);
+        }
+    }).is_err() {
+        RETURN_TO_EXPLORER_PENDING.store(false, Ordering::Release);
+    }
+}
+
 unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let hit = || with(|s| s.layout.hit((lp.0 & 0xFFFF) as i16 as i32, ((lp.0 >> 16) & 0xFFFF) as i16 as i32));
+    if m == WM_GETOBJECT {
+        if let Some(r) = accessibility::get_object(h, wp, lp) {
+            return r;
+        }
+    }
     match m {
+        WM_NCDESTROY => accessibility::destroy(h),
+        accessibility::WM_ACTION => {
+            let actions = accessibility::actions(h, wp.0);
+            let (layout, panel) = with(|s| (s.layout.clone(), s.panel_shown.clone()));
+            // solo importan la clave y los bordes: las etiquetas de la barra no cambian dónde se hace clic
+            let nodes = pill_access::nodes(&layout, &pill_access::Bar { clock: "-", temp: "-", island: "", pinned: false }, panel.as_ref());
+            for (key, action) in actions {
+                let step = match action {
+                    accesskit::Action::Increment => 1,
+                    accesskit::Action::Decrement => -1,
+                    accesskit::Action::Click => 0,
+                    _ => continue,
+                };
+                if step != 0 {
+                    if key == "bri" {
+                        brightness::adjust(step);
+                    } else {
+                        let _ = metrics::adjust_volume(step);
+                        tick(with(|s| s.strip));
+                    }
+                    continue;
+                }
+                if let Some((x, y)) = pill_access::click_point(&nodes, &key) {
+                    let _ = PostMessageW(h, WM_LBUTTONUP, WPARAM(0), LPARAM(((y as isize) << 16) | (x as isize & 0xFFFF)));
+                }
+            }
+            return LRESULT(0);
+        }
         WM_MOUSEMOVE => {
             let (strip, expanded, track) = with(|s| {
                 let expanded = s.expand_until.is_some();
@@ -1004,20 +1334,7 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                         shell_open(&w.url());
                     }
                 }
-                Some(Hit::Clock) => {
-                    with(|s| {
-                        s.clock_open = !s.clock_open;
-                        s.fade = 0.0;
-                        if s.clock_open {
-                            let today = calendar::now_local().0;
-                            let (y, m, _) = calendar::civil_from_days(today);
-                            s.cal_ym = (y, m);
-                            s.cal_sel = today;
-                        }
-                        s.expand_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(EXPAND_SECS));
-                    });
-                    tick(with(|s| s.strip));
-                }
+                Some(Hit::Clock) => toggle_clock(),
                 Some(Hit::CalPrev | Hit::CalNext) => {
                     let delta = if matches!(hit(), Some(Hit::CalPrev)) { -1 } else { 1 };
                     with(|s| {
@@ -1031,6 +1348,16 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                     if let Some(d) = day {
                         with(|s| s.cal_sel = calendar::days_from_civil(s.cal_ym.0, s.cal_ym.1, d));
                         tick(with(|s| s.strip));
+                    }
+                }
+                Some(Hit::NotifPage) => {
+                    NOTIF_PAGE.store(notif_page() + 1, std::sync::atomic::Ordering::Relaxed);
+                    tick(with(|s| s.strip));
+                }
+                Some(Hit::Notif(n)) => {
+                    let target = with(|s| s.panel.as_ref().and_then(|p| p.cal.as_ref()).and_then(|c| c.notifs.get(n)).and_then(wpn::open_toast));
+                    if let Some(t) = target {
+                        shell_open(&t);
                     }
                 }
                 Some(Hit::Weather) => {
@@ -1051,7 +1378,17 @@ unsafe extern "system" fn pill_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> 
                     }
                 }
                 Some(Hit::Mode) => komorebi::cycle_mode(),
-                Some(Hit::Surface) | None => {}
+                Some(Hit::Surface) | None => {
+                    // otra isla puede haber reemplazado al aviso: su clic ya no abre la unidad
+                    let shown = with(|s| s.flash_title.clone());
+                    let current = pipe::ISLAND.lock().unwrap().as_ref().map(|i| i.title.clone());
+                    if let Some(path) = NOTICE_TARGET.lock().unwrap().take().filter(|_| shown.is_some() && shown == current) {
+                        let (strip, root) = (with(|s| s.strip), HOST.get().map(|host| host.root.clone()).unwrap_or_default());
+                        if let Err(error) = desktop_view::launch_files(&root, std::path::Path::new(&path), strip) {
+                            boot_log(&root, &format!("files launch failed: {path} {error}"));
+                        }
+                    }
+                }
             }
             return LRESULT(0);
         }
@@ -1100,21 +1437,200 @@ fn workspace_changed(prev: Option<usize>, cur: Option<usize>) -> bool {
     matches!((prev, cur), (Some(p), Some(c)) if p != c)
 }
 
+
+fn shell_status_path(root: &Path, session_id: u32) -> PathBuf {
+    root.join("state").join(format!("shell-session-{session_id}"))
+}
+
+fn shell_session_marker(root: &Path, session_id: u32) -> PathBuf {
+    root.join("state").join(format!("session-shell-{session_id}"))
+}
+
+fn write_shell_status(path: &Path, pid: u32, session_shell: bool, identity: &str) -> std::io::Result<()> {
+    let temp = path.with_extension(format!("tmp-{pid}"));
+    std::fs::write(&temp, format!("{pid}|{}|{identity}", u8::from(session_shell)))?;
+    if let Err(error) = std::fs::rename(&temp, path) {
+        let _ = std::fs::remove_file(temp);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn write_shell_marker(path: &Path, pid: u32, identity: &str) -> std::io::Result<()> {
+    let temp = path.with_extension(format!("tmp-{pid}"));
+    std::fs::write(&temp, identity)?;
+    if let Err(error) = std::fs::rename(&temp, path) {
+        let _ = std::fs::remove_file(temp);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn policy_shell_points_to(policy_value: &str, exe: &Path) -> bool {
+    let exe = exe.to_string_lossy().to_lowercase();
+    !exe.is_empty() && policy_value.to_lowercase().contains(&exe)
+}
+
+fn policy_shell_value() -> String {
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
+    let mut buf = [0u16; 1024];
+    let mut len = (buf.len() * 2) as u32;
+    let rc = unsafe { RegGetValueW(HKEY_CURRENT_USER, w!(r"Software\Microsoft\Windows\CurrentVersion\Policies\System"), w!("Shell"), RRF_RT_REG_SZ, None, Some(buf.as_mut_ptr() as *mut _), Some(&mut len)) };
+    if rc.is_err() { return String::new(); }
+    String::from_utf16_lossy(&buf[..(len as usize / 2).saturating_sub(1)])
+}
+
+fn session_shell_mode(marker: &Path, identity: &str) -> bool {
+    std::fs::read_to_string(marker).is_ok_and(|value| value.trim() == identity)
+}
+
+fn update_shell_session_state(root: &Path, session_id: u32, pid: u32, session_shell: bool, identity: &str) -> std::io::Result<(PathBuf, PathBuf)> {
+    let status = shell_status_path(root, session_id);
+    let marker = shell_session_marker(root, session_id);
+    std::fs::create_dir_all(status.parent().unwrap_or(root))?;
+    if session_shell { write_shell_marker(&marker, pid, identity)?; }
+    write_shell_status(&status, pid, session_shell, identity)?;
+    Ok((status, marker))
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn ProcessIdToSessionId(process_id: u32, session_id: *mut u32) -> BOOL;
+}
+
+fn current_session_id() -> Option<u32> {
+    let mut session_id = 0;
+    unsafe { ProcessIdToSessionId(windows::Win32::System::Threading::GetCurrentProcessId(), &mut session_id).as_bool().then_some(session_id) }
+}
+fn current_logon_identity() -> Option<String> {
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct Luid { low: u32, high: i32 }
+    #[repr(C)]
+    struct TokenStatistics {
+        token_id: Luid, authentication_id: Luid, expiration_time: i64, token_type: u32,
+        impersonation_level: u32, dynamic_charged: u32, dynamic_available: u32,
+        group_count: u32, privilege_count: u32, modified_id: Luid,
+    }
+    #[repr(C)]
+    struct LsaUnicodeString { length: u16, maximum_length: u16, buffer: *mut u16 }
+    #[repr(C)]
+    struct LogonSessionData {
+        size: u32, logon_id: Luid, user_name: LsaUnicodeString, logon_domain: LsaUnicodeString,
+        authentication_package: LsaUnicodeString, logon_type: u32, session: u32,
+        sid: *mut core::ffi::c_void, logon_time: i64,
+    }
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn OpenProcessToken(process: HANDLE, access: u32, token: *mut HANDLE) -> BOOL;
+        fn GetTokenInformation(token: HANDLE, class: u32, info: *mut core::ffi::c_void, size: u32, returned: *mut u32) -> BOOL;
+    }
+    #[link(name = "secur32")]
+    unsafe extern "system" {
+        fn LsaGetLogonSessionData(id: *const Luid, data: *mut *mut LogonSessionData) -> i32;
+        fn LsaFreeReturnBuffer(data: *mut core::ffi::c_void) -> i32;
+    }
+    unsafe {
+        let mut token = HANDLE::default();
+        if !OpenProcessToken(windows::Win32::System::Threading::GetCurrentProcess(), 0x0008, &mut token).as_bool() { return None; }
+        let mut stats = std::mem::MaybeUninit::<TokenStatistics>::zeroed();
+        let mut returned = 0;
+        let ok = GetTokenInformation(token, 10, stats.as_mut_ptr().cast(), std::mem::size_of::<TokenStatistics>() as u32, &mut returned).as_bool();
+        let _ = CloseHandle(token);
+        if !ok || returned < std::mem::size_of::<TokenStatistics>() as u32 { return None; }
+        let authentication_id = stats.assume_init().authentication_id;
+        let mut data = std::ptr::null_mut();
+        if LsaGetLogonSessionData(&authentication_id, &mut data) != 0 || data.is_null() { return None; }
+        let logon_time = (*data).logon_time;
+        let _ = LsaFreeReturnBuffer(data.cast());
+        (logon_time > 0).then(|| format!("{:08x}{:08x}-{:016x}", authentication_id.high as u32, authentication_id.low, logon_time as u64))
+    }
+}
+
+
+fn shell_paths(args: &[String], executable: Option<PathBuf>) -> (PathBuf, PathBuf) {
+    let arg_value = |key: &str| args.windows(2).find(|pair| pair[0] == key).map(|pair| PathBuf::from(&pair[1]));
+    let root = arg_value("--root").or_else(|| {
+        executable.as_ref().and_then(|exe| {
+            let parent = exe.parent()?;
+            if parent.file_name().is_some_and(|name| name.eq_ignore_ascii_case("bin")) {
+                let state = parent.parent()?;
+                if state.file_name().is_some_and(|name| name.eq_ignore_ascii_case("state")) { return state.parent().map(PathBuf::from); }
+            }
+            exe.ancestors().find(|path| path.join("config/shell/theme.json").is_file()).map(PathBuf::from)
+        })
+    }).or_else(|| std::env::current_dir().ok()).unwrap_or_default();
+    let theme = arg_value("--theme").or_else(|| args.iter().enumerate().find(|(i, arg)| {
+        !arg.starts_with("--") && (*i == 0 || !matches!(args[*i - 1].as_str(), "--root" | "--theme"))
+    }).map(|(_, arg)| PathBuf::from(arg)))
+        .unwrap_or_else(|| root.join("config").join("shell").join("theme.json"));
+    (root, theme)
+}
+
+// Cada salida limpia deja su motivo: una caída sin esta línea no vino de un comando de la shell.
+fn exit_log(why: &str) {
+    if let Some(root) = with(|s| s.state_dir.parent().map(Path::to_path_buf)) {
+        boot_log(&root, &format!("exit: {why}"));
+    }
+}
+
+pub(crate) fn boot_log(root: &Path, text: &str) {
+    use std::io::Write;
+    let path = root.join("state").join("shell-boot.log");
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > 64 * 1024) { let _ = std::fs::rename(&path, path.with_extension("log.1")); }
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{} pid={} {text}", chrono_stamp(), std::process::id());
+    }
+}
+
+fn chrono_stamp() -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    format!("t={secs}")
+}
+
 fn main() {
-    let root = std::env::current_exe().ok().and_then(|p| p.ancestors().nth(4).map(|p| p.to_path_buf())).unwrap_or_default();
-    let theme_path = std::env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| root.join("config").join("shell").join("theme.json"));
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let explicit_session_shell = args.iter().any(|arg| arg == "--session-shell");
+    let (root, theme_path) = shell_paths(&args, std::env::current_exe().ok());
+    if !theme_path.is_file() { boot_log(&root, &format!("exit: theme missing {}", theme_path.display())); return; }
+    let Some(session_id) = current_session_id() else { boot_log(&root, "exit: no session id"); return };
+    let Some(identity) = current_logon_identity() else { boot_log(&root, "exit: no logon identity"); return };
+    let pid = unsafe { windows::Win32::System::Threading::GetCurrentProcessId() };
+    if explicit_session_shell {
+        let marker = shell_session_marker(&root, session_id);
+        if std::fs::create_dir_all(marker.parent().unwrap_or(&root)).is_err() || write_shell_marker(&marker, pid, &identity).is_err() { boot_log(&root, "exit: cannot write session marker"); return; }
+    }
+    if !explicit_session_shell && std::env::current_exe().is_ok_and(|exe| policy_shell_points_to(&policy_shell_value(), &exe)) {
+        boot_log(&root, "exit: the session shell policy owns the launch");
+        return;
+    }
+    let instance = unsafe { windows::Win32::System::Threading::CreateMutexW(None, true, w!("Local\\WinarchyShellInstance")).expect("create shell instance mutex") };
+    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        unsafe { let _ = CloseHandle(instance); }
+        boot_log(&root, "exit: another shell instance owns the mutex");
+        return;
+    }
+    let session_shell = explicit_session_shell || session_shell_mode(&shell_session_marker(&root, session_id), &identity);
+    let (session_status, session_marker) = match update_shell_session_state(&root, session_id, pid, session_shell, &identity) {
+        Ok(paths) => (Some(paths.0), Some(paths.1)),
+        Err(_) => { boot_log(&root, "exit: cannot write session status"); return }
+    };
+    boot_log(&root, &format!("start session_shell={session_shell}"));
+
+    let state_dir = root.join("state");
     let prev_hook = std::panic::take_hook();
+    let panic_root = root.clone();
     std::panic::set_hook(Box::new(move |i| {
-        if std::thread::current().name() == Some("main") {
-            dock::restore_native_taskbar();
-        }
+        boot_log(&panic_root, &format!("panic in {:?}: {i}", std::thread::current().name()));
+        dock::restore_native_taskbar();
         prev_hook(i);
     }));
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let inst = GetModuleHandleW(PCWSTR::null()).unwrap();
         let scale = GetDpiForSystem() as f32 / 96.0;
-        let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
+        // OleInitialize (no solo CoInitialize): la vista del escritorio registra su destino de arrastre al crearse y sin OLE falla (papelera, soltar archivos).
+        let com_initialized = windows::Win32::System::Ole::OleInitialize(None).is_ok();
         // SetTimer de 8 ms rinde ~15 ms con la resolución por defecto: 1 ms hace real la animación.
         windows::Win32::Media::timeBeginPeriod(1);
         let theme = Theme::load(&theme_path).unwrap_or_default();
@@ -1130,64 +1646,135 @@ fn main() {
         let pill = CreateWindowExW(ex | WS_EX_LAYERED, pill_class.lpszClassName, w!(""), WS_POPUP, 0, 0, 1, layout::bar_h(scale), None, None, inst, None).unwrap();
 
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { theme_mtime: Theme::stamp(&theme_path), theme, theme_path: theme_path.clone(), scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), last_mode: None, layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig(), fade: 1.0, was_open: false, clock_open: false, cal_ym: (1970, 1), cal_sel: 0, countdown: None, countdown_minute: 99 })
+            *s.borrow_mut() = Some(State { session_shell, state_dir: state_dir.clone(), theme_mtime: Theme::stamp(&theme_path), theme: theme.clone(), theme_path: theme_path.clone(), scale, pill, strip, cur_w: 0.0, vel: 0.0, target_w: 0.0, cur_h: 0.0, vel_h: 0.0, target_h: 0.0, anim_last: None, last_minute: 99, hidden: false, expand_until: None, sampler: Default::default(), last_vol: None, osd_until: None, last_ws: None, flash_title: None, last_label: Vec::new(), tracking: false, pinned: false, panel: None, panel_shown: None, last_layout: String::new(), last_mode: None, layout: Layout::default(), pill_mon: rects[0], layout_sig: layout_sig(), fade: 1.0, was_open: false, osd_p: None, target_p: None, clock_open: false, cal_ym: (1970, 1), cal_sel: 0, countdown: None, countdown_minute: 99 })
         });
+        let uwphost = if session_shell { uwphost::helper(&root) } else { None };
+        if session_shell {
+            desktop::init(&theme.background, &root, com_initialized, uwphost.is_some());
+            wpn::start_relay();
+            start::init(&root, &theme);
+            switcher::init();
+            komorebi::spawn_ahk_watch(root.clone());
+            komorebi::spawn_komorebi_watch(root.clone());
+            rescue::spawn(root.clone());
+        }
         ics::spawn_feed(theme_path.clone());
         extras::spawn_weather(theme_path);
+        accessibility::create(pill, tr(K::BarName), accesskit::Role::Toolbar);
         render_pill(pill);
         let _ = ShowWindow(pill, SW_SHOWNOACTIVATE);
         let dock_on = with(|s| s.theme.dock);
         if dock_on {
-            let state_dir = with(|s| s.theme_path.ancestors().nth(3).map(|r| r.join("state")).unwrap_or_default());
             let _ = dock::init(&with(|s| s.theme.clone()), &state_dir);
         }
         if !dock_on || !with(|s| s.theme.hide_native_taskbar) {
             dock::restore_native_taskbar_at_start();
         }
         SetTimer(strip, TIMER_TICK, 1000, None);
+        komorebi::spawn_ui_watch(pill, root.clone());
 
         let target = strip.0 as isize;
         brightness::init(move || {
             let _ = PostMessageW(HWND(target as *mut _), WM_BRIGHTNESS, WPARAM(0), LPARAM(0));
         });
-        pipe::serve(move |c| {
+        let _ = HOST.set(Host { hwnd: target, session_shell, root: root.clone() });
+        if let Some(exe) = uwphost {
+            uwphost::supervise(exe, root.clone(), move || {
+                let _ = PostMessageW(HWND(target as *mut _), WM_UWPHOST_DEGRADED, WPARAM(0), LPARAM(0));
+            });
+        }
+        pipe::serve(session_id, move |c| {
             let mut arg = 0;
             let m = match c {
                 pipe::Command::Reload => WM_CMD_RELOAD,
                 pipe::Command::Quit => WM_CMD_QUIT,
+                pipe::Command::Restart => WM_CMD_RESTART,
+                pipe::Command::ReturnToExplorer => WM_CMD_RETURN,
                 pipe::Command::Redraw => WM_WORKSPACES,
                 pipe::Command::Expand => WM_EXPAND,
                 pipe::Command::Tray => WM_CMD_TRAY,
+                pipe::Command::Start => WM_CMD_START,
+                pipe::Command::Notifications => WM_CMD_NOTIFICATIONS,
                 pipe::Command::TrayDismiss => WM_CMD_TRAY_DISMISS,
+                pipe::Command::SwitcherShow => WM_CMD_SWITCHER_SHOW,
+                pipe::Command::SwitcherHide => WM_CMD_SWITCHER_HIDE,
+                pipe::Command::ToggleDesktop => WM_CMD_TOGGLE_DESKTOP,
+                pipe::Command::ToggleClock => WM_CMD_TOGGLE_CLOCK,
                 pipe::Command::DockFocus => WM_CMD_DOCK_FOCUS,
                 pipe::Command::DockPin(n) => {
                     arg = n;
                     WM_CMD_DOCK_PIN
                 }
+                pipe::Command::FocusWindow(h) => {
+                    arg = h as usize;
+                    WM_CMD_FOCUS_WINDOW
+                }
             };
             let _ = PostMessageW(HWND(target as *mut _), m, WPARAM(arg), LPARAM(0));
         });
 
-        komorebi::spawn(move || {
+        komorebi::spawn(session_id, move || {
             let _ = PostMessageW(HWND(target as *mut _), WM_WORKSPACES, WPARAM(0), LPARAM(0));
         });
         komorebi::follow_foreground();
         system::spawn(cluster::notify);
-        tray::load_pins(&with(|s| s.theme_path.ancestors().nth(3).map(|r| r.join("state")).unwrap_or_default()));
-        let _ = tray::spawn(|| {
-            tray_flyout::notify();
-            cluster::notify();
-        });
+        tray::load_pins(&state_dir);
+        if session_shell {
+            if tray_host::spawn(theme.clone(), scale) {
+                let _ = tray::spawn_cleanup(|| {
+                    tray_flyout::notify();
+                    cluster::notify();
+                });
+            } else {
+                boot_log(&root, "tray host failed; returning to Explorer");
+                request_explorer_return(strip);
+            }
+        } else {
+            let _ = tray::spawn(|| {
+                tray_flyout::notify();
+                cluster::notify();
+            });
+        }
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-            let _ = DispatchMessageW(&msg);
+            if !desktop_view::translate_accelerator(&msg) {
+                let _ = TranslateMessage(&msg);
+                let _ = DispatchMessageW(&msg);
+            }
+        }
+        boot_log(&root, "message loop ended");
+        if let Some(status) = &session_status { let _ = std::fs::remove_file(status); }
+        if session_shell {
+            if let Some(marker) = &session_marker { let _ = std::fs::remove_file(marker); }
+        }
+        if com_initialized {
+            windows::Win32::System::Ole::OleUninitialize();
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
+    #[test]
+    fn a_volume_arrival_names_its_drive_letters() {
+        use super::{arrived_drives, drive_letters, DevBroadcastVolume};
+        assert_eq!(drive_letters(0), None);
+        assert_eq!(drive_letters((1 << 4) | (1 << 5)).as_deref(), Some("E: F:"));
+        let volume = |device_type, flags| DevBroadcastVolume { size: 18, device_type, reserved: 0, unit_mask: 1 << 3, flags };
+        assert_eq!(unsafe { arrived_drives(&volume(2, 0)) }.as_deref(), Some("D:"));
+        assert_eq!(unsafe { arrived_drives(&volume(2, 2)) }, None);
+        assert_eq!(unsafe { arrived_drives(&volume(3, 0)) }, None);
+    }
+
+    #[test]
+    fn restart_reloads_session_shell_and_exits_normal_shell() {
+        assert!(matches!(super::restart_action(true), super::RestartAction::Reload));
+        assert!(matches!(super::restart_action(false), super::RestartAction::Exit));
+    }
+
     #[test]
     fn flash_only_on_a_real_workspace_change() {
         assert!(!super::workspace_changed(None, Some(0)));
@@ -1197,9 +1784,113 @@ mod tests {
     }
 
     #[test]
+    fn shell_paths_resolve_installed_and_explicit_roots() {
+        let root = PathBuf::from(r"C:\Winarchy");
+        assert_eq!(super::shell_status_path(&root, 3), root.join(r"state\shell-session-3"));
+        assert_eq!(super::shell_session_marker(&root, 3), root.join(r"state\session-shell-3"));
+        let (installed, theme) = super::shell_paths(&[], Some(root.join(r"state\bin\winarchy-shell.exe")));
+        assert_eq!(installed, root);
+        assert_eq!(theme, root.join(r"config\shell\theme.json"));
+        let args = ["--root".into(), root.to_string_lossy().into_owned()];
+        let (explicit_root, default_theme) = super::shell_paths(&args, None);
+        assert_eq!(explicit_root, root);
+        assert_eq!(default_theme, root.join(r"config\shell\theme.json"));
+        let explicit_theme = PathBuf::from(r"C:\Themes\custom.json");
+        let args = ["--root".into(), root.to_string_lossy().into_owned(), "--theme".into(), explicit_theme.to_string_lossy().into_owned()];
+        let (explicit, theme) = super::shell_paths(&args, None);
+        assert_eq!(explicit, root);
+        assert_eq!(theme, explicit_theme);
+    }
+
+    #[test]
+    fn current_logon_identity_is_present_well_formed_and_stable() {
+        let identity = super::current_logon_identity().expect("current logon identity");
+        assert_eq!(identity.len(), 33);
+        assert_eq!(identity.as_bytes()[16], b'-');
+        assert!(identity.bytes().enumerate().all(|(i, byte)| i == 16 || byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+        assert_eq!(super::current_logon_identity(), Some(identity.clone()));
+        if let Ok(expected) = std::env::var("WINARCHY_EXPECTED_LOGON_IDENTITY") {
+            assert_eq!(identity, expected);
+        }
+    }
+
+    #[test]
+    fn shell_status_creates_a_missing_status_file() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("winarchy-status-create-{}-{unique}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("shell-session-3");
+        let result = super::write_shell_status(&path, 42, true, "00000000000000ab-01dc000000000001");
+        let content = std::fs::read_to_string(&path);
+        std::fs::remove_dir_all(&root).unwrap();
+        result.unwrap();
+        assert_eq!(content.unwrap(), "42|1|00000000000000ab-01dc000000000001");
+    }
+
+    #[test]
+    fn shell_status_replaces_malformed_existing_status() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("winarchy-status-replace-{}-{unique}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("shell-session-3");
+        std::fs::write(&path, "malformed status").unwrap();
+        let result = super::write_shell_status(&path, 43, false, "00000000000000ab-01dc000000000001");
+        let content = std::fs::read_to_string(&path);
+        std::fs::remove_dir_all(&root).unwrap();
+        result.unwrap();
+        assert_eq!(content.unwrap(), "43|0|00000000000000ab-01dc000000000001");
+    }
+
+    #[test]
+    fn shell_marker_replaces_stale_identity() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("winarchy-marker-write-{}-{unique}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("session-shell-3");
+        std::fs::write(&path, "00000000000000ab-01dc000000000000").unwrap();
+        let result = super::write_shell_marker(&path, 42, "00000000000000ab-01dc000000000001");
+        let content = std::fs::read_to_string(&path);
+        std::fs::remove_dir_all(&root).unwrap();
+        result.unwrap();
+        assert_eq!(content.unwrap(), "00000000000000ab-01dc000000000001");
+    }
+
+    #[test]
+    fn policy_value_matches_the_running_exe_ignoring_case() {
+        let exe = std::path::Path::new(r"C:\W\winarchy-shell.exe");
+        assert!(super::policy_shell_points_to(r#""c:\w\Winarchy-Shell.exe" --root "C:\W" --session-shell"#, exe));
+        assert!(!super::policy_shell_points_to("explorer.exe", exe));
+        assert!(!super::policy_shell_points_to("", exe));
+    }
+
+    #[test]
+    fn session_shell_mode_requires_a_matching_logon_identity() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("winarchy-marker-mode-{}-{unique}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("session-shell-3");
+        let identity = "00000000000000ab-01dc000000000001";
+        let mut results = vec![super::session_shell_mode(&path, identity)];
+        for content in [identity, "00000000000000ab-01dc000000000000", "malformed", ""] {
+            std::fs::write(&path, content).unwrap();
+            results.push(super::session_shell_mode(&path, identity));
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(results, [false, true, false, false, false]);
+    }
+
+    #[test]
     fn segments_dim_keys_and_separators() {
         let seg = super::segments("CPU 26%  RAM 9% · el SEXO FE");
         assert_eq!(seg.iter().map(|(_, d)| *d).collect::<Vec<_>>(), [true, false, false, true, false, true, false, false, false]);
+    }
+
+    #[test]
+    fn reload_reconciles_each_dock_enabled_transition() {
+        assert_eq!(super::dock_change(false, true), super::DockChange::Enable);
+        assert_eq!(super::dock_change(true, false), super::DockChange::Disable);
+        assert_eq!(super::dock_change(true, true), super::DockChange::Update);
+        assert_eq!(super::dock_change(false, false), super::DockChange::None);
     }
 }
 

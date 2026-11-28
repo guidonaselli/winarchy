@@ -7,7 +7,14 @@ use windows::Win32::Networking::NetworkListManager::{INetworkListManager, Networ
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 use windows::core::{w, PCWSTR};
 use windows::Win32::System::Performance::{PdhAddEnglishCounterW, PdhCollectQueryData, PdhGetFormattedCounterArrayW, PdhOpenQueryW, PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE};
-use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+use windows::core::GUID;
+use windows::Win32::Foundation::{LocalFree, HLOCAL};
+use windows::Win32::System::Power::{GetSystemPowerStatus, PowerGetActiveScheme, PowerReadDCValueIndex, SYSTEM_POWER_STATUS};
+use windows::Win32::System::Registry::HKEY;
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+use windows::Win32::Globalization::{GetLocaleInfoW, LOCALE_SISO639LANGNAME};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardLayout, GetKeyboardLayoutList};
+use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, PostMessageW, GUITHREADINFO, WM_INPUTLANGCHANGEREQUEST};
 
 #[derive(Default)]
 pub struct Sampler {
@@ -81,6 +88,68 @@ pub fn ram_percent() -> Option<u32> {
     Some(m.dwMemoryLoad)
 }
 
+// umbrales (bajo, crítico) del plan de energía activo; los de fábrica de Windows si no se leen
+pub fn battery_levels() -> (u8, u8) {
+    const BATTERY: GUID = GUID::from_u128(0xe73a048d_bf27_4f12_9731_8b2076e8891f);
+    const LOW: GUID = GUID::from_u128(0x8183ba9a_e910_48da_8769_14ae6dc1170a);
+    const CRITICAL: GUID = GUID::from_u128(0x9a66d8d7_4ff7_4ef9_b5a2_5a326ca2a469);
+    unsafe {
+        let mut scheme = std::ptr::null_mut();
+        if PowerGetActiveScheme(HKEY::default(), &mut scheme).is_err() {
+            return (10, 5);
+        }
+        let read = |setting: &GUID, fallback: u8| {
+            let mut value = 0u32;
+            let status = PowerReadDCValueIndex(HKEY::default(), Some(scheme), Some(&BATTERY), Some(setting), &mut value);
+            if status == 0 { value.min(100) as u8 } else { fallback }
+        };
+        let levels = (read(&LOW, 10), read(&CRITICAL, 5));
+        let _ = LocalFree(HLOCAL(scheme.cast()));
+        levels
+    }
+}
+
+fn foreground_input_window() -> HWND {
+    unsafe {
+        let foreground = GetForegroundWindow();
+        let mut info = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..Default::default() };
+        match GetGUIThreadInfo(GetWindowThreadProcessId(foreground, None), &mut info) {
+            Ok(()) if !info.hwndFocus.is_invalid() => info.hwndFocus,
+            _ => foreground,
+        }
+    }
+}
+
+pub fn input_code(layouts: i32, name: &[u16]) -> Option<[u16; 2]> {
+    let upper = |c: u16| if (b'a' as u16..=b'z' as u16).contains(&c) { c - 32 } else { c };
+    match name {
+        [a, b, ..] if layouts > 1 && *a != 0 && *b != 0 => Some([upper(*a), upper(*b)]),
+        _ => None,
+    }
+}
+
+pub fn input_language() -> Option<[u16; 2]> {
+    unsafe {
+        let layouts = GetKeyboardLayoutList(None);
+        if layouts < 2 {
+            return None;
+        }
+        let layout = GetKeyboardLayout(GetWindowThreadProcessId(foreground_input_window(), None));
+        let mut name = [0u16; 9];
+        GetLocaleInfoW(layout.0 as u32 & 0xFFFF, LOCALE_SISO639LANGNAME, Some(&mut name));
+        input_code(layouts, &name)
+    }
+}
+
+// pedido asíncrono a la ventana con foco: la píldora no toma el foco, así que sigue siendo la del usuario
+pub fn next_input_language() {
+    const INPUTLANGCHANGE_FORWARD: usize = 2;
+    const HKL_NEXT: isize = 1;
+    unsafe {
+        let _ = PostMessageW(foreground_input_window(), WM_INPUTLANGCHANGEREQUEST, WPARAM(INPUTLANGCHANGE_FORWARD), LPARAM(HKL_NEXT));
+    }
+}
+
 // None si no hay batería (escritorio).
 pub fn battery() -> Option<(u8, bool)> {
     let mut p = SYSTEM_POWER_STATUS::default();
@@ -88,7 +157,7 @@ pub fn battery() -> Option<(u8, bool)> {
     (p.BatteryFlag & 128 == 0 && p.BatteryLifePercent <= 100).then_some((p.BatteryLifePercent, p.ACLineStatus == 1))
 }
 
-fn endpoint() -> Option<IAudioEndpointVolume> {
+pub fn endpoint() -> Option<IAudioEndpointVolume> {
     unsafe {
         let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
         let dev = en.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
@@ -98,7 +167,10 @@ fn endpoint() -> Option<IAudioEndpointVolume> {
 
 // Requiere COM inicializado en el hilo que llama (igual que `adjust_volume` y `toggle_mute`).
 pub fn volume() -> Option<(u32, bool)> {
-    let vol = endpoint()?;
+    read_volume(&endpoint()?)
+}
+
+pub fn read_volume(vol: &IAudioEndpointVolume) -> Option<(u32, bool)> {
     unsafe { Some(((vol.GetMasterVolumeLevelScalar().ok()? * 100.0).round() as u32, vol.GetMute().ok()?.as_bool())) }
 }
 
@@ -175,9 +247,9 @@ mod tests {
 pub fn notification_count() -> Option<usize> {
     use windows::UI::Notifications::Management::{UserNotificationListener, UserNotificationListenerAccessStatus};
     use windows::UI::Notifications::NotificationKinds;
-    let l = UserNotificationListener::Current().ok()?;
-    if l.GetAccessStatus().ok()? != UserNotificationListenerAccessStatus::Allowed {
-        return None;
+    let Some(l) = UserNotificationListener::Current().ok() else { return crate::wpn::toast_count() };
+    if l.GetAccessStatus().ok() != Some(UserNotificationListenerAccessStatus::Allowed) {
+        return crate::wpn::toast_count();
     }
     Some(l.GetNotificationsAsync(NotificationKinds::Toast).ok()?.get().ok()?.Size().ok()? as usize)
 }

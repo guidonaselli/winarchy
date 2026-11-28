@@ -64,7 +64,9 @@ function Get-WinarchyAhkExe {
 
 function Get-WinarchyWeztermExe {
     <# wezterm-gui.exe (la GUI; wezterm.exe es el CLI y no abre ventana); $null si falta. #>
+    # state\bin\wezterm es un override de esta máquina (p. ej. una nightly): gana al instalado.
     $found = @(
+        (Join-Path (Get-WinarchyStateDir) 'bin\wezterm\wezterm-gui.exe'),
         "$env:ProgramFiles\WezTerm\wezterm-gui.exe",
         "$env:LOCALAPPDATA\Programs\WezTerm\wezterm-gui.exe"
     ) | Where-Object { Test-Path $_ } | Select-Object -First 1
@@ -94,17 +96,54 @@ function Start-WinarchyKomorebi {
       algunas máquinas (os error 1920: reintenta y puede colgarse varios segundos), así
       que lanzamos komorebi.exe directo, que arranca al toque y hereda KOMOREBI_CONFIG_HOME
       del entorno (User var que registra install.ps1). No-op si ya está corriendo.
+      -Resilient: lo delega en scripts/Start-Komorebi.ps1 (limpia el socket stale, reintenta
+      si otra app retiene el foreground y deja log); para reinicios desatendidos, donde un
+      arranque fallido pasaba sin rastro.
     #>
+    param([switch]$Resilient)
     if (Test-WinarchyProcess 'komorebi') { return }
+    if ($Resilient) {
+        $launcher = Join-Path (Get-WinarchyRoot) 'scripts\Start-Komorebi.ps1'
+        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $launcher
+        return
+    }
     $exe = Get-WinarchyKomorebiExe
     if (-not $exe) { Write-WinarchyWarn 'komorebi.exe not found; tiling not started.'; return }
-    Start-Process $exe -WindowStyle Hidden
+    Start-Process $exe -ArgumentList '--log-level', 'warn' -WindowStyle Hidden
 }
 
 function Write-WinarchyInfo { param([string]$Message) Write-Host "  $Message" }
 function Write-WinarchyOk   { param([string]$Message) Write-Host "  [OK] $Message" -ForegroundColor Green }
-function Write-WinarchyWarn { param([string]$Message) Write-Host "  [!!] $Message" -ForegroundColor Yellow }
-function Write-WinarchyErr  { param([string]$Message) Write-Host "  [XX] $Message" -ForegroundColor Red }
+function Write-WinarchyWarn { param([string]$Message) Write-Host "  [!!] $Message" -ForegroundColor Yellow; Write-WinarchyLog "WARN $Message" }
+function Write-WinarchyErr  { param([string]$Message) Write-Host "  [XX] $Message" -ForegroundColor Red; Write-WinarchyLog "ERROR $Message" }
+
+function Write-WinarchyLog {
+    <# Una línea de evento en state\winarchy.log (la comparten CLI y AHK). Nunca falla al llamador. #>
+    param([string]$Message)
+    try {
+        $path = Join-Path (Get-WinarchyStateDir) 'winarchy.log'
+        if ((Test-Path $path) -and (Get-Item $path).Length -gt 512KB) { Move-Item $path "$path.1" -Force }
+        Add-Content -Path $path -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff') cli[$PID] $($Message -replace '\r?\n', ' | ')" -Encoding UTF8
+    }
+    catch { Write-Debug "log: $_" }
+}
+
+function Show-WinarchyLogs {
+    <# Cola de todos los logs del stack, para diagnosticar sin saber dónde escribe cada uno. #>
+    param([int]$Lines = 20)
+    $state = Get-WinarchyStateDir
+    $paths = @(
+        'winarchy.log', 'shell-boot.log', 'proc-exits.log', 'session-autostart.log' | ForEach-Object { Join-Path $state $_ }
+        Get-ChildItem "$env:LOCALAPPDATA\winarchy\*.log", "$env:LOCALAPPDATA\komorebi\komorebi*.log" -ErrorAction SilentlyContinue | ForEach-Object FullName
+    )
+    foreach ($path in $paths | Where-Object { Test-Path $_ }) {
+        Write-Host "`n== $path ($((Get-Item $path).LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')))" -ForegroundColor Cyan
+        Get-Content $path -Tail $Lines | ForEach-Object { $_ -replace '\x1b\[[0-9;]*m' } | ForEach-Object {
+            # la shell fecha en segundos Unix
+            if ($_ -match '^t=(\d+) (.*)$') { "$([DateTimeOffset]::FromUnixTimeSeconds([long]$Matches[1]).ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss')) $($Matches[2])" } else { $_ }
+        }
+    }
+}
 
 function New-WinarchySnapshot {
     <# Copia los paths dados a backups/<timestamp>/ antes de tocar nada. Devuelve el dir del snapshot. #>

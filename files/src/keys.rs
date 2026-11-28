@@ -47,9 +47,14 @@ pub enum Key {
     Back,
     Forward,
     PrevTab,
+    MoveTabLeft,
+    MoveTabRight,
+    Palette,
+    Search,
     ReopenTab,
     JumpTab(usize),
     Rename,
+    QuickLook,
     NewFolder,
     CopyPath,
     Properties,
@@ -144,6 +149,10 @@ fn map_key(virtual_key: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Key> 
             0x54 => Some(Key::ReopenTab),
             0x43 => Some(Key::CopyPath),
             0x09 => Some(Key::PrevTab),
+            0x21 => Some(Key::MoveTabLeft),
+            0x22 => Some(Key::MoveTabRight),
+            0x50 => Some(Key::Palette),
+            0x46 => Some(Key::Search),
             _ => None,
         };
     }
@@ -155,6 +164,7 @@ fn map_key(virtual_key: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Key> 
     }
     match (virtual_key, ctrl) {
         (0x46, true) => Some(Key::FocusFilter),
+        (0x20, true) => Some(Key::QuickLook),
         (0x71, false) => Some(Key::Rename),
         (0x25, false) => Some(Key::MoveLeft),
         (0x27, false) => Some(Key::MoveRight),

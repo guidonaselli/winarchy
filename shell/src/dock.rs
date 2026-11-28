@@ -84,26 +84,28 @@ const TRAY_INDEX: usize = usize::MAX - 1;
 
 // El dock vive en el borde opuesto al de la isla: `bottom` es el borde del dock. `bar` va en coordenadas de pantalla, `cells` relativas a `bar`.
 pub fn layout(n: usize, scale: f32, mon: MonRect, bottom: bool, gap_dip: i32) -> Layout {
-    layout_for(n, scale, mon, bottom, gap_dip, true)
+    layout_for(n, scale, mon, bottom, gap_dip, false)
 }
 
 // `reserve` deja a cada lado el ancho del cluster; solo el dock que lo dibuja lo necesita.
-fn layout_for(n: usize, scale: f32, mon: MonRect, bottom: bool, gap_dip: i32, reserve: bool) -> Layout {
+pub fn layout_for(n: usize, scale: f32, mon: MonRect, bottom: bool, gap_dip: i32, reserve: bool) -> Layout {
     let (cell, gap, pad) = (px(CELL_DIP, scale), px(gap_dip, scale), px(PAD_DIP, scale));
     // El dock va centrado: deja a cada lado el ancho del cluster para que la píldora entre en cualquier monitor.
     let side = if reserve { px(crate::cluster::RESERVE_DIP, scale) } else { 0 };
     let max_w = ((mon.2 - mon.0) * 4 / 5).min(mon.2 - mon.0 - 2 * side);
     let cap = (((max_w - 2 * pad + gap) / (cell + gap)).max(1)) as usize;
-    let app_cap = cap.saturating_sub(2);
+    // El botón de bandeja vive en el cluster de la derecha cuando este dock lo dibuja.
+    let tail = usize::from(!reserve);
+    let app_cap = cap.saturating_sub(1 + tail);
     let (shown, overflow) = if n <= app_cap { (n, 0) } else { (app_cap.saturating_sub(1), n - app_cap.saturating_sub(1)) };
-    let slots = shown + usize::from(overflow > 0) + 2;
+    let slots = shown + usize::from(overflow > 0) + 1 + tail;
     let w = 2 * pad + slots as i32 * cell + (slots as i32 - 1) * gap;
     let h = px(BAR_DIP, scale);
     let x = mon.0 + (mon.2 - mon.0 - w) / 2;
     let y = if bottom { mon.3 - px(MARGIN_DIP, scale) - h } else { mon.1 + px(MARGIN_DIP, scale) };
     let brand = R { x: pad, y: (h - cell) / 2, w: cell, h: cell };
-    let cells = (0..slots - 2).map(|i| R { x: pad + (i as i32 + 1) * (cell + gap), y: (h - cell) / 2, w: cell, h: cell }).collect();
-    let tray = R { x: pad + (slots as i32 - 1) * (cell + gap), y: (h - cell) / 2, w: cell, h: cell };
+    let cells = (0..slots - 1 - tail).map(|i| R { x: pad + (i as i32 + 1) * (cell + gap), y: (h - cell) / 2, w: cell, h: cell }).collect();
+    let tray = if reserve { R::default() } else { R { x: pad + (slots as i32 - 1) * (cell + gap), y: (h - cell) / 2, w: cell, h: cell } };
     Layout { bar: R { x, y, w, h }, brand, tray, cells, overflow }
 }
 
@@ -124,6 +126,16 @@ fn display_layout(layout: &Layout, xs: &[i32], bar: R) -> Layout {
 }
 
 // Ventana a enfocar al hacer clic: con el grupo ya activo, la siguiente; si no, la última activa del grupo.
+// La rueda sobre un grupo con varias ventanas recorre cuál se previsualiza: hacia abajo la siguiente, hacia arriba la anterior.
+pub fn step_preview(wins: &[isize], current: Option<isize>, delta: i32) -> Option<isize> {
+    if wins.len() < 2 || delta == 0 {
+        return None;
+    }
+    let at = current.and_then(|c| wins.iter().position(|w| *w == c)).unwrap_or(0) as i32;
+    let n = wins.len() as i32;
+    Some(wins[(at + if delta < 0 { 1 } else { -1 }).rem_euclid(n) as usize])
+}
+
 pub fn pick_target(wins: &[isize], foreground: isize, last_active: Option<isize>) -> Option<isize> {
     if let Some(i) = wins.iter().position(|w| *w == foreground) {
         return (wins.len() > 1).then(|| wins[(i + 1) % wins.len()]).or(Some(wins[i]));
@@ -220,6 +232,38 @@ const WM_TRAY_FOREGROUND: u32 = WM_APP + 23;
 const T_TRAY_FOCUS: usize = 7;
 const T_TRAY_ACTIVATE: usize = 8;
 const T_CLICK: usize = 9;
+const T_PROGRESS: usize = 10;
+const WM_TASKBAR: u32 = WM_APP + 24;
+// una app que copia archivos manda cientos de valores por segundo: un aviso por redibujo
+static TASKBAR_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+const SWEEP_MS: u128 = 1400;
+const PROGRESS_MS: u32 = 66;
+
+pub(crate) fn notify_taskbar() {
+    let target = komorebi::NOTIFY.load(std::sync::atomic::Ordering::Relaxed);
+    if target != 0 && !TASKBAR_PENDING.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        unsafe {
+            if PostMessageW(HWND(target as *mut _), WM_TASKBAR, WPARAM(0), LPARAM(0)).is_err() {
+                TASKBAR_PENDING.store(false, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+// el timer del barrido solo existe mientras hay un progreso indeterminado a la vista y con efectos
+fn sweeping() -> bool {
+    with(|d| d.motion && d.want_visible() && d.items.iter().any(|i| crate::taskbar::group(&i.wins).is_some_and(|p| p.kind == crate::taskbar::Kind::Indeterminate)))
+}
+
+fn sweep_phase() -> f32 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    (START.get_or_init(std::time::Instant::now).elapsed().as_millis() % SWEEP_MS) as f32 / SWEEP_MS as f32
+}
+
+fn repaint_progress() {
+    with(|d| d.sig = 0);
+    render();
+}
 const FOCUS_DELAY_MS: u32 = 220;
 const TIP_FADE_MS: u128 = 130;
 const GLIDE_TAU_MS: f32 = 55.0;
@@ -240,10 +284,10 @@ struct Item {
 }
 
 #[derive(Clone)]
-struct Icon {
-    w: i32,
-    h: i32,
-    px: Vec<u32>,
+pub(crate) struct Icon {
+    pub(crate) w: i32,
+    pub(crate) h: i32,
+    pub(crate) px: Vec<u32>,
 }
 
 struct Dock {
@@ -257,6 +301,7 @@ struct Dock {
     asked: HashSet<(String, i32)>,
     layout: Layout,
     hover: Option<usize>,
+    preview_pick: Option<(String, isize)>,
     key_target: Option<KeyTarget>,
     key_witness: Option<(isize, u32)>,
     accessible_titles: HashMap<String, String>,
@@ -362,6 +407,11 @@ static READY: Mutex<Vec<(String, i32, Icon)>> = Mutex::new(Vec::new());
 type Ask = (String, i32, Vec<String>);
 static ASKS: Mutex<Option<std::sync::mpsc::Sender<Ask>>> = Mutex::new(None);
 
+#[link(name = "wtsapi32")]
+unsafe extern "system" {
+    fn WTSUnRegisterSessionNotification(hwnd: HWND) -> BOOL;
+}
+
 pub fn init(theme: &Theme, state_dir: &std::path::Path) -> Option<HWND> {
     unsafe {
         let inst = GetModuleHandleW(PCWSTR::null()).ok()?;
@@ -407,6 +457,7 @@ unsafe fn create_dock(r: &RECT, theme: &Theme, pins_path: &std::path::Path) -> O
         asked: HashSet::new(),
         layout: layout(0, scale, mon, theme.position != "bottom", style(theme).gap),
         hover: None,
+        preview_pick: None,
         key_target: None,
         key_witness: None,
         accessible_titles: HashMap::new(),
@@ -610,6 +661,31 @@ pub fn set_theme(theme: &Theme) {
     });
 }
 
+pub fn shutdown() {
+    dismiss_tray();
+    crate::tray_flyout::close();
+    crate::dock_menu::dismiss();
+    crate::dock_thumb::hide();
+    if KEY_SESSION.get().is_some() { end_keyboard(false); }
+    crate::cluster::destroy();
+    restore_native_taskbar();
+    let docks = DOCKS.with(|d| std::mem::take(&mut *d.borrow_mut()));
+    for d in docks {
+        unsafe {
+            crate::accessibility::destroy(d.hwnd);
+            crate::dock_drop::revoke(d.hwnd);
+            let _ = DeregisterShellHookWindow(d.hwnd);
+            let _ = WTSUnRegisterSessionNotification(d.hwnd);
+            let _ = DestroyWindow(d.tip);
+            let _ = DestroyWindow(d.hwnd);
+        }
+    }
+    komorebi::NOTIFY.store(0, std::sync::atomic::Ordering::Relaxed);
+    drop(ASKS.lock().unwrap().take());
+    READY.lock().unwrap().clear();
+    CUR.set(0);
+}
+
 // El ajuste de Windows "efectos de animación" apagado manda sobre el theme.
 pub(crate) fn motion_enabled(t: &Theme) -> bool {
     let mut on = windows::Win32::Foundation::BOOL(1);
@@ -625,7 +701,9 @@ unsafe fn for_native_taskbars(f: impl Fn(HWND)) {
     for class in [w!("Shell_TrayWnd"), w!("Shell_SecondaryTrayWnd")] {
         let mut prev = HWND::default();
         while let Ok(h) = FindWindowExW(None, prev, class, PCWSTR::null()) {
-            f(h);
+            if !crate::tray_host::owns_window(h) {
+                f(h);
+            }
             prev = h;
         }
     }
@@ -636,7 +714,8 @@ unsafe fn set_native_taskbar(hide: bool) {
     NATIVE_HIDDEN.store(hide, std::sync::atomic::Ordering::Relaxed);
     for_native_taskbars(|h| {
         if hide != !IsWindowVisible(h).as_bool() {
-            let _ = ShowWindow(h, if hide { SW_HIDE } else { SW_SHOWNA });
+            // asíncrono: esperar a un Explorer colgado frenaría también al watchdog y al panic hook
+            let _ = ShowWindowAsync(h, if hide { SW_HIDE } else { SW_SHOWNA });
         }
     });
 }
@@ -655,6 +734,9 @@ pub fn restore_native_taskbar_at_start() {
 
 // Con el host de bandeja activo abre el flyout propio sobre el botón; sin él, la bandeja nativa.
 fn open_tray() {
+    if with(|d| d.layout.tray.w == 0) {
+        return crate::cluster::open_tray();
+    }
     let (button, mon, bottom, scale, theme) = with(|d| (R { x: d.layout.bar.x + d.layout.tray.x, y: d.layout.bar.y + d.layout.tray.y, w: d.layout.tray.w, h: d.layout.tray.h }, d.mon, d.theme.position != "bottom", d.scale, d.theme.clone()));
     if !crate::tray_flyout::toggle(button, mon, bottom, scale, &theme) {
         show_tray();
@@ -678,7 +760,7 @@ pub fn show_tray() {
         TRAY_PENDING.set(true);
         TRAY_FALLBACK.set(false);
         set_native_taskbar(false);
-        for_native_taskbars(|h| { let _ = SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW); });
+        for_native_taskbars(|h| { let _ = SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS); });
         SetTimer(DOCKS.with(|d| d.borrow()[0].hwnd), T_TRAY_ACTIVATE, 50, None);
     }
 }
@@ -779,6 +861,35 @@ pub fn dismiss_tray() {
 fn request_control_center() {
     let path = with(|d| d.pins_path.with_file_name("show-menu.flag"));
     let _ = std::fs::OpenOptions::new().write(true).create_new(true).open(path);
+}
+
+// Win y el logo abren el Inicio propio sobre el dock del monitor del cursor; sin docks queda el lanzador de siempre.
+pub fn open_start() {
+    if dock_count() == 0 || !crate::start::available() { return request_start(); }
+    let Some((anchor, mon, bottom, scale, theme)) = dock_at_cursor() else { return request_start() };
+    crate::start::toggle(anchor, mon, bottom, scale, &theme);
+}
+
+// Dock del monitor del cursor (el primero si ninguno coincide): ancla del logo, monitor, posición, escala y tema.
+fn dock_at_cursor() -> Option<(R, (i32, i32, i32, i32), bool, f32, Theme)> {
+    unsafe {
+        let mut p = POINT::default();
+        let _ = GetCursorPos(&mut p);
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        let _ = GetMonitorInfoW(MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST), &mut info);
+        let at = (info.rcMonitor.left, info.rcMonitor.top, info.rcMonitor.right, info.rcMonitor.bottom);
+        DOCKS.with(|v| {
+            let v = v.borrow();
+            let d = v.iter().find(|d| d.mon == at).or_else(|| v.first())?;
+            Some((R { x: d.layout.bar.x + d.layout.brand.x, y: d.layout.bar.y + d.layout.brand.y, w: d.layout.brand.w, h: d.layout.brand.h }, d.mon, d.theme.position != "bottom", d.scale, d.theme.clone()))
+        })
+    }
+}
+
+pub fn show_switcher() {
+    if let Some((_, mon, _, scale, theme)) = dock_at_cursor() {
+        crate::switcher::show(mon, scale, &theme);
+    }
 }
 
 fn request_start() {
@@ -1095,6 +1206,10 @@ unsafe fn queue_refresh(hwnd: HWND) {
     SetTimer(hwnd, T_REFRESH, REFRESH_MS, None);
 }
 
+pub(crate) unsafe fn off_view(h: HWND) -> bool {
+    apps::off_view(IsWindowVisible(h).as_bool(), is_cloaked(h), komorebi::window_slot(h.0 as isize).is_some())
+}
+
 unsafe fn is_cloaked(h: HWND) -> bool {
     let mut c = 0u32;
     DwmGetWindowAttribute(h, DWMWA_CLOAKED, &mut c as *mut _ as *mut _, 4).is_ok() && c != 0
@@ -1123,6 +1238,58 @@ pub(crate) unsafe fn exe_of(h: HWND) -> String {
     let ok = QueryFullProcessImageNameW(p, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut n).is_ok();
     let _ = CloseHandle(p);
     if ok { String::from_utf16_lossy(&buf[..n as usize]) } else { String::new() }
+}
+
+fn wait_for_explorer_shell(timeout: std::time::Duration, mut is_ready: impl FnMut() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if is_ready() {
+            return true;
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return false;
+        }
+        std::thread::sleep(remaining.min(std::time::Duration::from_millis(100)));
+    }
+}
+
+fn system_explorer_shell_responsive() -> bool {
+    unsafe {
+        let mut previous = HWND::default();
+        while let Ok(hwnd) = FindWindowExW(None, previous, w!("Shell_TrayWnd"), PCWSTR::null()) {
+            previous = hwnd;
+            if !exe_of(hwnd).eq_ignore_ascii_case(system_explorer()) {
+                continue;
+            }
+            let mut result = 0usize;
+            if SendMessageTimeoutW(hwnd, WM_NULL, WPARAM(0), LPARAM(0), SMTO_ABORTIFHUNG | SMTO_ERRORONEXIT, 500, Some(&mut result)).0 != 0
+                && exe_of(hwnd).eq_ignore_ascii_case(system_explorer())
+            {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+pub fn start_system_explorer() -> bool {
+    if system_explorer_shell_responsive() {
+        return true;
+    }
+    let path = system_explorer();
+    if path.is_empty() || std::process::Command::new(path).spawn().is_err() {
+        return false;
+    }
+    let mut ready_samples = 0;
+    wait_for_explorer_shell(std::time::Duration::from_secs(20), || {
+        if system_explorer_shell_responsive() {
+            ready_samples += 1;
+        } else {
+            ready_samples = 0;
+        }
+        ready_samples >= 2
+    })
 }
 
 fn system_explorer() -> &'static str {
@@ -1223,20 +1390,24 @@ unsafe fn refresh() {
         let id = h.0 as isize;
         // lo que ya estaba al arrancar el dock no tiene hora de aparición: se usa la de su proceso
         opened.entry(id).or_insert_with(|| if seeded { appeared } else { process_started(h).unwrap_or(appeared) });
-        let cloaked = is_cloaked(h);
+        let away = off_view(h);
         match groups.iter_mut().find(|g| g.key == key) {
             Some(g) => {
                 g.wins.push(id);
                 g.active |= id == fg;
-                g.other_ws &= cloaked;
+                g.other_ws &= away;
             }
-            None => groups.push(Item { key, exe, aumid, wins: vec![id], active: id == fg, other_ws: cloaked, pin: None }),
+            None => groups.push(Item { key, exe, aumid, wins: vec![id], active: id == fg, other_ws: away, pin: None }),
         }
     }
     for g in &mut groups {
         g.wins.sort_by_key(|w| (opened[w], *w));
     }
     groups.sort_by_key(|g| (opened[&g.wins[0]], g.wins[0]));
+    if crate::tray::native_active() {
+        crate::taskbar::prune();
+        groups.iter().flat_map(|g| &g.wins).for_each(|w| crate::taskbar::announce(*w));
+    }
     with(|d| {
         d.ident = ident;
         d.opened = opened;
@@ -1332,7 +1503,7 @@ fn brand_mark_polygons(cell: R, scale: f32) -> [MarkQuad; 4] {
         [(53.7, 16.8), (67.7, 16.8), (75.4, 56.0), (61.4, 56.0)],
         [(78.9, 56.0), (92.9, 56.0), (103.9, 0.0), (89.9, 0.0)],
     ];
-    let w = px(30, scale).min(cell.w - px(8, scale)).max(1);
+    let w = px(24, scale).min(cell.w - px(8, scale)).max(1);
     let h = (w as f32 * 56.0 / 104.0).round() as i32;
     let (left, top) = (cell.x + (cell.w - w) / 2, cell.y + (cell.h - h) / 2);
     MARK.map(|quad| quad.map(|(x, y)| (left + (x * w as f32 / 104.0).round() as i32, top + (y * h as f32 / 56.0).round() as i32)))
@@ -1441,16 +1612,45 @@ fn draw_attention_marker(buf: &mut [u32], w: i32, h: i32, marker: R, border: i32
 
 // Texto centrado en una celda: GDI dibuja blanco sobre negro y la luminancia pasa a cobertura (como el tooltip).
 pub(crate) unsafe fn draw_label(buf: &mut [u32], stride: i32, rows: i32, cell: R, text: &str, family: &str, scale: f32, fg: (u8, u8, u8), font_size: i32) {
+    draw_text(buf, stride, rows, cell, text, family, scale, fg, font_size, DT_CENTER)
+}
+
+unsafe fn label_font(family: &str, scale: f32, font_size: i32) -> HFONT {
+    let family: Vec<u16> = family.encode_utf16().chain(std::iter::once(0)).collect();
+    CreateFontW(-px(font_size.max(11), scale), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, ANTIALIASED_QUALITY.0 as u32, 0, PCWSTR(family.as_ptr()))
+}
+
+/// Ancho en px con el que `draw_label` dibuja el texto.
+pub(crate) unsafe fn text_width(text: &str, family: &str, scale: f32, font_size: i32) -> i32 {
+    let wide: Vec<u16> = text.encode_utf16().collect();
+    if wide.is_empty() {
+        return 0;
+    }
+    let screen = GetDC(None);
+    let font = label_font(family, scale, font_size);
+    let old = SelectObject(screen, font);
+    let mut size = SIZE::default();
+    let _ = GetTextExtentPoint32W(screen, &wide, &mut size);
+    SelectObject(screen, old);
+    let _ = DeleteObject(font);
+    ReleaseDC(None, screen);
+    size.cx
+}
+
+pub(crate) unsafe fn draw_text(buf: &mut [u32], stride: i32, rows: i32, cell: R, text: &str, family: &str, scale: f32, fg: (u8, u8, u8), font_size: i32, align: DRAW_TEXT_FORMAT) {
+    // DrawTextW con un slice vacío recibe un puntero colgante y termina la shell
+    if text.is_empty() {
+        return;
+    }
     let (w, h) = (cell.w, cell.h);
     let wide: Vec<u16> = text.encode_utf16().collect();
-    let family: Vec<u16> = family.encode_utf16().chain(std::iter::once(0)).collect();
     let screen = GetDC(None);
     let mem = CreateCompatibleDC(screen);
     let bmi = BITMAPINFO { bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: w, biHeight: -h, biPlanes: 1, biBitCount: 32, biCompression: 0, ..Default::default() }, ..Default::default() };
     let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
     if let Ok(dib) = CreateDIBSection(mem, &bmi, DIB_RGB_COLORS, &mut bits, None, 0) {
         let old = SelectObject(mem, dib);
-        let font = CreateFontW(-px(font_size.max(11), scale), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, ANTIALIASED_QUALITY.0 as u32, 0, PCWSTR(family.as_ptr()));
+        let font = label_font(family, scale, font_size);
         let old_font = SelectObject(mem, font);
         let src = std::slice::from_raw_parts_mut(bits as *mut u32, (w * h) as usize);
         src.fill(0);
@@ -1458,7 +1658,7 @@ pub(crate) unsafe fn draw_label(buf: &mut [u32], stride: i32, rows: i32, cell: R
         SetTextColor(mem, COLORREF(0x00FF_FFFF));
         let mut rc = RECT { left: 0, top: 0, right: w, bottom: h };
         let mut tmp = wide.clone();
-        DrawTextW(mem, &mut tmp, &mut rc, DT_CENTER | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawTextW(mem, &mut tmp, &mut rc, align | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS);
         for y in 0..h {
             for x in 0..w {
                 let p = src[(y * w + x) as usize];
@@ -1491,6 +1691,10 @@ fn render() {
         }
         (d.hwnd, d.theme.clone(), d.items.clone(), Layout { bar: d.layout.bar, brand: d.layout.brand, tray: d.layout.tray, cells: d.layout.cells.clone(), overflow: d.layout.overflow }, d.hover, d.scale, d.want_visible(), d.motion, d.pressed)
     });
+    if layout_.tray.w == 0 {
+        // el botón de bandeja vive en el cluster: el foco de teclado se dibuja sobre su chevron
+        crate::cluster::set_key_focus(with(|d| d.key_target == Some(KeyTarget::Tray)));
+    }
     let (xs, bar_disp, glide_busy) = with(|d| glide_view(d));
     if glide_busy && !with(|d| d.anim_on) {
         unsafe { start_anim(hwnd) };
@@ -1511,7 +1715,14 @@ fn render() {
         return;
     }
     with(|d| d.sig = sig);
-    let (titles, focused) = with(|d| (d.accessible_titles.clone(), d.key_target.clone()));
+    let (mut titles, focused) = with(|d| (d.accessible_titles.clone(), d.key_target.clone()));
+    for item in &items {
+        if let Some(progress) = crate::taskbar::group(&item.wins).filter(|p| p.kind >= crate::taskbar::Kind::Normal) {
+            if let Some(title) = titles.get_mut(&accessible_group(item)) {
+                title.push_str(&format!(" ({:.0}%)", progress.fraction * 100.0));
+            }
+        }
+    }
     publish_accessibility(hwnd, &items, &display_layout(&layout_, &xs, bar_disp), &titles, focused, want_vis);
     let want_vis = if want_vis { 1.0 } else { 0.0 };
     let vis = with(|d| {
@@ -1559,11 +1770,13 @@ fn render() {
         }
         draw_brand_mark(buf, w, h, layout_.brand, scale, fg, accent);
         let tray = R { x: w - (layout_.bar.w - layout_.tray.x), ..layout_.tray };
-        let tray_alpha = if key_target == Some(KeyTarget::Tray) { 0.50 } else if pressed == Some(TRAY_INDEX) { 0.28 } else if hover == Some(TRAY_INDEX) { 0.16 } else { 0.0 };
+        let tray_alpha = if layout_.tray.w == 0 { 0.0 } else if key_target == Some(KeyTarget::Tray) { 0.50 } else if pressed == Some(TRAY_INDEX) { 0.28 } else if hover == Some(TRAY_INDEX) { 0.16 } else { 0.0 };
         if tray_alpha > 0.0 { fill_round_a(buf, w, h, tray, px(10, scale), accent, tray_alpha); }
-        let (cx, cy, s) = (tray.x + tray.w / 2, tray.y + tray.h / 2, px(1, scale).max(1));
-        fill_quad_a(buf, w, h, [(cx - 6*s, cy + 2*s), (cx, cy - 4*s), (cx + s, cy - 2*s), (cx - 5*s, cy + 4*s)], fg, 1.0);
-        fill_quad_a(buf, w, h, [(cx, cy - 4*s), (cx + 6*s, cy + 2*s), (cx + 5*s, cy + 4*s), (cx - s, cy - 2*s)], fg, 1.0);
+        if tray.w > 0 {
+            let (cx, cy, s) = (tray.x + tray.w / 2, tray.y + tray.h / 2, px(1, scale).max(1));
+            fill_quad_a(buf, w, h, [(cx - 6*s, cy + 2*s), (cx, cy - 4*s), (cx + s, cy - 2*s), (cx - 5*s, cy + 4*s)], fg, 1.0);
+            fill_quad_a(buf, w, h, [(cx, cy - 4*s), (cx + 6*s, cy + 2*s), (cx + 5*s, cy + 4*s), (cx - s, cy - 2*s)], fg, 1.0);
+        }
         DOCKS.with(|v| {
             let v = v.borrow();
             let d = &v[CUR.get().min(v.len() - 1)];
@@ -1597,6 +1810,29 @@ fn render() {
                 }
                 if item.wins.is_empty() {
                     continue;
+                }
+                if let Some(progress) = crate::taskbar::group(&item.wins) {
+                    use crate::taskbar::Kind;
+                    if let Some(badge) = &progress.overlay {
+                        let side = size as f32 * 0.5;
+                        draw_icon(buf, w, h, badge, ccx + side * 0.6, ccy + side * 0.5, side / badge.w as f32, dim);
+                    }
+                    if progress.kind != Kind::None {
+                        let inset = px(7, scale);
+                        let track = R { x: cell.x + inset, y: cell.y + cell.h - px(DOT_DIP, scale) - px(8, scale), w: cell.w - 2 * inset, h: px(3, scale).max(2) };
+                        let fill = match progress.kind {
+                            Kind::Error => urgent,
+                            Kind::Paused => fg,
+                            _ => accent,
+                        };
+                        let halo = crate::theme::contrasting_color(fill);
+                        fill_round_a(buf, w, h, R { x: track.x - 1, y: track.y - 1, w: track.w + 2, h: track.h + 2 }, (track.h + 2) / 2, halo, 0.55);
+                        let phase = if motion { sweep_phase() } else { 0.5 };
+                        let (x, length) = crate::taskbar::segment(track.w, progress.kind, progress.fraction, phase);
+                        if length > 0 {
+                            fill_round_a(buf, w, h, R { x: track.x + x, w: length, ..track }, track.h / 2, fill, if progress.kind == Kind::Paused { 0.75 } else { 1.0 });
+                        }
+                    }
                 }
                 let dot = px(DOT_DIP, scale);
                 let dw = if item.active { dot * 3 } else { dot };
@@ -1700,24 +1936,31 @@ fn spawn_icon_worker(target: isize) {
     });
 }
 
+pub(crate) unsafe fn icon_from_handle(handle: usize) -> Option<Icon> {
+    let mut info = ICONINFO::default();
+    GetIconInfo(HICON(handle as *mut _), &mut info).ok()?;
+    let _ = DeleteObject(info.hbmMask);
+    icon_from_bitmap(info.hbmColor)
+}
+
 unsafe fn fetch_window_icon(source: &str) -> Option<Icon> {
     let hwnd: isize = source[7..].parse().ok()?;
     let mut handle = 0usize;
     let _ = SendMessageTimeoutW(HWND(hwnd as *mut _), WM_GETICON, WPARAM(ICON_BIG as usize), LPARAM(0), SMTO_ABORTIFHUNG, 200, Some(&mut handle));
     if handle == 0 {
+        handle = GetClassLongPtrW(HWND(hwnd as *mut _), GCLP_HICON);
+    }
+    if handle == 0 {
         return None;
     }
-    let mut info = ICONINFO::default();
-    GetIconInfo(HICON(handle as *mut _), &mut info).ok()?;
-    let _ = DeleteObject(info.hbmMask);
-    let icon = icon_from_bitmap(info.hbmColor);
+    let icon = icon_from_handle(handle);
     if icon.is_some() {
         WINDOW_ICONS.lock().unwrap().get_or_insert_with(HashMap::new).insert(source.to_owned(), handle);
     }
     icon
 }
 
-unsafe fn fetch_icon(source: &str, size: i32) -> Option<Icon> {
+pub(crate) unsafe fn fetch_icon(source: &str, size: i32) -> Option<Icon> {
     if source.starts_with("window:") {
         return fetch_window_icon(source);
     }
@@ -1727,9 +1970,15 @@ unsafe fn fetch_icon(source: &str, size: i32) -> Option<Icon> {
     icon_from_bitmap(bmp)
 }
 
+// una app empaquetada no publica ícono en su marco: sale por su AppUserModelID
+pub(crate) unsafe fn window_icon(hwnd: isize, size: i32) -> Option<Icon> {
+    fetch_icon(&format!("window:{hwnd}"), size).or_else(|| fetch_icon(&format!(r"shell:AppsFolder\{}", aumid_of(HWND(hwnd as *mut _))?), size))
+}
+
 unsafe fn icon_from_bitmap(bmp: HBITMAP) -> Option<Icon> {
     let mut bm = BITMAP::default();
-    if GetObjectW(bmp, std::mem::size_of::<BITMAP>() as i32, Some(&mut bm as *mut _ as *mut _)) == 0 || bm.bmWidth <= 0 || bm.bmHeight <= 0 {
+    if GetObjectW(bmp, std::mem::size_of::<BITMAP>() as i32, Some(&mut bm as *mut _ as *mut _)) == 0 || bm.bmWidth <= 0 || bm.bmHeight <= 0 || bm.bmWidth > 1024 || bm.bmHeight > 1024 {
+        // otro proceso puede mandar cualquier ícono como insignia
         let _ = DeleteObject(bmp);
         return None;
     }
@@ -1780,7 +2029,7 @@ unsafe fn dock_foreground(mon: MonRect) -> Option<Foreground> {
         caption: style & WS_CAPTION.0 == WS_CAPTION.0,
         thickframe: style & WS_THICKFRAME.0 != 0,
         zoomed: IsZoomed(fg).as_bool(),
-        shell_like: fg == GetShellWindow() || matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd"),
+        shell_like: fg == GetShellWindow() || matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "WinarchyDesktopWallpaper"),
         on_dock_monitor: (mi.rcMonitor.left, mi.rcMonitor.top) == (mon.0, mon.1),
     })
 }
@@ -1802,6 +2051,8 @@ unsafe fn tick() {
     let reconciled = sync_docks();
     CUR.set(cur);
     if !reconciled { return }
+    // shortcut: sin Explorer no llegan los mensajes del shell hook; este sondeo de 1 s mantiene la lista al día
+    queue_refresh(with(|d| d.hwnd));
     let rects = crate::monitor_rects();
     let Some(r0) = rects.get(cur).copied() else { return };
     let (hwnd, hidden) = with(|d| (d.hwnd, d.hidden));
@@ -1853,10 +2104,12 @@ unsafe fn tick() {
 
 // Windows niega SetForegroundWindow a quien no es el foreground: se comparte la cola de entrada con él un instante.
 pub(crate) unsafe fn raise(hwnd: HWND) {
-    if SetForegroundWindow(hwnd).as_bool() {
+    // reordenar una ventana colgada, o compartir la cola de entrada con una, congela la shell
+    if SetForegroundWindow(hwnd).as_bool() || IsHungAppWindow(hwnd).as_bool() {
         return;
     }
-    let fg_thread = GetWindowThreadProcessId(GetForegroundWindow(), None);
+    let foreground = GetForegroundWindow();
+    let fg_thread = if IsHungAppWindow(foreground).as_bool() { 0 } else { GetWindowThreadProcessId(foreground, None) };
     let me = GetCurrentThreadId();
     let attached = fg_thread != 0 && fg_thread != me && AttachThreadInput(me, fg_thread, true).as_bool();
     let _ = BringWindowToTop(hwnd);
@@ -1891,9 +2144,9 @@ pub(crate) unsafe fn focus_window(hwnd: HWND) {
         _ => (hwnd, hwnd.0 as isize),
     };
     if IsIconic(hwnd).as_bool() {
-        let _ = ShowWindow(hwnd, SW_RESTORE);
+        let _ = ShowWindowAsync(hwnd, SW_RESTORE);
     }
-    if is_cloaked(hwnd) {
+    if off_view(hwnd) {
         komorebi::bring_to_front(id);
     } else {
         raise(hwnd);
@@ -1994,12 +2247,13 @@ fn publish_accessibility(hwnd: HWND, items: &[Item], layout: &Layout, titles: &H
             } else if let Some(item) = items.get(i) {
                 let key = accessible_group(item);
                 let name = titles.get(&key).cloned().unwrap_or_else(|| {
-                    std::path::Path::new(&item.exe).file_stem().and_then(|s| s.to_str()).filter(|s| !s.is_empty()).unwrap_or(&item.key).to_string()
+                    let stem = |p: &str| std::path::Path::new(p).file_stem().and_then(|s| s.to_str()).filter(|s| !s.is_empty()).map(str::to_string);
+                    stem(&item.exe).or_else(|| stem(&item.key)).unwrap_or_else(|| item.key.clone())
                 });
                 nodes.push((key, accessible_node(name, *cell)));
             }
         }
-        nodes.push(("tray".into(), accessible_node(t(K::SystemTray).into(), layout.tray)));
+        if layout.tray.w > 0 { nodes.push(("tray".into(), accessible_node(t(K::SystemTray).into(), layout.tray))); }
     }
     let focus = focused.and_then(|target| match target {
         KeyTarget::Brand => Some("start".into()),
@@ -2097,7 +2351,7 @@ pub fn focus_keyboard() {
     if KEY_SESSION.get().is_some() { end_keyboard(true); return; }
     unsafe {
         let previous = GetForegroundWindow();
-        let monitor = if previous.0.is_null() || previous == GetShellWindow() {
+        let monitor = if previous.0.is_null() || crate::desktop::is_desktop(previous) {
             let mut point = POINT::default();
             let _ = GetCursorPos(&mut point);
             MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST)
@@ -2174,7 +2428,7 @@ pub(crate) fn return_keyboard() {
 unsafe fn keyboard_action(context: bool) {
     let target = with(|d| d.key_target.clone());
     match target {
-        Some(KeyTarget::Brand) => { end_keyboard(false); if context { request_control_center(); } else { request_start(); } }
+        Some(KeyTarget::Brand) => { end_keyboard(false); if context { request_control_center(); } else { open_start(); } }
         Some(KeyTarget::Tray) if !context => { end_keyboard(false); open_tray(); }
         Some(KeyTarget::Item(id)) => {
             let index = with(|d| d.items.iter().position(|item| group_id(item) == id));
@@ -2229,6 +2483,17 @@ pub(crate) fn drop_launch(owner: isize, sx: i32, sy: i32) -> Option<(String, Str
         .filter(|(o, a)| crate::dock_drop::droppable(o, a));
     });
     out
+}
+
+// Si el punto de pantalla (sx, sy) cae sobre el logo de este dock: soltar ahí ancla al Inicio.
+pub(crate) fn brand_at(owner: isize, sx: i32, sy: i32) -> bool {
+    let mut hit = false;
+    on_dock(owner, || unsafe {
+        let mut p = POINT { x: sx, y: sy };
+        let _ = ScreenToClient(HWND(owner as *mut _), &mut p);
+        hit = with(|d| matches!(display_hit(d, p.x, p.y), Some(Hit::Brand)));
+    });
+    hit
 }
 
 pub(crate) fn on_dock(owner: isize, f: impl FnOnce()) {
@@ -2386,7 +2651,7 @@ unsafe fn tip_text(idx: usize) -> Option<String> {
     if let Some(n) = with(|d| (d.layout.overflow > 0 && idx + 1 == d.layout.cells.len()).then_some(d.layout.overflow)) {
         return Some(format!("+{n}"));
     }
-    let (wins, last, pin) = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), d.last_active.get(&i.key).copied(), launch_of(&d.pins, i).map(|(o, _)| o))))?;
+    let (wins, last, pin) = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), previewed(d, i), launch_of(&d.pins, i).map(|(o, _)| o))))?;
     let target = pick_target(&wins, 0, last);
     if let Some(t) = target {
         let h = HWND(t as *mut _);
@@ -2410,11 +2675,20 @@ unsafe fn hide_tip() {
 }
 
 // Ventana que enfocaría el clic en la celda, para su miniatura; ni el hub, ni la bandeja ni el desborde la tienen.
+// Ventana que se previsualiza: la elegida con la rueda mientras siga abierta, si no la última activa.
+fn previewed(d: &Dock, item: &Item) -> Option<isize> {
+    d.preview_pick.as_ref().filter(|(k, w)| *k == item.key && item.wins.contains(w)).map(|(_, w)| *w).or_else(|| d.last_active.get(&item.key).copied())
+}
+
+unsafe fn thumb_windows(idx: usize) -> Vec<isize> {
+    with(|d| d.items.get(idx).map(|i| i.wins.clone())).unwrap_or_default()
+}
+
 unsafe fn thumb_target(idx: usize) -> Option<isize> {
     if idx == HUB_INDEX || idx == TRAY_INDEX || with(|d| d.layout.overflow > 0 && idx + 1 == d.layout.cells.len()) {
         return None;
     }
-    let (wins, last) = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), d.last_active.get(&i.key).copied())))?;
+    let (wins, last) = with(|d| d.items.get(idx).map(|i| (i.wins.clone(), previewed(d, i))))?;
     pick_target(&wins, 0, last)
 }
 
@@ -2426,7 +2700,7 @@ unsafe fn show_tip(idx: usize) {
     let text = if idx == HUB_INDEX { Some(crate::i18n::t(crate::i18n::K::StartMenu).to_string()) } else if idx == TRAY_INDEX { Some(crate::i18n::t(crate::i18n::K::SystemTray).to_string()) } else { tip_text(idx) };
     let Some(text) = text else { return hide_tip() };
     let (tip, theme, scale, bar, cell, bottom) = with(|d| (d.tip, d.theme.clone(), d.scale, d.layout.bar, if idx == HUB_INDEX { Some(d.layout.brand) } else if idx == TRAY_INDEX { Some(d.layout.tray) } else { d.layout.cells.get(idx).copied() }, d.theme.position != "bottom"));
-    let Some(cell) = cell else { return hide_tip() };
+    let Some(cell) = cell.filter(|_| !text.is_empty()) else { return hide_tip() };
     let wide: Vec<u16> = text.encode_utf16().collect();
     let family: Vec<u16> = theme.font_family.encode_utf16().chain(std::iter::once(0)).collect();
     let screen = GetDC(None);
@@ -2476,9 +2750,9 @@ unsafe fn show_tip(idx: usize) {
     let _ = DeleteDC(mem);
     ReleaseDC(None, screen);
     let _ = ShowWindow(tip, SW_SHOWNOACTIVATE);
-    match thumb_target(idx) {
-        Some(target) => crate::dock_thumb::show(target, bar.x + cell.x + cell.w / 2, (x, y, w, h), bottom, mon, scale, &theme),
-        None => crate::dock_thumb::hide(),
+    match (thumb_target(idx), thumb_windows(idx)) {
+        (Some(target), wins) => crate::dock_thumb::show(&wins, target, bar.x + cell.x + cell.w / 2, (x, y, w, h), bottom, mon, scale, &theme),
+        _ => crate::dock_thumb::hide(),
     }
     if animate {
         let dock = with(|d| {
@@ -2508,7 +2782,11 @@ unsafe fn tip_tick(h: HWND) {
 // Los mensajes llegan anidados (ShowWindow envía a su propia ventana): `CUR` se devuelve a lo que era al salir.
 unsafe extern "system" fn dock_proc(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if m == WM_GETOBJECT { if let Some(result) = crate::accessibility::get_object(h, wp, lp) { return result; } }
-    if m == WM_NCDESTROY { crate::accessibility::destroy(h); }
+    if m == WM_NCDESTROY {
+        crate::accessibility::destroy(h);
+        // el timer muere con la ventana: sin esto el progreso quedaría congelado
+        TASKBAR_PENDING.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
     let keep = CUR.get();
     let r = dock_msg(h, m, wp, lp);
     CUR.set(keep);
@@ -2548,7 +2826,7 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 }
                 if action != accesskit::Action::Click { continue }
                 match key.as_str() {
-                    "start" => request_start(),
+                    "start" => open_start(),
                     "tray" => open_tray(),
                     "overflow" => {
                         let first = with(|d| (d.layout.overflow > 0).then(|| d.layout.cells.len().saturating_sub(1)));
@@ -2628,6 +2906,22 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             drain_ready();
             LRESULT(0)
         }
+        WM_TASKBAR => {
+            // el redibujo sale del timer: acota la frecuencia y no tapa la entrada
+            for_each_dock(|| {
+                let hwnd = with(|d| d.hwnd);
+                SetTimer(hwnd, T_PROGRESS, if sweeping() { ANIM_MS } else { PROGRESS_MS }, None);
+            });
+            LRESULT(0)
+        }
+        WM_TIMER if wp.0 == T_PROGRESS => {
+            TASKBAR_PENDING.store(false, std::sync::atomic::Ordering::Relaxed);
+            if !sweeping() {
+                let _ = KillTimer(h, T_PROGRESS);
+            }
+            repaint_progress();
+            LRESULT(0)
+        }
         x if x == komorebi::WM_WINDOW_MAP => {
             let all: Vec<HWND> = DOCKS.with(|v| v.borrow().iter().map(|d| d.hwnd).collect());
             all.into_iter().for_each(|d| queue_refresh(d));
@@ -2654,7 +2948,7 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     let visible = d.layout.cells.len().saturating_sub(usize::from(d.layout.overflow > 0));
                     let targets = keyboard_targets(&d.items, visible, d.layout.overflow);
                     let current = d.key_target.as_ref().unwrap_or(&KeyTarget::Brand);
-                    d.key_target = Some(if key == VK_HOME.0 { KeyTarget::Brand } else if key == VK_END.0 { KeyTarget::Tray } else {
+                    d.key_target = Some(if key == VK_HOME.0 { KeyTarget::Brand } else if key == VK_END.0 { targets.last().cloned().unwrap_or(KeyTarget::Brand) } else {
                         let backwards = key == VK_LEFT.0 || (key == VK_TAB.0 && GetAsyncKeyState(VK_SHIFT.0 as i32) < 0);
                         keyboard_step(&targets, current, if backwards { -1 } else { 1 })
                     });
@@ -2706,6 +3000,9 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     None => None,
                 };
                 let changed = idx != d.hover;
+                if changed {
+                    d.preview_pick = None;
+                }
                 d.hover = idx;
                 let need = !d.tracking;
                 d.tracking = true;
@@ -2726,8 +3023,22 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
             LRESULT(0)
         }
+        WM_MOUSEWHEEL => {
+            let delta = ((wp.0 >> 16) & 0xFFFF) as i16 as i32;
+            let next = with(|d| {
+                let item = d.items.get(d.hover?)?;
+                let next = step_preview(&item.wins, previewed(d, item), delta)?;
+                d.preview_pick = Some((item.key.clone(), next));
+                d.hover
+            });
+            if let Some(idx) = next {
+                show_tip(idx);
+            }
+            LRESULT(0)
+        }
         0x02A3 => {
             with(|d| {
+                d.preview_pick = None;
                 d.hover = None;
                 d.pressed = None;
                 d.tracking = false;
@@ -2807,7 +3118,7 @@ unsafe fn dock_msg(h: HWND, m: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
             if !activate { return LRESULT(0); }
             match hit {
-                Some(Hit::Brand) => request_start(),
+                Some(Hit::Brand) => open_start(),
                 Some(Hit::Tray) => { hide_tip(); open_tray(); },
                 Some(Hit::Item(i)) => click(i),
                 Some(Hit::Overflow) => replay(Replay::Overflow, 0),
@@ -2846,6 +3157,13 @@ mod pointer_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drawing_an_empty_string_leaves_the_buffer_alone() {
+        let mut buf = vec![0u32; 64 * 32];
+        unsafe { draw_text(&mut buf, 64, 32, R { x: 0, y: 0, w: 64, h: 32 }, "", "Segoe UI", 1.0, (255, 255, 255), 12, DT_LEFT) };
+        assert!(buf.iter().all(|p| *p == 0));
+    }
 
     const MON: MonRect = (0, 0, 1920, 1080);
 
@@ -2912,6 +3230,17 @@ mod tests {
         let mut half = vec![0u32; 16];
         draw_icon(&mut half, 4, 4, &ic, 2.0, 2.0, 1.0, 0.5);
         assert!(half.iter().all(|p| *p == 0 || (*p >> 24) == 0x80));
+    }
+
+    #[test]
+    fn the_wheel_cycles_the_previewed_window_and_wraps() {
+        let wins = [10, 20, 30];
+        assert_eq!(step_preview(&wins, Some(10), -120), Some(20));
+        assert_eq!(step_preview(&wins, Some(30), -120), Some(10));
+        assert_eq!(step_preview(&wins, Some(10), 120), Some(30));
+        assert_eq!(step_preview(&wins, None, -120), Some(20));
+        assert_eq!(step_preview(&[10], Some(10), -120), None);
+        assert_eq!(step_preview(&wins, Some(10), 0), None);
     }
 
     #[test]
@@ -3009,6 +3338,16 @@ mod tests {
         assert_eq!(hit_test(&l, l.bar.x + c.x + 5, l.bar.y + c.y + 5), Some(Hit::Item(1)));
         assert_eq!(hit_test(&l, l.bar.x + c.x - 1, l.bar.y + c.y + 5), None);
         assert_eq!(hit_test(&l, 0, 0), None);
+    }
+
+    #[test]
+    fn the_dock_that_hosts_the_cluster_has_no_tray_button_of_its_own() {
+        for n in [0, 3, 200] {
+            let l = layout_for(n, 1.0, MON, true, 4, true);
+            assert_eq!(l.tray.w, 0);
+            assert_eq!(hit_test(&l, l.bar.x + l.bar.w - 2, l.bar.y + l.bar.h / 2), None);
+            assert!(l.bar.x >= MON.0 && l.bar.x + l.bar.w <= MON.2);
+        }
     }
 
     #[test]

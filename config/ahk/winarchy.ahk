@@ -15,6 +15,12 @@ EnvSet('NO_COLOR')
 ; --- Rutas (el script vive en <repo>\config\ahk) -----------------------------
 RepoRoot := RegExReplace(A_ScriptDir, "\\config\\ahk$")
 StateDir := RepoRoot "\state"
+OnError(LogAhkError)
+sessionId := 0
+ShellStatusFile := DllCall('ProcessIdToSessionId', 'uint', DllCall('GetCurrentProcessId'), 'uint*', &sessionId, 'int') ? StateDir "\shell-session-" sessionId : ""
+ShellSessionMarker := sessionId ? StateDir "\session-shell-" sessionId : ""
+AssistantPidFile := sessionId ? StateDir "\assistant-session-" sessionId : ""
+ShellLogonIdentity := GetShellLogonIdentity()
 GameFlag := StateDir "\game-mode.flag"
 MenuFlag := StateDir "\show-menu.flag"
 StartFlag := StateDir "\show-start.flag"
@@ -33,12 +39,22 @@ WinarchyLocale := StrLower(WinarchyLocale)
 try FileDelete(AwakeFlag)   ; the execution state dies with this process, so a surviving flag would lie
 
 ; Asistente de voz: opt-in (`winarchy assistant on`); este script, que arranca con la sesión, lo levanta.
-if FileExist(StateDir "\assistant.enabled") && !ProcessExist("winarchy-assistant.exe") {
-    for exe in [StateDir "\bin\winarchy-assistant.exe", RepoRoot "\assistant\target\release\winarchy-assistant.exe"] {
-        if FileExist(exe) {
-            EnvSet("WINARCHY_ROOT", RepoRoot)
-            Run('"' exe '" serve', , "Hide")
-            break
+if FileExist(StateDir "\assistant.enabled") && !GetAssistantPid() {
+    legacyPid := !FileExist(AssistantPidFile) ? FindSessionProcessPid('winarchy-assistant.exe', [RepoRoot '\state\bin\winarchy-assistant.exe', RepoRoot '\assistant\target\release\winarchy-assistant.exe'], 'serve') : 0
+    if legacyPid > 0 {
+        try {
+            ProcessClose(legacyPid)
+            ProcessWaitClose(legacyPid, 1)
+        }
+    }
+    assistantCandidate := !GetAssistantPid() ? FindSessionProcessPid('winarchy-assistant.exe', [RepoRoot '\state\bin\winarchy-assistant.exe', RepoRoot '\assistant\target\release\winarchy-assistant.exe'], 'serve') : 0
+    if (assistantCandidate = 0) {
+        for exe in [StateDir "\bin\winarchy-assistant.exe", RepoRoot "\assistant\target\release\winarchy-assistant.exe"] {
+            if FileExist(exe) {
+                EnvSet("WINARCHY_ROOT", RepoRoot)
+                Run('"' exe '" serve', , "Hide")
+                break
+            }
         }
     }
 }
@@ -88,13 +104,135 @@ WinAloneOpensStart := true
 ~LWin::Send('{Blind}{vkE8}')    ; traga el key-up de Win sola sin afectar combos
 #HotIf
 
+; Sin Explorer no existe el menú Inicio de Windows: Win sola abre el launcher (Flow).
+SessionShellActive() {
+    global ShellSessionMarker, ShellLogonIdentity
+    try return ShellSessionMarker && FileExist(ShellSessionMarker) && Trim(FileRead(ShellSessionMarker)) = ShellLogonIdentity
+    catch
+        return false
+}
+#HotIf SessionShellActive()
+#d::ShellIsland('desktop.toggle')   ; sin Explorer nadie atiende Win+D
+#NumpadAdd::RunTool('magnify.exe')  ; magnifier; con Explorer, Windows ya hace lanzar y acercar
+Volume_Up::StepVolume('+2')               ; sin Explorer nadie atiende las teclas de volumen; el OSD sale solo al cambiar el nivel
+Volume_Down::StepVolume('-2')
+Volume_Mute::SoundSetMute(-1)
+#n::ShellIsland('notifications.recent')   ; sin Explorer nadie atiende Win+N: se repiten las últimas notificaciones
+~LWin up:: {
+    if A_PriorKey = 'LWin'
+        OpenStart()
+}
+; Al apretar Win se suelta el confinamiento del mouse que fija un juego, para pasar el cursor a otro monitor antes de que el launcher tome el foco.
+~LWin::DllCall('ClipCursor', 'ptr', 0)
+; Sin Explorer no hay conmutador de Alt+Tab: un toque vuelve a la ventana anterior y Tab con Alt sostenido sigue por z-order; la shell dibuja el conmutador.
+!Tab::AltTabStep(1)
+!+Tab::AltTabStep(-1)
+#HotIf
+
+AltTabStep(dir) {
+    ; Sin Critical, un Tab o la suelta de Alt interrumpen al paso que espera a komorebi y el conmutador queda abierto.
+    Critical
+    static list := [], idx := -1, shown := false   ; idx -1: no hay conmutador abierto
+    if !dir {
+        SetTimer(AltTabRelease, 0)
+        if shown
+            ShellIsland('switcher.hide')
+        if idx >= 0
+            AltTabActivate(list[idx + 1])
+        shown := false
+        idx := -1
+        return
+    }
+    if idx < 0 {
+        list := []
+        active := DllCall('user32\GetAncestor', 'ptr', WinExist('A'), 'uint', 3, 'ptr')
+        managed := KomorebiWindows()
+        prev := A_DetectHiddenWindows
+        DetectHiddenWindows(true)
+        away := []
+        for hwnd in WinGetList() {
+            visible := DllCall('user32\IsWindowVisible', 'ptr', hwnd)
+            ; las ocultas solo cuentan si son de otro workspace de komorebi
+            if hwnd = active || ((visible || managed.Has(hwnd)) && AltTabCandidate(hwnd) && !DllCall('user32\GetWindow', 'ptr', hwnd, 'uint', 4, 'ptr'))
+                (visible ? list : away).Push(hwnd)
+        }
+        DetectHiddenWindows(prev)
+        list.Push(away*)   ; al final: un toque sigue volviendo a la ventana anterior en pantalla
+        if list.Length > 64   ; tope que acepta la shell
+            list.Length := 64
+        ; si la primera no es la activa (escritorio, dueño oculto), el primer Tab no la saltea
+        current := list.Length && list[1] = active
+        if list.Length < (current ? 2 : 1)
+            return
+        idx := current || dir < 0 ? 0 : -1
+    }
+    idx := Mod(idx + dir + list.Length, list.Length)
+    ids := ''
+    for hwnd in list
+        ids .= (ids ? ',' : '') hwnd
+    shown := ShellIsland('switcher.show', ',"params":{"windows":[' ids '],"index":' idx '}')
+    SetTimer(AltTabRelease, 30)
+}
+
+; Alt se consulta en vez de esperar su key-up: un juego o una ventana protegida se lo traga y el conmutador queda abierto.
+AltTabRelease() {
+    if !(DllCall('user32\GetAsyncKeyState', 'int', 0x12, 'short') & 0x8000)
+        AltTabStep(0)
+}
+
+; Una ventana oculta la trae la shell: se va a su workspace y recién ahí la enfoca.
+AltTabActivate(hwnd) {
+    if !DllCall('user32\IsWindow', 'ptr', hwnd)   ; se cerró con Alt apretado
+        return
+    if !DllCall('user32\IsWindowVisible', 'ptr', hwnd) {
+        if (pid := GetShellPid())
+            DllCall('user32\AllowSetForegroundWindow', 'uint', pid)
+        ShellIsland('window.focus', ',"params":{"hwnd":' hwnd '}')
+        return
+    }
+    try WinActivate(hwnd)
+}
+
+; hwnds que komorebi gestiona en cualquier workspace; vacío si no contesta.
+KomorebiWindows() {
+    global KomorebicExe
+    found := Map()
+    try {
+        tmp := A_Temp '\winarchy-alttab.json'
+        Run(A_ComSpec ' /c ""' KomorebicExe '" state > "' tmp '""', , 'Hide', &pid)
+        if ProcessWaitClose(pid, 1) {   ; acotado: un komorebi colgado no puede congelar Alt+Tab
+            Run('taskkill /T /F /PID ' pid, , 'Hide')   ; con /T cae también el komorebic que sigue esperando
+            return found
+        }
+        json := FileRead(tmp), pos := 1
+        while pos := RegExMatch(json, '"hwnd":\s*(\d+)', &m, pos)
+            found[Integer(m[1])] := true, pos += m.Len
+    }
+    return found
+}
+
+AltTabCandidate(hwnd) {
+    if WinGetTitle(hwnd) = '' || (WinGetExStyle(hwnd) & 0x80) && !(WinGetExStyle(hwnd) & 0x40000)
+        return false
+    DllCall('dwmapi\DwmGetWindowAttribute', 'ptr', hwnd, 'uint', 14, 'int*', &cloaked := 0, 'uint', 4)
+    return !cloaked && ProcessNameOf(hwnd) != 'winarchy-shell.exe'
+}
+
+; Una ventana protegida (anti-cheat, otro usuario) niega el nombre de su proceso: nunca es de Winarchy.
+ProcessNameOf(hwnd) {
+    try return WinGetProcessName(hwnd)
+    return ''
+}
+
 ; --- Helpers -----------------------------------------------------------------
 ; Ruta completa: no depender del PATH heredado (puede ser anterior a la instalación)
 KomorebicExe := FileExist(A_ProgramFiles "\komorebi\bin\komorebic.exe")
     ? A_ProgramFiles "\komorebi\bin\komorebic.exe"
     : "komorebic.exe"
 
-WeztermExe := FileExist(A_ProgramFiles "\WezTerm\wezterm-gui.exe")
+WeztermExe := FileExist(StateDir "\bin\wezterm\wezterm-gui.exe")
+    ? StateDir "\bin\wezterm\wezterm-gui.exe"
+    : FileExist(A_ProgramFiles "\WezTerm\wezterm-gui.exe")
     ? A_ProgramFiles "\WezTerm\wezterm-gui.exe"
     : "wezterm-gui.exe"
 ; --config-file explicito: WEZTERM_CONFIG_FILE puede faltar en el entorno heredado (AHK
@@ -269,11 +407,11 @@ CloseWindow() {
         return
     try {
         if WinGetClass(hwnd) ~= '^(Progman|WorkerW|Shell_TrayWnd|Shell_SecondaryTrayWnd)$'
-            || WinGetProcessName(hwnd) ~= '^(yasb|winarchy-shell)\.exe$'
+            || ProcessNameOf(hwnd) ~= '^(yasb|winarchy-shell)\.exe$'
             return
         ; WezTerm tarda 2-4 s en cerrar (apaga los procesos del pane); oculta primero para que
         ; el tiling reaccione al instante. Seguro: window_close_confirmation = NeverPrompt.
-        if WinGetProcessName(hwnd) = 'wezterm-gui.exe'
+        if ProcessNameOf(hwnd) = 'wezterm-gui.exe'
             WinHide(hwnd)
         PostMessage(0x0010, 0, 0, , hwnd)
     }
@@ -324,7 +462,23 @@ DragTarget(hwnd) {
     return (WinGetStyle(hwnd) & 0x10000000) && !(WinGetExStyle(hwnd) & 0x80)
         && WinGetMinMax(hwnd) != -1
         && !(WinGetClass(hwnd) ~= '^(Progman|WorkerW|Shell_TrayWnd|Shell_SecondaryTrayWnd)$')
-        && !(WinGetProcessName(hwnd) ~= '^(yasb|winarchy-shell)\.exe$')
+        && !(ProcessNameOf(hwnd) ~= '^(yasb|winarchy-shell)\.exe$')
+}
+
+; Floating workspace (tile off) or a floating window: there is no tile to swap with or snap back
+; to, so the window keeps where it was dropped. Unreadable state falls back to the tiled path.
+DragIsFree(hwnd) {
+    try {
+        ws := FocusedWorkspace(&m, &w)
+        if !ws.tile
+            return true
+        floats := ws.floating_windows.elements
+        Loop floats.length {
+            if (floats.%A_Index - 1%.hwnd = hwnd)
+                return true
+        }
+    }
+    return false
 }
 
 DragMove(hwnd, x0, y0, held) {
@@ -341,10 +495,12 @@ DragMove(hwnd, x0, y0, held) {
         Sleep(1)
     }
     DllCall('winmm\timeEndPeriod', 'uint', 1)
+    if DragIsFree(hwnd)
+        return
     DllCall('user32\SetWindowPos', 'ptr', hwnd, 'ptr', 0, 'int', wx, 'int', wy, 'int', 0, 'int', 0, 'uint', 0x15)
     MouseGetPos(&x, &y, &under)                  ; what is visible under the cursor once the window is back
     t := DllCall('user32\GetAncestor', 'ptr', under, 'uint', 2, 'ptr')
-    while t && WinGetProcessName(t) = 'komorebi.exe' {   ; focus borders overhang the tile; look through them
+    while t && ProcessNameOf(t) = 'komorebi.exe' {   ; focus borders overhang the tile; look through them
         loop {
             t := DllCall('user32\GetWindow', 'ptr', t, 'uint', 2, 'ptr')   ; GW_HWNDNEXT
             if !t
@@ -379,6 +535,8 @@ DragResize(hwnd, x0, y0, held) {
         Sleep(1)
     }
     DllCall('winmm\timeEndPeriod', 'uint', 1)
+    if DragIsFree(hwnd)
+        return
     MouseGetPos(&x, &y)
     dx := x - x0, dy := y - y0
     K := (cmd) => RunWait('"' KomorebicExe '" ' cmd, , 'Hide')
@@ -423,6 +581,29 @@ WinarchyTerminal(args) {
 
 FlowWindow := 'Flow.Launcher ahk_exe Flow.Launcher.exe'
 
+WLog(text) {
+    path := StateDir '\winarchy.log'
+    try if FileGetSize(path) > 524288
+        FileMove(path, path '.1', true)
+    try FileAppend(FormatTime(, 'yyyy-MM-dd HH:mm:ss') '.' A_MSec ' ahk ' text '`n', path, 'UTF-8-RAW')
+}
+
+; devuelve 0: queda además el aviso normal de AutoHotkey
+LogAhkError(err, mode) {
+    try WLog('ERROR ' (IsObject(err) ? err.Message ' ' err.Extra ' @ ' err.File ':' err.Line : String(err)))
+    return 0
+}
+
+; Dónde quedó el lanzador y dónde estaba el mouse: para diagnosticar una ventana fuera de la vista.
+LogFlowPlacement(hwnd) {
+    try {
+        WinGetPos(&x, &y, &w, &h, 'ahk_id ' hwnd)
+        CoordMode('Mouse', 'Screen')
+        MouseGetPos(&mx, &my)
+        WLog('flow shown at ' x ',' y ' ' w 'x' h ' mouse ' mx ',' my ' minmax ' WinGetMinMax('ahk_id ' hwnd))
+    }
+}
+
 ToggleFlow() {
     ; Reusa el hotkey nativo de Flow (Alt+Space) para mostrar/ocultar su ventana ya
     ; existente, en vez de relanzar el exe.
@@ -436,6 +617,10 @@ ToggleFlow() {
         if wasVisible
             return 0
         hwnd := WinWait(FlowWindow, , 2)
+        if hwnd
+            SetTimer(LogFlowPlacement.Bind(hwnd), -300)
+        else
+            WLog('flow did not show after Alt+Space')
         return hwnd ? hwnd : 0
     }
     ; Cold start: todavía no hay proceso corriendo (recién logueado), así que tampoco
@@ -445,8 +630,11 @@ ToggleFlow() {
     ; esperábamos antes: se vencía el WinWait, no se activaba nada y la primera pulsación
     ; del día se sentía muerta.
     hwnd := WinWait(FlowWindow, , 5)
-    if !hwnd
+    if !hwnd {
+        WLog('flow did not show after cold start')
         return 0
+    }
+    SetTimer(LogFlowPlacement.Bind(hwnd), -300)
     ; La instancia en background no siempre puede tomar el foreground (lock de Windows):
     ; reintentar la activación hasta que el foco quede realmente en el query box.
     loop 10 {
@@ -512,11 +700,31 @@ LockWorkstation() {
 }
 
 SleepSystem() {
-    Run('rundll32.exe powrprof.dll,SetSuspendState 0,1,0', , 'Hide')
+    ; rundll32 no pasa los tres argumentos y con hibernación activa terminaba hibernando
+    DllCall('powrprof\SetSuspendState', 'char', 0, 'char', 0, 'char', 0)
 }
 
 HibernateSystem() {
     Run('shutdown.exe /h', , 'Hide')
+}
+
+SwitchUserSystem() {
+    ; desconecta la sesión sin cerrarla: la pantalla de inicio de sesión permite entrar con otra cuenta
+    DllCall('wtsapi32\WTSDisconnectSession', 'ptr', 0, 'uint', 0xFFFFFFFF, 'int', 0)
+}
+
+; DisplaySwitch.exe no abre su panel sin Explorer: SetDisplayConfig cambia la topología directo
+ProjectDisplay(topology) {
+    if code := DllCall('user32\SetDisplayConfig', 'uint', 0, 'ptr', 0, 'uint', 0, 'ptr', 0, 'uint', 0x80 | topology, 'int')
+        WLog('projection ' topology ' error ' code)
+}
+
+ProjectItems() {
+    return [
+        {text:'PC screen only',     action:(*)=>ProjectDisplay(1)},
+        {text:'Duplicate',          action:(*)=>ProjectDisplay(2)},
+        {text:'Extend',             action:(*)=>ProjectDisplay(4)},
+        {text:'Second screen only', action:(*)=>ProjectDisplay(8)} ]
 }
 
 SignOutSystem() {
@@ -595,7 +803,10 @@ MenuWatch() {
         try FileDelete(StartFlag)
         catch
             return
-        Send('{LWin}')
+        if SessionShellActive()
+            ToggleFlow()
+        else
+            Send('{LWin}')
     }
     if FileExist(MenuFlag) {
         try FileDelete(MenuFlag)
@@ -635,16 +846,104 @@ ShowTaskbars() {
     DetectHiddenWindows(prev)
 }
 
+RunShellRecoveryBridge(timeoutMs := 60000) {
+    global RepoRoot, ShellRecoveryBridgeHandle, ShellRecoveryBridgeBusy
+    if ShellRecoveryBridgeBusy
+        return false
+    ShellRecoveryBridgeBusy := true
+    try {
+        if ShellRecoveryBridgeHandle {
+            state := DllCall('WaitForSingleObject', 'ptr', ShellRecoveryBridgeHandle, 'uint', 0, 'uint')
+            if state = 0 || state != 0x102 {
+                DllCall('CloseHandle', 'ptr', ShellRecoveryBridgeHandle)
+                ShellRecoveryBridgeHandle := 0
+            }
+            return false
+        }
+
+        bridge := RepoRoot '\\scripts\\Stop-WinarchySessionShell.ps1'
+        command := 'pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "' bridge '" -Root "' RepoRoot '"'
+        startup := Buffer(A_PtrSize = 8 ? 104 : 68, 0)
+        NumPut('uint', startup.Size, startup)
+        processInfo := Buffer(A_PtrSize * 2 + 8, 0)
+        commandBuffer := Buffer((StrLen(command) + 1) * 2, 0)
+        StrPut(command, commandBuffer, 'UTF-16')
+        if !DllCall('CreateProcessW', 'ptr', 0, 'ptr', commandBuffer.Ptr, 'ptr', 0, 'ptr', 0, 'int', false, 'uint', 0x08000000, 'ptr', 0, 'ptr', 0, 'ptr', startup.Ptr, 'ptr', processInfo.Ptr, 'int')
+            return false
+
+        handle := NumGet(processInfo, 0, 'ptr')
+        DllCall('CloseHandle', 'ptr', NumGet(processInfo, A_PtrSize, 'ptr'))
+        ShellRecoveryBridgeHandle := handle
+        started := DllCall('GetTickCount64', 'uint64')
+        loop {
+            state := DllCall('WaitForSingleObject', 'ptr', handle, 'uint', 0, 'uint')
+            if state = 0 {
+                exitCode := 1
+                succeeded := DllCall('GetExitCodeProcess', 'ptr', handle, 'uint*', &exitCode, 'int')
+                DllCall('CloseHandle', 'ptr', handle)
+                ShellRecoveryBridgeHandle := 0
+                return succeeded && exitCode = 0
+            }
+            if state != 0x102 {
+                DllCall('CloseHandle', 'ptr', handle)
+                ShellRecoveryBridgeHandle := 0
+                return false
+            }
+            if DllCall('GetTickCount64', 'uint64') - started >= timeoutMs
+                return false
+            Sleep(25)
+        }
+    } finally {
+        ShellRecoveryBridgeBusy := false
+    }
+}
+
 QuitStack() {
-    ; parada ordenada y NO elevada: komorebi primero, luego barra/launcher, AHK al final
-    SetTimer(YasbWatch, 0)   ; si no, relanza la barra que acabamos de matar
+    global ShellSessionMarker, ShellStatusFile, ShellLogonIdentity, ShellLifecycleStopping, ShellWatchBusy, RepoRoot
+    sessionShell := false
+    statusValid := false
+    if ShellStatusFile && FileExist(ShellStatusFile) {
+        try status := StrSplit(Trim(FileRead(ShellStatusFile)), '|')
+        catch
+            status := []
+        if status.Length = 3 && RegExMatch(status[1], '^\d+$') && status[3] = ShellLogonIdentity && status[2] ~= '^[01]$' {
+            statusValid := true
+            sessionShell := status[2] = '1'
+        }
+    }
+    if !statusValid && ShellSessionMarker && FileExist(ShellSessionMarker) {
+        try sessionShell := Trim(FileRead(ShellSessionMarker)) = ShellLogonIdentity
+        catch
+            sessionShell := false
+    }
+    shellPid := GetShellPid()
+    if sessionShell {
+        if ShellLifecycleStopping
+            return
+        ShellLifecycleStopping := true
+        ShellWatchBusy := true
+        SetTimer(ShellWatch, 0)
+        result := RunShellRecoveryBridge()
+        ShellWatchBusy := false
+        if !result {
+            ShellLifecycleStopping := false
+            SetTimer(ShellWatch, 5000)
+            TrayTip('Explorer recovery did not finish; Winarchy services are still running.', 'Winarchy')
+            return
+        }
+    }
+    ; parada ordenada y NO elevada: el shell personalizado entrega el escritorio antes del teardown
+    SetTimer(YasbWatch, 0)
     SetTimer(ShellWatch, 0)
+    try FileOpen(StateDir '\komorebi-stop', 'w').Close()   ; la shell no lo trata como muerte
     try Komorebic('stop')
     try RunWait('taskkill /IM yasb.exe /F', , 'Hide')
-    ShellIsland('quit')   ; la shell limpia lo suyo (región, taskbar oculta); el /F es solo si no sale
-    if ProcessWaitClose('winarchy-shell.exe', 1.5) {
-        try RunWait('taskkill /IM winarchy-shell.exe /F', , 'Hide')
-        ShowTaskbars()
+    if !sessionShell {
+        ShellIsland('quit')
+        if shellPid && ProcessWaitClose(shellPid, 1.5) && GetShellPid() = shellPid {
+            try ProcessClose(shellPid)
+            ShowTaskbars()
+        }
     }
     try RunWait('taskkill /IM Flow.Launcher.exe /F', , 'Hide')
     ExitApp()
@@ -684,56 +983,390 @@ YasbWatch() {
     EnvSet('YASB_CONFIG_HOME', RepoRoot '\config\yasb')
     Run('"' YasbcExe '" start', , 'Hide')
 }
+GetShellLogonIdentity() {
+    token := 0
+    if !DllCall('advapi32\OpenProcessToken', 'ptr', DllCall('GetCurrentProcess', 'ptr'), 'uint', 8, 'ptr*', &token, 'int')
+        throw OSError()
+    stats := Buffer(56, 0), returned := 0
+    ok := DllCall('advapi32\GetTokenInformation', 'ptr', token, 'uint', 10, 'ptr', stats, 'uint', stats.Size, 'uint*', &returned, 'int')
+    DllCall('CloseHandle', 'ptr', token)
+    if !ok || returned < stats.Size
+        throw OSError()
+    luid := Buffer(8, 0)
+    low := NumGet(stats, 8, 'uint'), high := NumGet(stats, 12, 'uint')
+    NumPut('uint', low, luid, 0), NumPut('uint', high, luid, 4)
+    data := 0
+    if DllCall('secur32\LsaGetLogonSessionData', 'ptr', luid, 'ptr*', &data, 'int') || !data
+        throw Error('Could not read the current Windows logon identity.')
+    logonTime := NumGet(data, A_PtrSize = 8 ? 80 : 60, 'int64')
+    DllCall('secur32\LsaFreeReturnBuffer', 'ptr', data, 'int')
+    if logonTime <= 0
+        throw Error('The current Windows logon identity is invalid.')
+    return Format('{:08x}{:08x}-{:016x}', high, low, logonTime)
+}
+
 
 ; --- Native shell watchdog ----------------------------------------------------------
 ; Same policy as YasbWatch: two missed checks (a reload restarts it within seconds), at most 3 relaunches in 5 min.
 ; A check is "missing" (no process) or "hung" (a visible window of it does not answer WM_NULL within 2 s).
 ShellMisses := 0
+ShellWatchBusy := false
+ShellLifecycleStopping := false
+ShellRecoveryAttempted := false
+ShellRecoveryBridgeHandle := 0
+ShellRecoveryBridgeBusy := false
 ShellRelaunches := []
+ShellBootUntil := 0
 SetTimer(ShellWatch, 5000)
+; Sin Explorer nadie ejecuta Run/RunOnce ni Startup: la shell de sesión lo delega acá, una vez por inicio de sesión.
+SessionAutostartTries := 0
+SetTimer(SessionAutostart, 5000)
+SessionAutostart() {
+    global ShellSessionMarker, ShellLogonIdentity, RepoRoot, SessionAutostartTries
+    if ++SessionAutostartTries > 12 {
+        SetTimer(SessionAutostart, 0)
+        return
+    }
+    try active := ShellSessionMarker && FileExist(ShellSessionMarker) && Trim(FileRead(ShellSessionMarker)) = ShellLogonIdentity
+    catch
+        return
+    if !active
+        return
+    SetTimer(SessionAutostart, 0)
+    Run('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' RepoRoot '\scripts\Start-SessionAutostart.ps1" -Identity "' ShellLogonIdentity '"', , 'Hide')
+}
+AcquireShellLifecycleMutex() {
+    global sessionId
+    handle := DllCall('CreateMutexW', 'ptr', 0, 'int', 0, 'str', 'Local\WinarchyShellLifecycle-' sessionId, 'ptr')
+    if !handle
+        return 0
+    wait := DllCall('WaitForSingleObject', 'ptr', handle, 'uint', 0, 'uint')
+    if wait != 0 && wait != 0x80 {
+        DllCall('CloseHandle', 'ptr', handle)
+        return 0
+    }
+    return handle
+}
+
+ReleaseShellLifecycleMutex(handle) {
+    if handle {
+        DllCall('ReleaseMutex', 'ptr', handle)
+        DllCall('CloseHandle', 'ptr', handle)
+    }
+}
+
+ShellRelaunchInhibited() {
+    global StateDir, sessionId, ShellLogonIdentity
+    path := StateDir '\shell-relaunch-inhibit-' sessionId
+    if !FileExist(path)
+        return false
+    try return Trim(FileRead(path)) = ShellLogonIdentity
+    catch
+        return true
+}
+
+
+ReapShellRecoveryBridge() {
+    global ShellRecoveryBridgeHandle, ShellRecoveryBridgeBusy
+    if !ShellRecoveryBridgeHandle || ShellRecoveryBridgeBusy
+        return
+    state := DllCall('WaitForSingleObject', 'ptr', ShellRecoveryBridgeHandle, 'uint', 0, 'uint')
+    if state != 0x102 {
+        DllCall('CloseHandle', 'ptr', ShellRecoveryBridgeHandle)
+        ShellRecoveryBridgeHandle := 0
+    }
+}
 
 ShellWatch() {
-    global ShellMisses, ShellRelaunches, BarFile, YasbcExe, RepoRoot
+    global ShellMisses, ShellRelaunches, ShellBootUntil, ShellStatusFile, ShellSessionMarker, ShellLogonIdentity, sessionId, BarFile, YasbcExe, RepoRoot, ShellWatchBusy, ShellLifecycleStopping, ShellRecoveryAttempted
+    ReapShellRecoveryBridge()
+    if ShellLifecycleStopping
+        return
     try native := FileExist(BarFile) ? Trim(FileRead(BarFile)) = 'native' : !YasbcExe
     catch
-        return   ; state\bar en reemplazo: se vuelve a mirar en 5 s
-    state := native ? ShellState() : 'ok'
-    if state = 'ok' {
+        return   ; state\bar is being atomically replaced; check again in 5 s
+    if !native {
         ShellMisses := 0
         return
     }
-    if (++ShellMisses < 2)
-        return
-    ShellMisses := 0
-    exe := ''
-    for p in [RepoRoot '\state\bin\winarchy-shell.exe', RepoRoot '\shell\target\release\winarchy-shell.exe']
-        if FileExist(p) {
-            exe := p
-            break
-        }
-    while ShellRelaunches.Length && A_TickCount - ShellRelaunches[1] > 300000
-        ShellRelaunches.RemoveAt(1)
-    if !exe
-        return
-    if ShellRelaunches.Length >= 3 {
-        TrayTip('The shell keeps crashing; relaunch paused. Run: winarchy doctor', 'Winarchy')
+    if ShellRelaunchInhibited() {
+        ShellMisses := 0
+        ShellBootUntil := 0
         return
     }
-    ShellRelaunches.Push(A_TickCount)
-    if state = 'hung'
-        ProcessClose('winarchy-shell.exe')
-    ShowTaskbars()   ; the shell hides the system taskbars; without it running they must not stay hidden
-    Run('"' exe '"', , 'Hide')
+    sessionShell := false
+    if ShellSessionMarker && FileExist(ShellSessionMarker) {
+        try sessionShell := Trim(FileRead(ShellSessionMarker)) = ShellLogonIdentity
+        catch
+            sessionShell := false
+    }
+    hadShellState := sessionShell || ShellStatusFile && FileExist(ShellStatusFile)
+    pid := 0, statusValid := false, reportedSessionShell := false
+    if ShellStatusFile && FileExist(ShellStatusFile) {
+        try status := StrSplit(Trim(FileRead(ShellStatusFile)), '|')
+        catch
+            status := []
+        if status.Length = 3 && RegExMatch(status[1], '^\d+$') && status[3] = ShellLogonIdentity && status[2] ~= '^[01]$' {
+            statusValid := true
+            reportedSessionShell := status[2] = '1'
+            try candidate := Integer(status[1])
+            catch
+                candidate := 0
+            candidateSession := 0
+            if candidate >= 1 && candidate <= 4294967295 && ProcessExist(candidate) && DllCall('ProcessIdToSessionId', 'uint', candidate, 'uint*', &candidateSession, 'int') && candidateSession = sessionId {
+                try if StrLower(ProcessGetName(candidate)) = 'winarchy-shell.exe'
+                    pid := candidate
+            }
+        }
+    } else if pid := GetShellPid() {
+        ShellMisses := 0
+        return
+    }
+    modeMismatch := sessionShell ? (!statusValid || !reportedSessionShell) : statusValid && reportedSessionShell != sessionShell
+    static watchedPid := 0
+    if pid != watchedPid {
+        watchedPid := pid
+        ShellMisses := 0
+    }
+    if pid {
+        if ShellBootUntil = 0
+            ShellBootUntil := A_TickCount + 20000
+        if !modeMismatch && ShellResponsive(pid) {
+            ShellMisses := 0
+            ShellBootUntil := 0
+            ShellRecoveryAttempted := false
+            return
+        }
+        if !modeMismatch && !WinGetList('ahk_class WinarchyShellPill ahk_pid ' pid).Length && A_TickCount < ShellBootUntil
+            return
+    }
+    ; la shell de sesión colgada se aborta sola en ~40 s y Windows la relanza; Explorer es solo el respaldo
+    limit := pid && reportedSessionShell ? 12 : 2
+    if (++ShellMisses < limit) || ShellWatchBusy
+        return
+    ShellWatchBusy := true
+    handle := DllCall('CreateMutexW', 'ptr', 0, 'int', 0, 'str', 'Local\WinarchyShellLifecycle-' sessionId, 'ptr')
+    if !handle {
+        ShellWatchBusy := false
+        return
+    }
+    wait := DllCall('WaitForSingleObject', 'ptr', handle, 'uint', 0, 'uint')
+    if wait != 0 && wait != 0x80 {
+        DllCall('CloseHandle', 'ptr', handle)
+        ShellWatchBusy := false
+        return
+    }
+    recoverSessionShell := false
+    try {
+        if ShellRelaunchInhibited() {
+            ShellMisses := 0
+            ShellBootUntil := 0
+            return
+        }
+        sessionShell := false
+        if ShellSessionMarker && FileExist(ShellSessionMarker) {
+            try sessionShell := Trim(FileRead(ShellSessionMarker)) = ShellLogonIdentity
+            catch
+                sessionShell := false
+        }
+        statusValid := false, reportedSessionShell := false
+        if ShellStatusFile && FileExist(ShellStatusFile) {
+            try status := StrSplit(Trim(FileRead(ShellStatusFile)), '|')
+            catch
+                status := []
+            if status.Length = 3 && RegExMatch(status[1], '^\d+$') && status[3] = ShellLogonIdentity && status[2] ~= '^[01]$' {
+                statusValid := true
+                reportedSessionShell := status[2] = '1'
+            }
+        }
+        if statusValid && reportedSessionShell
+            sessionShell := true
+        modeMismatch := sessionShell ? (!statusValid || !reportedSessionShell) : statusValid && reportedSessionShell != sessionShell
+        pid := GetShellPid()
+        if pid && !modeMismatch && ShellResponsive(pid) {
+            ShellMisses := 0
+            ShellBootUntil := 0
+            ShellRecoveryAttempted := false
+            return
+        }
+        hadShellState := sessionShell || ShellStatusFile && FileExist(ShellStatusFile)
+        ShellMisses := 0
+        ShellBootUntil := 0
+        exe := ''
+        for p in [RepoRoot '\state\bin\winarchy-shell.exe', RepoRoot '\shell\target\release\winarchy-shell.exe']
+            if FileExist(p) {
+                exe := p
+                break
+            }
+        while ShellRelaunches.Length && A_TickCount - ShellRelaunches[1] > 300000
+            ShellRelaunches.RemoveAt(1)
+        ; una shell de sesión viva pero sin responder no se cierra ni se reemplaza; solo una muerta se relanza
+        if sessionShell && (pid || !exe || ShellRelaunches.Length >= 3) {
+            if !ShellRecoveryAttempted
+                recoverSessionShell := true
+        } else if !exe || ShellRelaunches.Length >= 3 {
+            static pauseTip := -300000
+            if ShellRelaunches.Length >= 3 && A_TickCount - pauseTip >= 300000 {
+                pauseTip := A_TickCount
+                WLog('shell watch: relaunch paused, the shell keeps crashing')
+                TrayTip('The shell keeps crashing; relaunch paused. Run: winarchy doctor', 'Winarchy')
+            }
+        } else {
+            if pid {
+                try ProcessClose(pid)
+                if ProcessExist(pid) {
+                    if hadShellState
+                        ShowTaskbars()
+                    WLog('shell watch: hung shell pid ' pid ' could not be stopped')
+                    TrayTip('The shell is hung and could not be stopped; relaunch paused. Run: winarchy doctor', 'Winarchy')
+                    return
+                }
+            }
+            if !recoverSessionShell {
+                if hadShellState && !sessionShell
+                    ShowTaskbars()
+                ShellRelaunches.Push(A_TickCount)
+                WLog('shell watch: relaunch ' ShellRelaunches.Length ' in 5 min (previous pid ' pid ', session shell ' sessionShell ')')
+                Run('"' exe '" --root "' RepoRoot '"' (sessionShell ? ' --session-shell' : ''), , 'Hide')
+            }
+        }
+    } finally {
+        DllCall('ReleaseMutex', 'ptr', handle)
+        DllCall('CloseHandle', 'ptr', handle)
+        ShellWatchBusy := recoverSessionShell
+    }
+    if recoverSessionShell {
+        ShellRecoveryAttempted := true
+        WLog('shell watch: session shell unresponsive, restoring Explorer')
+        ShellLifecycleStopping := true
+        ShellWatchBusy := true
+        SetTimer(ShellWatch, 0)
+        result := RunShellRecoveryBridge()
+        ShellLifecycleStopping := false
+        ShellWatchBusy := false
+        SetTimer(ShellWatch, 5000)
+        if !result {
+            SetTimer(RetryShellRecovery, -300000)
+            TrayTip('Automatic Explorer recovery did not finish; retrying in 5 minutes.', 'Winarchy')
+        }
+    }
 }
 
-ShellState() {
-    if !ProcessExist('winarchy-shell.exe')
-        return 'missing'
-    for hwnd in WinGetList('ahk_exe winarchy-shell.exe') {
-        if !DllCall('SendMessageTimeoutW', 'Ptr', hwnd, 'UInt', 0, 'UPtr', 0, 'Ptr', 0, 'UInt', 2, 'UInt', 2000, 'UPtr*', &answer := 0, 'Ptr')
-            return 'hung'
+RetryShellRecovery() {
+    global ShellRecoveryAttempted
+    ShellRecoveryAttempted := false
+}
+
+FindSessionProcessPid(exeName, paths, commandArg := '') {
+    global sessionId
+    capacity := 1024
+    loop {
+        pids := Buffer(capacity * 4, 0), bytes := 0
+        if !DllCall('Psapi.dll\EnumProcesses', 'ptr', pids, 'uint', pids.Size, 'uint*', &bytes, 'int')
+            return 0
+        if bytes < pids.Size
+            break
+        if capacity >= 262144
+            return 0
+        capacity *= 2
     }
-    return 'ok'
+    ; ProcessExist only returns one match and may select another RDP session.
+    Loop (bytes // 4) {
+        pid := NumGet(pids, (A_Index - 1) * 4, 'uint')
+        candidateSession := 0
+        if pid < 1 || !DllCall('ProcessIdToSessionId', 'uint', pid, 'uint*', &candidateSession, 'int') || candidateSession != sessionId
+            continue
+        try {
+            if StrLower(ProcessGetName(pid)) != exeName
+                continue
+            path := StrLower(ProcessGetPath(pid))
+            matchesPath := false
+            for candidatePath in paths
+                if path = StrLower(candidatePath) {
+                    matchesPath := true
+                    break
+                }
+            if !matchesPath
+                continue
+            if commandArg {
+                try {
+                    commandLine := ''
+                    for process in ComObjGet('winmgmts:').ExecQuery('SELECT CommandLine FROM Win32_Process WHERE ProcessId = ' pid)
+                        commandLine := StrLower(process.CommandLine)
+                } catch {
+                    return -1
+                }
+                if (commandLine = '')
+                    return -1
+                commandKind := GetAssistantCommandKind(path, commandLine)
+                if (commandKind = 'unknown')
+                    return -1
+                if (commandKind != commandArg)
+                    continue
+            }
+            return pid
+        } catch {
+            continue
+        }
+    }
+    return 0
+}
+
+GetAssistantCommandKind(path, commandLine) {
+    commandLine := StrLower(commandLine)
+    if (commandLine = '')
+        return 'unknown'
+    quotedPath := '"' path '"'
+    if SubStr(commandLine, 1, StrLen(quotedPath)) = quotedPath
+        offset := StrLen(quotedPath)
+    else if SubStr(commandLine, 1, StrLen(path)) = path
+        offset := StrLen(path)
+    else
+        return 'unknown'
+    if (StrLen(commandLine) > offset && !InStr(' `t', SubStr(commandLine, offset + 1, 1)))
+        return 'unknown'
+    if !RegExMatch(Trim(SubStr(commandLine, offset + 1)), '^([^\s]+)', &match)
+        return 'unknown'
+    argument := match[1]
+    if (argument = 'serve')
+        return 'serve'
+    if (argument = 'ask' || argument = 'login' || argument = 'logout' || argument = 'status' || argument = 'levels' || argument = 'listen')
+        return 'cli'
+    return 'unknown'
+}
+GetShellPid() {
+    global ShellStatusFile, ShellLogonIdentity, sessionId, RepoRoot
+    if !ShellStatusFile || !FileExist(ShellStatusFile)
+        return FindSessionProcessPid('winarchy-shell.exe', [RepoRoot '\state\bin\winarchy-shell.exe', RepoRoot '\shell\target\release\winarchy-shell.exe'])
+    try status := StrSplit(Trim(FileRead(ShellStatusFile)), '|')
+    catch
+        return 0
+    if status.Length != 3 || !RegExMatch(status[1], '^\d+$') || !(status[2] ~= '^[01]$') || status[3] != ShellLogonIdentity
+        return 0
+    try pid := Integer(status[1])
+    catch
+        return 0
+    candidateSession := 0
+    if pid < 1 || pid > 4294967295 || !ProcessExist(pid) || !DllCall('ProcessIdToSessionId', 'uint', pid, 'uint*', &candidateSession, 'int') || candidateSession != sessionId
+        return 0
+    try if StrLower(ProcessGetName(pid)) = 'winarchy-shell.exe'
+        return pid
+    return 0
+}
+
+ShellResponsive(pid) {
+    prev := A_DetectHiddenWindows
+    DetectHiddenWindows(true)
+    try {
+        for hwnd in WinGetList('ahk_class WinarchyShellPill ahk_pid ' pid) {
+            result := 0
+            if DllCall('user32\SendMessageTimeoutW', 'ptr', hwnd, 'uint', 0, 'uptr', 0, 'ptr', 0, 'uint', 2, 'uint', 2000, 'ptr*', &result, 'uptr')
+                return true
+        }
+    } finally {
+        DetectHiddenWindows(prev)
+    }
+    return false
 }
 
 ; --- Monitor watchdog -------------------------------------------------------------
@@ -778,7 +1411,7 @@ WinarchyText(text) {
         'Scrolling', 'Desplazamiento', 'scrolling strip', 'tira desplazable', 'Next mode', 'Modo siguiente', 'Floating', 'Flotante', 'windows stay where you put them', 'Las ventanas quedan donde las pongas',
         'Move to top', 'Mover arriba', 'Move to bottom', 'Mover abajo', 'Toggle transparency', 'Alternar transparencia',
         'Lock', 'Bloquear', 'Screensaver', 'Protector de pantalla', 'Sleep', 'Suspender', 'Hibernate', 'Hibernar',
-        'Sign out', 'Cerrar sesión', 'Restart', 'Reiniciar', 'Shut down', 'Apagar', 'Settings', 'Configuración',
+        'Switch user', 'Cambiar de usuario', 'Project', 'Proyectar', 'Sign out', 'Cerrar sesión', 'Restart', 'Reiniciar', 'Shut down', 'Apagar', 'Settings', 'Configuración',
         'Region', 'Región', 'Window', 'Ventana', 'Full screen', 'Pantalla completa',
         'Repeat last region', 'Repetir última región', 'Scrolling capture', 'Captura con desplazamiento',
         'Record screen', 'Grabar pantalla', 'Record as GIF', 'Grabar como GIF', 'Stop recording', 'Detener grabación',
@@ -837,7 +1470,13 @@ WinarchyText(text) {
         'record screen', 'Grabar la pantalla', 'record as GIF', 'Grabar como GIF', 'stop recording', 'Detener la grabación',
         'text from screen (OCR)', 'Texto de pantalla (OCR)', 'colour picker', 'Selector de color', 'QR code scan', 'Escanear código QR',
         'theme gallery', 'Galería de temas', 'next background', 'Siguiente fondo', 'sound', 'Sonido', 'bluetooth', 'Bluetooth',
-        'network', 'Red', 'display', 'Pantalla', 'power & sleep', 'Energía y suspensión'
+        'network', 'Red', 'display', 'Pantalla', 'power & sleep', 'Energía y suspensión', 'magnifier', 'Lupa',
+        'Windows tools', 'Herramientas de Windows', 'Device manager', 'Administrador de dispositivos',
+        'Disk management', 'Administración de discos', 'Task manager', 'Administrador de tareas',
+        'Network connections', 'Conexiones de red', 'Power options', 'Opciones de energía', 'Event viewer', 'Visor de eventos',
+        'Terminal (admin)', 'Terminal (administrador)', 'Magnifier', 'Lupa', 'On-screen keyboard', 'Teclado en pantalla',
+        'PC screen only', 'Solo pantalla de PC', 'Duplicate', 'Duplicar', 'Extend', 'Extender', 'Second screen only', 'Solo segunda pantalla',
+        'This setting needs Explorer', 'Este ajuste necesita Explorer'
     )
     return (SubStr(WinarchyLocale, 1, 2) = 'es' && es.Has(text)) ? es[text] : text
 }
@@ -871,6 +1510,7 @@ WinarchyMenuItems() {
         {text:WinarchyText('Stay awake') ' · ' OnOff(AwakeFlag), hint:'SUPER+Ctrl+I', action:(*)=>ToggleStayAwake()},
         {text:'Doctor',                                   action:(*)=>WinarchyTerminal('doctor')},
         {text:'Check for updates',                        action:(*)=>WinarchyTerminal('update')},
+        {text:'Windows tools',                            sub: WinarchyToolItems()},
         {text:'System',        hint:'SUPER+Esc',          sub: WinarchySysItems()},
         {text:'Quit Winarchy',                            action:(*)=>QuitStack()} ]
 }
@@ -944,16 +1584,72 @@ WinarchyBarItems() {
         {text:'Toggle transparency',  action:(*)=>Winarchy('bar transparent')} ]
 }
 
+WinarchyToolItems() {
+    return [
+        {text:'Device manager',                              action:(*)=>RunTool('devmgmt.msc')},
+        {text:'Disk management',                             action:(*)=>RunTool('diskmgmt.msc')},
+        {text:'Task manager',                                action:(*)=>RunTool('taskmgr.exe')},
+        {text:'Network connections',                         action:(*)=>RunTool('control.exe ncpa.cpl')},
+        {text:'Power options',                               action:(*)=>RunTool('control.exe powercfg.cpl')},
+        {text:'Event viewer',                                action:(*)=>RunTool('eventvwr.msc')},
+        {text:'Terminal (admin)',                            action:(*)=>AdminTerminal()},
+        {text:'Magnifier',          hint:'SUPER+NumpadAdd',  action:(*)=>RunTool('magnify.exe')},
+        {text:'On-screen keyboard',                          action:(*)=>RunTool('osk.exe')} ]
+}
+
+; ms-settings: solo abre si la ventana de shell es de Explorer o del helper UWP; si no, mismos applets que SETTINGS_FALLBACK de la shell
+SettingsFallback := Map(
+    'ms-settings:sound', 'control.exe mmsys.cpl',
+    'ms-settings:network', 'control.exe ncpa.cpl',
+    'ms-settings:powersleep', 'control.exe powercfg.cpl')
+
+OpenSettings(uri) {
+    global SettingsFallback
+    if SettingsLinksOpen()
+        return RunTool(uri)
+    if SettingsFallback.Has(uri)
+        return RunTool(SettingsFallback[uri])
+    WLog('settings ' uri ' needs Explorer')
+    ToolTip(WinarchyText('This setting needs Explorer'))
+    SetTimer(() => ToolTip(), -4000)
+}
+
+SettingsLinksOpen() {
+    shell := DllCall('GetShellWindow', 'ptr')
+    ; el helper toma la ventana de shell antes de poder presentar apps: vale recién cuando informa que está listo
+    try return WinGetClass(shell) = 'Progman' || (WinGetProcessName(shell) = 'winarchy-uwphost.exe' && InStr(FileRead(StateDir '\uwphost.status'), '|ready|'))
+    return false
+}
+
+; cancelar el UAC lanza un error: queda en el log, no en un cartel
+RunTool(command) {
+    try Run(command)
+    catch Error as err
+        WLog('tool ' command ' ' err.Message)
+}
+
+StepVolume(step) {
+    SoundSetMute(0)      ; como Windows: mover el volumen quita el silencio
+    SoundSetVolume(step)
+}
+
+; elevada sin perfil ni config del usuario: nada editable sin privilegios corre como administrador
+AdminTerminal() {
+    RunTool('*RunAs "' A_WinDir '\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile')
+}
+
 WinarchySysItems() {
     return [
         {text:'Lock',            action:(*)=>LockWorkstation()},
         {text:'Screensaver',     action:(*)=>LaunchScreensaver()},
         {text:'Sleep',           action:(*)=>SleepSystem()},
         {text:'Hibernate',       action:(*)=>HibernateSystem()},
+        {text:'Switch user',     action:(*)=>SwitchUserSystem()},
         {text:'Sign out',        action:(*)=>SignOutSystem()},
         {text:'Restart',         action:(*)=>RestartSystem()},
         {text:'Shut down',       action:(*)=>ShutdownSystem()},
-        {text:'Settings',        action:(*)=>Run('explorer.exe ms-settings:')} ]
+        {text:'Project',         sub: ProjectItems()},
+        {text:'Settings',        action:(*)=>OpenSettings('ms-settings:')} ]
 }
 
 ShowMainMenu(*) {
@@ -966,20 +1662,48 @@ ShowSystemMenu(*) {
         PalOpen('system', WinarchyLocalize(WinarchySysItems()), WinarchyText('System'))
 }
 
+RunDialog() {
+    ; shell32 ordinal 61 = RunFileDlg: no depende de Explorer
+    DllCall(DllCall('GetProcAddress', 'ptr', DllCall('GetModuleHandle', 'str', 'shell32', 'ptr'), 'ptr', 61, 'ptr'), 'ptr', 0, 'ptr', 0, 'ptr', 0, 'ptr', 0, 'ptr', 0, 'uint', 0)
+}
+
 ShellIsland(cmd, extra := '') {
+    global sessionId
+    pipeName := '\\.\pipe\winarchy-shell-' sessionId
+    if !DllCall('WaitNamedPipeW', 'str', pipeName, 'uint', 250, 'int')
+        return false
+    pipe := DllCall('CreateFileW', 'str', pipeName, 'uint', 0x40000000, 'uint', 0, 'ptr', 0, 'uint', 3, 'uint', 0, 'ptr', 0, 'ptr')
+    if pipe = -1
+        return false
     try {
-        pipe := FileOpen('\\.\pipe\winarchy-shell', 'w')   ; 'rw' lee para detectar BOM y se cuelga esperando
-        pipe.Write('{"v":1,"id":1,"cmd":"' cmd '"' extra '}`n')
-        pipe.Close()
+        payload := '{"v":1,"id":1,"cmd":"' cmd '"' extra '}' Chr(10)
+        byteCount := StrPut(payload, 'UTF-8') - 1
+        data := Buffer(byteCount + 1)
+        StrPut(payload, data, 'UTF-8')
+        written := 0
+        return DllCall('WriteFile', 'ptr', pipe, 'ptr', data, 'uint', byteCount, 'uint*', &written, 'ptr', 0, 'int') && written = byteCount
+    } finally {
+        DllCall('CloseHandle', 'ptr', pipe)
     }
 }
+
 
 DockPin(n) {
     ShellIsland('dock.pin', ',"params":{"n":' n '}')
 }
 
+; Win abre el Inicio propio de la shell; sin shell que responda queda Flow como lanzador.
+OpenStart() {
+    if (pid := GetShellPid()) {
+        DllCall('user32\AllowSetForegroundWindow', 'uint', pid)
+        if ShellIsland('start.toggle')
+            return
+    }
+    ToggleFlow()
+}
+
 FocusDock() {
-    if (pid := ProcessExist('winarchy-shell.exe')) {
+    if (pid := GetShellPid()) {
         DllCall('user32\AllowSetForegroundWindow', 'uint', pid)
         ShellIsland('dock.focus')
     }
@@ -987,9 +1711,25 @@ FocusDock() {
 
 ; Push-to-talk del asistente de voz. Se suelta con el reloj de pulsaciones físicas: no depende del orden
 ; en que se sueltan Win y CapsLock, ni de que el hotkey "up" sobreviva a un cambio de modificadores.
+GetAssistantPid() {
+    global AssistantPidFile, sessionId
+    if !AssistantPidFile || !FileExist(AssistantPidFile)
+        return 0
+    try pid := Integer(Trim(FileRead(AssistantPidFile)))
+    catch
+        return 0
+    candidateSession := 0
+    if pid < 1 || pid > 4294967295 || !ProcessExist(pid) || !DllCall('ProcessIdToSessionId', 'uint', pid, 'uint*', &candidateSession, 'int') || candidateSession != sessionId
+        return 0
+    try if StrLower(ProcessGetName(pid)) = 'winarchy-assistant.exe'
+        return pid
+    return 0
+}
+
 AssistantSend(cmd) {
+    global sessionId
     try {
-        pipe := FileOpen('\\.\pipe\winarchy-assistant', 'w')
+        pipe := FileOpen('\\.\pipe\winarchy-assistant-' sessionId, 'w')
         pipe.Write(cmd '`n')
         pipe.Close()
     }
@@ -997,7 +1737,7 @@ AssistantSend(cmd) {
 
 AssistantReady() {
     global GameFlag
-    return !FileExist(GameFlag) && ProcessExist('winarchy-assistant.exe')
+    return !FileExist(GameFlag) && GetAssistantPid()
 }
 
 AssistantPtt() {
@@ -1577,10 +2317,12 @@ AccentWatch() {
 #s::ToggleFlowScoped('f ')                       ; search files (Everything)
 #+Enter::Run(DefaultBrowser())                   ; browser
 #+b::Run(DefaultBrowser())
-#+f::Run('explorer.exe')                         ; file explorer
+#+f::OpenFiles()                                 ; file explorer
+#e::OpenFiles()                                   ; Files if installed, else Explorer
 ; Win+N stays with Windows (notification center; the YASB bell mirrors it)
 #+m::LaunchMusic()                               ; music (Spotify / YT Music)
 #+o::LaunchObsidian()                            ; Obsidian
+#!r::RunDialog()                                 ; Run dialog (Win+R is retile)
 #+q::Run('calc.exe')                             ; calculator
 #^+a::Winarchy('agent launch')                   ; coding agent
 
@@ -1787,13 +2529,18 @@ $#v::Send(InTerminal() ? '^+v' : '^v')           ; paste ($: SUPER+Ctrl+V sends 
 #^w::Winarchy('background next')
 
 ; --- System settings -------------------------------------------------------------
-#^a::Run('explorer.exe ms-settings:sound')       ; sound
-#^b::Run('explorer.exe ms-settings:bluetooth')   ; bluetooth
-#^n::Run('explorer.exe ms-settings:network')     ; network
-#^d::Run('explorer.exe ms-settings:display')     ; display
-#^p::Run('explorer.exe ms-settings:powersleep')  ; power & sleep
+#^a::OpenSettings('ms-settings:sound')       ; sound
+#^b::OpenSettings('ms-settings:bluetooth')   ; bluetooth
+#^n::OpenSettings('ms-settings:network')     ; network
+#^d::OpenSettings('ms-settings:display')     ; display
+#^p::OpenSettings('ms-settings:powersleep')  ; power & sleep
 
 ; User overrides: config\ahk\user.ahk (untracked). Its hotkeys show in SUPER+K under
 ; "User", or under their own "; --- Title ---" headers.
 #HotIf
 #Include *i %A_ScriptDir%\user.ahk
+
+OpenFiles() {
+    exe := EnvGet('LOCALAPPDATA') '\Programs\winarchy-files\winarchy-files.exe'
+    Run(FileExist(exe) ? '"' exe '"' : 'explorer.exe')
+}

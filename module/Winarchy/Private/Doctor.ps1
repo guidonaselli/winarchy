@@ -50,10 +50,16 @@ function Invoke-WinarchyDoctor {
             $(if ($yasbCount -gt 1) { 'winarchy reload  (kill+start leaves a single subscriber)' } else { 'yasbc start  (or launch YASB from the Start Menu)' })
     }
     else {
-        $shellCount = @(Get-Process -Name 'winarchy-shell' -ErrorAction SilentlyContinue).Count
+        $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+        $shellCount = @(Get-Process -Name 'winarchy-shell' -ErrorAction SilentlyContinue | Where-Object SessionId -eq $sessionId).Count
         Add-Check 'native shell running (single instance)' ($shellCount -eq 1) `
             $(if ($shellCount -eq 0) { 'status bar down' } elseif ($shellCount -eq 1) { 'status bar' } else { "$shellCount winarchy-shell processes" }) `
             'winarchy reload'
+    }
+    $uwp = Get-WinarchyUwphostState
+    if ($uwp.State -ne 'off') {
+        Add-Check 'UWP host (Store apps in the session shell)' ($uwp.State -in 'ready', 'starting' -or -not (Test-WinarchySessionShellMarker)) `
+            "$($uwp.State): $($uwp.Detail)" $(if ($uwp.State -eq 'blocked') { 'winarchy uwphost retry, then sign out and back in' } else { 'sign out and back in; details in state\uwphost.log' })
     }
     if (Test-WinarchyBarDock) {
         $want = Get-WinarchyDockWorkAreaOffset
@@ -252,6 +258,10 @@ function Invoke-WinarchyDoctor {
         # Flow reporta 4 componentes (2.1.3.0) contra el 2.1.3 del lockfile
         $pin = $lock['core'][$pinned.Key]
         $matchesLock = $installed -and ($installed -eq $pin -or $installed.StartsWith("$pin."))
+        if ($pinned.Key -eq 'wezterm' -and $found -and $pinned.Path.StartsWith((Get-WinarchyStateDir), [StringComparison]::OrdinalIgnoreCase)) {
+            Add-Check 'WezTerm local override' $true "$($pinned.Path) wins over the pinned $pin; delete that folder to go back"
+            continue
+        }
         Add-Check "$($pinned.Name) at lockfile version" ([bool]$matchesLock) `
             $(if ($installed) { "installed=$installed lockfile=$($lock['core'][$pinned.Key])" } else { 'not found on disk' }) `
             'winarchy update --core  (or reinstall the pinned version)'
@@ -307,6 +317,17 @@ function Invoke-WinarchyDoctor {
     Add-Check 'no duplicate hotkey owners (whkd)' (-not $whkd) `
         $(if ($whkd) { 'whkd is running — conflicts with AHK' } else { 'AHK is the sole owner' }) `
         'Stop-Process -Name whkd; remove its autostart'
+
+    # Winarchy Files y el desktop de la shell dependen de pwsh 7, del runtime de VC++ y de Windows App Runtime >= 2.4.
+    Add-Check 'PowerShell 7 available' ([bool](Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue)) `
+        $(if (Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue) { (Get-Command pwsh -CommandType Application).Source } else { 'pwsh is not on PATH: the shell cannot open folders in Files' }) `
+        'winget install Microsoft.PowerShell'
+    Add-Check 'VC++ runtime installed' (Test-Path (Join-Path $env:WINDIR 'System32\VCRUNTIME140.dll')) `
+        'VCRUNTIME140.dll' 'winget install Microsoft.VCRedist.2015+.x64'
+    $appRuntime = @(Get-AppxPackage -Name 'Microsoft.WindowsAppRuntime.2*' -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge [version]'2.4' })
+    Add-Check 'Windows App Runtime 2.4+ installed' ($appRuntime.Count -gt 0) `
+        $(if ($appRuntime) { "Microsoft.WindowsAppRuntime.2 $($appRuntime[0].Version)" } else { 'Winarchy Files will not start' }) `
+        'winget install Microsoft.WindowsAppRuntime.2'
 
     # --- Terminal profile (informativo) -----------------------------------------------
     $shellTools = @('starship', 'fzf', 'zoxide', 'eza', 'bat')

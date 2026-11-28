@@ -4,6 +4,19 @@ pub fn open(path: &Path) -> Result<(), String> {
     execute("open", &path.to_string_lossy(), None)
 }
 
+#[cfg(windows)]
+pub fn explorer_is_shell() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetShellWindow};
+    let mut class = [0u16; 16];
+    let length = unsafe { GetClassNameW(GetShellWindow(), &mut class) };
+    String::from_utf16_lossy(&class[..length as usize]) == "Progman"
+}
+
+#[cfg(not(windows))]
+pub fn explorer_is_shell() -> bool {
+    false
+}
+
 // Verbs such as "open", "properties" or "runas" (elevated, with its own UAC prompt).
 #[cfg(windows)]
 pub fn execute(verb: &str, file: &str, parameters: Option<&str>) -> Result<(), String> {
@@ -14,8 +27,11 @@ pub fn execute(verb: &str, file: &str, parameters: Option<&str>) -> Result<(), S
 
     let wide = |text: &str| text.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
     let operation = wide(verb);
+    let file_text = file;
     let file = wide(file);
     let parameters = parameters.map(wide);
+    // como Explorer: los .bat y programas con rutas relativas corren desde la carpeta del archivo
+    let directory = Path::new(file_text).parent().filter(|dir| dir.is_dir()).map(|dir| wide(&dir.to_string_lossy()));
     // Only the "properties" verb needs INVOKEIDLIST; it makes the shell parse the file as an item id list.
     let mut info = SHELLEXECUTEINFOW {
         cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
@@ -23,6 +39,7 @@ pub fn execute(verb: &str, file: &str, parameters: Option<&str>) -> Result<(), S
         lpVerb: PCWSTR(operation.as_ptr()),
         lpFile: PCWSTR(file.as_ptr()),
         lpParameters: parameters.as_ref().map_or(PCWSTR::null(), |p| PCWSTR(p.as_ptr())),
+        lpDirectory: directory.as_ref().map_or(PCWSTR::null(), |d| PCWSTR(d.as_ptr())),
         nShow: 1,
         ..Default::default()
     };
@@ -320,6 +337,90 @@ pub fn free_name(dir: &Path, stem: &str, extension: &str) -> PathBuf {
 }
 
 #[cfg(windows)]
+pub fn print_to_parent_console(line: &str) {
+    use windows::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+    if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) }.is_ok() {
+        println!("{line}");
+    }
+}
+
+#[cfg(not(windows))]
+pub fn print_to_parent_console(line: &str) {
+    println!("{line}");
+}
+
+// A Start menu shortcut that carries the app's taskbar identity, so pinning it and running it group as one app.
+#[cfg(windows)]
+pub fn create_app_shortcut(target: &Path, link: &Path, app_id: &str) -> Result<(), String> {
+    use windows::{
+        Win32::{
+            System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, IPersistFile},
+            UI::Shell::{
+                IShellLinkW, ShellLink,
+                PropertiesSystem::IPropertyStore,
+            },
+        },
+        core::{GUID, HSTRING, Interface},
+    };
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let shell_link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(|e| e.to_string())?;
+        shell_link.SetPath(&HSTRING::from(target.as_os_str())).map_err(|e| e.to_string())?;
+        if let Some(folder) = target.parent() {
+            shell_link.SetWorkingDirectory(&HSTRING::from(folder.as_os_str())).map_err(|e| e.to_string())?;
+        }
+        let store: IPropertyStore = shell_link.cast().map_err(|e| e.to_string())?;
+        let key = windows::Win32::Foundation::PROPERTYKEY { fmtid: GUID::from_u128(0x9F4C2855_9F79_4B39_A8D0_E1D42DE1D5F3), pid: 5 };
+        let value = windows::Win32::System::Com::StructuredStorage::PROPVARIANT::from(app_id);
+        store.SetValue(&key, &value).map_err(|e| e.to_string())?;
+        store.Commit().map_err(|e| e.to_string())?;
+        shell_link.cast::<IPersistFile>().and_then(|file| file.Save(&HSTRING::from(link.as_os_str()), true)).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(not(windows))]
+pub fn create_app_shortcut(_target: &Path, _link: &Path, _app_id: &str) -> Result<(), String> {
+    Err("Shortcuts are supported only on Windows".to_owned())
+}
+
+pub const APP_ID: &str = "Winarchy.Files";
+
+// Groups every window and pin of the app under one taskbar identity instead of the exe path.
+#[cfg(windows)]
+pub fn set_app_id() {
+    let _ = unsafe { windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(windows::core::w!("Winarchy.Files")) };
+}
+
+#[cfg(not(windows))]
+pub fn set_app_id() {}
+
+#[cfg(windows)]
+pub fn link_target(link: &Path) -> Option<PathBuf> {
+    use windows::{
+        Win32::{
+            Storage::FileSystem::WIN32_FIND_DATAW,
+            System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, IPersistFile, STGM_READ},
+            UI::Shell::{IShellLinkW, ShellLink},
+        },
+        core::{HSTRING, Interface},
+    };
+    unsafe {
+        let shell_link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+        shell_link.cast::<IPersistFile>().ok()?.Load(&HSTRING::from(link.as_os_str()), STGM_READ).ok()?;
+        let mut buffer = [0u16; 520];
+        let mut data = WIN32_FIND_DATAW::default();
+        shell_link.GetPath(&mut buffer, &mut data, 0).ok()?;
+        let length = buffer.iter().position(|&c| c == 0)?;
+        (length > 0).then(|| PathBuf::from(String::from_utf16_lossy(&buffer[..length])))
+    }
+}
+
+#[cfg(not(windows))]
+pub fn link_target(_link: &Path) -> Option<PathBuf> {
+    None
+}
+
+#[cfg(windows)]
 pub fn create_shortcut(target: &Path, link: &Path) -> Result<(), String> {
     use windows::{
         Win32::{
@@ -459,7 +560,7 @@ pub fn share(_paths: &[PathBuf]) -> Result<(), String> {
 const ICON_LAYERS: &[u8] = include_bytes!("../assets/icon-layers.bin");
 const ICON_SIZES: [usize; 4] = [16, 24, 32, 48];
 const ICON_OPACITY: [f32; 3] = [0.55, 0.45, 1.0];
-const DEFAULT_ICON_COLORS: [[u8; 3]; 3] = [[0xe6, 0xd9, 0xdb], [0xf3, 0x8d, 0x70], [0x2c, 0x25, 0x25]];
+const DEFAULT_ICON_COLORS: [[u8; 3]; 3] = [[0xd4, 0xd4, 0xd8], [0x8b, 0x91, 0x9c], [0x1f, 0x21, 0x25]];
 
 // The baked 48px layers carry about a fifth of padding per side; this crop (origin and side) trims it so the icon fills its slot like its neighbours.
 const ICON_CROP: (f32, f32, f32) = (8.0, 6.0, 36.0);
@@ -569,16 +670,76 @@ pub fn apply_window_icon(colors: Option<[[u8; 3]; 3]>, wait_for_window: bool) {
 #[cfg(not(windows))]
 pub fn apply_window_icon(_colors: Option<[[u8; 3]; 3]>, _wait_for_window: bool) {}
 
+// komorebi draws each window's border as a click-catching window stacked just below it, but a window it tiles right after
+// it appears can end up under that border, and then every click lands on the border until something reorders the stack.
+// So while the window is visible, if what sits over its centre is a komorebi border, raise the window above it (without activating).
+#[cfg(windows)]
+pub fn stay_above_tiling_border() {
+    use windows::Win32::{
+        Foundation::{HWND, LPARAM, POINT, RECT},
+        System::Threading::GetCurrentProcessId,
+        UI::WindowsAndMessaging::{
+            EnumWindows, GA_ROOT, GetAncestor, GetClassNameW, GetWindowRect, GetWindowThreadProcessId, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindowVisible, SWP_NOACTIVATE,
+            SWP_NOMOVE, SWP_NOSIZE, SetWindowPos, WindowFromPoint,
+        },
+    };
+    use windows::core::BOOL;
+    const POLL: std::time::Duration = std::time::Duration::from_millis(400);
+
+    unsafe extern "system" fn find(window: HWND, data: LPARAM) -> BOOL {
+        let mut process = 0;
+        // SAFETY: plain Win32 queries on a window handle supplied by EnumWindows; `data` points at an HWND slot
+        unsafe {
+            GetWindowThreadProcessId(window, Some(&mut process));
+            if process == GetCurrentProcessId() && IsWindowVisible(window).as_bool() && GetWindowRect(window, &mut RECT::default()).is_ok() {
+                *(data.0 as *mut HWND) = window;
+                return false.into();
+            }
+        }
+        true.into()
+    }
+
+    std::thread::spawn(|| loop {
+        std::thread::sleep(POLL);
+        unsafe {
+            let mut window = HWND::default();
+            let _ = EnumWindows(Some(find), LPARAM(&mut window as *mut HWND as isize));
+            if window.0.is_null() || IsIconic(window).as_bool() {
+                continue;
+            }
+            let mut rect = RECT::default();
+            if GetWindowRect(window, &mut rect).is_err() {
+                continue;
+            }
+            let covering = GetAncestor(WindowFromPoint(POINT { x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 }), GA_ROOT);
+            if covering == window || covering.0.is_null() {
+                continue;
+            }
+            let mut name = [0u16; 32];
+            let length = GetClassNameW(covering, &mut name) as usize;
+            if String::from_utf16_lossy(&name[..length]).starts_with("komoborder") {
+                // HWND_TOP alone leaves the window under the border (verified live); a topmost round trip does reorder it
+                let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+                let _ = SetWindowPos(window, Some(HWND_TOPMOST), 0, 0, 0, 0, flags);
+                let _ = SetWindowPos(window, Some(HWND_NOTOPMOST), 0, 0, 0, 0, flags);
+            }
+        }
+    });
+}
+
+#[cfg(not(windows))]
+pub fn stay_above_tiling_border() {}
+
 // The classic Explorer menu, including third-party entries; shown at the pointer and run when one is chosen.
 #[cfg(windows)]
-pub fn native_menu(paths: &[PathBuf]) -> Result<bool, String> {
+pub fn native_menu(paths: &[PathBuf], background: bool) -> Result<bool, String> {
     use windows::{
         Win32::{
             Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
             UI::{
                 Shell::{
-                    BHID_SFUIObject, CMF_NORMAL, CMINVOKECOMMANDINFO, DefSubclassProc, IContextMenu, IContextMenu2,
-                    SHCreateShellItemArrayFromIDLists, SHParseDisplayName, SetWindowSubclass, RemoveWindowSubclass,
+                    BHID_SFUIObject, CMF_NORMAL, CMINVOKECOMMANDINFO, DefSubclassProc, IContextMenu, IContextMenu2, IShellFolder,
+                    SHBindToObject, SHCreateShellItemArrayFromIDLists, SHParseDisplayName, SetWindowSubclass, RemoveWindowSubclass,
                 },
                 WindowsAndMessaging::{
                     CreatePopupMenu, DestroyMenu, GetCursorPos, GetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
@@ -613,10 +774,16 @@ pub fn native_menu(paths: &[PathBuf]) -> Result<bool, String> {
             SHParseDisplayName(PCWSTR(wide.as_ptr()), None, &mut identifier, 0, None).map_err(|error| error.to_string())?;
             identifiers.push(identifier as *const _);
         }
-        let items = SHCreateShellItemArrayFromIDLists(&identifiers).map_err(|error| error.to_string())?;
-        let menu: IContextMenu = items.BindToHandler(None, &BHID_SFUIObject).map_err(|error| error.to_string())?;
-        let popup = CreatePopupMenu().map_err(|error| error.to_string())?;
         let window = GetForegroundWindow();
+        let menu: IContextMenu = if background {
+            // the menu of the empty area of the folder: New, Paste, Properties and the extensions registered for it
+            let folder: IShellFolder = SHBindToObject(None::<&IShellFolder>, identifiers[0], None).map_err(|error| error.to_string())?;
+            folder.CreateViewObject(window).map_err(|error| error.to_string())?
+        } else {
+            let items = SHCreateShellItemArrayFromIDLists(&identifiers).map_err(|error| error.to_string())?;
+            items.BindToHandler(None, &BHID_SFUIObject).map_err(|error| error.to_string())?
+        };
+        let popup = CreatePopupMenu().map_err(|error| error.to_string())?;
         let outcome = (|| -> Result<bool, String> {
             menu.QueryContextMenu(popup, 0, 1, 0x7FFF, CMF_NORMAL).ok().map_err(|error| error.to_string())?;
             let second = menu.cast::<IContextMenu2>().ok();
@@ -649,7 +816,7 @@ pub fn native_menu(paths: &[PathBuf]) -> Result<bool, String> {
 }
 
 #[cfg(not(windows))]
-pub fn native_menu(_paths: &[PathBuf]) -> Result<bool, String> {
+pub fn native_menu(_paths: &[PathBuf], _background: bool) -> Result<bool, String> {
     Err("not supported on this platform".to_owned())
 }
 
@@ -1031,4 +1198,75 @@ mod elevated_tests {
         assert!(folder.is_dir());
         println!("{}", folder.display());
     }
+}
+
+// Programs registered for the file's type, as (display name, executable); packaged apps without an executable path are left out.
+#[cfg(windows)]
+pub fn open_with_handlers(path: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
+    use windows::{
+        Win32::{
+            System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoTaskMemFree},
+            UI::Shell::{ASSOC_FILTER_RECOMMENDED, IAssocHandler, SHAssocEnumHandlers},
+        },
+        core::{HSTRING, PWSTR},
+    };
+    let Some(extension) = path.extension() else { return Vec::new() };
+    let read = |text: PWSTR| {
+        let value = unsafe { text.to_string().ok() };
+        unsafe { CoTaskMemFree(Some(text.0.cast())) };
+        value
+    };
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let Ok(handlers) = SHAssocEnumHandlers(&HSTRING::from(format!(".{}", extension.to_string_lossy())), ASSOC_FILTER_RECOMMENDED) else { return Vec::new() };
+        let mut found = Vec::new();
+        loop {
+            let mut batch: [Option<IAssocHandler>; 1] = [None];
+            let mut fetched = 0u32;
+            if handlers.Next(&mut batch, Some(&mut fetched)).is_err() || fetched == 0 {
+                break;
+            }
+            let Some(handler) = batch[0].take() else { break };
+            let (Ok(name), Ok(label)) = (handler.GetName(), handler.GetUIName()) else { continue };
+            if let (Some(exe), Some(label)) = (read(name), read(label))
+                && std::path::Path::new(&exe).is_file()
+            {
+                found.push((label, std::path::PathBuf::from(exe)));
+            }
+        }
+        found
+    }
+}
+
+#[cfg(not(windows))]
+pub fn open_with_handlers(_path: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
+    Vec::new()
+}
+
+// Screen position in physical pixels.
+#[cfg(windows)]
+pub fn cursor_pos() -> (i32, i32) {
+    use windows::Win32::{Foundation::POINT, UI::WindowsAndMessaging::GetCursorPos};
+    let mut point = POINT::default();
+    // SAFETY: `point` is a valid out pointer for the duration of the call.
+    unsafe {
+        let _ = GetCursorPos(&mut point);
+    }
+    (point.x, point.y)
+}
+
+#[cfg(not(windows))]
+pub fn cursor_pos() -> (i32, i32) {
+    (0, 0)
+}
+
+// Physical pixels per layout unit on the primary display.
+#[cfg(windows)]
+pub fn dip_scale() -> f64 {
+    f64::from(unsafe { windows::Win32::UI::HiDpi::GetDpiForSystem() }.max(96)) / 96.0
+}
+
+#[cfg(not(windows))]
+pub fn dip_scale() -> f64 {
+    1.0
 }

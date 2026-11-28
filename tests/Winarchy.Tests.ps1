@@ -5,6 +5,20 @@ BeforeAll {
     Import-Module (Join-Path $script:Root 'module\Winarchy\Winarchy.psd1') -Force
 }
 
+Describe 'Write-WinarchyLog' {
+    It 'writes one line per event and rotates past 512 KB' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyStateDir { "$TestDrive" }
+            $log = Join-Path $TestDrive 'winarchy.log'
+            Set-Content $log ('x' * 600KB)
+            Write-WinarchyLog "a`r`nb"
+            Test-Path "$log.1" | Should -BeTrue
+            @(Get-Content $log).Count | Should -Be 1
+            Get-Content $log | Should -Match 'cli\[\d+\] a \| b$'
+        }
+    }
+}
+
 Describe 'ConvertFrom-WinarchyToml' {
     It 'accepts comments after headers, single-quoted strings and empty content' {
         InModuleScope Winarchy {
@@ -123,15 +137,16 @@ Describe 'Get-WinarchyStaleIgnores' {
     }
 }
 
-Describe 'Get-WinarchyKomorebiHwnds' {
-    It 'lists every managed window, or only the floating ones' {
+Describe 'Get-WinarchyMonitorIndexMap' {
+    It 'resolves a saved id by model when Windows reassigned the UID suffix, and leaves ambiguous ones alone' {
         InModuleScope Winarchy {
-            $state = '{"monitors":{"elements":[{"workspaces":{"elements":[
-                {"containers":{"elements":[{"windows":{"elements":[{"hwnd":10},{"hwnd":11}]}}]},"floating_windows":{"elements":[{"hwnd":12}]},"monocle_container":null},
-                {"containers":{"elements":[]},"floating_windows":{"elements":[]},"monocle_container":{"windows":{"elements":[{"hwnd":13}]}}}]}},
-                {"workspaces":{"elements":[{"containers":{"elements":[]},"floating_windows":{"elements":[{"hwnd":20}]},"monocle_container":null}]}}]}}' | ConvertFrom-Json
-            @(Get-WinarchyKomorebiHwnds -State $state) | Sort-Object | Should -Be @(10, 11, 12, 13, 20)
-            @(Get-WinarchyKomorebiHwnds -State $state -Floating) | Should -Be @(12, 20)
+            $file = Join-Path $TestDrive 'windows.toml'
+            Set-Content $file "[[windows]]`nexe = 'a.exe'`nmonitor = 'MSI3BA4-5&1&UID1'`nworkspace = 0`n[[windows]]`nexe = 'b.exe'`nmonitor = 'GONE000-5&1&UID9'`nworkspace = 0"
+            Mock Get-WinarchyWindowPrefsPath { $file }
+            $state = '{"monitors":{"elements":[{"device_id":"SAC2763-5&1&UID2"},{"device_id":"MSI3BA4-5&1&UID3"}]}}' | ConvertFrom-Json
+            $map = Get-WinarchyMonitorIndexMap -State $state
+            $map['MSI3BA4-5&1&UID1'] | Should -Be 1
+            $map.ContainsKey('GONE000-5&1&UID9') | Should -BeFalse
         }
     }
 }
@@ -698,13 +713,29 @@ Describe 'Coding agent' {
             Mock Start-Process {}
             Start-WinarchyCodingAgent
             Should -Invoke Start-Process -Times 1 -ParameterFilter {
-                $FilePath -eq 'wezterm-gui.exe' -and $ArgumentList -contains 'codex'
+                $FilePath -like '*wezterm-gui.exe' -and $ArgumentList -contains 'codex'
             }
         }
     }
 }
 
 Describe 'Background gallery' {
+    It 'has a distinct English and Spanish message for every gallery state, formatting the dynamic ones' {
+        InModuleScope Winarchy {
+            foreach ($key in 'title', 'empty', 'dynamic', 'current', 'no-theme', 'apply-error') {
+                $en = Get-WinarchyBackgroundGalleryText -Key $key -Theme 'nord' -File 'a.png' -Reason 'boom' -Language en
+                $es = Get-WinarchyBackgroundGalleryText -Key $key -Theme 'nord' -File 'a.png' -Reason 'boom' -Language es
+                $en | Should -Not -BeNullOrEmpty
+                $es | Should -Not -BeNullOrEmpty
+                $es | Should -Not -Be $en
+            }
+            Get-WinarchyBackgroundGalleryText -Key title -Theme 'nord' -Language en | Should -Match 'nord'
+            $err = Get-WinarchyBackgroundGalleryText -Key apply-error -File 'a.png' -Reason 'boom' -Language es
+            $err | Should -Match 'a\.png'
+            $err | Should -Match 'boom'
+        }
+    }
+
     It 'fits three wallpaper cards in one row' {
         InModuleScope Winarchy {
             $layout = Get-WinarchyBackgroundGalleryLayout -Count 3 -WorkWidth 1920 -WorkHeight 1080
@@ -759,6 +790,50 @@ Describe 'Background gallery' {
         $ahk | Should -Match "'Appearance', 'Apariencia'"
         $appearance | Should -Match "text:'Theme gallery'.*Winarchy\('theme gallery'\)"
         $appearance | Should -Match "text:'Wallpaper gallery'.*Winarchy\('background gallery'\)"
+    }
+
+    It 'offers the Win+X tools and the accessibility apps with Spanish labels' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $tools = [regex]::Match($ahk, '(?ms)^WinarchyToolItems\(\) \{.*?^\}').Value
+        foreach ($target in 'devmgmt.msc', 'diskmgmt.msc', 'taskmgr.exe', 'ncpa.cpl', 'powercfg.cpl', 'eventvwr.msc', 'AdminTerminal()', 'magnify.exe', 'osk.exe') {
+            $tools | Should -Match ([regex]::Escape($target))
+        }
+        foreach ($label in [regex]::Matches($tools, "text:'([^']+)'") | ForEach-Object { $_.Groups[1].Value }) {
+            $ahk | Should -Match ([regex]::Escape("'$label', '")) -Because "'$label' needs a Spanish label"
+        }
+        $ahk | Should -Match 'sub: WinarchyToolItems\(\)'
+        $ahk | Should -Match "(?m)^#NumpadAdd::RunTool\('magnify\.exe'\)"
+    }
+
+    It 'unmutes when a volume key moves the level, as Windows does' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $ahk | Should -Match "(?m)^Volume_Up::StepVolume\('\+2'\)"
+        $ahk | Should -Match "(?m)^Volume_Down::StepVolume\('-2'\)"
+        $ahk | Should -Match '(?ms)^StepVolume\(step\) \{\s+SoundSetMute\(0\)'
+    }
+
+    It 'switches the projection topology without the Explorer panel' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $ahk | Should -Not -Match 'DisplaySwitch\.exe''\)'
+        $items = [regex]::Match($ahk, '(?ms)^ProjectItems\(\) \{.*?^\}').Value
+        ([regex]::Matches($items, 'ProjectDisplay\((\d)\)') | ForEach-Object { $_.Groups[1].Value }) -join ',' | Should -Be '1,2,4,8'
+        foreach ($label in [regex]::Matches($items, "text:'([^']+)'") | ForEach-Object { $_.Groups[1].Value }) {
+            $ahk | Should -Match ([regex]::Escape("'$label', '")) -Because "'$label' needs a Spanish label"
+        }
+        $ahk | Should -Match "text:'Project',\s+sub: ProjectItems\(\)"
+    }
+
+    It 'replaces settings links without Explorer with the same applets as the shell' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $rust = Get-Content (Join-Path $script:Root 'shell\src\dock_menu.rs') -Raw
+        $ahk | Should -Not -Match "Run\('ms-settings:"
+        $map = [regex]::Match($ahk, '(?s)SettingsFallback := Map\((.*?)\)\r?\n').Groups[1].Value
+        $pairs = [regex]::Matches($map, "'(ms-settings:[^']*)', '(\S+)(?: ([^']+))?'")
+        $pairs.Count | Should -BeGreaterThan 0
+        foreach ($pair in $pairs) {
+            $row = '("{0}", "{1}", "{2}")' -f $pair.Groups[1].Value, $pair.Groups[2].Value, $pair.Groups[3].Value
+            $rust.Contains($row) | Should -BeTrue -Because "the shell needs the row $row"
+        }
     }
 
     It 'keeps both localized gallery windows floating' {
@@ -1106,6 +1181,7 @@ Describe 'Window placement' {
 
     It 'writes floating as tile=false and scrolling as the Scrolling layout into komorebi.json' {
         InModuleScope Winarchy {
+            Mock Set-WinarchyConfigLiveView { }
             Mock Test-WinarchyProcess { $true }
             Mock Get-WinarchyKomorebiState { [pscustomobject]@{ monitors = [pscustomobject]@{ elements = @([pscustomobject]@{ device_id = 'AAA1' }) } } }
             Mock Import-WinarchyWindowPrefs { }
@@ -1126,6 +1202,7 @@ Describe 'Window placement' {
 
     It 'applies default_mode only to workspaces without a saved mode' {
         InModuleScope Winarchy {
+            Mock Set-WinarchyConfigLiveView { }
             Mock Test-WinarchyProcess { $true }
             Mock Get-WinarchyKomorebiState { [pscustomobject]@{ monitors = [pscustomobject]@{ elements = @([pscustomobject]@{ device_id = 'AAA1' }) } } }
             Mock Import-WinarchyWindowPrefs { }
@@ -1140,6 +1217,7 @@ Describe 'Window placement' {
 
     It 'writes saved layouts into the generated komorebi.json only for connected monitors' {
         InModuleScope Winarchy {
+            Mock Set-WinarchyConfigLiveView { }
             Mock Test-WinarchyProcess { $true }
             Mock Get-WinarchyKomorebiState { [pscustomobject]@{ monitors = [pscustomobject]@{ elements = @([pscustomobject]@{ device_id = 'AAA1' }) } } }
             Mock Import-WinarchyWindowPrefs { }
@@ -1151,6 +1229,46 @@ Describe 'Window placement' {
             $out = Add-WinarchyWindowRulesToKomorebiJson -Json $json | ConvertFrom-Json
             $out.monitors[0].workspaces[0].layout | Should -Be 'BSP'
             $out.monitors[0].workspaces[1].layout | Should -Be 'Columns'
+        }
+    }
+
+    It 'lets the live view win over saved modes unless the live view is skipped' {
+        InModuleScope Winarchy {
+            Mock Test-WinarchyProcess { $true }
+            Mock Get-WinarchyKomorebiState { '{"new_window_behaviour":"Append","monitors":{"elements":[{"device_id":"AAA1","workspaces":{"elements":[
+                {"layout":{"Default":"Columns"},"tile":true,"layout_flip":"Horizontal","container_padding":17,"workspace_padding":31},
+                {"layout":{"Default":"BSP"},"tile":false,"layout_flip":null,"container_padding":null,"workspace_padding":null}]}}]}}' | ConvertFrom-Json }
+            Mock Import-WinarchyWindowPrefs { }
+            Mock Import-WinarchyDefaultMode { 'tiling' }
+            Mock Import-WinarchyWorkspaceLayouts { [pscustomobject]@{ Monitor = 'AAA1'; Workspace = 0; Layout = 'BSP'; Mode = 'floating' } }
+            $json = '{"monitors":[{"workspaces":[{"name":"1","layout":"BSP"},{"name":"2","layout":"BSP","layout_flip":"Vertical"}]}]}'
+
+            $live = (Add-WinarchyWindowRulesToKomorebiJson -Json $json | ConvertFrom-Json).monitors[0].workspaces
+            $live[0].layout | Should -Be 'Columns'
+            $live[0].layout_flip | Should -Be 'Horizontal'
+            $live[0].container_padding | Should -Be 17
+            $live[0].workspace_padding | Should -Be 31
+            $live[0].PSObject.Properties['tile'] | Should -BeNullOrEmpty
+            $live[1].tile | Should -BeFalse
+            foreach ($key in 'layout_flip', 'container_padding', 'workspace_padding') { $live[1].PSObject.Properties[$key] | Should -BeNullOrEmpty }
+
+            $applied = Add-WinarchyWindowRulesToKomorebiJson -Json $json -SkipLiveView | ConvertFrom-Json
+            $applied.window_container_behaviour | Should -Be 'Append'
+            $saved = $applied.monitors[0].workspaces
+            $saved[0].tile | Should -BeFalse
+            $saved[0].layout | Should -Be 'BSP'
+        }
+    }
+
+    It 'layout apply renders without the live view' {
+        InModuleScope Winarchy {
+            Mock Test-WinarchyProcess { $true }
+            Mock Import-WinarchyWindowPrefs { }
+            Mock Import-WinarchyWorkspaceLayouts { [pscustomobject]@{ Monitor = 'AAA1'; Workspace = 0; Layout = 'BSP'; Mode = 'floating' } }
+            Mock Get-WinarchyKomorebiState { [pscustomobject]@{ monitors = [pscustomobject]@{ elements = @() } } }
+            Mock Update-WinarchyKomorebiRules { }
+            Invoke-WinarchyLayoutApply -Quiet
+            Should -Invoke Update-WinarchyKomorebiRules -Times 1 -ParameterFilter { $SkipLiveView }
         }
     }
 
@@ -1203,6 +1321,7 @@ Describe 'Window placement' {
             Mock Get-WinarchyRoot { $TestDrive }
             Mock Test-WinarchyProcess { $true }
             Mock Get-WinarchyKomorebiState { $State }
+            Mock Set-WinarchyConfigLiveView { }
             New-Item -ItemType Directory -Path (Join-Path $TestDrive 'config') -Force | Out-Null
             Export-WinarchyWindowPrefs -Pref @(
                 [pscustomobject]@{ Exe = 'Discord.exe'; Monitor = 'BBB2222-5&bbbbbbb&1&UID4353'; Workspace = 0; WorkspaceName = 'A'; Slot = 0;     Pin = $false }
@@ -1218,6 +1337,39 @@ Describe 'Window placement' {
             $out.monitors[0].workspaces[1].workspace_rules.id | Should -Be 'Code.exe'
             # un monitor ausente no debe caer en otra pantalla
             ($out | ConvertTo-Json -Depth 20) | Should -Not -Match 'Ghost.exe'
+        }
+    }
+
+    It 'writes the live view into the config and skips monitors it cannot identify' {
+        InModuleScope Winarchy {
+            $live = [pscustomobject]@{ layout = [pscustomobject]@{ Default = 'Columns' }; tile = $false; container_padding = 7 }
+            $state = [pscustomobject]@{ new_window_behaviour = 'Append'; monitors = [pscustomobject]@{ elements = @(
+                [pscustomobject]@{ device_id = 'AAA1'; workspaces = [pscustomobject]@{ elements = @($live) } }
+                [pscustomobject]@{ device_id = 'GONE'; workspaces = [pscustomobject]@{ elements = @($live) } }) } }
+            $config = '{"monitors":[{"workspaces":[{"name":"1"}]},{"workspaces":[{"name":"A"}]}]}' | ConvertFrom-Json
+            Set-WinarchyConfigLiveView -Config $config -State $state -Map @{ AAA1 = 0 }
+
+            $config.window_container_behaviour | Should -Be 'Append'
+            $config.monitors[0].workspaces[0].layout | Should -Be 'Columns'
+            $config.monitors[0].workspaces[0].tile | Should -BeFalse
+            $config.monitors[0].workspaces[0].container_padding | Should -Be 7
+            $config.monitors[1].workspaces[0].PSObject.Properties['layout'] | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'does not publish komorebi.json when a running komorebi gives no state' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyRoot { $TestDrive }
+            Mock Test-WinarchyProcess { $true }
+            Mock Get-WinarchyKomorebiState { throw 'komorebic state returned nothing' }
+            Mock Write-WinarchyWarn { }
+            $base = '{"monitors":[]}'
+            $path = Join-Path $TestDrive 'config\komorebi\komorebi.json'
+            Remove-Item $path -ErrorAction SilentlyContinue
+            Add-WinarchyWindowRulesToKomorebiJson -Json $base | Should -Be $base
+            New-Item -ItemType File -Path $path -Force | Out-Null
+            Add-WinarchyWindowRulesToKomorebiJson -Json $base | Should -BeNullOrEmpty
+            Should -Invoke Write-WinarchyWarn -Times 1
         }
     }
 
@@ -1298,6 +1450,8 @@ Describe 'games.toml (shipped)' {
 }
 
 Describe 'Game registration round-trip' {
+    BeforeEach { Mock -ModuleName Winarchy Test-WinarchyProcess { $false } }   # nunca tocar el komorebi real
+
     It 'add writes games.user.toml, never the shipped games.toml, and remove undoes it' {
         InModuleScope Winarchy {
             $toml = Join-Path $TestDrive 'games.toml'
@@ -1523,6 +1677,21 @@ Describe 'WezTerm terminal' {
         $tpl | Should -Match ([regex]::Escape('[==[{{computed.root}}/config/wezterm/user.lua]==]'))
     }
 
+    It 'prefers a WezTerm dropped in state\bin over the installed one' {
+        InModuleScope Winarchy {
+            $state = Join-Path $TestDrive 'state'
+            New-Item -ItemType File -Path (Join-Path $state 'bin\wezterm\wezterm-gui.exe') -Force | Out-Null
+            Mock Get-WinarchyStateDir { $state }
+            Get-WinarchyWeztermExe | Should -Be (Join-Path $state 'bin\wezterm\wezterm-gui.exe')
+        }
+    }
+
+    # wezterm#7705: recorrer el árbol de procesos se desborda al reusarse un PID y cierra la terminal.
+    It 'never walks the process tree from the terminal config' {
+        $code = Get-Content (Join-Path $script:Root 'templates\wezterm.lua.tpl') | Where-Object { $_ -notmatch '^\s*--' }
+        $code -join "`n" | Should -Not -Match 'foreground_process|current_working_dir|procinfo'
+    }
+
     # Sin default_prog WezTerm levanta cmd.exe y todo el terminal profile del stack
     # (starship, fzf, zoxide, eza, bat) no carga.
     It 'defaults to PowerShell 7 and keeps its own updater off' {
@@ -1596,6 +1765,8 @@ Describe 'versions.lock.toml' {
 }
 
 Describe 'App rules (community ASC + user layer)' {
+    BeforeEach { Mock -ModuleName Winarchy Test-WinarchyProcess { $false } }   # nunca tocar el komorebi real
+
     BeforeAll {
         # Capas sinteticas: el merge se prueba solo, sin depender de las 226 entradas reales.
         $script:MakeLayer = {
@@ -2231,6 +2402,33 @@ Describe 'Autostart' {
         }
     }
 
+    It 'only autostarts the network glyph watcher for the YASB bar' {
+        InModuleScope Winarchy {
+            Mock Get-Command { [pscustomobject]@{ Source = $null } }
+            Mock Get-WinarchyActiveBar { 'native' }
+            Get-WinarchyAutostartComponents | Where-Object Key -eq 'net-icon' | Should -BeNullOrEmpty
+            Mock Get-WinarchyActiveBar { 'yasb' }
+            Get-WinarchyAutostartComponents | Where-Object Key -eq 'net-icon' | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'keeps session-shell mode out of scheduled shell task arguments' {
+        InModuleScope Winarchy -Parameters @{ Root = (Join-Path $TestDrive 'autostart-session-shell') } {
+            param($Root)
+            Mock Resolve-Path { [pscustomobject]@{ Path = $Root } } -ParameterFilter { $Path -like '*\..\..\..' }
+            Mock Get-Command { [pscustomobject]@{ Source = $null } }
+            $state = Get-WinarchyStateDir
+            New-Item -ItemType Directory -Path (Join-Path $state 'bin') -Force | Out-Null
+            Set-Content (Join-Path $state 'bin\winarchy-shell.exe') -Value 'fixture' -NoNewline
+            Set-Content (Join-Path $state 'bar') -Value 'native' -NoNewline
+            Set-Content (Join-Path $state "session-shell-$([Diagnostics.Process]::GetCurrentProcess().SessionId)") -Value '' -NoNewline
+
+            $shell = Get-WinarchyAutostartComponents | Where-Object Key -eq 'shell'
+
+            $shell.Arguments | Should -Be "--root `"$Root`""
+        }
+    }
+
     It 'renders task XML that parses, for every component' {
         InModuleScope Winarchy -Parameters @{ Pwsh = $script:MockPwsh } {
             param($Pwsh)
@@ -2282,10 +2480,11 @@ Describe 'Runtime configuration environment' {
                 Mock Test-WinarchyProcess { $false }
                 Mock Get-WinarchyActiveBar { 'yasb' }
                 Mock Start-WinarchyKomorebi {}
+                Mock Restore-WinarchyFloatingApps {}
                 Mock Get-Command { [pscustomobject]@{ Source = 'C:\Program Files\YASB\yasbc.exe' } } -ParameterFilter { $Name -eq 'yasbc' }
                 Mock Start-Process {}
                 Mock Stop-Process {}
-                Mock Stop-WinarchyShell { }
+                Mock Stop-WinarchyShell { $true }
 
                 foreach ($initial in @($null, 'C:\stale')) {
                     $env:KOMOREBI_CONFIG_HOME = $initial
@@ -2312,12 +2511,13 @@ Describe 'Runtime configuration environment' {
                 Mock Get-WinarchyRoot { $Root }
                 Mock Test-WinarchyProcess { $false }
                 Mock Start-WinarchyKomorebi {}
+                Mock Restore-WinarchyFloatingApps {}
                 Mock Start-WinarchyWindowSlots {}
                 Mock Get-WinarchyAhkExe { 'AutoHotkey64.exe' }
                 Mock Get-Command { [pscustomobject]@{ Source = 'C:\Program Files\YASB\yasbc.exe' } } -ParameterFilter { $Name -eq 'yasbc' }
                 Mock Start-Process {}
                 Mock Stop-Process {}
-                Mock Stop-WinarchyShell { }
+                Mock Stop-WinarchyShell { $true }
 
                 Invoke-WinarchyReload
                 $env:CLAUDE_CODE_CHILD_SESSION | Should -BeNullOrEmpty
@@ -3145,9 +3345,34 @@ Describe 'native shell guardrails' {
         (Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw) | Should -Match '\(yasb\|winarchy-shell\)'
     }
 
-    It 'opens the shell pipe write-only from AHK (read mode blocks the hotkey thread waiting for a BOM)' {
+    It 'bounds AHK shell pipe connection attempts and opens the pipe write-only' {
         $root = Split-Path $PSScriptRoot -Parent
-        (Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw) | Should -Match ([regex]::Escape("FileOpen('\\.\pipe\winarchy-shell', 'w')"))
+        $ahk = Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw
+        $island = [regex]::Match($ahk, '(?ms)^ShellIsland\(.*?^\}').Value
+        $island | Should -Match "(?s)if !DllCall\('WaitNamedPipeW', 'str', pipeName, 'uint', 250, 'int'\)\s+return false\s+pipe := DllCall\('CreateFileW', 'str', pipeName, 'uint', 0x40000000, 'uint', 0, 'ptr', 0, 'uint', 3, 'uint', 0, 'ptr', 0, 'ptr'\)\s+if pipe = -1\s+return false"
+        $island | Should -Not -Match 'FileOpen\('
+    }
+
+    It 'writes an AHK shell request as newline-delimited UTF-8 and always closes its handle' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $ahk = Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw
+        $island = [regex]::Match($ahk, '(?ms)^ShellIsland\(.*?^\}').Value
+        $island | Should -Match ([regex]::Escape('payload := ''{"v":1,"id":1,"cmd":"'' cmd ''"'' extra ''}'' Chr(10)'))
+        $island | Should -Match "(?s)try \{\s+payload := [^\r\n]+\s+byteCount := StrPut\(payload, 'UTF-8'\) - 1\s+data := Buffer\(byteCount \+ 1\)\s+StrPut\(payload, data, 'UTF-8'\)\s+written := 0\s+return DllCall\('WriteFile', 'ptr', pipe, 'ptr', data, 'uint', byteCount, 'uint\*', &written, 'ptr', 0, 'int'\) && written = byteCount\s+\} finally \{\s+DllCall\('CloseHandle', 'ptr', pipe\)\s+\}"
+    }
+
+    It 'recovers a hung native shell with a bounded UI probe and restores taskbars before relaunch' {
+        $root = Split-Path $PSScriptRoot -Parent
+        $ahk = Get-Content (Join-Path $root 'config\ahk\winarchy.ahk') -Raw
+        $watchdog = [regex]::Match($ahk, '(?s); --- Native shell watchdog.*?(?=; --- Monitor watchdog)').Value
+        $watchdog | Should -Not -BeNullOrEmpty
+        $watchdog | Should -Not -Match "if !native \|\| ProcessExist\('winarchy-shell\.exe'\)"
+        $watchdog | Should -Match 'SendMessageTimeoutW'
+        $watchdog | Should -Match "(?s)SendMessageTimeoutW[^\r\n]*'UInt',\s*(?:0x0+|0)\s*,"
+        $watchdog | Should -Match "(?s)SendMessageTimeoutW.*?'UInt',\s*[1-9][0-9]{0,3}\s*,\s*'(?:U?Ptr)\*'"
+        $watchdog | Should -Match 'ShellResponsive\(pid\)'
+        $watchdog | Should -Match '\? 12 : 2\s+if \(\+\+ShellMisses < limit\)'
+        $watchdog | Should -Match "(?s)(?:ProcessClose\(|taskkill[^\r\n]*/F).*?ShowTaskbars\(\).*?Run\("
     }
 
     It 'points the YASB watchdog at state\bar so it does not relaunch YASB under the native bar' {
@@ -3331,16 +3556,61 @@ Describe 'Bar dock' {
         }
     }
 
-    It 'switching bars re-renders komorebi only while the dock switch is on' {
-        InModuleScope Winarchy {
+    It 'rejects YASB while the current session uses the Winarchy shell with ProcessAlive=<ProcessAlive>' -ForEach @(
+        @{ ProcessAlive = $true }
+        @{ ProcessAlive = $false }
+    ) {
+        InModuleScope Winarchy -Parameters @{ Root = (Join-Path $TestDrive "session-shell-$ProcessAlive"); ProcessAlive = $ProcessAlive } {
+            param($Root, $ProcessAlive)
+            Mock Resolve-Path { [pscustomobject]@{ Path = $Root } } -ParameterFilter { $Path -like '*\..\..\..' }
+            $state = Get-WinarchyStateDir
+            Set-Content (Join-Path $state 'bar') -Value 'native' -NoNewline
+            $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+            Mock Get-WinarchyCurrentLogonIdentity { '00000000000000ab-01dc000000000001' }
+            Set-Content (Join-Path $state "session-shell-$sessionId") -Value '00000000000000ab-01dc000000000001' -NoNewline
+            Set-Content (Join-Path $state "shell-session-$sessionId") -Value '4242|1|00000000000000ab-01dc000000000001' -NoNewline
+            Mock Get-Process {
+                if ($ProcessAlive) { [pscustomobject]@{ ProcessName = 'winarchy-shell'; SessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId } }
+            } -ParameterFilter { $Id -eq 4242 }
+            Mock Get-Command { throw 'Unexpected YASB lookup after session shell guard' } -ParameterFilter { $Name -eq 'yasbc' }
+
+            { Set-WinarchyBar -Name yasb } | Should -Throw 'YASB cannot replace the Winarchy session shell. Exit the custom shell session before changing bars.'
+            (Get-Content (Join-Path $state 'bar') -Raw) | Should -Be 'native'
+            if (-not $ProcessAlive) {
+                Get-WinarchyShellArguments | Should -Be "--root `"$Root`""
+            }
+        }
+    }
+
+    It 'switching bars re-renders komorebi only while the dock switch is on with <SessionState>' -ForEach @(
+        @{ SessionState = 'no-marker' }
+        @{ SessionState = 'stale-marker' }
+        @{ SessionState = 'missing-process' }
+        @{ SessionState = 'wrong-session' }
+    ) {
+        InModuleScope Winarchy -Parameters @{ Root = (Join-Path $TestDrive "bar-switch-$SessionState"); SessionState = $SessionState } {
+            param($Root, $SessionState)
+            Mock Resolve-Path { [pscustomobject]@{ Path = $Root } } -ParameterFilter { $Path -like '*\..\..\..' }
             Mock Install-WinarchyYasb {}
             Mock Test-WinarchyTask { $false }
             Mock Invoke-WinarchyReload {}
             Mock Update-WinarchyKomorebiRules {}
-            Mock Set-WinarchyFileAtomic {}
             Mock Get-Command { [pscustomobject]@{ Name = 'yasbc' } } -ParameterFilter { $Name -eq 'yasbc' }
+            $state = Get-WinarchyStateDir
+            $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+            if ($SessionState -ne 'no-marker') {
+                Set-Content (Join-Path $state "session-shell-$sessionId") -Value '00000000000000ab-01dc000000000000' -NoNewline
+            }
+            if ($SessionState -in 'missing-process', 'wrong-session') {
+                Set-Content (Join-Path $state "shell-session-$sessionId") -Value '4242|1|00000000000000ab-01dc000000000001' -NoNewline
+                Mock Get-Process { $null } -ParameterFilter { $Id -eq 4242 }
+                if ($SessionState -eq 'wrong-session') {
+                    Mock Get-Process { [pscustomobject]@{ ProcessName = 'winarchy-shell'; SessionId = ([Diagnostics.Process]::GetCurrentProcess().SessionId + 1) } } -ParameterFilter { $Id -eq 4242 }
+                }
+            }
             Remove-Item (Get-WinarchyBarDockPath) -Force -ErrorAction SilentlyContinue
             Set-WinarchyBar -Name yasb
+            (Get-Content (Join-Path (Get-WinarchyStateDir) 'bar') -Raw) | Should -Be 'yasb'
             Should -Invoke Update-WinarchyKomorebiRules -Times 0
             Set-Content (Get-WinarchyBarDockPath) -Value '' -NoNewline
             Set-WinarchyBar -Name yasb
@@ -3361,6 +3631,7 @@ Describe 'Install-WinarchyShellBinary' {
         InModuleScope Winarchy -Parameters @{ Repo = $script:repo; Exe = $script:exe } {
             param($Repo, $Exe)
             Mock Get-WinarchyRoot { $Repo }
+            Mock Assert-WinarchyCustomShellPolicySafeForMaintenance {}
             Set-Content (Join-Path $Repo 'versions.lock.toml') "[core]`nkomorebi = `"1`""
             { Install-WinarchyShellBinary -Source $Exe } | Should -Throw '*no [[]shell[]] sha256*'
             Set-Content (Join-Path $Repo 'versions.lock.toml') "[shell]`nsha256 = `"$('0' * 64)`""
@@ -3373,11 +3644,96 @@ Describe 'Install-WinarchyShellBinary' {
         InModuleScope Winarchy -Parameters @{ Repo = $script:repo; Exe = $script:exe } {
             param($Repo, $Exe)
             Mock Get-WinarchyRoot { $Repo }
+            Mock Assert-WinarchyCustomShellPolicySafeForMaintenance {}
             $hash = (Get-FileHash $Exe -Algorithm SHA256).Hash.ToLowerInvariant()
             Set-Content (Join-Path $Repo 'versions.lock.toml') "[shell]`nsha256 = `"$hash`""
             $dest = Install-WinarchyShellBinary -Source $Exe
             Test-Path $dest | Should -BeTrue
             Get-WinarchyShellExe | Should -Be $dest
+        }
+    }
+}
+
+Describe 'UWP host' {
+    BeforeEach {
+        $script:repo = Join-Path $TestDrive "uwp-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path (Join-Path $script:repo 'state') -Force | Out-Null
+    }
+
+    It 'installs only a binary whose SHA256 matches the pin' {
+        InModuleScope Winarchy -Parameters @{ Repo = $script:repo } {
+            param($Repo)
+            Mock Get-WinarchyRoot { $Repo }
+            $exe = Join-Path $Repo 'winarchy-uwphost.exe'
+            Set-Content $exe 'fake binary' -NoNewline
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[core]`nkomorebi = `"1`""
+            { Install-WinarchyUwphostBinary -Source $exe } | Should -Throw '*no [[]uwphost[]] sha256*'
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[uwphost]`nsha256 = `"$('0' * 64)`""
+            { Install-WinarchyUwphostBinary -Source $exe } | Should -Throw '*mismatch*'
+            Test-Path (Join-Path $Repo 'state\bin\winarchy-uwphost.exe') | Should -BeFalse
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[uwphost]`nsha256 = `"$((Get-FileHash $exe -Algorithm SHA256).Hash)`""
+            Install-WinarchyUwphostBinary -Source $exe | Should -Be (Join-Path $Repo 'state\bin\winarchy-uwphost.exe')
+        }
+    }
+
+    It 'turns on only with a binary to run: local build, installed copy or pinned release' {
+        InModuleScope Winarchy -Parameters @{ Repo = $script:repo } {
+            param($Repo)
+            Mock Get-WinarchyRoot { $Repo }
+            Mock Install-WinarchyUwphostRelease { throw 'no network in tests' }
+            Set-Content (Join-Path $Repo 'versions.lock.toml') "[core]`nkomorebi = `"1`""
+            $flag = Join-Path (Get-WinarchyStateDir) 'uwphost.enabled'
+            { Set-WinarchyUwphost on } | Should -Throw '*No UWP host binary*'
+            Test-Path $flag | Should -BeFalse
+            Should -Invoke Install-WinarchyUwphostRelease -Times 0
+            $build = Join-Path $Repo 'uwphost\target\release'
+            New-Item -ItemType Directory -Path $build, (Join-Path $Repo 'state\bin') -Force | Out-Null
+            Set-Content (Join-Path $Repo 'state\bin\winarchy-uwphost.exe') 'installed'
+            Set-Content (Join-Path $build 'winarchy-uwphost.exe') 'built'
+            Set-WinarchyUwphost on
+            Test-Path $flag | Should -BeTrue
+            Get-WinarchyUwphostExe | Should -Be (Join-Path $build 'winarchy-uwphost.exe')
+        }
+    }
+
+    It 'comes on with the session shell, and a missing binary does not undo the activation' {
+        InModuleScope Winarchy {
+            Mock Invoke-WinarchyCustomShellChange { [pscustomobject]@{ State = 'Installed' } }
+            Mock Get-WinarchyCurrentTheme { }
+            Mock Set-WinarchyUwphost { throw 'no binary' }
+            Mock Write-WinarchyWarn { }
+            Mock Write-WinarchyOk { }
+            Invoke-Winarchy shell activate --yes
+            Should -Invoke Set-WinarchyUwphost -Times 1 -ParameterFilter { $Action -eq 'on' }
+            Should -Invoke Write-WinarchyWarn -Times 1
+            Should -Invoke Write-WinarchyOk -Times 1
+        }
+    }
+
+    It 'reports off, ready, blocked and down from the flag and the helper status' {
+        InModuleScope Winarchy -Parameters @{ Repo = $script:repo } {
+            param($Repo)
+            Mock Get-WinarchyRoot { $Repo }
+            $state = Get-WinarchyStateDir
+            (Get-WinarchyUwphostState).State | Should -Be 'off'
+            Set-Content (Join-Path $state 'uwphost.enabled') '1'
+            (Get-WinarchyUwphostState).State | Should -Be 'down'
+            Set-Content (Join-Path $state 'uwphost.status') 'x|ready' -NoNewline
+            (Get-WinarchyUwphostState).State | Should -Be 'down'
+            Set-Content (Join-Path $state 'uwphost.status') '4242|ready|10.0.1|' -NoNewline
+            Mock Get-Process { [pscustomobject]@{ ProcessName = 'winarchy-uwphost' } } -ParameterFilter { $Id -eq 4242 }
+            $ready = Get-WinarchyUwphostState
+            $ready.State | Should -Be 'ready'
+            $ready.Detail | Should -Be 'twinui 10.0.1'
+            Set-Content (Join-Path $state 'uwphost.blocked') 'stamp'
+            Set-Content (Join-Path $state 'uwphost.status') '4242|failed|10.0.1|missing symbol' -NoNewline
+            $blocked = Get-WinarchyUwphostState
+            $blocked.State | Should -Be 'blocked'
+            $blocked.Detail | Should -Be 'twinui 10.0.1: missing symbol'
+            Set-WinarchyUwphost -Action retry
+            Test-Path (Join-Path $state 'uwphost.blocked') | Should -BeFalse
+            Set-WinarchyUwphost -Action off
+            (Get-WinarchyUwphostState).State | Should -Be 'off'
         }
     }
 }
@@ -3431,20 +3787,6 @@ Describe 'Install-WinarchyFilesBinary' {
     }
 }
 
-Describe 'Start-WinarchyFiles' {
-    It 'tries the release when no binary exists and explains how to build when that fails' {
-        $repo = Join-Path $TestDrive 'repo-files'
-        New-Item -ItemType Directory -Path $repo -Force | Out-Null
-        InModuleScope Winarchy -Parameters @{ Repo = $repo } {
-            param($Repo)
-            Mock Get-WinarchyRoot { $Repo }
-            Mock Install-WinarchyFilesRelease { throw 'offline' }
-            { Start-WinarchyFiles } | Should -Throw '*release download failed (offline)*cargo build*'
-            Should -Invoke Install-WinarchyFilesRelease -Times 1 -Exactly
-        }
-    }
-}
-
 Describe 'Restore-WinarchyFilesPrevious' {
     It 'swaps the current binary with the previous one and refuses without a previous one' {
         $repo = Join-Path $TestDrive 'repo-rollback'
@@ -3464,6 +3806,20 @@ Describe 'Restore-WinarchyFilesPrevious' {
     }
 }
 
+Describe 'Start-WinarchyFiles' {
+    It 'tries the release when no binary exists and explains how to build when that fails' {
+        $repo = Join-Path $TestDrive 'repo-files'
+        New-Item -ItemType Directory -Path $repo -Force | Out-Null
+        InModuleScope Winarchy -Parameters @{ Repo = $repo } {
+            param($Repo)
+            Mock Get-WinarchyRoot { $Repo }
+            Mock Install-WinarchyFilesRelease { throw 'offline' }
+            { Start-WinarchyFiles } | Should -Throw '*release download failed (offline)*cargo build*'
+            Should -Invoke Install-WinarchyFilesRelease -Times 1 -Exactly
+        }
+    }
+}
+
 Describe 'Invoke-WinarchyAssistant' {
     It 'rejects unknown subcommands and reports status without a binary' {
         InModuleScope Winarchy {
@@ -3477,7 +3833,11 @@ Describe 'Invoke-WinarchyAssistant' {
 
     It 'only enables push-to-talk while the assistant runs and game mode is off' {
         $ahk = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'config\ahk\winarchy.ahk') -Raw
-        $ahk | Should -Match "(?s)AssistantReady\(\) \{.*?GameFlag.*?winarchy-assistant\.exe"
+        $ready = [regex]::Match($ahk, '(?ms)^AssistantReady\(\) \{.*?^\}').Value
+        $ready | Should -Match 'return !FileExist\(GameFlag\) && GetAssistantPid\(\)'
+        $pidLookup = [regex]::Match($ahk, '(?ms)^GetAssistantPid\(\) \{.*?^\}').Value
+        $pidLookup | Should -Match 'candidateSession != sessionId'
+        $pidLookup | Should -Match "StrLower\(ProcessGetName\(pid\)\) = 'winarchy-assistant\.exe'"
         $ahk | Should -Match '(?s)#HotIf AssistantReady\(\)\s*\r?\n#CapsLock::AssistantPtt\(\)'
     }
 }
@@ -3575,7 +3935,7 @@ Describe 'Monitor health' {
             InModuleScope Winarchy {
                 Repair-WinarchyKomorebiMonitors | Should -BeTrue
                 Should -Invoke Invoke-WinarchyKomorebic -Times 1 -ParameterFilter { $Arguments[0] -eq 'stop' }
-                Should -Invoke Start-WinarchyKomorebi -Times 1
+                Should -Invoke Start-WinarchyKomorebi -Times 1 -ParameterFilter { $Resilient }
             }
         }
 
@@ -3633,29 +3993,26 @@ Describe 'Monitor health' {
                 Mock Get-WinarchyShellExe { $null }
                 Mock Start-Process { }
                 Mock Stop-Process { }
-                Mock Stop-WinarchyShell { }
+                Mock Stop-WinarchyShell { $true }
                 Mock Start-WinarchyWindowSlots { }
                 Mock Get-WinarchyAhkExe { $null }
-                if (-not (Get-Command komorebic -ErrorAction SilentlyContinue)) { function komorebic { } }
-                Mock komorebic { }
+                Mock Invoke-WinarchyKomorebiStaticReload { }
             }
         }
 
-        It 'skips configuration replacement when komorebi was just restarted' {
+        It 'skips the configuration reload when komorebi was just restarted' {
             InModuleScope Winarchy {
                 Mock Repair-WinarchyKomorebiMonitors { $true }
                 Invoke-WinarchyReload
-                Should -Invoke komorebic -Times 0 -ParameterFilter { $args[0] -in 'reload-configuration', 'replace-configuration' }
+                Should -Invoke Invoke-WinarchyKomorebiStaticReload -Times 0
             }
         }
 
-        It 'replaces the generated configuration when komorebi was not restarted' {
+        It 'reloads the generated configuration when komorebi was not restarted' {
             InModuleScope Winarchy {
                 Mock Repair-WinarchyKomorebiMonitors { $false }
                 Invoke-WinarchyReload
-                Should -Invoke komorebic -Times 1 -ParameterFilter {
-                    $args[0] -eq 'replace-configuration' -and $args[1] -eq (Join-Path $TestDrive 'config\komorebi\komorebi.json')
-                }
+                Should -Invoke Invoke-WinarchyKomorebiStaticReload -Times 1 -ParameterFilter { $ConfigPath -eq (Join-Path $TestDrive 'config\komorebi\komorebi.json') }
             }
         }
 
@@ -3664,9 +4021,7 @@ Describe 'Monitor health' {
                 Mock Repair-WinarchyKomorebiMonitors { $true }
                 Invoke-WinarchyReload -Light
                 Should -Invoke Repair-WinarchyKomorebiMonitors -Times 0
-                Should -Invoke komorebic -Times 1 -ParameterFilter {
-                    $args[0] -eq 'replace-configuration' -and $args[1] -eq (Join-Path $TestDrive 'config\komorebi\komorebi.json')
-                }
+                Should -Invoke Invoke-WinarchyKomorebiStaticReload -Times 1
             }
         }
     }
@@ -3754,37 +4109,367 @@ Describe 'Floating apps already open' {
     }
 }
 
+Describe 'Session process isolation' {
+    It '<Subject> resolves only its recorded process with <Case>' -ForEach @(
+        foreach ($subject in 'shell', 'assistant') {
+            foreach ($case in 'valid', 'missing-file', 'malformed', 'missing-process', 'wrong-name', 'wrong-session') {
+                @{ Subject = $subject; Case = $case }
+            }
+        }
+    ) {
+        InModuleScope Winarchy -Parameters @{ Root = (Join-Path $TestDrive "$Subject-$Case"); Subject = $Subject; Case = $Case } {
+            param($Root, $Subject, $Case)
+            Mock Resolve-Path { [pscustomobject]@{ Path = $Root } } -ParameterFilter { $Path -like '*\..\..\..' }
+            $state = Get-WinarchyStateDir
+            $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+            Mock Get-WinarchyCurrentLogonIdentity { '00000000000000ab-01dc000000000001' }
+            $path = Join-Path $state "$Subject-session-$sessionId"
+            if ($Case -ne 'missing-file') {
+                $content = if ($Subject -eq 'shell') { '4242|0|00000000000000ab-01dc000000000001' } else { '4242' }
+                if ($Case -eq 'malformed') { $content = 'not a PID' }
+                Set-Content $path -Value $content -NoNewline
+            }
+            Mock Get-Process {} -ParameterFilter { $Name -in 'winarchy-shell', 'winarchy-assistant' }
+            Mock Get-Process {
+                if ($Case -ne 'missing-process') {
+                    $name = if ($Subject -eq 'shell') { 'winarchy-shell' } else { 'winarchy-assistant' }
+                    if ($Case -eq 'wrong-name') { $name = 'unrelated' }
+                    $processSession = [Diagnostics.Process]::GetCurrentProcess().SessionId
+                    if ($Case -eq 'wrong-session') { $processSession++ }
+                    [pscustomobject]@{ Id = 4242; ProcessName = $name; SessionId = $processSession }
+                }
+            } -ParameterFilter { $Id -eq 4242 }
+
+            $process = if ($Subject -eq 'shell') { Get-WinarchyShellProcess } else { Get-WinarchyAssistantProcess }
+
+            if ($Case -eq 'valid') { $process.Id | Should -Be 4242 }
+            else { $process | Should -BeNullOrEmpty }
+        }
+    }
+
+    It '<Subject> migration lookup accepts only matching repo paths in its session with <Case>' -ForEach @(
+        foreach ($subject in 'shell', 'assistant') {
+            foreach ($case in 'installed', 'development', 'wrong-session', 'wrong-path', 'missing-path') {
+                @{ Subject = $subject; Case = $case }
+            }
+        }
+    ) {
+        InModuleScope Winarchy -Parameters @{ Root = (Join-Path $TestDrive "migration-$Subject-$Case"); Subject = $Subject; Case = $Case } {
+            param($Root, $Subject, $Case)
+            Mock Resolve-Path { [pscustomobject]@{ Path = $Root } } -ParameterFilter { $Path -like '*\..\..\..' }
+            $null = Get-WinarchyStateDir
+            Mock Get-CimInstance {
+                $binary = Join-Path $Root 'state\bin\winarchy-assistant.exe'
+                if ($Case -eq 'development') { $binary = Join-Path $Root 'assistant\target\release\winarchy-assistant.exe' }
+                [pscustomobject]@{ CommandLine = '"{0}" serve' -f $binary }
+            } -ParameterFilter { $ClassName -eq 'Win32_Process' -and $Filter -eq 'ProcessId = 4343' }
+            Mock Get-Process {
+                $processSession = [Diagnostics.Process]::GetCurrentProcess().SessionId
+                if ($Case -eq 'wrong-session') { $processSession++ }
+                $binary = Join-Path $Root "state\bin\winarchy-$Subject.exe"
+                if ($Case -eq 'development') { $binary = Join-Path $Root "$Subject\target\release\winarchy-$Subject.exe" }
+                if ($Case -eq 'wrong-path') { $binary = Join-Path $Root "other\winarchy-$Subject.exe" }
+                if ($Case -eq 'missing-path') { $binary = $null }
+                [pscustomobject]@{ Id = 4343; ProcessName = "winarchy-$Subject"; SessionId = $processSession; Path = $binary }
+            } -ParameterFilter { $Name -in 'winarchy-shell', 'winarchy-assistant' }
+
+            $process = if ($Subject -eq 'shell') { Get-WinarchyShellProcess } else { Get-WinarchyAssistantProcess }
+
+            if ($Case -in 'installed', 'development') { $process.Id | Should -Be 4343 }
+            else { $process | Should -BeNullOrEmpty }
+        }
+    }
+
+    It 'assistant migration requires an initial serve command with <Case>' -ForEach @(
+        @{ Case = 'serve'; Command = 'serve'; Expected = $true }
+        @{ Case = 'serve-with-options'; Command = 'serve --verbose'; Expected = $true }
+        @{ Case = 'login'; Command = 'login'; Expected = $false }
+        @{ Case = 'ask'; Command = 'ask serve'; Expected = $false }
+        @{ Case = 'ask-with-quoted-serve-text'; Command = 'ask --prompt "{exe}" serve'; Expected = $false }
+        @{ Case = 'serve-prefix'; Command = 'server'; Expected = $false }
+        @{ Case = 'missing-command-line'; Command = $null; Expected = $false }
+        @{ Case = 'unavailable-cim'; Command = 'serve'; Expected = $false }
+    ) {
+        InModuleScope Winarchy -Parameters @{ Root = (Join-Path $TestDrive "assistant-command-$Case"); Case = $Case; Command = $Command; Expected = $Expected } {
+            param($Root, $Case, $Command, $Expected)
+            Mock Resolve-Path { [pscustomobject]@{ Path = $Root } } -ParameterFilter { $Path -like '*\..\..\..' }
+            $null = Get-WinarchyStateDir
+            Mock Get-Process {
+                [pscustomobject]@{ Id = 4343; ProcessName = 'winarchy-assistant'; SessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId; Path = (Join-Path $Root 'state\bin\winarchy-assistant.exe') }
+            } -ParameterFilter { $Name -eq 'winarchy-assistant' }
+            Mock Get-CimInstance {
+                if ($Case -eq 'unavailable-cim') { throw 'CIM unavailable' }
+                $binary = Join-Path $Root 'state\bin\winarchy-assistant.exe'
+                $line = if ($null -ne $Command) { '"{0}" {1}' -f $binary, $Command.Replace('{exe}', $binary) } else { $null }
+                [pscustomobject]@{ CommandLine = $line }
+            } -ParameterFilter { $ClassName -eq 'Win32_Process' -and $Filter -eq 'ProcessId = 4343' }
+
+            $process = Get-WinarchyAssistantProcess
+
+            if ($Expected) { $process.Id | Should -Be 4343 }
+            else { $process | Should -BeNullOrEmpty }
+        }
+    }
+
+    It 'assistant startup handles a legacy candidate classified as <Case>' -ForEach @(
+        @{ Case = 'unavailable-cim'; Command = $null; Reject = $true; Launch = $false }
+        @{ Case = 'null-command'; Command = $null; Reject = $true; Launch = $false }
+        @{ Case = 'empty-command'; Command = ''; Reject = $true; Launch = $false }
+        @{ Case = 'whitespace-command'; Command = '   '; Reject = $true; Launch = $false }
+        @{ Case = 'serve-quoted'; Command = '"{exe}" serve'; Reject = $false; Launch = $false }
+        @{ Case = 'ask-quoted'; Command = '"{exe}" ask'; Reject = $false; Launch = $true }
+        @{ Case = 'login-quoted'; Command = '"{exe}" login'; Reject = $false; Launch = $true }
+        @{ Case = 'logout-quoted'; Command = '"{exe}" logout'; Reject = $false; Launch = $true }
+        @{ Case = 'status-quoted'; Command = '"{exe}" status'; Reject = $false; Launch = $true }
+        @{ Case = 'levels-quoted'; Command = '"{exe}" levels'; Reject = $false; Launch = $true }
+        @{ Case = 'listen-quoted'; Command = '"{exe}" listen'; Reject = $false; Launch = $true }
+        @{ Case = 'serve-unquoted'; Command = '{exe} serve'; Reject = $false; Launch = $false }
+        @{ Case = 'ask-unquoted'; Command = '{exe} ask'; Reject = $false; Launch = $true }
+        @{ Case = 'login-unquoted'; Command = '{exe} login'; Reject = $false; Launch = $true }
+        @{ Case = 'logout-unquoted'; Command = '{exe} logout'; Reject = $false; Launch = $true }
+        @{ Case = 'status-unquoted'; Command = '{exe} status'; Reject = $false; Launch = $true }
+        @{ Case = 'levels-unquoted'; Command = '{exe} levels'; Reject = $false; Launch = $true }
+        @{ Case = 'listen-unquoted'; Command = '{exe} listen'; Reject = $false; Launch = $true }
+        @{ Case = 'unknown-command'; Command = '"{exe}" dance'; Reject = $true; Launch = $false }
+        @{ Case = 'malformed-path'; Command = '"{exe} serve'; Reject = $true; Launch = $false }
+        @{ Case = 'path-suffix'; Command = '"{exe}extra" serve'; Reject = $true; Launch = $false }
+        @{ Case = 'missing-argument'; Command = '"{exe}"'; Reject = $true; Launch = $false }
+        @{ Case = 'serve-prefix'; Command = '"{exe}" server'; Reject = $true; Launch = $false }
+    ) {
+        InModuleScope Winarchy -Parameters @{ Root = (Join-Path $TestDrive "assistant-start-$Case"); Case = $Case; Command = $Command; Reject = $Reject; Launch = $Launch } {
+            param($Root, $Case, $Command, $Reject, $Launch)
+            Mock Resolve-Path { [pscustomobject]@{ Path = $Root } } -ParameterFilter { $Path -like '*\..\..\..' }
+            $state = Get-WinarchyStateDir
+            New-Item -ItemType Directory -Path (Join-Path $state 'bin') -Force | Out-Null
+            $binary = Join-Path $state 'bin\winarchy-assistant.exe'
+            Set-Content $binary -Value 'fixture' -NoNewline
+            Mock Get-Process {
+                [pscustomobject]@{ Id = 4343; ProcessName = 'winarchy-assistant'; SessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId; Path = $binary }
+            } -ParameterFilter { $Name -eq 'winarchy-assistant' }
+            Mock Get-CimInstance {
+                if ($Case -eq 'unavailable-cim') { throw 'CIM unavailable' }
+                $line = if ($null -eq $Command) { $null } else { $Command.Replace('{exe}', $binary) }
+                [pscustomobject]@{ CommandLine = $line }
+            } -ParameterFilter { $ClassName -eq 'Win32_Process' -and $Filter -eq 'ProcessId = 4343' }
+            Mock Start-Process {}
+            Mock Stop-Process {}
+            $previousRoot = $env:WINARCHY_ROOT
+            try {
+                if ($Reject) {
+                    { Start-WinarchyAssistant } | Should -Throw 'Cannot safely start the assistant while a same-session process cannot be classified; retry after Windows process query access is restored.'
+                } else { Start-WinarchyAssistant }
+                if ($Launch) {
+                    Should -Invoke Start-Process -Exactly -Times 1 -ParameterFilter { $FilePath -eq $binary -and $ArgumentList -eq 'serve' -and $WindowStyle -eq 'Hidden' }
+                } else { Should -Invoke Start-Process -Times 0 }
+                Should -Invoke Stop-Process -Times 0
+            } finally { $env:WINARCHY_ROOT = $previousRoot }
+        }
+    }
+
+    It 'assistant does not use migration fallback when its PID file has <_>' -ForEach 'malformed', 'missing-process', 'wrong-name', 'wrong-session' {
+        InModuleScope Winarchy -Parameters @{ Root = (Join-Path $TestDrive "assistant-no-fallback-$_"); Case = $_ } {
+            param($Root, $Case)
+            Mock Resolve-Path { [pscustomobject]@{ Path = $Root } } -ParameterFilter { $Path -like '*\..\..\..' }
+            $state = Get-WinarchyStateDir
+            $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+            $content = if ($Case -eq 'malformed') { 'invalid' } else { '4242' }
+            Set-Content (Join-Path $state "assistant-session-$sessionId") -Value $content -NoNewline
+            Mock Get-Process {
+                if ($Case -ne 'missing-process') {
+                    $name = if ($Case -eq 'wrong-name') { 'unrelated' } else { 'winarchy-assistant' }
+                    $processSession = [Diagnostics.Process]::GetCurrentProcess().SessionId
+                    if ($Case -eq 'wrong-session') { $processSession++ }
+                    [pscustomobject]@{ Id = 4242; ProcessName = $name; SessionId = $processSession }
+                }
+            } -ParameterFilter { $Id -eq 4242 }
+            Mock Get-Process {
+                [pscustomobject]@{ Id = 4343; ProcessName = 'winarchy-assistant'; SessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId; Path = (Join-Path $Root 'state\bin\winarchy-assistant.exe') }
+            } -ParameterFilter { $Name -eq 'winarchy-assistant' }
+
+            Get-WinarchyAssistantProcess | Should -BeNullOrEmpty
+            Should -Invoke Get-Process -ParameterFilter { $Name -eq 'winarchy-assistant' } -Times 0
+        }
+    }
+
+    It 'AHK migration discovery enumerates PIDs and checks session name and executable path' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $lookup = [regex]::Match($ahk, '(?ms)^FindSessionProcessPid\(exeName, paths, commandArg := ''''\) \{.*?^\}').Value
+        $lookup | Should -Match ([regex]::Escape("DllCall('Psapi.dll\EnumProcesses'"))
+        $lookup | Should -Match ([regex]::Escape("pid := NumGet(pids, (A_Index - 1) * 4, 'uint')"))
+        $lookup | Should -Match "ProcessIdToSessionId[^\r\n]*candidateSession != sessionId"
+        $lookup | Should -Match ([regex]::Escape('if StrLower(ProcessGetName(pid)) != exeName'))
+        $lookup | Should -Match ([regex]::Escape('path := StrLower(ProcessGetPath(pid))'))
+        $lookup | Should -Match '(?s)for candidatePath in paths\s+if path = StrLower\(candidatePath\) \{\s+matchesPath := true'
+        $lookup | Should -Match '(?s)if !matchesPath\s+continue'
+    }
+
+    It 'AHK command filtering requires the initial command argument and its boundary' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $lookup = [regex]::Match($ahk, '(?ms)^FindSessionProcessPid\(.*?^\}').Value
+        $lookup | Should -Match ([regex]::Escape('if commandArg {'))
+        $lookup | Should -Match ([regex]::Escape('commandKind := GetAssistantCommandKind(path, commandLine)'))
+        $lookup | Should -Match '(?s)if \(commandKind = ''unknown''\)\s+return -1'
+        $lookup | Should -Match '(?s)if \(commandKind != commandArg\)\s+continue'
+        $classifier = [regex]::Match($ahk, '(?ms)^GetAssistantCommandKind\(path, commandLine\) \{.*?^\}').Value
+        $classifier | Should -Match ([regex]::Escape('SubStr(commandLine, 1, StrLen(quotedPath)) = quotedPath'))
+        $classifier | Should -Match ([regex]::Escape('SubStr(commandLine, 1, StrLen(path)) = path'))
+        $classifier | Should -Match ([regex]::Escape("SubStr(commandLine, offset + 1, 1)"))
+        $classifier | Should -Match '(?s)if \(argument = ''serve''\)\s+return ''serve'''
+        foreach ($command in 'ask', 'login', 'logout', 'status', 'levels', 'listen') {
+            $classifier | Should -Match ([regex]::Escape("argument = '$command'"))
+        }
+        $classifier | Should -Match "return 'cli'"
+        $classifier | Should -Match "return 'unknown'"
+    }
+
+    It 'AHK leaves an unclassifiable assistant alive and suppresses daemon startup' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $lookup = [regex]::Match($ahk, '(?ms)^FindSessionProcessPid\(.*?^\}').Value
+        $lookup | Should -Match '(?s)catch \{\s+return -1'
+        $lookup | Should -Match '(?s)if \(commandLine = ''''\)\s+return -1'
+        $startup = [regex]::Match($ahk, '(?ms)^if FileExist[^\r\n]*assistant\.enabled[^\r\n]*\{.*?^\}').Value
+        $startup | Should -Match '(?s)if legacyPid > 0 \{\s+try \{\s+ProcessClose\(legacyPid\)'
+        $startup | Should -Match '(?s)if \(assistantCandidate = 0\) \{\s+for exe.*?Run\('
+    }
+
+    It 'AHK shell migration discovery is limited to an absent session status file' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $lookup = [regex]::Match($ahk, '(?ms)^GetShellPid\(\) \{.*?^\}').Value
+        $lookup | Should -Match '(?s)if !ShellStatusFile \|\| !FileExist\(ShellStatusFile\)\s+return FindSessionProcessPid'
+        $lookup | Should -Match ([regex]::Escape("FindSessionProcessPid('winarchy-shell.exe', [RepoRoot '\state\bin\winarchy-shell.exe', RepoRoot '\shell\target\release\winarchy-shell.exe'])"))
+        [regex]::Matches($lookup, 'FindSessionProcessPid\(').Count | Should -Be 1
+    }
+
+    It 'AHK assistant startup stops a repo legacy process before launching its replacement' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $startup = [regex]::Match($ahk, '(?ms)^if FileExist[^\r\n]*assistant\.enabled[^\r\n]*\{.*?^\}').Value
+        $startup | Should -Match ([regex]::Escape("legacyPid := !FileExist(AssistantPidFile) ? FindSessionProcessPid('winarchy-assistant.exe', [RepoRoot '\state\bin\winarchy-assistant.exe', RepoRoot '\assistant\target\release\winarchy-assistant.exe'], 'serve') : 0"))
+        $startup | Should -Match '(?s)if legacyPid > 0 \{.*?ProcessClose\(legacyPid\).*?ProcessWaitClose\(legacyPid, 1\).*?assistantCandidate := !GetAssistantPid\(\) \? FindSessionProcessPid\(.*?if \(assistantCandidate = 0\) \{.*?Run\('
+        [regex]::Matches($startup, "FindSessionProcessPid\('winarchy-assistant\.exe', [^\r\n]*?\], 'serve'\)").Count | Should -Be 2
+        $startup | Should -Not -Match ([regex]::Escape('\\.\pipe\winarchy-assistant'))
+    }
+
+    It 'AHK never falls back to unsuffixed shell or assistant pipes' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        foreach ($name in 'shell', 'assistant') {
+            $ahk | Should -Not -Match (([regex]::Escape("\\.\pipe\winarchy-$name")) + '[''"]')
+        }
+        $ahk | Should -Match ([regex]::Escape('if FileExist(StateDir "\assistant.enabled") && !GetAssistantPid()'))
+    }
+
+    It 'AHK routes both command pipes through the current session' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $ahk | Should -Match ([regex]::Escape("DllCall('ProcessIdToSessionId', 'uint', DllCall('GetCurrentProcessId'), 'uint*', &sessionId"))
+        $ahk | Should -Match ([regex]::Escape("pipeName := '\\.\pipe\winarchy-shell-' sessionId"))
+        $ahk | Should -Match ([regex]::Escape("FileOpen('\\.\pipe\winarchy-assistant-' sessionId, 'w')"))
+    }
+
+    It 'AHK CustomShell bridge finishes before services stop' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $quit = [regex]::Match($ahk, '(?ms)^QuitStack\(\) \{.*?^\}').Value
+        $handoff = [regex]::Match($quit, '(?ms)^    if sessionShell \{.*?^    \}')
+        $handoff.Value | Should -Match '(?s)SetTimer\(ShellWatch, 0\).*result := RunShellRecoveryBridge\(\).*if !result'
+        foreach ($teardown in 'SetTimer(YasbWatch, 0)', "Komorebic('stop')", "RunWait('taskkill /IM yasb.exe /F'", "RunWait('taskkill /IM Flow.Launcher.exe /F'") {
+            $quit.IndexOf($teardown) | Should -BeGreaterOrEqual ($handoff.Index + $handoff.Length)
+        }
+    }
+
+    It 'AHK CustomShell restores its watchdog and aborts teardown when the bridge fails' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $quit = [regex]::Match($ahk, '(?ms)^QuitStack\(\) \{.*?^\}').Value
+        $failure = [regex]::Match($quit, '(?ms)^        if !result \{.*?^        \}').Value
+
+        $quit | Should -Match '(?s)result := RunShellRecoveryBridge\(\).*if !result'
+        $failure | Should -Match '(?s)ShellLifecycleStopping := false\s+SetTimer\(ShellWatch, 5000\)\s+TrayTip\([^\r\n]+\)\s+return'
+        $failure | Should -Not -Match 'Komorebic|taskkill|ProcessClose|ExitApp'
+        $quit.IndexOf($failure) | Should -BeLessThan $quit.IndexOf("Komorebic('stop')")
+    }
+
+    It 'the CustomShell bridge propagates failed PowerShell recovery as a nonzero exit' {
+        $bridge = Get-Content (Join-Path $script:Root 'scripts\Stop-WinarchySessionShell.ps1') -Raw
+
+        $bridge | Should -Match '(?s)\$module = Join-Path \$Root ''module/Winarchy/Winarchy.psd1''\s+Import-Module \$module -Force\s+if \(-not \(Stop-WinarchyShell\)\) \{ exit 1 \}\s+exit 0'
+    }
+
+    It 'PowerShell checks Explorer ownership in the current session before a bounded readiness message' {
+        $shell = Get-Content (Join-Path $script:Root 'module\Winarchy\Private\Shell.ps1') -Raw
+        $ready = [regex]::Match($shell, '(?ms)^function Test-WinarchyExplorerShellReady \{.*?(?=^function Start-WinarchyExplorer)').Value
+
+        $ready | Should -Match 'process.SessionId == sessionId && String.Equals\(process.ProcessName, "explorer", StringComparison.OrdinalIgnoreCase\)'
+        $ready | Should -Match 'SendMessageTimeout\(window, 0, IntPtr.Zero, IntPtr.Zero, 0x22, 500, out result\) != IntPtr.Zero'
+        $ready | Should -Match '\[WinarchyExplorerShellReadiness\]::IsResponsive\(\[Diagnostics.Process\]::GetCurrentProcess\(\).SessionId\)'
+    }
+
+    It 'AHK accepts valid status mode zero before considering a stale CustomShell marker' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $quit = [regex]::Match($ahk, '(?ms)^QuitStack\(\) \{.*?^\}').Value
+        $quit | Should -Match ([regex]::Escape("if status.Length = 3 && RegExMatch(status[1], '^\d+$') && status[3] = ShellLogonIdentity && status[2] ~= '^[01]$' {"))
+        $quit | Should -Match '(?s)statusValid := true\s+sessionShell := status\[2\] = ''1''\s+\}\s+\}\s+if !statusValid && ShellSessionMarker && FileExist\(ShellSessionMarker\) \{\s+try sessionShell := Trim\(FileRead\(ShellSessionMarker\)\) = ShellLogonIdentity'
+    }
+
+    It 'AHK QuitStack closes the recorded shell PID without killing by image name' {
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $quit = [regex]::Match($ahk, '(?ms)^QuitStack\(\) \{.*?^\}').Value
+        $quit | Should -Match 'shellPid := GetShellPid\(\)'
+        $quit | Should -Match 'ProcessClose\(shellPid\)'
+        $quit | Should -Not -Match 'taskkill[^\r\n]*/IM\s+winarchy-shell'
+    }
+}
+
 Describe 'Stop-WinarchyShell' {
     BeforeEach {
-        InModuleScope Winarchy {
+        InModuleScope Winarchy -Parameters @{ Root = (Join-Path $TestDrive 'shell-stop') } {
+            param($Root)
+            $script:shellStopRoot = $Root
+            Mock Resolve-Path { [pscustomobject]@{ Path = $script:shellStopRoot } } -ParameterFilter { $Path -like '*\..\..\..' }
+            $state = Get-WinarchyStateDir
+            $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+            Mock Get-WinarchyCurrentLogonIdentity { '00000000000000ab-01dc000000000001' }
+            Remove-Item (Join-Path $state "session-shell-$sessionId") -Force -ErrorAction SilentlyContinue
+            Remove-Item (Join-Path $state "shell-relaunch-inhibit-$sessionId") -Force -ErrorAction SilentlyContinue
+            Set-Content (Join-Path $state "shell-session-$sessionId") -Value '4242|0|00000000000000ab-01dc000000000001' -NoNewline
+            $script:savedShellQuitWaitMs = $script:ShellQuitWaitMs
+            $script:savedShellReturnWaitMs = $script:ShellReturnWaitMs
             $script:log = [System.Collections.Generic.List[string]]::new()
             $script:alive = $true
             $script:written = $null
             $script:connectFails = $false
+            $script:stopFails = $false
+            $script:explorerReady = $false
+            Mock Test-WinarchyExplorerShellReady { $script:explorerReady }
+            Mock Start-WinarchyExplorer { }
             Mock Get-Process {
                 if ($script:alive) {
-                    $p = [pscustomobject]@{ Name = 'winarchy-shell' }
-                    $p | Add-Member ScriptMethod WaitForExit { param($ms) $script:log.Add("wait:$ms"); if ($script:exitsOnWait) { $script:alive = $false }; -not $script:alive }
-                    $p
+                    [pscustomobject]@{ Id = 4242; ProcessName = 'winarchy-shell'; SessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId; Path = (Join-Path $script:shellStopRoot 'state\bin\winarchy-shell.exe') }
                 }
             }
-            Mock Stop-Process { $script:log.Add('stop') }
+            Mock Stop-Process { if ($Name -ne 'yasb' -and -not $script:stopFails) { $script:alive = $false }; $script:log.Add('stop') }
+            Mock Wait-Process { }
             Mock Restore-WinarchyNativeTaskbar { $script:log.Add('restore') }
             Mock New-Object {
                 $pipe = [pscustomobject]@{}
                 $pipe | Add-Member ScriptMethod Connect { param($ms) $script:log.Add("connect:$ms"); if ($script:connectFails) { throw 'timeout' } }
-                $pipe | Add-Member ScriptMethod Write { param($b, $o, $n) $script:written = [Text.Encoding]::UTF8.GetString($b, $o, $n) }
+                $pipe | Add-Member ScriptMethod WriteAsync { param($b, $o, $n) $script:written = [Text.Encoding]::UTF8.GetString($b, $o, $n); [Threading.Tasks.Task]::CompletedTask }
                 $pipe | Add-Member ScriptMethod Flush { }
                 $pipe | Add-Member ScriptMethod Dispose { $script:log.Add('dispose') }
                 $pipe
             }
+            Mock Start-Sleep { $script:log.Add("wait:$Milliseconds"); if ($script:exitsOnWait) { $script:alive = $false } }
             $script:exitsOnWait = $false
+        }
+    }
+
+    AfterEach {
+        InModuleScope Winarchy {
+            $script:ShellQuitWaitMs = $script:savedShellQuitWaitMs
+            $script:ShellReturnWaitMs = $script:savedShellReturnWaitMs
         }
     }
 
     It 'returns without touching the pipe or killing anything when no shell runs' {
         InModuleScope Winarchy {
             $script:alive = $false
+            $script:explorerReady = $true
             Stop-WinarchyShell
             Should -Invoke New-Object -Times 0
             Should -Invoke Stop-Process -Times 0
@@ -3797,35 +4482,552 @@ Describe 'Stop-WinarchyShell' {
             Stop-WinarchyShell
             $script:written | Should -Be "{`"v`":1,`"id`":1,`"cmd`":`"quit`"}`n"
             $script:log[0] | Should -Be 'connect:200'
-            $script:log -contains 'wait:1500' | Should -BeTrue
+            $script:log -contains 'wait:50' | Should -BeTrue
+            Should -Invoke Get-Process -ParameterFilter { $null -ne $Id -and @($Id | Where-Object { $_ -ne 4242 }).Count -gt 0 } -Times 0
+            Should -Invoke New-Object -ParameterFilter { $TypeName -eq 'System.IO.Pipes.NamedPipeClientStream' -and $ArgumentList[1] -eq "winarchy-shell-$([Diagnostics.Process]::GetCurrentProcess().SessionId)" } -Exactly -Times 1
             Should -Invoke Stop-Process -Times 0
             Should -Invoke Restore-WinarchyNativeTaskbar -Times 0
         }
     }
 
-    It 'forces the shell only after the wait when it is still alive' {
+    It 'returns to Explorer only when stopping a custom session shell' {
         InModuleScope Winarchy {
-            Stop-WinarchyShell
-            ($script:log -join ',') | Should -Be 'connect:200,wait:1500,dispose,stop,restore'
-            Should -Invoke Stop-Process -Times 1 -ParameterFilter { $Force }
+            $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+            Set-Content (Join-Path (Get-WinarchyStateDir) "shell-session-$sessionId") -Value '4242|1|00000000000000ab-01dc000000000001' -NoNewline
+            $script:exitsOnWait = $true
+            $script:explorerReady = $true
+            Stop-WinarchyShell | Should -BeTrue
+            $script:written | Should -Be "{`"v`":1,`"id`":1,`"cmd`":`"return`"}`n"
+            Should -Invoke Start-WinarchyExplorer -Times 0
+            Should -Invoke Stop-Process -Times 0
         }
     }
 
-    It 'waits exactly ShellQuitWaitMs milliseconds' {
+    It 'reports failure when the shell exits after return but Explorer never becomes ready' {
+        InModuleScope Winarchy {
+            $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+            Set-Content (Join-Path (Get-WinarchyStateDir) "shell-session-$sessionId") -Value '4242|1|00000000000000ab-01dc000000000001' -NoNewline
+            $script:exitsOnWait = $true
+            $script:explorerReady = $false
+            $script:ShellReturnWaitMs = 50
+
+            Stop-WinarchyShell | Should -BeFalse
+
+            $script:alive | Should -BeFalse
+            $script:written | Should -Be "{`"v`":1,`"id`":1,`"cmd`":`"return`"}`n"
+            Should -Invoke Start-WinarchyExplorer -Exactly -Times 1
+            Should -Invoke Stop-Process -Times 0
+            Should -Invoke Restore-WinarchyNativeTaskbar -Times 0
+        }
+    }
+
+    It 'keeps the session shell alive when the Explorer return request does not exit' {
+        InModuleScope Winarchy {
+            $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+            Set-Content (Join-Path (Get-WinarchyStateDir) "shell-session-$sessionId") -Value '4242|1|00000000000000ab-01dc000000000001' -NoNewline
+            $script:ShellReturnWaitMs = 10
+            $script:explorerReady = $false
+            Stop-WinarchyShell | Should -BeFalse
+            $script:written | Should -Be "{`"v`":1,`"id`":1,`"cmd`":`"return`"}`n"
+            Should -Invoke Start-WinarchyExplorer -Exactly -Times 1
+            Should -Invoke Stop-Process -Times 0
+            Should -Invoke Restore-WinarchyNativeTaskbar -Times 0
+        }
+    }
+
+    It 'stops a custom session shell only after Explorer recovers from an unavailable return pipe' {
+        InModuleScope Winarchy {
+            $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+            Set-Content (Join-Path (Get-WinarchyStateDir) "shell-session-$sessionId") -Value '4242|1|00000000000000ab-01dc000000000001' -NoNewline
+            $script:connectFails = $true
+            $script:ShellQuitWaitMs = 0
+            $script:ShellReturnWaitMs = 1000
+            Mock Start-WinarchyExplorer { $script:explorerReady = $true; $script:log.Add('explorer-ready') }
+            Mock Stop-Process { $script:alive = $false; $script:log.Add('stop') }
+            Mock Wait-Process { }
+
+            Stop-WinarchyShell | Should -BeTrue
+
+            $script:log -join ',' | Should -Be 'connect:200,dispose,explorer-ready,wait:100,stop,restore'
+            Should -Invoke Stop-Process -Exactly -Times 1 -ParameterFilter { $Force -and $Id.Count -eq 1 -and $Id[0] -eq 4242 }
+        }
+    }
+
+    It 'uses quit when a valid normal-shell status conflicts with a stale session marker' {
+        InModuleScope Winarchy {
+            $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+            Set-Content (Join-Path (Get-WinarchyStateDir) "session-shell-$sessionId") -Value '00000000000000ab-01dc000000000000' -NoNewline
+            $script:ShellQuitWaitMs = 0
+            Stop-WinarchyShell
+            $script:written | Should -Be "{`"v`":1,`"id`":1,`"cmd`":`"quit`"}`n"
+            Should -Invoke Stop-Process -Times 1
+            Should -Invoke Restore-WinarchyNativeTaskbar -Times 1
+        }
+    }
+
+    It 'uses return when a live session shell has a marker but lost its status file' {
+        InModuleScope Winarchy {
+            $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+            Set-Content (Join-Path (Get-WinarchyStateDir) "session-shell-$sessionId") -Value '00000000000000ab-01dc000000000001' -NoNewline
+            Remove-Item (Join-Path (Get-WinarchyStateDir) "shell-session-$sessionId") -Force
+            $script:ShellReturnWaitMs = 10
+            $script:explorerReady = $false
+            Stop-WinarchyShell | Should -BeFalse
+            $script:written | Should -Be "{`"v`":1,`"id`":1,`"cmd`":`"return`"}`n"
+            Should -Invoke Start-WinarchyExplorer -Exactly -Times 1
+            Should -Invoke Stop-Process -Times 0
+        }
+    }
+
+    It 'sends restart instead of quit when the shell will be relaunched' {
+        InModuleScope Winarchy {
+            $script:exitsOnWait = $true
+            Stop-WinarchyShell -Restart
+            $script:written | Should -Be "{`"v`":1,`"id`":1,`"cmd`":`"restart`"}`n"
+            Should -Invoke Stop-Process -Times 0
+        }
+    }
+
+    It 'reloads a custom session shell in place without waiting for exit or forcing it' {
+        InModuleScope Winarchy {
+            $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+            Set-Content (Join-Path (Get-WinarchyStateDir) "shell-session-$sessionId") -Value '4242|1|00000000000000ab-01dc000000000001' -NoNewline
+            Stop-WinarchyShell -Restart
+            $script:written | Should -Be "{`"v`":1,`"id`":1,`"cmd`":`"reload`"}`n"
+            Should -Invoke Start-Sleep -Times 0
+            Should -Invoke Stop-Process -Times 0
+            Should -Invoke Restore-WinarchyNativeTaskbar -Times 0
+        }
+    }
+
+    It 'keeps a custom session shell running when its reload pipe is unavailable' {
+        InModuleScope Winarchy {
+            $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+            Set-Content (Join-Path (Get-WinarchyStateDir) "shell-session-$sessionId") -Value '4242|1|00000000000000ab-01dc000000000001' -NoNewline
+            $script:connectFails = $true
+            $script:ShellQuitWaitMs = 0
+            Stop-WinarchyShell -Restart
+            $script:log -join ',' | Should -Be 'connect:200,dispose'
+            Should -Invoke Stop-Process -Times 0
+            Should -Invoke Restore-WinarchyNativeTaskbar -Times 0
+        }
+    }
+
+    It 'native reload <Mode> launches <Starts> replacement shell processes' -ForEach @(
+        @{ Mode = 'CustomShell'; SessionShell = '1'; Starts = 0; Command = 'reload'; Light = $true; Inhibited = $false; RetainsInhibit = $false }
+        @{ Mode = 'normal'; SessionShell = '0'; Starts = 1; Command = 'restart'; Light = $true; Inhibited = $false; RetainsInhibit = $false }
+        @{ Mode = 'Light with current-logon inhibit'; SessionShell = '0'; Starts = 0; Command = 'restart'; Light = $true; Inhibited = $true; RetainsInhibit = $true }
+        @{ Mode = 'full with current-logon inhibit'; SessionShell = '0'; Starts = 1; Command = 'restart'; Light = $false; Inhibited = $true; RetainsInhibit = $false }
+        @{ Mode = 'full without inhibit'; SessionShell = '0'; Starts = 1; Command = 'restart'; Light = $false; Inhibited = $false; RetainsInhibit = $false }
+    ) {
+        InModuleScope Winarchy -Parameters @{ SessionShell = $SessionShell; Starts = $Starts; Command = $Command; Light = $Light; Inhibited = $Inhibited; RetainsInhibit = $RetainsInhibit } {
+            param($SessionShell, $Starts, $Command, $Light, $Inhibited, $RetainsInhibit)
+            $oldKomorebi = $env:KOMOREBI_CONFIG_HOME
+            $oldYasb = $env:YASB_CONFIG_HOME
+            try {
+                $state = Get-WinarchyStateDir
+                $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+                Set-Content (Join-Path $state "shell-session-$sessionId") -Value "4242|$SessionShell|00000000000000ab-01dc000000000001" -NoNewline
+                Set-Content (Join-Path $state 'bar') -Value 'native' -NoNewline
+                $bin = New-Item (Join-Path $state 'bin') -ItemType Directory -Force
+                $exe = Join-Path $bin.FullName 'winarchy-shell.exe'
+                Set-Content $exe -Value ''
+                Mock Start-Process { }
+                if (-not (Get-Command komorebic -ErrorAction SilentlyContinue)) { function komorebic { } }
+                Mock komorebic { }
+                Mock Invoke-WinarchyKomorebiStaticReload { }
+                Mock komorebic { throw 'monitor information unavailable' } -ParameterFilter { $args[0] -eq 'monitor-information' }
+                $script:ShellQuitWaitMs = 0
+                $inhibitPath = Join-Path $state "shell-relaunch-inhibit-$sessionId"
+                if ($Inhibited) {
+                    Set-Content $inhibitPath -Value '00000000000000ab-01dc000000000001' -NoNewline
+                }
+
+                Invoke-WinarchyReload -Light:$Light
+
+                $script:written | Should -Be "{`"v`":1,`"id`":1,`"cmd`":`"$Command`"}`n"
+                Should -Invoke Start-Process -Exactly -Times $Starts -ParameterFilter { $FilePath -eq $exe -and $WindowStyle -eq 'Hidden' }
+                if ($Light) { Should -Invoke Start-Process -Exactly -Times $Starts }
+                (Test-Path -LiteralPath $inhibitPath) | Should -Be $RetainsInhibit
+                if ($RetainsInhibit) {
+                    Get-Content -LiteralPath $inhibitPath -Raw | Should -Be '00000000000000ab-01dc000000000001'
+                }
+            }
+            finally {
+                $env:KOMOREBI_CONFIG_HOME = $oldKomorebi
+                $env:YASB_CONFIG_HOME = $oldYasb
+            }
+        }
+    }
+
+    It 'aborts <Bar> reload after a failed session-shell reload without starting later processes' -ForEach @(
+        @{ Bar = 'native' }
+        @{ Bar = 'yasb' }
+    ) {
+        InModuleScope Winarchy -Parameters @{ Bar = $Bar } {
+            param($Bar)
+            $oldKomorebi = $env:KOMOREBI_CONFIG_HOME
+            $oldYasb = $env:YASB_CONFIG_HOME
+            try {
+                $state = Get-WinarchyStateDir
+                $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
+                Set-Content (Join-Path $state "shell-session-$sessionId") -Value '4242|1|00000000000000ab-01dc000000000001' -NoNewline
+                Set-Content (Join-Path $state 'bar') -Value $Bar -NoNewline
+                New-Item (Join-Path $script:shellStopRoot 'scripts') -ItemType Directory -Force | Out-Null
+                Set-Content (Join-Path $script:shellStopRoot 'scripts\Start-WindowSlots.ps1') -Value ''
+                $script:connectFails = $true
+                $script:ShellQuitWaitMs = 0
+                Mock Get-Process { } -ParameterFilter { $Name -eq 'yasb' }
+                $script:reloadTestPath = Get-Command Test-Path
+                $script:reloadGetCommand = Get-Command Get-Command
+                Mock Test-Path { if ($LiteralPath) { & $script:reloadTestPath -LiteralPath $LiteralPath } else { & $script:reloadTestPath -Path $Path } }
+                Mock Test-Path { $false } -ParameterFilter { $Path -eq '\\.\pipe\winarchy-window-slots' }
+                Mock Get-Command { & $script:reloadGetCommand -Name $Name -ErrorAction SilentlyContinue }
+                Mock Get-Command { $null } -ParameterFilter { $Name -in 'yasbc', 'yasb' }
+                Mock Start-Process { }
+                if (-not (Get-Command komorebic -ErrorAction SilentlyContinue)) { function komorebic { } }
+                Mock komorebic { }
+                Mock Invoke-WinarchyKomorebiStaticReload { }
+                Mock komorebic { throw 'monitor information unavailable' } -ParameterFilter { $args[0] -eq 'monitor-information' }
+
+                { Invoke-WinarchyReload } | Should -Throw '*shell could not reload*'
+
+                Should -Invoke New-Object -Exactly -Times 1
+                Should -Invoke Start-Process -Times 0
+                Should -Invoke Restore-WinarchyNativeTaskbar -Times 0
+            }
+            finally {
+                $env:KOMOREBI_CONFIG_HOME = $oldKomorebi
+                $env:YASB_CONFIG_HOME = $oldYasb
+            }
+        }
+    }
+
+    It 'reports failure when normal-shell <Mode> cannot stop the process' -ForEach @(
+        @{ Mode = 'quit'; Restart = $false }
+        @{ Mode = 'restart'; Restart = $true }
+    ) {
+        InModuleScope Winarchy -Parameters @{ Restart = $Restart } {
+            param($Restart)
+            $script:ShellQuitWaitMs = 0
+            $script:stopFails = $true
+            Mock Wait-Process { }
+
+            $result = Stop-WinarchyShell -Restart:$Restart
+
+            Should -Invoke Stop-Process -Exactly -Times 1 -ParameterFilter { $Force -and $Id.Count -eq 1 -and $Id[0] -eq 4242 }
+            Should -Invoke Restore-WinarchyNativeTaskbar -Exactly -Times 1
+            $result | Should -BeFalse
+        }
+    }
+
+    It 'forces only the recorded shell PID after its grace period expires' {
+        InModuleScope Winarchy {
+            $script:ShellQuitWaitMs = 0
+            Stop-WinarchyShell
+            ($script:log -join ',') | Should -Be 'connect:200,dispose,stop,restore'
+            Should -Invoke Stop-Process -Times 1 -ParameterFilter { $Force -and $Id.Count -eq 1 -and $Id[0] -eq 4242 }
+        }
+    }
+
+    It 'checks the recorded shell PID again after each polling interval' {
         InModuleScope Winarchy {
             $script:exitsOnWait = $true
             Stop-WinarchyShell
-            $script:log -contains "wait:$($script:ShellQuitWaitMs)" | Should -BeTrue
+            $script:log -contains 'wait:50' | Should -BeTrue
+            Should -Invoke Start-Sleep -ParameterFilter { $Milliseconds -eq 50 } -Exactly -Times 1
+            Should -Invoke Stop-Process -Times 0
         }
     }
 
     It 'forces without waiting when Connect throws and the shell is alive' {
         InModuleScope Winarchy {
             $script:connectFails = $true
+            $script:ShellQuitWaitMs = 0
             Stop-WinarchyShell
             ($script:log | Where-Object { $_ -like 'wait:*' }) | Should -BeNullOrEmpty
             Should -Invoke Stop-Process -Times 1 -ParameterFilter { $Force }
             Should -Invoke Restore-WinarchyNativeTaskbar -Times 1
+        }
+    }
+}
+
+Describe 'Session shell launcher readiness' {
+    BeforeAll {
+        function Invoke-LauncherReadinessCheck {
+            param([string]$Launcher, [object[]]$Processes = @(), [int]$Foreground = 0, [switch]$RetryLoop)
+
+            $path = Join-Path $script:Root "scripts\$Launcher"
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$null)
+            $functions = $ast.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.FunctionDefinitionAst]
+            }, $false).Extent.Text -join "`n"
+            $loop = $ast.EndBlock.Statements | Where-Object {
+                $_ -is [System.Management.Automation.Language.WhileStatementAst] -and
+                $_.Condition.Extent.Text -eq '(Get-Date) -lt $overallDeadline'
+            } | Select-Object -Last 1
+            $functions = $functions.Replace('[Win.FgAhk]', '[LauncherForeground]').Replace('[Win.Fg]', '[LauncherForeground]')
+            $loopText = $loop.Extent.Text.Replace('[Win.Fg]', '[LauncherForeground]')
+            $foregroundType = 'LauncherForeground' + [guid]::NewGuid().ToString('N')
+            $functions = $functions.Replace('LauncherForeground', $foregroundType)
+            $loopText = $loopText.Replace('LauncherForeground', $foregroundType)
+            $runner = [powershell]::Create()
+            try {
+                $runnerScript = {
+                    param($functions, $loopText, $processes, $foreground, $retryLoop, $logPath)
+                    class LauncherForeground {
+                        static [IntPtr]$Handle
+                        static [IntPtr] GetForegroundWindow() { return [LauncherForeground]::Handle }
+                        static [bool] SystemParametersInfo([uint32]$a, [uint32]$b, [IntPtr]$c, [uint32]$d) { return $true }
+                        static [void] keybd_event([byte]$a, [byte]$b, [uint32]$c, [UIntPtr]$d) {}
+                    }
+                    [LauncherForeground]::Handle = [IntPtr]$foreground
+                    $script:processes = $processes
+                    $sessionId = 42
+                    $script:now = [datetime]'2026-01-01T00:00:00'
+                    $overallDeadline = $script:now.AddSeconds(1)
+                    $script:launched = 0
+                    $exe = 'unused.exe'
+                    $script = 'unused.ahk'
+                    $log = $logPath
+                    $outLog = "$logPath.out"
+                    $errLog = "$logPath.err"
+                    function Get-Process {
+                        param([string[]]$Name, $ErrorAction)
+                        $script:processes | Where-Object { $_.ProcessName -in $Name }
+                    }
+                    function Get-CimInstance { param($ClassName, $Filter, $ErrorAction) }
+                    function Get-Date {
+                        param($Format)
+                        if ($Format) { return '2026-01-01 00:00:00' }
+                        $script:now
+                    }
+                    function Start-Sleep {
+                        param($Milliseconds, $Seconds)
+                        $script:now = $overallDeadline
+                    }
+                    function Start-Process {
+                        param($FilePath, $ArgumentList, $WindowStyle, [switch]$PassThru, $RedirectStandardOutput, $RedirectStandardError)
+                        $script:launched++
+                        [pscustomobject]@{ HasExited = $true; ExitCode = 1 }
+                    }
+                    . ([scriptblock]::Create($functions))
+                    if ($retryLoop) {
+                        & ([scriptblock]::Create($loopText))
+                        return $script:launched
+                    }
+                    Test-ShellReady
+                }
+                $null = $runner.AddScript($runnerScript.ToString().Replace('LauncherForeground', $foregroundType)).
+                    AddArgument($functions).AddArgument($loopText).AddArgument($Processes).
+                    AddArgument($Foreground).AddArgument([bool]$RetryLoop).AddArgument((Join-Path $TestDrive 'launcher.log'))
+                $result = $runner.Invoke()
+                if ($runner.HadErrors) { throw ($runner.Streams.Error -join "`n") }
+                $result
+            }
+            finally { $runner.Dispose() }
+        }
+    }
+
+    Context '<Launcher>' -ForEach @(
+        @{ Launcher = 'Start-Ahk.ps1' }
+        @{ Launcher = 'Start-Komorebi.ps1' }
+    ) {
+        It 'accepts the session shell without a foreground window' {
+            $process = [pscustomobject]@{ ProcessName = 'winarchy-shell'; SessionId = 42 }
+            Invoke-LauncherReadinessCheck $Launcher -Processes @($process) | Should -BeTrue
+        }
+
+        It 'requires a foreground window when only Explorer is running' {
+            $process = [pscustomobject]@{ ProcessName = 'explorer'; SessionId = 42 }
+            Invoke-LauncherReadinessCheck $Launcher -Processes @($process) | Should -BeFalse
+        }
+
+        It 'accepts Explorer with a foreground window' {
+            $process = [pscustomobject]@{ ProcessName = 'explorer'; SessionId = 42 }
+            Invoke-LauncherReadinessCheck $Launcher -Processes @($process) -Foreground 1 | Should -BeTrue
+        }
+
+        It 'rejects a shell from another session even with a foreground window' {
+            $process = [pscustomobject]@{ ProcessName = 'winarchy-shell'; SessionId = 43 }
+            Invoke-LauncherReadinessCheck $Launcher -Processes @($process) -Foreground 1 | Should -BeFalse
+        }
+
+        It 'rejects Explorer from another session even with a foreground window' {
+            $process = [pscustomobject]@{ ProcessName = 'explorer'; SessionId = 43 }
+            Invoke-LauncherReadinessCheck $Launcher -Processes @($process) -Foreground 1 | Should -BeFalse
+        }
+
+        It 'rejects a foreground window without a shell process' {
+            Invoke-LauncherReadinessCheck $Launcher -Foreground 1 | Should -BeFalse
+        }
+
+        It 'does not launch a child when the readiness wait consumes the deadline' {
+            Invoke-LauncherReadinessCheck $Launcher -RetryLoop | Should -Be 0
+        }
+    }
+}
+
+Describe 'Custom shell policy maintenance guard' -Tag 'CustomShellPolicyMaintenance' {
+    It 'exports the guard to maintenance scripts' {
+        (Get-Command Assert-WinarchyCustomShellPolicySafeForMaintenance).Name | Should -Be 'Assert-WinarchyCustomShellPolicySafeForMaintenance'
+    }
+
+    It 'allows unrelated or empty shell commands: <Command>' -TestCases @(
+        @{ Command = $null }
+        @{ Command = '' }
+        @{ Command = '   ' }
+        @{ Command = 'explorer.exe' }
+        @{ Command = '"C:\Other Shell\shell.exe" --session-shell' }
+        @{ Command = 'winarchy-shell.exe.backup' }
+        @{ Command = 'other-winarchy-shell.exe' }
+        @{ Command = 'explorer.exe winarchy-shell.exe' }
+    ) {
+        param($Command)
+        InModuleScope Winarchy -Parameters @{ Command = $Command } {
+            param($Command)
+            Mock Get-WinarchyCustomShellPolicySnapshot {
+                if ($null -eq $Command) { New-WinarchyCustomShellPolicySnapshot -Present $false }
+                else { New-WinarchyCustomShellPolicySnapshot -Present $true -Kind String -RawBytes ([Text.Encoding]::Unicode.GetBytes("$Command`0")) }
+            }
+
+            { Assert-WinarchyCustomShellPolicySafeForMaintenance } | Should -Not -Throw
+            Should -Invoke Get-WinarchyCustomShellPolicySnapshot -Times 1 -Exactly -ParameterFilter {
+                $SubKey -eq 'Software\Microsoft\Windows\CurrentVersion\Policies\System'
+            }
+        }
+    }
+
+    It 'refuses maintenance for the exact Winarchy shell executable: <Command>' -TestCases @(
+        @{ Command = 'winarchy-shell.exe' }
+        @{ Command = 'winarchy-shell.exe --session-shell' }
+        @{ Command = '"C:\Program Files\Winarchy\winarchy-shell.exe" --session-shell' }
+        @{ Command = '"C:\Program Files\Winarchy\WINARCHY-SHELL.EXE"' }
+        @{ Command = 'C:\Winarchy\winarchy-shell.exe' }
+    ) {
+        param($Command)
+        InModuleScope Winarchy -Parameters @{ Command = $Command } {
+            param($Command)
+            Mock Get-WinarchyCustomShellPolicySnapshot {
+                New-WinarchyCustomShellPolicySnapshot -Present $true -Kind String -RawBytes ([Text.Encoding]::Unicode.GetBytes("$Command`0"))
+            }
+
+            { Assert-WinarchyCustomShellPolicySafeForMaintenance } | Should -Throw '*winarchy-shell.exe*'
+        }
+    }
+
+    It 'detects Winarchy in an environment-expanded policy command' {
+        InModuleScope Winarchy {
+            $env:WINARCHY_POLICY_TEST_ROOT = 'C:\Program Files\Winarchy'
+            try {
+                Mock Get-WinarchyCustomShellPolicySnapshot {
+                    $value = '%WINARCHY_POLICY_TEST_ROOT%\winarchy-shell.exe'
+                    New-WinarchyCustomShellPolicySnapshot -Present $true -Kind ExpandString -RawBytes ([Text.Encoding]::Unicode.GetBytes("$value`0"))
+                }
+
+                { Assert-WinarchyCustomShellPolicySafeForMaintenance } | Should -Throw '*winarchy-shell.exe*'
+            }
+            finally { Remove-Item Env:WINARCHY_POLICY_TEST_ROOT -ErrorAction SilentlyContinue }
+        }
+    }
+
+    It 'allows a missing policy key' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyCustomShellPolicySnapshot { New-WinarchyCustomShellPolicySnapshot -Present $false }
+
+            { Assert-WinarchyCustomShellPolicySafeForMaintenance } | Should -Not -Throw
+            Should -Invoke Get-WinarchyCustomShellPolicySnapshot -Times 1 -Exactly
+        }
+    }
+
+    It 'allows a missing Shell value' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyCustomShellPolicySnapshot { New-WinarchyCustomShellPolicySnapshot -Present $false }
+
+            { Assert-WinarchyCustomShellPolicySafeForMaintenance } | Should -Not -Throw
+            Should -Invoke Get-WinarchyCustomShellPolicySnapshot -Times 1 -Exactly
+        }
+    }
+
+    It 'fails closed when registry inspection is denied' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyCustomShellPolicySnapshot { throw [System.UnauthorizedAccessException]::new('Policy inspection denied') }
+
+            { Assert-WinarchyCustomShellPolicySafeForMaintenance } | Should -Throw '*Policy inspection denied*'
+        }
+    }
+
+    It 'fails closed on an unexpected registry read error' {
+        InModuleScope Winarchy {
+            Mock Get-WinarchyCustomShellPolicySnapshot { throw [System.IO.IOException]::new('Policy read failed') }
+
+            { Assert-WinarchyCustomShellPolicySafeForMaintenance } | Should -Throw '*Policy read failed*'
+        }
+    }
+
+    It 'fails closed on unsupported value types and malformed command bytes' -ForEach @(
+        @{ Kind = [Microsoft.Win32.RegistryValueKind]::Binary; Bytes = [byte[]]@(1, 2) }
+        @{ Kind = [Microsoft.Win32.RegistryValueKind]::String; Bytes = [byte[]]@(65) }
+        @{ Kind = [Microsoft.Win32.RegistryValueKind]::String; Bytes = [byte[]]@(65, 0, 0, 0, 66, 0, 0, 0) }
+    ) {
+        InModuleScope Winarchy -Parameters @{ Kind = $Kind; Bytes = $Bytes } {
+            param($Kind, $Bytes)
+            Mock Get-WinarchyCustomShellPolicySnapshot {
+                New-WinarchyCustomShellPolicySnapshot -Present $true -Kind $Kind -RawBytes $Bytes
+            }
+
+            { Assert-WinarchyCustomShellPolicySafeForMaintenance } | Should -Throw '*CustomShell policy*'
+        }
+    }
+}
+
+Describe 'Custom shell policy maintenance caller order' -Tag 'CustomShellPolicyMaintenance' {
+    It 'checks policy before destructive commands in <File>' -TestCases @(
+        @{ File = 'install.ps1'; Function = $null; Mutations = @('New-WinarchySnapshot', 'Set-Content', 'winget', 'Initialize-WinarchyBar') }
+        @{ File = 'uninstall.ps1'; Function = $null; Mutations = @('Stop-WinarchyShell', 'Stop-WinarchyWindowSlots', 'Stop-Process', 'Unregister-WinarchyAutostart') }
+        @{ File = 'scripts\rollback-to-seelen.ps1'; Function = $null; Mutations = @('Stop-WinarchyShell', 'komorebic', 'Stop-Process', 'Remove-Item', 'Set-ItemProperty', 'Unregister-WinarchyAutostart') }
+        @{ File = 'module\Winarchy\Private\SelfUpdate.ps1'; Function = 'Invoke-WinarchySelfUpdate'; Mutations = @('git', 'pwsh') }
+        @{ File = 'module\Winarchy\Private\Shell.ps1'; Function = 'Install-WinarchyShellBinary'; Mutations = @('Copy-WinarchyRunningBinary') }
+    ) {
+        param($File, $Function, $Mutations)
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $script:Root $File), [ref]$null, [ref]$null)
+        if ($Function) {
+            $ast = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $Function }, $true).Body
+        }
+        $commands = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true))
+        $guard = @($commands | Where-Object { $_.GetCommandName() -eq 'Assert-WinarchyCustomShellPolicySafeForMaintenance' })
+        $guard.Count | Should -Be 1
+        foreach ($name in $Mutations) {
+            $sideEffects = @($commands | Where-Object { $_.GetCommandName() -eq $name })
+            $sideEffects.Count | Should -BeGreaterThan 0
+            foreach ($sideEffect in $sideEffects) {
+                $guard[0].Extent.StartOffset | Should -BeLessThan $sideEffect.Extent.StartOffset
+            }
+        }
+    }
+}
+
+Describe 'Session shell policy on removal' {
+    It 'gives Explorer back before uninstall or rollback, only when Winarchy owns the policy' {
+        InModuleScope Winarchy {
+            Mock Invoke-WinarchyCustomShellChange { }
+            Mock Set-WinarchyUwphost { }
+            Mock Write-WinarchyOk { }
+            Mock Write-Host { }
+            Mock Get-WinarchyCustomShellStatus { [pscustomobject]@{ State = 'Inactive'; Record = $null } }
+            Remove-WinarchySessionShellPolicy
+            Mock Get-WinarchyCustomShellStatus { [pscustomobject]@{ State = 'Installed'; Record = $null } }
+            Remove-WinarchySessionShellPolicy -DryRun
+            Should -Invoke Invoke-WinarchyCustomShellChange -Times 0 -Exactly
+            Remove-WinarchySessionShellPolicy
+            Should -Invoke Invoke-WinarchyCustomShellChange -Times 1 -Exactly -ParameterFilter { $Action -eq 'deactivate' }
+            Should -Invoke Set-WinarchyUwphost -Times 1 -Exactly -ParameterFilter { $Action -eq 'off' }
+        }
+        foreach ($file in 'uninstall.ps1', 'scripts\rollback-to-seelen.ps1') {
+            $text = Get-Content (Join-Path $script:Root $file) -Raw
+            $text.IndexOf('Remove-WinarchySessionShellPolicy') | Should -BeGreaterThan -1
+            $text.IndexOf('Remove-WinarchySessionShellPolicy') | Should -BeLessThan $text.IndexOf('Unregister-WinarchyAutostart')
         }
     }
 }
@@ -3842,17 +5044,111 @@ Describe 'Shell stop callers' {
         $script:Rollback | Should -Match 'Stop-WinarchyShell'
     }
 
+    It 'uninstall and rollback refuse teardown before stopping services when Explorer cannot return' {
+        $script:Uninstall.IndexOf('if (-not $DryRun -and -not (Stop-WinarchyShell))') | Should -BeGreaterThan -1
+        $script:Uninstall.IndexOf('if (-not $DryRun -and -not (Stop-WinarchyShell))') | Should -BeLessThan $script:Uninstall.IndexOf("Invoke-Step 'Stop komorebi")
+        $script:Rollback.IndexOf('if (-not (Stop-WinarchyShell))') | Should -BeGreaterThan -1
+        $script:Rollback.IndexOf('if (-not (Stop-WinarchyShell))') | Should -BeLessThan $script:Rollback.IndexOf('komorebic stop')
+        $script:Rollback.IndexOf('if (-not (Stop-WinarchyShell))') | Should -BeLessThan $script:Rollback.IndexOf('Stop-Process -Name yasb')
+    }
+
+    It 'theme reload uses the non-restoring restart command' {
+        ([regex]::Matches($script:Theme, [regex]::Escape('if (-not (Stop-WinarchyShell -Restart))'))).Count | Should -Be 2
+    }
+
     It 'no caller kills winarchy-shell by name with Stop-Process' {
         foreach ($text in $script:Theme, $script:Uninstall, $script:Rollback) {
             $text | Should -Not -Match 'Stop-Process[^\r\n]*winarchy-shell'
         }
     }
 
-    It 'the AHK QuitStack wait matches ShellQuitWaitMs' {
+    It 'the AHK QuitStack normal-mode source wait is 1.5 seconds and matches ShellQuitWaitMs' {
         $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
-        ($ahk -match "ProcessWaitClose\('winarchy-shell\.exe', ([\d.]+)\)") | Should -BeTrue
-        $ms = [double]$Matches[1] * 1000
+        $quit = [regex]::Match($ahk, '(?ms)^QuitStack\(\) \{.*?^\}').Value
+        ($quit -match "(?s)if !sessionShell \{\s+ShellIsland\('quit'\)\s+if shellPid && ProcessWaitClose\(shellPid, ([\d.]+)\)") | Should -BeTrue
+        $seconds = [double]$Matches[1]
+        $seconds | Should -Be 1.5
         $shellMs = InModuleScope Winarchy { $script:ShellQuitWaitMs }
-        $ms | Should -Be $shellMs
+        ($seconds * 1000) | Should -Be $shellMs
+    }
+
+    It 'CustomShell delegates its 25 second return wait to PowerShell through the bridge' {
+        $shell = Get-Content (Join-Path $script:Root 'module\Winarchy\Private\Shell.ps1') -Raw
+        $bridge = Get-Content (Join-Path $script:Root 'scripts\Stop-WinarchySessionShell.ps1') -Raw
+        $ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw
+        $quit = [regex]::Match($ahk, '(?ms)^QuitStack\(\) \{.*?^\}').Value
+
+        InModuleScope Winarchy { $script:ShellReturnWaitMs | Should -Be 25000 }
+        $shell | Should -Match ([regex]::Escape('$waitMs = if ($command -eq ''return'' -and $sent) { $script:ShellReturnWaitMs } else { $script:ShellQuitWaitMs }'))
+        $bridge | Should -Match 'if \(-not \(Stop-WinarchyShell\)\) \{ exit 1 \}'
+        $quit | Should -Match 'RunShellRecoveryBridge\(\)'
+        $quit | Should -Not -Match "ShellIsland\('return'\)|ProcessWaitClose\(shellPid, 25\)|WaitExplorerShellReady"
+    }
+}
+
+Describe 'Super+drag in a floating workspace' {
+    BeforeAll { $script:Ahk = Get-Content (Join-Path $script:Root 'config\ahk\winarchy.ahk') -Raw }
+
+    It 'move and resize leave the window where it was dropped when nothing is tiled' {
+        $fn = [regex]::Match($script:Ahk, '(?s)DragIsFree\(hwnd\) \{.*?\n\}')
+        $fn.Success | Should -BeTrue
+        $fn.Value | Should -Match '!ws\.tile'
+        $fn.Value | Should -Match 'floating_windows'
+        foreach ($name in 'DragMove', 'DragResize') {
+            $body = [regex]::Match($script:Ahk, "(?s)$name\(hwnd, x0, y0, held\) \{.*?\n\}").Value
+            $body | Should -Match '(?s)timeEndPeriod.*?if DragIsFree\(hwnd\)\s+return' -Because "$name no debe restaurar la posición en un workspace flotante"
+        }
+    }
+
+    It 'only the tiled path snaps the window back before the swap' {
+        $move = [regex]::Match($script:Ahk, '(?s)DragMove\(hwnd, x0, y0, held\) \{.*?\n\}').Value
+        $move.IndexOf('DragIsFree') | Should -BeLessThan $move.IndexOf("'int', wx, 'int', wy, 'int', 0")
+    }
+}
+
+Describe 'Layout apply report' {
+    It 'does not claim success when komorebi.json was not written' {
+        InModuleScope Winarchy {
+            Mock Import-WinarchyWindowPrefs { [pscustomobject]@{ Exe = 'a.exe'; Monitor = 'm' } }
+            Mock Import-WinarchyWorkspaceLayouts { }
+            Mock Test-WinarchyProcess { $true }
+            Mock Get-WinarchyKomorebiState { @{} }
+            Mock Get-WinarchyMonitorIndexMap { @{ m = 0 } }
+            Mock Update-WinarchyKomorebiRules { $false }
+            Mock Write-WinarchyOk { }
+            Invoke-WinarchyLayoutApply
+            Should -Invoke Update-WinarchyKomorebiRules -Times 1 -Exactly
+            Should -Invoke Write-WinarchyOk -Times 0 -Exactly
+        }
+    }
+}
+
+Describe 'Dynamic accent marker' {
+    It 'stays pending while komorebi.json cannot be published' {
+        InModuleScope Winarchy -Parameters @{ Root = $script:Root; Work = (Join-Path $TestDrive 'accent') } {
+            param($Root, $Work)
+            New-Item -ItemType Directory -Path (Join-Path $Work 'state') -Force | Out-Null
+            foreach ($dir in 'themes', 'templates') { Copy-Item (Join-Path $Root $dir) (Join-Path $Work $dir) -Recurse }
+            $oldProfile = $env:USERPROFILE
+            try {
+                $env:USERPROFILE = $Work
+                Mock Get-WinarchyRoot { $Work }
+                Mock Get-WinarchyStateDir { Join-Path $Work 'state' }
+                Mock Get-WinarchyThemesDir { Join-Path $Work 'themes' }
+                Mock Set-WinarchyThemeLiveAccent { '#123456' }
+                Mock Add-WinarchyAppRulesToKomorebiJson { $Json }
+                Mock Add-WinarchyWindowRulesToKomorebiJson {}
+                Mock Assert-WinarchyWeztermConfig {}
+                Mock Get-WinarchyTerminalSettingsPath {}
+                Mock Merge-WinarchyTerminalScheme {}
+                Mock Set-WinarchyFlowTheme {}
+                Mock Invoke-WinarchyReload {}
+                Mock Update-WinarchyLockScreen {}
+                Set-WinarchyTheme -Name 'auto-accent' -LightRefresh
+                Get-Content (Join-Path $Work 'state\dynamic-accent') -Raw | Should -Be 'pending'
+                Should -Invoke Invoke-WinarchyReload -Times 1 -Exactly
+            }
+            finally { $env:USERPROFILE = $oldProfile }
+        }
     }
 }

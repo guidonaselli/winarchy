@@ -23,6 +23,7 @@ $ErrorActionPreference = 'Stop'
 $Root = $PSScriptRoot
 
 Import-Module (Join-Path $Root 'module\Winarchy\Winarchy.psd1') -Force
+Assert-WinarchyCustomShellPolicySafeForMaintenance
 
 Write-Host "`n== Winarchy install ==" -ForegroundColor Cyan
 
@@ -140,6 +141,7 @@ if ($WithYasb -and -not (Test-Path (Join-Path (Get-WinarchyStateDir) 'bar'))) {
     Set-WinarchyFileAtomic -Path (Join-Path (Get-WinarchyStateDir) 'bar') -Value 'yasb'
 }
 Initialize-WinarchyBar
+Update-WinarchyUwphost
 
 # --- 3c. Skill "winarchy" en los agentes de IA detectados (estilo Omarchy) ----------
 Install-WinarchySkill
@@ -163,6 +165,8 @@ if ($initialTheme) {
     Write-WinarchyInfo 'Generating configs with the initial theme (tokyo-night)...'
 }
 Set-WinarchyTheme -Name $initialTheme
+# la recarga del config deja vivas las ventanas de borde anteriores; solo este comando las destruye
+if (Get-Process komorebi -ErrorAction SilentlyContinue) { komorebic border-implementation windows }
 
 # --- 4b. Identidad unificada: tray único + auto-updates de terceros off ---------------
 # Idempotente: se reaplica en cada install/repair, así un update de Flow/ShareX/Everything
@@ -210,9 +214,10 @@ if ($Activate) {
     catch { Write-WinarchyWarn "Could not remove the Startup delay: $($_.Exception.Message)" }
 
     Write-WinarchyInfo 'Starting the stack...'
+    $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
     if ($komorebic) { Start-WinarchyKomorebi }
     if ($yasb -and (Get-WinarchyActiveBar) -eq 'yasb') { & $yasb start }
-    elseif ((Get-WinarchyActiveBar) -eq 'native' -and -not (Get-Process winarchy-shell -ErrorAction SilentlyContinue) -and ($shellExe = Get-WinarchyShellExe)) { Start-Process $shellExe -WindowStyle Hidden }
+    elseif ((Get-WinarchyActiveBar) -eq 'native' -and -not (Get-Process winarchy-shell -ErrorAction SilentlyContinue | Where-Object SessionId -eq $sessionId) -and ($shellExe = Get-WinarchyShellExe)) { Start-Process $shellExe -ArgumentList (Get-WinarchyShellArguments) -WindowStyle Hidden }
     if ($ahkExe) {
         Remove-Item Env:CLAUDE_CODE_CHILD_SESSION, Env:CLAUDECODE -ErrorAction SilentlyContinue
         Start-Process $ahkExe -ArgumentList "`"$Root\config\ahk\winarchy.ahk`""

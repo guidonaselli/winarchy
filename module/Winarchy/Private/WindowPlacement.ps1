@@ -32,14 +32,21 @@ function Add-WinarchyWindowRulesToKomorebiJson {
       El índice de monitor se resuelve contra el estado vivo (las preferencias guardan
       device_id). Sin komorebi corriendo no hay a qué resolver: se devuelve el JSON tal
       cual y las reglas entran en la próxima regeneración.
+
+      Si komorebi corre pero no da su estado, no devuelve nada: publicar sin la vista viva
+      pisaría los layouts, así que quien llama deja el komorebi.json que está.
     #>
-    param([Parameter(Mandatory)][string]$Json)
+    param([Parameter(Mandatory)][string]$Json, [switch]$SkipLiveView)
     if (-not (Test-WinarchyProcess 'komorebi')) { return $Json }
     try {
         $state = Get-WinarchyKomorebiState
         $map = Get-WinarchyMonitorIndexMap -State $state
     }
-    catch { return $Json }
+    catch {
+        if (-not (Test-Path (Join-Path (Get-WinarchyRoot) 'config\komorebi\komorebi.json'))) { return $Json }
+        Write-WinarchyWarn "komorebi.json not rewritten (`winarchy theme set` applies it later): $($_.Exception.Message)"
+        return
+    }
 
     $config = $Json | ConvertFrom-Json
     # display_index_preferences con el orden vivo de los monitores
@@ -82,7 +89,56 @@ function Add-WinarchyWindowRulesToKomorebiJson {
             }
         }
     }
+    Set-WinarchyConfigLiveView -Config $config -State $state -Map $map -GlobalOnly:$SkipLiveView
     $config | ConvertTo-Json -Depth 50
+}
+
+function Set-WinarchyConfigLiveView {
+    <# La recarga estática de komorebi pisa layout, flip, paddings, tiling y apilar/mosaico de ventanas nuevas
+       con lo que diga el archivo: se escribe lo vivo antes de publicarlo.
+       -GlobalOnly deja los workspaces como vienen (`layout apply`); el modo global no tiene preferencia guardada. #>
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$State, [Parameter(Mandatory)][hashtable]$Map, [switch]$GlobalOnly)
+    $behaviour = $State.PSObject.Properties['new_window_behaviour']?.Value
+    if ($behaviour) { $Config | Add-Member -NotePropertyName window_container_behaviour -NotePropertyValue $behaviour -Force }
+    else { $Config.PSObject.Properties.Remove('window_container_behaviour') }
+    if ($GlobalOnly) { return }
+    foreach ($monitor in $State.monitors.elements) {
+        if (-not $monitor.device_id -or -not $Map.ContainsKey($monitor.device_id)) { continue }
+        $target = $Config.monitors[$Map[$monitor.device_id]]
+        $index = -1
+        foreach ($live in $monitor.workspaces.elements) {
+            $index++
+            if (-not $target -or $index -ge @($target.workspaces).Count) { continue }
+            $workspace = $target.workspaces[$index]
+            $layout = $live.layout.PSObject.Properties['Default']?.Value
+            if ($layout) { $workspace | Add-Member -NotePropertyName layout -NotePropertyValue $layout -Force }
+            if ($live.tile -eq $false) { $workspace | Add-Member -NotePropertyName tile -NotePropertyValue $false -Force }
+            else { $workspace.PSObject.Properties.Remove('tile') }
+            foreach ($key in 'layout_flip', 'container_padding', 'workspace_padding') {
+                $value = $live.PSObject.Properties[$key]?.Value
+                if ($null -ne $value) { $workspace | Add-Member -NotePropertyName $key -NotePropertyValue $value -Force }
+                else { $workspace.PSObject.Properties.Remove($key) }
+            }
+        }
+    }
+}
+
+function Invoke-WinarchyKomorebiStaticReload {
+    <# Reescribe komorebi.json con la vista viva: el watcher de komorebi lo recarga sin reconstruir el WM. #>
+    param([Parameter(Mandatory)][string]$ConfigPath)
+    try {
+        $state = Get-WinarchyKomorebiState
+        $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+        Set-WinarchyConfigLiveView -Config $config -State $state -Map (Get-WinarchyMonitorIndexMap -State $state)
+        Set-WinarchyFileAtomic -Path $ConfigPath -Value ($config | ConvertTo-Json -Depth 50)
+    }
+    catch {
+        # sin vista viva no se escribe: la recarga pisaría los layouts; el resto del reload sigue
+        Write-WinarchyWarn "komorebi config not reloaded: $($_.Exception.Message)"
+        return
+    }
+    Restore-WinarchyFloatingApps -ConfigPath $ConfigPath
+    Write-WinarchyStaleIgnoreWarning -ConfigPath $ConfigPath
 }
 
 function Get-WinarchyWindowPlacements {
@@ -185,6 +241,20 @@ function Get-WinarchyMonitorIndexMap {
     foreach ($monitor in $State.monitors.elements) {
         $index++
         if ($monitor.device_id) { $map[$monitor.device_id] = $index }
+    }
+    # Windows reasigna el sufijo UID del device_id al reconectar o reordenar pantallas, y el id guardado deja de
+    # coincidir con un monitor que sigue ahí. El modelo (lo que va antes del primer '-') es estable: un id guardado
+    # sin coincidencia exacta se resuelve por modelo, solo si hay un único monitor vivo de ese modelo.
+    $path = Get-WinarchyWindowPrefsPath
+    if (Test-Path $path) {
+        $data = Import-WinarchyToml -Path $path
+        $saved = foreach ($section in $data.Values) { if ($section -is [System.Collections.IEnumerable] -and $section -isnot [string]) { foreach ($entry in $section) { if ($entry -is [System.Collections.IDictionary] -and $entry['monitor']) { $entry['monitor'] } } } }
+        foreach ($id in @($saved | Select-Object -Unique)) {
+            if ($map.ContainsKey($id)) { continue }
+            $model = ($id -split '-')[0]
+            $candidates = @($map.Keys | Where-Object { ($_ -split '-')[0] -eq $model })
+            if ($candidates.Count -eq 1) { $map[$id] = $map[$candidates[0]] }
+        }
     }
     $map
 }
@@ -363,8 +433,8 @@ function Invoke-WinarchyLayoutApply {
     foreach ($pref in @($prefs | Where-Object { -not $map.ContainsKey($_.Monitor) })) {
         Write-WinarchyWarn "'$($pref.Exe)': monitor '$($pref.Monitor)' not connected; rule skipped."
     }
-    Update-WinarchyKomorebiRules
-    if (-not $Quiet) {
+    $written = Update-WinarchyKomorebiRules -SkipLiveView -PassThru
+    if ($written -and -not $Quiet) {
         $applied = @($prefs | Where-Object { $map.ContainsKey($_.Monitor) }).Count
         Write-WinarchyOk "$applied window placement rule(s) written to komorebi.json and reloaded."
     }

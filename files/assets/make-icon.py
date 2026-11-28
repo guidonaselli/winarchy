@@ -5,7 +5,7 @@ import resvg_py
 from PIL import Image
 
 # Theme colours from config/files/theme.json (foreground, accent).
-VALUES = {"--icon-stroke": "#e6d9db", "--icon-accent": "#f38d70", "--icon-back-opacity": "0.55", "--icon-accent-opacity": "0.45"}
+VALUES = {"--icon-stroke": "#d4d4d8", "--icon-accent": "#8b919c", "--icon-back-opacity": "0.55", "--icon-accent-opacity": "0.45"}
 SIZES = (16, 24, 32, 48, 64, 256)
 
 

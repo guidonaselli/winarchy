@@ -67,6 +67,10 @@ pub enum Hit {
     CalNext,
     // Celda de la grilla del mes, por índice.
     CalCell(usize),
+    // Línea de notificación reciente del panel del reloj, por índice.
+    Notif(usize),
+    // Título de la sección de notificaciones: pasa a la página siguiente.
+    NotifPage,
     Surface,
 }
 
@@ -107,6 +111,7 @@ pub struct PanelRects {
     pub cal_cells: Vec<R>,
     pub agenda: Vec<R>,
     pub world: R,
+    pub notifs: Vec<R>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
@@ -119,6 +124,8 @@ pub struct PanelShape {
     pub agenda: usize,
     // Fila de relojes de otras ciudades bajo la agenda.
     pub world: bool,
+    // Líneas de notificaciones recientes bajo la agenda (con su título).
+    pub notifs: usize,
 }
 
 pub struct Inputs<'a> {
@@ -182,7 +189,8 @@ pub fn panel_height(scale: f32, shape: PanelShape) -> i32 {
     if shape.cal_rows > 0 {
         let fixed = CAL_HEAD_DIP + 2 + CAL_WEEK_DIP + 2 + SECTION_GAP_DIP + PANEL_TOP_DIP + PANEL_BOTTOM_DIP;
         let world = if shape.world { px(AGENDA_LINE_DIP + SECTION_GAP_DIP, scale) } else { 0 };
-        return px(fixed, scale) + shape.cal_rows as i32 * px(CAL_CELL_DIP, scale) + shape.agenda as i32 * px(AGENDA_LINE_DIP, scale) + world;
+        let notifs = if shape.notifs > 0 { px((shape.notifs as i32 + 1) * AGENDA_LINE_DIP + SECTION_GAP_DIP, scale) } else { 0 };
+        return px(fixed, scale) + shape.cal_rows as i32 * px(CAL_CELL_DIP, scale) + shape.agenda as i32 * px(AGENDA_LINE_DIP, scale) + world + notifs;
     }
     let gap = px(SECTION_GAP_DIP, scale);
     let media = if shape.media { px(MEDIA_DIP, scale) + gap } else { 0 };
@@ -267,10 +275,15 @@ impl Layout {
         if shape.world {
             p.world = R::new(pad, y + shape.agenda as i32 * line + gap, right - pad, line);
         }
+        if shape.notifs > 0 {
+            let top = y + shape.agenda as i32 * line + if shape.world { gap + line } else { 0 } + gap;
+            // la primera fila es el título de la sección
+            p.notifs = (0..=shape.notifs).map(|n| R::new(pad, top + n as i32 * line, right - pad, line)).collect();
+        }
         if i.flip {
             // El orden visual (título arriba, agenda abajo) no cambia al pegar la isla abajo: se espeja dentro del panel.
             let total = panel_height(s, shape);
-            for r in [&mut p.cal_title, &mut p.cal_prev, &mut p.cal_next, &mut p.world].into_iter().chain(&mut p.cal_heads).chain(&mut p.cal_cells).chain(&mut p.agenda) {
+            for r in [&mut p.cal_title, &mut p.cal_prev, &mut p.cal_next, &mut p.world].into_iter().chain(&mut p.cal_heads).chain(&mut p.cal_cells).chain(&mut p.agenda).chain(&mut p.notifs) {
                 r.y = 2 * bar + total - r.y - r.h;
             }
         }
@@ -365,6 +378,12 @@ impl Layout {
             }
             if let Some(n) = p.cal_cells.iter().position(|c| c.contains(x, y)) {
                 return Some(Hit::CalCell(n));
+            }
+            if p.notifs.first().is_some_and(|c| c.contains(x, y)) {
+                return Some(Hit::NotifPage);
+            }
+            if let Some(n) = p.notifs.iter().skip(1).position(|c| c.contains(x, y)) {
+                return Some(Hit::Notif(n));
             }
             for (r, h) in [(p.prev, Hit::Prev), (p.toggle, Hit::Toggle), (p.next, Hit::Next)] {
                 if r.contains(x, y) {

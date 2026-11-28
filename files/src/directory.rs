@@ -100,6 +100,126 @@ pub fn entry_at(path: &std::path::Path) -> Option<Entry> {
     })
 }
 
+// Newest first, as the shell lists them: the target of every shortcut in the user's Recent folder.
+pub fn recent(limit: usize) -> Vec<Entry> {
+    let Some(folder) = std::env::var_os("APPDATA").map(|appdata| PathBuf::from(appdata).join("Microsoft\\Windows\\Recent")) else {
+        return Vec::new();
+    };
+    let Ok(read) = fs::read_dir(folder) else { return Vec::new() };
+    let mut links: Vec<_> = read
+        .filter_map(Result::ok)
+        .filter(|link| link.path().extension().is_some_and(|extension| extension.eq_ignore_ascii_case("lnk")))
+        .filter_map(|link| Some((link.metadata().ok()?.modified().ok()?, link.path())))
+        .collect();
+    links.sort_by(|a, b| b.0.cmp(&a.0));
+    links.into_iter().filter_map(|(_, link)| entry_at(&crate::shell::link_target(&link)?)).filter(|entry| !entry.is_directory).take(limit).collect()
+}
+
+// What the shell put in the Recycle Bin of every local drive, read from its own bookkeeping: each deleted item `$R<id>`
+// has a sibling `$I<id>` recording where it came from and when. Returns the entry (named as it was) and its origin.
+pub fn recycle_bin() -> Vec<(Entry, PathBuf)> {
+    let Some(sid) = user_sid() else { return Vec::new() };
+    let mut items = Vec::new();
+    for drive in drives().iter().filter(|drive| drive.kind == DriveKind::Fixed) {
+        let Ok(read) = fs::read_dir(drive.path.join("$Recycle.Bin").join(&sid)) else { continue };
+        for info in read.filter_map(Result::ok).filter(|item| item.file_name().to_string_lossy().starts_with("$I")) {
+            let Some((original, deleted)) = parse_recycle_info(&fs::read(info.path()).unwrap_or_default()) else { continue };
+            let data = info.path().with_file_name(info.file_name().to_string_lossy().replacen("$I", "$R", 1));
+            let Some(mut entry) = entry_at(&data) else { continue };
+            entry.name = original.file_name().map_or_else(|| original.to_string_lossy().into_owned(), |name| name.to_string_lossy().into_owned());
+            entry.modified = Some(deleted);
+            items.push((entry, original));
+        }
+    }
+    items.sort_by(|a, b| b.0.modified.cmp(&a.0.modified));
+    items
+}
+
+fn parse_recycle_info(bytes: &[u8]) -> Option<(PathBuf, std::time::SystemTime)> {
+    let word = |at: usize, len: usize| -> Option<u64> {
+        let mut padded = [0u8; 8];
+        padded[..len].copy_from_slice(bytes.get(at..at + len)?);
+        Some(u64::from_le_bytes(padded))
+    };
+    let version = word(0, 8)?;
+    let filetime = word(16, 8)?;
+    let name_at = if version >= 2 { 28 } else { 24 };
+    let units: Vec<u16> = bytes.get(name_at..)?.chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).take_while(|&unit| unit != 0).collect();
+    let deleted = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(filetime.checked_sub(116_444_736_000_000_000)? / 10_000_000);
+    Some((PathBuf::from(String::from_utf16_lossy(&units)), deleted))
+}
+
+fn user_sid() -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    static SID: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    SID.get_or_init(|| {
+        let output = std::process::Command::new("whoami").args(["/user", "/nh", "/fo", "csv"]).creation_flags(0x0800_0000).output().ok()?;
+        let line = String::from_utf8_lossy(&output.stdout).into_owned();
+        line.trim().rsplit(',').next().map(|sid| sid.trim_matches('"').to_owned()).filter(|sid| sid.starts_with("S-"))
+    })
+    .clone()
+}
+
+// Puts a deleted item back where it was; refuses to overwrite something that has taken its place.
+pub fn restore(data: &std::path::Path, original: &std::path::Path) -> Result<(), String> {
+    if original.exists() {
+        return Err(format!("{} already exists", original.display()));
+    }
+    if let Some(parent) = original.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::rename(data, original).map_err(|error| error.to_string())?;
+    let _ = fs::remove_file(info_of(data));
+    Ok(())
+}
+
+// Deletes a Recycle Bin item for good, together with its bookkeeping file.
+pub fn purge(data: &std::path::Path) -> Result<(), String> {
+    let removed = if data.is_dir() { fs::remove_dir_all(data) } else { fs::remove_file(data) };
+    removed.map_err(|error| format!("{}: {error}", data.display()))?;
+    let _ = fs::remove_file(info_of(data));
+    Ok(())
+}
+
+fn info_of(data: &std::path::Path) -> PathBuf {
+    data.with_file_name(data.file_name().map_or_else(String::new, |name| name.to_string_lossy().replacen("$R", "$I", 1)))
+}
+
+#[cfg(test)]
+mod recycle_tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_bookkeeping_of_a_deleted_item() {
+        let mut info = Vec::new();
+        info.extend(2u64.to_le_bytes());
+        info.extend(10u64.to_le_bytes());
+        info.extend((116_444_736_000_000_000u64 + 86_400 * 10_000_000).to_le_bytes());
+        let path: Vec<u16> = r"C:\Users\a\note.txt".encode_utf16().chain(Some(0)).collect();
+        info.extend((path.len() as u32).to_le_bytes());
+        info.extend(path.iter().flat_map(|unit| unit.to_le_bytes()));
+        let (original, deleted) = parse_recycle_info(&info).unwrap();
+        assert_eq!(original, PathBuf::from(r"C:\Users\a\note.txt"));
+        assert_eq!(deleted, std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(86_400));
+    }
+
+    #[test]
+    fn restore_refuses_to_overwrite() {
+        let dir = std::env::temp_dir().join(format!("winarchy-bin-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let (data, original) = (dir.join("$RABC.txt"), dir.join("a.txt"));
+        fs::write(&data, "x").unwrap();
+        fs::write(dir.join("$IABC.txt"), "i").unwrap();
+        fs::write(&original, "y").unwrap();
+        assert!(restore(&data, &original).is_err());
+        fs::remove_file(&original).unwrap();
+        restore(&data, &original).unwrap();
+        assert!(original.exists() && !data.exists() && !dir.join("$IABC.txt").exists());
+        fs::remove_file(&original).unwrap();
+        fs::remove_dir(&dir).unwrap();
+    }
+}
+
 pub fn read(path: &PathBuf) -> io::Result<Vec<Entry>> {
     let mut entries = fs::read_dir(path)?.map(|entry| entry_of(&entry?)).collect::<io::Result<Vec<_>>>()?;
     entries.sort_by_key(|entry| (!entry.is_directory, entry.name.to_lowercase()));
@@ -289,6 +409,24 @@ pub fn drives() -> Vec<Drive> {
     drives
 }
 
+// Files under `scope` whose name contains `term`, answered by the Windows Search index (the same one Explorer uses).
+// The term travels through the environment so it can never become part of the script.
+pub fn search_index(scope: &std::path::Path, term: &str) -> Result<Vec<PathBuf>, String> {
+    use std::os::windows::process::CommandExt;
+    const SCRIPT: &str = "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); $c = New-Object System.Data.OleDb.OleDbConnection \"Provider=Search.CollatorDSO;Extended Properties='Application=Windows'\"; $c.Open();         $q = $env:WINARCHY_TERM.Replace(\"'\", \"''\").Replace('%', '[%]').Replace('_', '[_]'); $s = $env:WINARCHY_SCOPE.Replace(\"'\", \"''\");         $m = $c.CreateCommand(); $m.CommandText = \"SELECT TOP 500 System.ItemPathDisplay FROM SystemIndex WHERE SCOPE='file:$s' AND System.FileName LIKE '%$q%'\";         $r = $m.ExecuteReader(); while ($r.Read()) { $r.GetString(0) }";
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
+        .env("WINARCHY_TERM", term)
+        .env("WINARCHY_SCOPE", scope)
+        .creation_flags(0x0800_0000)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).lines().next().unwrap_or("search failed").to_owned());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).lines().map(str::trim).filter(|line| !line.is_empty()).map(PathBuf::from).collect())
+}
+
 pub fn places() -> Vec<(String, PathBuf)> {
     let mut places = Vec::new();
     if let Some(home) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
@@ -307,6 +445,10 @@ pub fn places() -> Vec<(String, PathBuf)> {
         }
         places.insert(0, (tr("Home").to_owned(), home));
     }
+    // only whether WSL is installed is checked here: touching the share itself can start the WSL VM and stall startup
+    if std::env::var_os("SystemRoot").is_some_and(|root| PathBuf::from(root).join(r"System32\wsl.exe").exists()) {
+        places.push(("WSL".to_owned(), PathBuf::from(r"\\wsl.localhost")));
+    }
     places
 }
 
@@ -314,16 +456,39 @@ pub fn format_size(entry: &Entry) -> String {
     if entry.is_directory {
         return String::new();
     }
-    let mut size = entry.size as f64;
+    format_bytes(entry.size)
+}
+
+pub fn format_bytes(bytes: u64) -> String {
+    let mut size = bytes as f64;
     let mut unit = 0;
     while size >= 1024.0 && unit < 4 {
         size /= 1024.0;
         unit += 1;
     }
     match unit {
-        0 => format!("{} B", entry.size),
+        0 => format!("{bytes} B"),
         _ => format!("{size:.1} {}", ["", "KB", "MB", "GB", "TB"][unit]),
     }
+}
+
+// Total size and file count of everything below `root`; symlinks are not followed, unreadable folders count as empty.
+pub fn tree_size(root: &std::path::Path) -> (u64, u64) {
+    let (mut bytes, mut files) = (0, 0);
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(folder) = pending.pop() {
+        let Ok(read) = fs::read_dir(&folder) else { continue };
+        for item in read.filter_map(Result::ok) {
+            let Ok(kind) = item.file_type() else { continue };
+            if kind.is_dir() {
+                pending.push(item.path());
+            } else if let Ok(metadata) = item.metadata() {
+                bytes += metadata.len();
+                files += 1;
+            }
+        }
+    }
+    (bytes, files)
 }
 
 pub fn format_modified(entry: &Entry) -> String {

@@ -10,7 +10,8 @@ use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SPACE, VK_UP};
-use windows::Win32::UI::Shell::ShellExecuteW;
+use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_LOCAL_SERVER};
+use windows::Win32::UI::Shell::{ApplicationActivationManager, IApplicationActivationManager, ShellExecuteW, AO_NONE};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 type MonRect = (i32, i32, i32, i32);
@@ -211,12 +212,140 @@ pub fn is_open() -> bool {
     MENU.with(|m| m.try_borrow().map(|m| m.is_some()).unwrap_or(true))
 }
 
+const ACTIVATION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
+// sin Explorer una app UWP no devuelve error: se cuelga, y el aviso no puede tardar 20 s
+const SESSION_ACTIVATION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(3);
+
+// Err(None) es plazo vencido: sin Explorer ActivateApplication puede no volver nunca
+fn activate_with_deadline(activate: impl FnOnce() -> Result<(), i32> + Send + 'static, deadline: std::time::Duration) -> Result<(), Option<i32>> {
+    let (done, result) = std::sync::mpsc::channel();
+    std::thread::spawn(move || { let _ = done.send(activate()); });
+    match result.recv_timeout(deadline) {
+        Ok(outcome) => outcome.map_err(Some),
+        Err(_) => Err(None),
+    }
+}
+
+// sin Explorer una app UWP solo abre mientras el helper la presenta
+fn uwp_unhosted() -> bool {
+    crate::HOST.get().is_some_and(|h| h.session_shell) && !crate::uwphost::presenting()
+}
+
+fn report_unlaunched(target: &str, hresult: Option<i32>) {
+    let Some(host) = crate::HOST.get() else { return };
+    let why = hresult.map_or_else(|| "timeout".to_owned(), |h| format!("hr=0x{:08X}", h as u32));
+    crate::boot_log(&host.root, &format!("launch failed: {target} {why}"));
+    // con Explorer un error ya tuvo su fallback; un plazo vencido no, y no puede quedar en silencio
+    if host.session_shell || hresult.is_none() {
+        // sin Explorer, UWP se cuelga o responde "Class not registered"
+        let uwp = uwp_unhosted() && hresult.map_or(true, |h| h == 0x80040900u32 as i32);
+        crate::notify(t(if uwp { K::UwpUnavailable } else { K::LaunchFailed }));
+    }
+}
+
+// applets Win32 que sí abren sin Explorer; SettingsFallback de winarchy.ahk repite los suyos
+const SETTINGS_FALLBACK: &[(&str, &str, &str)] = &[
+    ("ms-settings:sound", "control.exe", "mmsys.cpl"),
+    ("ms-settings:apps-volume", "SndVol.exe", ""),
+    ("ms-settings:network", "control.exe", "ncpa.cpl"),
+    ("ms-settings:network-wifi", "control.exe", "ncpa.cpl"),
+    ("ms-settings:powersleep", "control.exe", "powercfg.cpl"),
+    ("ms-settings:dateandtime", "control.exe", "timedate.cpl"),
+];
+
+fn settings_fallback(uri: &str) -> Option<(&'static str, &'static str)> {
+    SETTINGS_FALLBACK.iter().find(|(known, ..)| *known == uri).map(|&(_, exe, args)| (exe, args))
+}
+
 pub fn launch(path: &str, args: &str) {
+    // Configuración es UWP: sin quien la presente no abre y ShellExecute no lo informa
+    if path.starts_with("ms-settings:") && uwp_unhosted() {
+        match settings_fallback(path) {
+            Some((exe, args)) => launch(exe, args),
+            None => report_unlaunched(path, Some(0x80040900u32 as i32)),
+        }
+        return;
+    }
+    // sin Explorer, ShellExecute de shell:AppsFolder falla con "Class not registered";
+    // la activación va en un hilo propio porque bloquea y bombea mensajes en el de UI
+    if let Some(aumid) = path.strip_prefix(r"shell:AppsFolder\") {
+        let (aumid, fallback) = (aumid.to_owned(), (path.to_owned(), args.to_owned()));
+        std::thread::spawn(move || {
+            let wide_id: Vec<u16> = aumid.encode_utf16().chain(std::iter::once(0)).collect();
+            let activate = move || unsafe {
+                use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+                let activated = CoCreateInstance::<_, IApplicationActivationManager>(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER)
+                    .and_then(|m| m.ActivateApplication(PCWSTR(wide_id.as_ptr()), PCWSTR::null(), AO_NONE));
+                CoUninitialize();
+                activated.map(drop).map_err(|e| e.code().0)
+            };
+            let session = crate::HOST.get().is_some_and(|h| h.session_shell);
+            let deadline = if uwp_unhosted() { SESSION_ACTIVATION_DEADLINE } else { ACTIVATION_DEADLINE };
+            if let Err(hresult) = activate_with_deadline(activate, deadline) {
+                // una app Win32 también figura en AppsFolder, pero no se activa como las de la Tienda: se abre su destino
+                if let Some((target, args)) = hresult.and_then(|_| link_target(&fallback.0)) {
+                    // shortcut: corre desde la carpeta del destino, no desde el "Iniciar en" del acceso directo; leer el .lnk si una app lo necesita
+                    launch(&target, &args);
+                    return;
+                }
+                report_unlaunched(&fallback.0, hresult);
+                // un plazo vencido puede completar después: relanzar abriría la app dos veces
+                if !session && hresult.is_some() {
+                    shell_execute(&fallback.0, &fallback.1);
+                }
+            }
+        });
+        return;
+    }
+    // un destino de red caído puede bloquear ShellExecute minutos: nunca en el hilo de UI
+    let (path, args) = (path.to_owned(), args.to_owned());
+    std::thread::spawn(move || unsafe {
+        use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        shell_execute(&path, &args);
+        CoUninitialize();
+    });
+}
+
+// destino y argumentos del acceso directo detrás de una entrada de AppsFolder; una app de la Tienda no tiene
+fn link_target(path: &str) -> Option<(String, String)> {
+    use windows::Win32::Storage::EnhancedStorage::{PKEY_Link_Arguments, PKEY_Link_TargetParsingPath};
+    use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, CoUninitialize, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::{IShellItem2, SHCreateItemFromParsingName};
+    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        let com = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let found = SHCreateItemFromParsingName::<_, _, IShellItem2>(PCWSTR(wide.as_ptr()), None).ok().and_then(|item| {
+            let text = |key| {
+                let value = item.GetString(key).ok()?;
+                let owned = value.to_string().ok();
+                CoTaskMemFree(Some(value.0.cast()));
+                owned
+            };
+            let target = text(&PKEY_Link_TargetParsingPath).filter(|t| std::path::Path::new(t).is_file())?;
+            Some((target, text(&PKEY_Link_Arguments).unwrap_or_default()))
+        });
+        if com.is_ok() {
+            CoUninitialize();
+        }
+        found
+    }
+}
+
+fn shell_execute(path: &str, args: &str) {
     let wide = |t: &str| -> Vec<u16> { t.encode_utf16().chain(std::iter::once(0)).collect() };
     let (p, a) = (wide(path), wide(args));
+    // como Explorer: un ancla .exe/.bat con rutas relativas corre desde su carpeta
+    let dir = std::path::Path::new(path).parent().filter(|d| d.is_dir()).map(|d| wide(&d.to_string_lossy()));
     unsafe {
         let params = if args.is_empty() { PCWSTR::null() } else { PCWSTR(a.as_ptr()) };
-        let _ = ShellExecuteW(None, w!("open"), PCWSTR(p.as_ptr()), params, PCWSTR::null(), SW_SHOWNORMAL);
+        let directory = dir.as_ref().map_or(PCWSTR::null(), |d| PCWSTR(d.as_ptr()));
+        // ShellExecute informa el error con un valor de hasta 32
+        let code = ShellExecuteW(None, w!("open"), PCWSTR(p.as_ptr()), params, directory, SW_SHOWNORMAL).0 as usize;
+        if let Some(host) = crate::HOST.get().filter(|_| code <= 32) {
+            crate::boot_log(&host.root, &format!("launch failed: {path} shellexecute={code}"));
+        }
     }
 }
 
@@ -423,7 +552,9 @@ unsafe fn paint(m: &Menu) {
         let can_close = matches!(m.acts.get(i), Some(Act::Focus(id)) if m.closeable_wins.contains(id));
         let local = (i - m.first) as i32;
         let mut rc = RECT { left: padx, top: m.pad + local * m.row, right: if can_close { m.close_x - px(4, s) } else { w - padx }, bottom: m.pad + (local + 1) * m.row };
-        DrawTextW(mem, &mut wide, &mut rc, DT_LEFT | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS);
+        if !wide.is_empty() {
+            DrawTextW(mem, &mut wide, &mut rc, DT_LEFT | DT_VCENTER | DT_NOPREFIX | DT_SINGLELINE | DT_END_ELLIPSIS);
+        }
         if can_close {
             let mut close: Vec<u16> = "×".encode_utf16().collect();
             let mut rc = RECT { left: m.close_x, top: rc.top, right: w - padx, bottom: rc.bottom };
@@ -769,6 +900,14 @@ mod scroll_tests;
 mod tests {
     use super::*;
 
+    #[test]
+    fn an_activation_that_never_returns_or_fails_is_reported() {
+        let wait = std::time::Duration::from_millis(200);
+        assert_eq!(activate_with_deadline(|| Ok(()), wait), Ok(()));
+        assert_eq!(activate_with_deadline(|| Err(-5), wait), Err(Some(-5)));
+        assert_eq!(activate_with_deadline(|| { std::thread::sleep(std::time::Duration::from_secs(30)); Ok(()) }, wait), Err(None));
+    }
+
     fn caps(l: bool, pinned: bool, pinnable: bool, picker: bool) -> Caps {
         Caps { launchable: l, pinned, pinnable, picker, closable: true, recents: 0 }
     }
@@ -783,6 +922,17 @@ mod tests {
     #[test]
     fn close_actions_offer_the_last_window_and_all_normal_windows() {
         assert_eq!(close_actions(&[7, 8], &[8, 7], Some(8)), (Some(8), vec![7, 8]));
+    }
+
+    #[test]
+    fn an_unknown_apps_folder_entry_has_no_link_target() {
+        assert_eq!(link_target(r"shell:AppsFolder\winarchy.missing"), None);
+    }
+
+    #[test]
+    #[ignore = "depende de las apps instaladas: LINK_TARGET=shell:AppsFolder\\<id>"]
+    fn print_the_link_target_of_an_installed_app() {
+        println!("{:?}", link_target(&std::env::var("LINK_TARGET").unwrap_or_default()));
     }
 
     #[test]
@@ -897,5 +1047,19 @@ mod tests {
         assert_eq!(keyboard_row(Some(2), 3, 0, 3, VK_DOWN.0), Some(0));
         assert_eq!(keyboard_row(Some(0), 3, 0, 3, VK_UP.0), Some(2));
         assert_eq!(keyboard_row(None, 0, 0, 0, VK_DOWN.0), None);
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::settings_fallback;
+
+    #[test]
+    fn settings_links_map_to_applets_that_open_without_explorer() {
+        assert_eq!(settings_fallback("ms-settings:sound"), Some(("control.exe", "mmsys.cpl")));
+        assert_eq!(settings_fallback("ms-settings:apps-volume"), Some(("SndVol.exe", "")));
+        // desk.cpl y bthprops.cpl no abren nada sin Explorer
+        assert_eq!(settings_fallback("ms-settings:display"), None);
+        assert_eq!(settings_fallback("ms-settings:bluetooth"), None);
     }
 }
