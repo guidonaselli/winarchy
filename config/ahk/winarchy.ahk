@@ -132,18 +132,18 @@ Volume_Mute::SoundSetMute(-1)
 AltTabStep(dir) {
     ; Sin Critical, un Tab o la suelta de Alt interrumpen al paso que espera a komorebi y el conmutador queda abierto.
     Critical
-    static list := [], idx := 0, shown := false
+    static list := [], idx := -1, shown := false   ; idx -1: no hay conmutador abierto
     if !dir {
         SetTimer(AltTabRelease, 0)
         if shown
             ShellIsland('switcher.hide')
-        if idx
+        if idx >= 0
             AltTabActivate(list[idx + 1])
         shown := false
-        idx := 0
+        idx := -1
         return
     }
-    if !idx {
+    if idx < 0 {
         list := []
         active := DllCall('user32\GetAncestor', 'ptr', WinExist('A'), 'uint', 3, 'ptr')
         managed := KomorebiWindows()
@@ -160,9 +160,12 @@ AltTabStep(dir) {
         list.Push(away*)   ; al final: un toque sigue volviendo a la ventana anterior en pantalla
         if list.Length > 64   ; tope que acepta la shell
             list.Length := 64
+        ; si la primera no es la activa (escritorio, dueño oculto), el primer Tab no la saltea
+        current := list.Length && list[1] = active
+        if list.Length < (current ? 2 : 1)
+            return
+        idx := current || dir < 0 ? 0 : -1
     }
-    if list.Length < 2
-        return
     idx := Mod(idx + dir + list.Length, list.Length)
     ids := ''
     for hwnd in list
@@ -179,6 +182,8 @@ AltTabRelease() {
 
 ; Una ventana oculta la trae la shell: se va a su workspace y recién ahí la enfoca.
 AltTabActivate(hwnd) {
+    if !DllCall('user32\IsWindow', 'ptr', hwnd)   ; se cerró con Alt apretado
+        return
     if !DllCall('user32\IsWindowVisible', 'ptr', hwnd) {
         if (pid := GetShellPid())
             DllCall('user32\AllowSetForegroundWindow', 'uint', pid)
@@ -195,8 +200,10 @@ KomorebiWindows() {
     try {
         tmp := A_Temp '\winarchy-alttab.json'
         Run(A_ComSpec ' /c ""' KomorebicExe '" state > "' tmp '""', , 'Hide', &pid)
-        if ProcessWaitClose(pid, 1)   ; acotado: un komorebi colgado no puede congelar Alt+Tab
+        if ProcessWaitClose(pid, 1) {   ; acotado: un komorebi colgado no puede congelar Alt+Tab
+            Run('taskkill /T /F /PID ' pid, , 'Hide')   ; con /T cae también el komorebic que sigue esperando
             return found
+        }
         json := FileRead(tmp), pos := 1
         while pos := RegExMatch(json, '"hwnd":\s*(\d+)', &m, pos)
             found[Integer(m[1])] := true, pos += m.Len
@@ -493,7 +500,7 @@ DragMove(hwnd, x0, y0, held) {
     DllCall('user32\SetWindowPos', 'ptr', hwnd, 'ptr', 0, 'int', wx, 'int', wy, 'int', 0, 'int', 0, 'uint', 0x15)
     MouseGetPos(&x, &y, &under)                  ; what is visible under the cursor once the window is back
     t := DllCall('user32\GetAncestor', 'ptr', under, 'uint', 2, 'ptr')
-    while t && WinGetProcessName(t) = 'komorebi.exe' {   ; focus borders overhang the tile; look through them
+    while t && ProcessNameOf(t) = 'komorebi.exe' {   ; focus borders overhang the tile; look through them
         loop {
             t := DllCall('user32\GetWindow', 'ptr', t, 'uint', 2, 'ptr')   ; GW_HWNDNEXT
             if !t
