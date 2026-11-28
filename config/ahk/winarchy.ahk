@@ -127,13 +127,14 @@ Volume_Mute::SoundSetMute(-1)
 ; Sin Explorer no hay conmutador de Alt+Tab: un toque vuelve a la ventana anterior y Tab con Alt sostenido sigue por z-order; la shell dibuja el conmutador.
 !Tab::AltTabStep(1)
 !+Tab::AltTabStep(-1)
-~LAlt up::AltTabStep(0)
-~RAlt up::AltTabStep(0)
 #HotIf
 
 AltTabStep(dir) {
+    ; Sin Critical, un Tab o la suelta de Alt interrumpen al paso que espera a komorebi y el conmutador queda abierto.
+    Critical
     static list := [], idx := 0, shown := false
     if !dir {
+        SetTimer(AltTabRelease, 0)
         if shown
             ShellIsland('switcher.hide')
         if idx
@@ -167,6 +168,13 @@ AltTabStep(dir) {
     for hwnd in list
         ids .= (ids ? ',' : '') hwnd
     shown := ShellIsland('switcher.show', ',"params":{"windows":[' ids '],"index":' idx '}')
+    SetTimer(AltTabRelease, 30)
+}
+
+; Alt se consulta en vez de esperar su key-up: un juego o una ventana protegida se lo traga y el conmutador queda abierto.
+AltTabRelease() {
+    if !(DllCall('user32\GetAsyncKeyState', 'int', 0x12, 'short') & 0x8000)
+        AltTabStep(0)
 }
 
 ; Una ventana oculta la trae la shell: se va a su workspace y recién ahí la enfoca.
