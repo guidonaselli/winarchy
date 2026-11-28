@@ -318,6 +318,7 @@ pub fn parse_windows(event: &Value) -> Option<WindowMap> {
             }
             w["floating_windows"]["elements"].as_array().into_iter().flatten().for_each(&mut add);
             w["monocle_container"]["windows"]["elements"].as_array().into_iter().flatten().for_each(&mut add);
+            add(&w["maximized_window"]);
         }
     }
     Some(map)
@@ -336,7 +337,7 @@ pub fn parse(event: &Value) -> Option<Workspaces> {
         .iter()
         .map(|w| {
             let has = |k: &str| w[k]["elements"].as_array().is_some_and(|a| !a.is_empty());
-            has("containers") || has("floating_windows") || !w["monocle_container"].is_null()
+            has("containers") || has("floating_windows") || !w["monocle_container"].is_null() || !w["maximized_window"].is_null()
         })
         .collect();
     let focused = ws["focused"].as_u64()? as usize;
@@ -372,7 +373,8 @@ unsafe extern "system" fn on_foreground(_: windows::Win32::UI::Accessibility::HW
 }
 
 // Lee el estado de komorebi en el momento: el mapa en caché puede ir atrás de una mudanza de ventana y llevar al workspace equivocado.
-fn fresh_slot(hwnd: isize) -> Option<(usize, usize)> {
+// El segundo valor dice si ese workspace ya es el que muestra su monitor.
+fn fresh_slot(hwnd: isize) -> Option<((usize, usize), bool)> {
     let out = std::process::Command::new("komorebic.exe").arg("state").creation_flags(CREATE_NO_WINDOW).output().ok()?;
     let state = serde_json::from_slice::<Value>(&out.stdout).ok()?;
     let map = parse_windows(&serde_json::json!({ "state": state }))?;
@@ -381,13 +383,18 @@ fn fresh_slot(hwnd: isize) -> Option<(usize, usize)> {
     if changed {
         notify_windows();
     }
-    slot
+    slot.map(|slot| (slot, shown_on_its_monitor(&state, slot)))
+}
+
+fn shown_on_its_monitor(state: &Value, (monitor, workspace): (usize, usize)) -> bool {
+    state["monitors"]["elements"][monitor]["workspaces"]["focused"].as_u64() == Some(workspace as u64)
 }
 
 // Lleva la vista al workspace de la ventana y la sube. Al cambiar de workspace komorebi enfoca su última ventana de ahí, no la pedida: se la vuelve a traer.
 pub fn bring_to_front(target: isize) {
     std::thread::spawn(move || {
-        if let Some((m, ws)) = fresh_slot(target) {
+        // en la vista ya puesta (pestaña de una pila, detrás del monóculo) cambiar de workspace no muestra nada y repite el aviso
+        if let Some(((m, ws), false)) = fresh_slot(target) {
             let cmd = std::process::Command::new("komorebic.exe").args(crate::dock::focus_args(m, ws)).creation_flags(CREATE_NO_WINDOW).spawn();
             if let Ok(mut child) = cmd {
                 let _ = child.wait();
@@ -549,11 +556,11 @@ mod tests {
         let ev = serde_json::json!({"state":{"monitors":{"elements":[
             {"workspaces":{"elements":[
                 {"containers":{"elements":[{"windows":{"elements":[{"hwnd":10},{"hwnd":11}]}}]},"floating_windows":{"elements":[{"hwnd":12}]},"monocle_container":null},
-                {"containers":{"elements":[]},"floating_windows":{"elements":[]},"monocle_container":{"windows":{"elements":[{"hwnd":13}]}}}]}},
+                {"containers":{"elements":[]},"floating_windows":{"elements":[]},"monocle_container":{"windows":{"elements":[{"hwnd":13}]}},"maximized_window":{"hwnd":14}}]}},
             {"workspaces":{"elements":[{"containers":{"elements":[{"windows":{"elements":[{"hwnd":20}]}}]}}]}}]}}});
         let m = parse_windows(&ev).unwrap();
         assert_eq!((m[&10], m[&11], m[&12], m[&13], m[&20]), ((0, 0), (0, 0), (0, 0), (0, 1), (1, 0)));
-        assert_eq!(m.len(), 5);
+        assert_eq!((m[&14], m.len()), ((0, 1), 6));
     }
 
     #[test]
@@ -568,6 +575,7 @@ mod tests {
             {"size":{"left":2560,"top":0},"workspaces":{"focused":0,"elements":[{"tile":true,"layout":{"Default":"Scrolling"}}]}}]}}});
         let ws = parse(&ev).unwrap();
         assert_eq!(ws.mode, Mode::Floating);
+        assert!(shown_on_its_monitor(&ev["state"], (0, 1)) && !shown_on_its_monitor(&ev["state"], (0, 0)));
         assert_eq!(ws.monitor_modes, vec![((0, 0), Mode::Floating), ((2560, 0), Mode::Scrolling)]);
     }
 
